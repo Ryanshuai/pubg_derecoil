@@ -10,8 +10,9 @@ class Ui_Dialog(object):
         Dialog.setObjectName("Dialog")
         Dialog.resize(show_size_x, show_size_y)
         Dialog.move(show_position_x, show_position_y)
-        Dialog.setWindowFlag(QtCore.Qt.WindowStaysOnTopHint)
         Dialog.setWindowFlag(QtCore.Qt.FramelessWindowHint)
+        Dialog.setWindowFlag(QtCore.Qt.WindowStaysOnTopHint)
+
         # Dialog.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
         font = QtGui.QFont()
         font.setFamily("Arial")

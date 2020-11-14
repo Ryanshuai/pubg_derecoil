@@ -3,11 +3,10 @@ import threading
 from pynput import keyboard, mouse
 from PyQt5.QtCore import pyqtSignal, QObject
 
-from image_detect.diff_image_detect.Detector import DiffDetector, WhiteDetector
-from state.position_constant import crop_position
+from image_detect.Detector import Detector
+from state.position_constant import get_crop_position, get_pos
 from state.all_states import All_States
 from screen_capture import win32_cap
-from screen_parameter import min_white_rate
 
 from calibrate_distance.save_image import Image_Saver  # calibrate
 from press_gun.press import Press
@@ -26,18 +25,18 @@ class Robot:
 
         self.is_calibrating = is_calibrating
 
-        self.fire_mode_detect = WhiteDetector('fire-mode')
-        self.in_tab_detect = WhiteDetector('in-tab')
-        # self.posture_detect = Detector('posture', 'white', min_white_rate['posture'])
+        self.fire_mode_detect = Detector('fire_mode')
+        self.in_tab_detect = Detector('in_tab')
+        # self.posture_detect = Detector('posture')
         # self.in_scope_detect = Detector('in_scope')
 
         self.gun_detector = dict()
-        self.gun_detector['name'] = WhiteDetector('name', True)
-        self.gun_detector['scope'] = DiffDetector('scope')
-        self.gun_detector['muzzle'] = DiffDetector('muzzle')
-        self.gun_detector['grip'] = DiffDetector('grip')
-        self.gun_detector['butt'] = DiffDetector('butt')
-        # self.gun_detector['magazine'] = Detector('magazine', 'icon')
+        self.gun_detector['name'] = Detector('gun_name')
+        self.gun_detector['scope'] = Detector('gun_scope')
+        self.gun_detector['muzzle'] = Detector('gun_muzzle')
+        self.gun_detector['grip'] = Detector('gun_grip')
+        self.gun_detector['butt'] = Detector('gun_butt')
+        # self.gun_detector['magazine'] = Detector('magazine')
 
         self.key_listener = keyboard.Listener(on_press=self.on_press)
         self.mouse_listener = mouse.Listener(on_click=self.on_click)
@@ -91,7 +90,7 @@ class Robot:
                 threading.Timer(0.0001, self.tab_func).start()
 
     def is_in_tab(self):
-        if 'type' == self.in_tab_detect.detect(get_screen('in-tab')):
+        if 'in_tab' == self.in_tab_detect.im2name(get_screen('in_tab')):
             self.all_states.screen_state = 'tab'
             self.all_states.dont_press = True
         else:
@@ -101,11 +100,11 @@ class Robot:
 
     def tab_func(self):
         self.screen = get_screen()
-        position_filtered = dict(filter(lambda x: ('gun' in x[0]), crop_position.items()))
-        for position, (y1, x1, y2, x2) in position_filtered.items():
-            corp_im = self.screen[y1:y2, x1:x2]
+        position_filtered = dict(filter(lambda x: ('gun' in x[0]), get_crop_position().items()))
+        for position, (y, x, h, w) in position_filtered.items():
+            corp_im = self.screen[y:y + h, x:x + w]
             pos = position.split('_')[-1]
-            crop_name = self.gun_detector[pos].detect(corp_im)
+            crop_name = self.gun_detector[pos].im2name(corp_im)
             if '1' in position:
                 self.all_states.weapon[0].set(pos, crop_name)
             if '2' in position:
@@ -116,18 +115,18 @@ class Robot:
         self.print_state()
 
     def set_fire_mode(self):
-        fire_mode_crop = get_screen('fire-mode')
-        fire_mode = self.fire_mode_detect.detect(fire_mode_crop)
+        fire_mode_crop = get_screen('fire_mode')
+        fire_mode = self.fire_mode_detect.im2name(fire_mode_crop)
         n = self.all_states.weapon_n
-        self.all_states.weapon[n].set('fire-mode', fire_mode)
+        self.all_states.weapon[n].set('fire_mode', fire_mode)
         self.print_state()
 
     def print_state(self):
         w = self.all_states.weapon[0]
-        gun1_state = str(w.name) + '-' + str(w.fire_mode) + '-' + str(w.scope) + '-' + str(w.muzzle)[3:6] + '-' + str(
+        gun1_state = str(w.name) + '-' + str(w.fire_mode) + '-' + str(w.scope) + '-' + str(w.muzzle)[:3] + '-' + str(
             w.grip)
         w = self.all_states.weapon[1]
-        gun2_state = str(w.name) + '-' + str(w.fire_mode) + '-' + str(w.scope) + '-' + str(w.muzzle)[3:6] + '-' + str(
+        gun2_state = str(w.name) + '-' + str(w.fire_mode) + '-' + str(w.scope) + '-' + str(w.muzzle)[:3] + '-' + str(
             w.grip)
         if self.all_states.weapon_n == 0:
             emit_str = ' * ' + gun1_state + '\n' + gun2_state
@@ -156,7 +155,7 @@ def prepare_calibrate_dir(name):
 
 
 def get_crop(name, screen):
-    y1, x1, y2, x2 = crop_position[name]
+    y1, x1, y2, x2 = get_pos(name)
     corp_im = screen[y1:y2, x1:x2]
     return corp_im
 
@@ -164,7 +163,7 @@ def get_crop(name, screen):
 def get_screen(name=None):
     if name is None:
         return win32_cap(filename='temp_image')
-    pos = crop_position[name]
+    pos = get_pos(name)
     return win32_cap(filename='temp_image', rect=pos)
 
 

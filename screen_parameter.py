@@ -8,7 +8,7 @@ screen_w_factor = screen_width / 1920
 show_position_y = 300 * screen_h_factor
 show_position_x = 1650 * screen_w_factor
 show_size_y = 50
-show_size_x = 200
+show_size_x = 300
 
 min_icon_area = 10 * 10 * screen_h_factor * screen_h_factor
 max_icon_area = 30 * screen_h_factor * 30 * screen_h_factor

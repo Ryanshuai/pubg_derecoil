@@ -1,21 +1,38 @@
 # [y1, x1, y2, x2]
+
+def get_pos(name):
+    name_tuple = crop_position[name]
+    if len(name_tuple) == 2:
+        y, x = name_tuple
+        return y, x, 64, 64
+    y1, x1, y2, x2 = name_tuple
+    return y1, x1, y2 - y1, x2 - x1
+
+
+def get_crop_position():
+    position = dict(map(lambda x: (x, get_pos(x)), crop_position.keys()))
+    return position
+
+
 crop_position = {
-    'fire-mode': [1000, 912, 1021, 926],
-    'in-tab': [132, 926, 155, 974],
+    'fire_mode': [1330, 1648, 1364, 1676],
+    'in_tab': [132, 926, 155, 974],
     'posture': [1005, 705, 1048, 743],
-    # 'in-scope': [1669, 1179, 1766, 1208],
-    'white_gun1_name': [100, 1355, 123, 1471],
-    'icon_gun1_scope': [117, 1588, 162, 1633],
-    'icon_gun1_muzzle': [250, 1316, 295, 1361],
-    'icon_gun1_grip': [250, 1418, 295, 1463],
-    # 'icon_gun1_magazine': [250, 1528, 295, 1573],
-    'icon_gun1_butt': [250, 1740, 295, 1785],
-    'white_gun2_name': [330, 1355, 353, 1471],
-    'icon_gun2_scope': [347, 1588, 392, 1633],
-    'icon_gun2_muzzle': [480, 1316, 525, 1361],
-    'icon_gun2_grip': [480, 1418, 525, 1463],
-    # 'icon_gun2_magazine': [480, 1528, 525, 1573],
-    'icon_gun2_butt': [480, 1740, 525, 1785]
+    # 'in_scope': [1669, 1179, 1766, 1208],
+
+    'gun1_name': [130, 2245, 130 + 35, 2250 + 64],
+    'gun1_scope': [152, 2554],
+    'gun1_muzzle': [330, 2191],
+    'gun1_grip': [330, 2327],
+    # 'gun1_magazine': [330, 2474],
+    'gun1_butt': [330, 2756],
+
+    'gun2_name': [436, 2250, 436 + 35, 2250 + 64],
+    'gun2_scope': [458, 2554],
+    'gun2_muzzle': [636, 2191],
+    'gun2_grip': [636, 2327],
+    # 'gun2_magazine': [636, 2474],
+    'gun2_butt': [636, 2756]
 }
 
 screen_position_states = \
