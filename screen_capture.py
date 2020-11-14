@@ -23,10 +23,9 @@ def win32_cap(filename=None, rect=None):
     MoniterDev = win32api.EnumDisplayMonitors(None, None)
     w = MoniterDev[0][2][2]
     h = MoniterDev[0][2][3]
-    x0, y0 = 0, 0
+    x, y = 0, 0
     if rect is not None:
-        y0, x0, y1, x1 = rect
-        w, h = x1 - x0, y1 - y0
+        y, x, h, w = rect
 
     hwnd = 0  # 窗口的编号，0号表示当前活跃窗口
     # 根据窗口句柄获取窗口的设备上下文DC（Divice Context）
@@ -42,7 +41,7 @@ def win32_cap(filename=None, rect=None):
     # 高度saveDC，将截图保存到saveBitmap中
     saveDC.SelectObject(saveBitMap)
     # 截取从左上角(x0, y0)长宽为(w, h)的图片
-    saveDC.BitBlt((0, 0), (w, h), mfcDC, (x0, y0), win32con.SRCCOPY)
+    saveDC.BitBlt((0, 0), (w, h), mfcDC, (x, y), win32con.SRCCOPY)
     saveBitMap.SaveBitmapFile(saveDC, filename)
     im = cv2.imread(filename)
     return im

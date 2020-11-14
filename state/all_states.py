@@ -101,6 +101,8 @@ class Weapon():
         self.time_seq = list()
 
     def set(self, pos, state):
+        if state == "":
+            return
         if pos == 'name':
             self.name = state
             self.time_interval = time_periods.get(self.name, 0.1)
@@ -116,7 +118,7 @@ class Weapon():
                 self.type = 'mg'
             elif self.name in shotgun:
                 self.type = 'shotgun'
-        if pos == 'fire-mode':
+        if pos == 'fire_mode':
             self.fire_mode = state
         if pos == 'scope':
             self.scope = state
@@ -127,9 +129,9 @@ class Weapon():
         if pos == 'muzzle':
             self.muzzle = state
             self.muzzle_factor = 1.0
-            if self.muzzle.endswith('flash'):
+            if self.muzzle.startswith('fla'):
                 self.muzzle_factor = 0.9
-            elif self.muzzle.endswith('compensator'):
+            elif self.muzzle.startswith('com'):
                 if self.name in ar:
                     self.muzzle_factor = 0.85
                 elif self.name in smg:
@@ -154,7 +156,6 @@ class Weapon():
             self.butt = state
             if self.butt == 'sto':
                 self.butt_factor = 0.85
-            return True
 
     def set_seq(self):
         self.all_factor = self.scope_factor * self.muzzle_factor * self.grip_factor * self.butt_factor
