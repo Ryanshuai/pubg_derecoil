@@ -9,11 +9,11 @@ from image_detect.ocr_detect import get_ocr_name
 
 class DiffDetector:
     def __init__(self, png_dir):  # white or icon
-        self.png_dir = png_dir
-        os.makedirs(png_dir, exist_ok=True)
+        self.png_dir = "image_detect/diff_image_detect/" + png_dir
+        os.makedirs(self.png_dir, exist_ok=True)
         self.png_dict = dict()
-        for png_name in os.listdir(png_dir):
-            png = cv2.imread(os.path.join(png_dir, png_name), cv2.IMREAD_UNCHANGED)
+        for png_name in os.listdir(self.png_dir):
+            png = cv2.imread(os.path.join(self.png_dir, png_name), cv2.IMREAD_UNCHANGED)
             self.png_dict[png_name[:-4]] = png
 
     def detect(self, crop_im, avr_thr=max_icon_diff):
@@ -41,12 +41,13 @@ class DiffDetector:
 
 
 class WhiteDetector:
-    def __init__(self, png_dir):  # white or icon
-        self.png_dir = png_dir
-        os.makedirs(png_dir, exist_ok=True)
+    def __init__(self, png_dir, ocr=False):  # white or icon
+        self.ocr = ocr
+        self.png_dir = "image_detect/diff_image_detect/" + png_dir
+        os.makedirs(self.png_dir, exist_ok=True)
         self.png_dict = dict()
-        for png_name in os.listdir(png_dir):
-            png = cv2.imread(os.path.join(png_dir, png_name), cv2.IMREAD_UNCHANGED)
+        for png_name in os.listdir(self.png_dir):
+            png = cv2.imread(os.path.join(self.png_dir, png_name), cv2.IMREAD_UNCHANGED)
             self.png_dict[png_name[:-4]] = png
 
     def detect(self, crop_im, avr_thr=max_icon_diff):
@@ -54,22 +55,32 @@ class WhiteDetector:
         white_shield = get_white_shield(crop_im, min_rgb).astype(np.uint8)
 
         for item_name, png in self.png_dict.items():
+            png = png[:, :, 0] & png[:, :, 1] & png[:, :, 2] & png[:, :, 3]
             avr = np.sum(np.abs(white_shield - png)) / np.sum(white_shield)
             if avr < avr_thr:
                 return item_name
 
-        item_name = get_ocr_name(white_shield)
+        if self.ocr:
+            print("ocr")
+            item_name = get_ocr_name(white_shield)
+        else:
+            item_name = image2name(crop_im)
+            print("image2name:  ",item_name)
         self.save_image(item_name, crop_im)
         return item_name
 
     def save_image(self, im_name, crop_im):
+        cv2.imshow("crop_im", crop_im)
+        cv2.waitKey()
         im_diff = np.mean(crop_im, axis=-1)
-        alpha = np.where(im_diff == 255, 1, 0)
+        alpha = np.where(im_diff > 230, 1, 0).astype(np.uint8)
         alpha = alpha[:, :, np.newaxis]
         crop_im *= alpha
         crop_im = crop_im.astype(np.uint8)
         alpha = (alpha * 255).astype(np.uint8)
         rgba = np.concatenate((crop_im, alpha), axis=-1)
+        cv2.imshow(":", rgba)
+        cv2.waitKey()
 
         rgba_path = os.path.join(self.png_dir, im_name + ".png")
         cv2.imwrite(rgba_path, rgba)
