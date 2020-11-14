@@ -1,10 +1,10 @@
 import torch.nn as nn
 
 cfg = {
+    3: [8, 'M', 16, 'M', 32, 'M',],
+    5: [64, 'M', 128, 'M', 256, 'M',],
+    8: [64, 'M', 128, 'M', 256, 'M', 512, 'M', 512, 'M'],
     11: [64, 'M', 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
-    13: [64, 64, 'M', 128, 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
-    16: [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512, 'M', 512, 512, 512, 'M'],
-    19: [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M', 512, 512, 512, 512, 'M', 512, 512, 512, 512, 'M'],
 }
 
 
@@ -25,17 +25,17 @@ def make_layers(cfg, batch_norm=False):
 
 
 class VGG(nn.Module):
-    def __init__(self, num_classes=21, vgg=11, batch_norm=True, init_weights=True):
+    def __init__(self, num_classes, vgg=3, batch_norm=True, init_weights=True):
         super(VGG, self).__init__()
         self.features = make_layers(cfg[vgg], batch_norm=batch_norm)
         self.classifier = nn.Sequential(
-            nn.Linear(512 * 7 * 7, 4096),
+            nn.Linear(32 * 8 * 8, 256),
             nn.ReLU(True),
             nn.Dropout(),
-            nn.Linear(4096, 4096),
+            nn.Linear(256, 256),
             nn.ReLU(True),
             nn.Dropout(),
-            nn.Linear(4096, num_classes),
+            nn.Linear(256, num_classes),
         )
         if init_weights:
             self._initialize_weights()
