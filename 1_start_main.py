@@ -9,7 +9,7 @@ class Ui_Dialog(object):
     def setupUi(self, Dialog):
         Dialog.setObjectName("Dialog")
         Dialog.resize(show_size_x, show_size_y)
-        Dialog.move(show_position_x, show_position_y)
+        Dialog.move(int(show_position_x), int(show_position_y))
         Dialog.setWindowFlag(QtCore.Qt.FramelessWindowHint)
         Dialog.setWindowFlag(QtCore.Qt.WindowStaysOnTopHint)
 
