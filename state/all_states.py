@@ -35,11 +35,11 @@ def factor_scope(scope):
     if scope == 1:
         factor = 1.
     if scope == 2:
-        factor = 0.9
+        factor = 1
     if scope == 3:
-        factor = 0.9
+        factor = 1
     if scope == 4:
-        factor = 0.9
+        factor = 1
     if scope == 6:
         factor = 1
     screen_factor = 1  # screen_h_factor
@@ -53,7 +53,7 @@ def calculate_press_seq(name, factor):
         dist_interval[0] += a
     # dist_interval.append(dist_interval[-1] * (40 - len(dist_interval)))
     dist_interval = [i * factor for i in dist_interval]
-    time_interval = time_periods.get(name, 1)
+    time_interval = time_periods.get(name, 0.01)
     divide_num0 = math.floor(time_interval / 0.01)  # 整数分割
     time_sequence = list()
     time_accumulate = 0

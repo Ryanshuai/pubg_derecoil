@@ -10,6 +10,7 @@ class Press(threading.Thread):
         self.dist_seq, self.time_seq = dist_seq[:self.len], time_seq[:self.len]
         self._loop = True
         self.i = 0
+        # self.mouse = Controller()
 
     def run(self):
         for time, dist in zip(self.time_seq, self.dist_seq):
