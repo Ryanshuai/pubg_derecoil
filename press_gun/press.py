@@ -4,8 +4,9 @@ import win32con
 
 
 class Press(threading.Thread):
-    def __init__(self, dist_seq, time_seq):
+    def __init__(self, dist_seq, time_seq, is_calibrate=False):
         threading.Thread.__init__(self)
+        self.is_calibrate = is_calibrate
         self.len = min(len(dist_seq), len(time_seq))
         self.dist_seq, self.time_seq = dist_seq[:self.len], time_seq[:self.len]
         self._loop = True
@@ -13,12 +14,16 @@ class Press(threading.Thread):
         # self.mouse = Controller()
 
     def run(self):
-        for time, dist in zip(self.time_seq, self.dist_seq):
-            threading.Timer(time, self.mouse_down, args=[dist]).start()
+        if self.is_calibrate:
+            for time, dist in zip(self.time_seq, self.dist_seq):
+                threading.Timer(time, self.mouse_down, args=[5, dist]).start()
+        else:
+            for time, dist in zip(self.time_seq, self.dist_seq):
+                threading.Timer(time, self.mouse_down, args=[0, dist]).start()
 
-    def mouse_down(self, y):
+    def mouse_down(self, x, y):
         if self._loop:
-            win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, 0, int(y))
+            win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, int(x), int(y))
 
     def stop(self):
         self._loop = False

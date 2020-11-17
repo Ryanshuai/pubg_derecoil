@@ -23,7 +23,7 @@ class Robot:
         self.in_block = False
         self.in_right = False
 
-        self.is_calibrating = is_calibrating
+        self.calibrate = is_calibrating
 
         self.fire_mode_detect = Detector('fire_mode')
         self.in_tab_detect = Detector('in_tab')
@@ -47,7 +47,7 @@ class Robot:
         self.temp_qobject = Temp_QObject()
 
     def on_press(self, key):
-        if key == keyboard.Key.ctrl_l and self.is_calibrating:
+        if key == keyboard.Key.ctrl_l and self.calibrate:
             n = self.all_states.weapon_n
             name = self.all_states.weapon[n].name
             self.image_dir = prepare_calibrate_dir(name)
@@ -68,18 +68,20 @@ class Robot:
         if key == '1' or key == '2':
             self.all_states.dont_press = False
             self.all_states.set_weapon_n(int(key) - 1)
-            threading.Timer(0.5, self.set_fire_mode).start()
+            threading.Timer(0.2, self.set_fire_mode).start()
 
     def on_click(self, x, y, button, pressed):
         if button == mouse.Button.left and pressed and (not self.all_states.dont_press):
             n = self.all_states.weapon_n
             if is_press(self.all_states.weapon[n]):
-                if not self.is_calibrating:
-                    self.press = Press(self.all_states.weapon[n].dist_seq, self.all_states.weapon[n].time_seq)
-                    self.press.start()
-                else:
-                    self.press = Image_Saver(self.all_states.weapon[n].time_interval, self.image_dir)
-                    self.press.start()
+                self.press = Press(self.all_states.weapon[n].dist_seq, self.all_states.weapon[n].time_seq, self.calibrate)
+                self.press.start()
+                # if not self.is_calibrating:
+                #     self.press = Press(self.all_states.weapon[n].dist_seq, self.all_states.weapon[n].time_seq)
+                #     self.press.start()
+                # else:
+                #     self.press = Image_Saver(self.all_states.weapon[n].time_interval, self.image_dir)
+                #     self.press.start()
 
         if button == mouse.Button.left and (not pressed) and (not self.all_states.dont_press):
             if hasattr(self, 'press'):
