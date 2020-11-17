@@ -9,10 +9,8 @@ def get_pos(name):
     return y1, x1, y2 - y1, x2 - x1
 
 
-def get_crop_position():
-    position = dict(map(lambda x: (x, get_pos(x)), crop_position.keys()))
-    return position
-
+pos_names = ['gun1_name', 'gun1_scope', 'gun1_muzzle', 'gun1_grip', 'gun1_butt',
+             'gun2_name', 'gun2_scope', 'gun2_muzzle', 'gun2_grip', 'gun2_butt']
 
 crop_position = {
     'fire_mode': [1330, 1648, 1364, 1676],

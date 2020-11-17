@@ -4,11 +4,10 @@ from pynput import keyboard, mouse
 from PyQt5.QtCore import pyqtSignal, QObject
 
 from image_detect.Detector import Detector
-from state.position_constant import get_crop_position, get_pos
+from state.position_constant import get_pos, pos_names
 from state.all_states import All_States
 from screen_capture import win32_cap
 
-from calibrate_distance.save_image import Image_Saver  # calibrate
 from press_gun.press import Press
 
 
@@ -47,14 +46,8 @@ class Robot:
         self.temp_qobject = Temp_QObject()
 
     def on_press(self, key):
-        if key == keyboard.Key.ctrl_l and self.calibrate:
-            n = self.all_states.weapon_n
-            name = self.all_states.weapon[n].name
-            self.image_dir = prepare_calibrate_dir(name)
-
         if key == keyboard.Key.tab:
-            self.screen = win32_cap()
-            threading.Timer(0.3, self.is_in_tab).start()
+            threading.Timer(0.5, self.is_in_tab).start()
         if key == keyboard.Key.f12:
             self.all_states.dont_press = True
 
@@ -68,28 +61,23 @@ class Robot:
         if key == '1' or key == '2':
             self.all_states.dont_press = False
             self.all_states.set_weapon_n(int(key) - 1)
-            threading.Timer(0.2, self.set_fire_mode).start()
+            threading.Timer(0.5, self.set_fire_mode).start()
 
     def on_click(self, x, y, button, pressed):
         if button == mouse.Button.left and pressed and (not self.all_states.dont_press):
             n = self.all_states.weapon_n
-            if is_press(self.all_states.weapon[n]):
-                self.press = Press(self.all_states.weapon[n].dist_seq, self.all_states.weapon[n].time_seq, self.calibrate)
+            if self.all_states.weapon[n].is_press:
+                self.press = Press(self.all_states.weapon[n].dist_seq, self.all_states.weapon[n].time_seq,
+                                   self.calibrate)
                 self.press.start()
-                # if not self.is_calibrating:
-                #     self.press = Press(self.all_states.weapon[n].dist_seq, self.all_states.weapon[n].time_seq)
-                #     self.press.start()
-                # else:
-                #     self.press = Image_Saver(self.all_states.weapon[n].time_interval, self.image_dir)
-                #     self.press.start()
 
-        if button == mouse.Button.left and (not pressed) and (not self.all_states.dont_press):
+        if button == mouse.Button.left and (not pressed):
             if hasattr(self, 'press'):
                 self.press.stop()
 
         if button in [mouse.Button.right, mouse.Button.left] and (not pressed):
             if self.all_states.screen_state == 'tab':
-                threading.Timer(0.0001, self.tab_func).start()
+                threading.Timer(0.2, self.tab_func).start()
 
     def is_in_tab(self):
         if 'in_tab' == self.in_tab_detect.im2name(get_screen('in_tab')):
@@ -101,15 +89,13 @@ class Robot:
             threading.Timer(0.5, self.set_fire_mode).start()
 
     def tab_func(self):
-        self.screen = get_screen()
-        position_filtered = dict(filter(lambda x: ('gun' in x[0]), get_crop_position().items()))
-        for position, (y, x, h, w) in position_filtered.items():
-            corp_im = self.screen[y:y + h, x:x + w]
-            pos = position.split('_')[-1]
+        for pos_name in pos_names:
+            corp_im = get_screen(pos_name)
+            pos = pos_name.split('_')[-1]
             crop_name = self.gun_detector[pos].im2name(corp_im)
-            if '1' in position:
+            if pos_name.startswith("gun1"):
                 self.all_states.weapon[0].set(pos, crop_name)
-            if '2' in position:
+            if pos_name.startswith("gun2"):
                 self.all_states.weapon[1].set(pos, crop_name)
 
         self.all_states.weapon[0].set_seq()
@@ -135,31 +121,6 @@ class Robot:
         else:
             emit_str = gun1_state + '\n' + ' * ' + gun2_state
         self.temp_qobject.state_str_signal.emit(emit_str)
-
-
-def is_press(weapon):
-    if weapon.type in ['ar', 'smg', 'mg'] and weapon.fire_mode in ['full', '']:
-        return True
-    elif weapon.type in ['dmr', 'shotgun'] and weapon.fire_mode in ['single', '']:
-        return True
-    return False
-
-
-def prepare_calibrate_dir(name):
-    image_dir = 'calibrate_distance/image_match_dir/' + name + '/'
-    for i in range(0, 20):
-        if not os.path.exists(image_dir + str(i)):
-            image_dir += str(i) + '/'
-            break
-    os.makedirs(image_dir, exist_ok=True)
-    win32_cap(filename=image_dir + '4444.png', rect=(100, 100, 400, 1600))
-    return image_dir
-
-
-def get_crop(name, screen):
-    y1, x1, y2, x2 = get_pos(name)
-    corp_im = screen[y1:y2, x1:x2]
-    return corp_im
 
 
 def get_screen(name=None):
