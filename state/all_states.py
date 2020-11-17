@@ -81,7 +81,7 @@ class Back():
 
 class Weapon():
     def __init__(self):
-        self.fire_mode = 'single'
+        self.fire_mode = 'full'
         self.name = ''
         self.scope = '1'
         self.muzzle = ''
@@ -99,6 +99,7 @@ class Weapon():
         self.time_interval = 0.1
         self.dist_seq = list()
         self.time_seq = list()
+        self.is_press = False
 
     def set(self, pos, state):
         if state == "":
@@ -119,7 +120,12 @@ class Weapon():
             elif self.name in shotgun:
                 self.type = 'shotgun'
         if pos == 'fire_mode':
+            self.is_press = False
             self.fire_mode = state
+            if self.fire_mode == "full" and self.type in ['ar', 'smg', 'mg']:
+                self.is_press = True
+            if self.fire_mode == "single" and self.type in ['dmr', 'shotgun']:
+                self.is_press = True
         if pos == 'scope':
             self.scope = state
             self.scope_factor = int(self.scope.replace('r', '').replace('h', '').replace('x', ''))
@@ -181,9 +187,7 @@ class All_States():
         self.vt = None
 
     def set_weapon_n(self, weapon_n):
-        original_n = self.weapon_n
         self.weapon_n = weapon_n
-        return original_n != weapon_n
 
 
 if __name__ == '__main__':

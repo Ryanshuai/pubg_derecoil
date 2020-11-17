@@ -16,7 +16,7 @@ class Press(threading.Thread):
     def run(self):
         if self.is_calibrate:
             for time, dist in zip(self.time_seq, self.dist_seq):
-                threading.Timer(time, self.mouse_down, args=[5, dist]).start()
+                threading.Timer(time, self.mouse_down, args=[3, dist]).start()
         else:
             for time, dist in zip(self.time_seq, self.dist_seq):
                 threading.Timer(time, self.mouse_down, args=[0, dist]).start()
