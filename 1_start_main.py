@@ -22,7 +22,6 @@ class Ui_Dialog(object):
         self.label = QtWidgets.QLabel(Dialog)
         self.label.setGeometry(QtCore.QRect(0, 0, show_size_x, show_size_y))
         self.label.setObjectName("label")
-
         QtCore.QMetaObject.connectSlotsByName(Dialog)
 
         # self.robot = Robot(All_States(), is_calibrating=True)

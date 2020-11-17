@@ -12,22 +12,22 @@ except ImportError:
     from image_detect.net import VGG
 
 name_size_dict = {
-    'gun_scope': [64, 9],
-    'gun_muzzle': [64, 10],
-    'gun_grip': [64, 7],
-    'gun_butt': [64, 2],
-    'gun_name': [64, 35],
+    'gun_scope': [64, 64, 9],
+    'gun_muzzle': [64, 64, 10],
+    'gun_grip': [64, 64, 7],
+    'gun_butt': [64, 64, 2],
+    'gun_name': [64, 64, 35],
 
-    'fire_mode': [32, 6],
-    'in_tab': [32, 2],
+    'fire_mode': ['fire_mode', 32, 5],
+    'in_tab': [32, 32, 2],
 }
 
 
 class Detector:
     def __init__(self, class_name):
         self.class_name = class_name
-        im_size, out_size = name_size_dict[class_name]
-        self.model = VGG(im_size, out_size)
+        net_cfg, im_size, out_size = name_size_dict[class_name]
+        self.model = VGG(net_cfg, out_size)
         try:
             self.model.load_state_dict(torch.load(class_name + ".pth.tar"))
         except:
@@ -54,6 +54,22 @@ class Detector:
             save_path = os.path.join(save_dir, str(howMany) + ".png")
             cv2.imwrite(save_path, im_cv2)
             print(save_path)
+
+        save_dir = os.path.join("for_database", "fire_mode_background")
+        os.makedirs(save_dir, exist_ok=True)
+        howMany = len(os.listdir(save_dir))
+        if name == "" and self.class_name == "fire_mode":
+            save_path = os.path.join(save_dir, str(howMany) + ".png")
+            cv2.imwrite(save_path, im_cv2)
+            print(save_path)
+
+        save_dir = os.path.join("for_database", "in_tab_background")
+        os.makedirs(save_dir, exist_ok=True)
+        howMany = len(os.listdir(save_dir))
+        if name == "" and self.class_name == "in_tab":
+            save_path = os.path.join(save_dir, str(howMany) + ".png")
+            cv2.imwrite(save_path, im_cv2)
+            print(save_path)
         return name
 
     def idx2name(self, idx):
@@ -71,17 +87,21 @@ class Detector:
             'fire_mode': ["burst2", "burst3", "full", "high", "single", ],
             'in_tab': ["in_tab"],
         }
-        name = pos_name_dict[self.class_name][idx - 1]
+        if self.class_name == "fire_mode":
+            name = pos_name_dict[self.class_name][idx]
+        else:
+            name = pos_name_dict[self.class_name][idx - 1]
         return name
 
 
 if __name__ == '__main__':
+    de = Detector('gun_scope')
 
-    test_dir = "test"
-    for image_name in os.listdir(test_dir):
-        image_path = os.path.join(test_dir, image_name)
-        im = Image.open(image_path).convert('RGB')
-
-        name = ""
-
-        print(image_name + "----->" + name)
+    # test_dir = "test"
+    # for image_name in os.listdir(test_dir):
+    #     image_path = os.path.join(test_dir, image_name)
+    #     im = Image.open(image_path).convert('RGB')
+    #
+    #     name = ""
+    #
+    #     print(image_name + "----->" + name)
