@@ -1,6 +1,7 @@
 import threading
 import win32api
 import win32con
+from state.time_periods_constant import time_periods
 
 
 class Press(threading.Thread):
@@ -11,12 +12,13 @@ class Press(threading.Thread):
         self.dist_seq, self.time_seq = dist_seq[:self.len], time_seq[:self.len]
         self._loop = True
         self.i = 0
+        self.x_move = 1500 / len(dist_seq)
         # self.mouse = Controller()
 
     def run(self):
         if self.is_calibrate:
             for time, dist in zip(self.time_seq, self.dist_seq):
-                threading.Timer(time, self.mouse_down, args=[5, dist]).start()
+                threading.Timer(time, self.mouse_down, args=[self.x_move, dist]).start()
         else:
             for time, dist in zip(self.time_seq, self.dist_seq):
                 threading.Timer(time, self.mouse_down, args=[0, dist]).start()

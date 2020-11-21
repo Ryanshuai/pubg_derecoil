@@ -45,7 +45,7 @@ class Robot:
         self.mouse_listener.start()
 
         self.temp_qobject = Temp_QObject()
-        if is_calibrating:
+        if is_calibrating and os.path.exists("calibrate_distance/gun_dist_screen"):
             shutil.rmtree("calibrate_distance/gun_dist_screen")
 
     def on_press(self, key):
