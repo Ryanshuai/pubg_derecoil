@@ -1,3 +1,4 @@
+import numpy as np
 from calibrate_distance.gun_distance_constant import dist_lists
 
 
@@ -24,9 +25,10 @@ def write_to_file_delta(gun_name, delta_dist):
         if i < len(delta_dist):
             dist += delta_dist[i]
         if i < len(original):
-            dist += delta_dist[i]
+            dist += original[i]
         new_dist.append(dist)
-    write_to_file(new_dist, 'gun_distance_constant.py')
+    dist_lists[gun_name] = list(new_dist)
+    write_to_file(dist_lists, 'gun_distance_constant.py')
 
 
 def write_to_file_average(gun_name, new_dist):

@@ -1,14 +1,15 @@
 import cv2
 import numpy as np
-from calibrate_distance.write_dict import write_to_file_delta
 
 
 def im_to_deltaY(im):
+    im[600:, :, :] = np.ones((len(im) - 600, len(im[0]), 3)) * 255
+    # cv2.imshow("", im)
+    # cv2.waitKey()
+
     im_gray = np.where(im > 0, 0, 255)
     im_gray = im_gray[:, :, 0] & im_gray[:, :, 1] & im_gray[:, :, 2]
     im_gray = im_gray.astype(np.uint8)
-
-    im_gray[620:, 1570:1881] = np.zeros((len(im_gray) - 620, 1881 - 1570))
 
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))  # 定义矩形结构元素
     b_im = cv2.morphologyEx(im_gray, cv2.MORPH_OPEN, kernel, iterations=1)  # 开运算1
@@ -19,32 +20,47 @@ def im_to_deltaY(im):
     areas = stats[:, -1]
 
     centroids = centroids[1:]
-    # for x, y in centroids:
-    #     cv2.circle(im, (int(x), int(y)), 2, (255, 0, 0), 6)
-    # cv2.imwrite("keypoints.png", im)
-
     centroids = centroids[centroids[:, 0].argsort()]
     Ys = centroids[:, 1]
     deltaY = np.diff(Ys)
-    deltaY = np.round(deltaY)
+    deltaY /= 3
+    print(-deltaY.astype(np.int))
 
-    return deltaY.astype(np.int)
+    # for x, y in centroids:
+    #     cv2.circle(im, (int(x), int(y)), 2, (255, 0, 0), 6)
+    # cv2.imshow("keypoints.png", im)
+    # cv2.waitKey()
+
+    return deltaY
 
 
 if __name__ == '__main__':
     import os
+    from calibrate_distance.write_dict import write_to_file_delta
 
+
+    # im = cv2.imread("gun_dist_screen/qbz/1 (2).png")
+    # im_to_deltaY(im)
 
     def write_delta(gun_name):
+        gun_dir = os.path.join("gun_dist_screen", gun_name)
         deltaY_list = []
-        for im_name in os.listdir(gun_name):
-            im_path = os.path.join(gun_name, im_name)
+        min_len = 1000
+        for im_name in os.listdir(gun_dir):
+            im_path = os.path.join(gun_dir, im_name)
             im = cv2.imread(im_path)
             deltaY = im_to_deltaY(im)
+            min_len = min(min_len, len(deltaY))
             deltaY_list.append(deltaY)
-        print()
+
+        m = len(deltaY_list)
+        deltaY_mat = np.zeros((m, min_len))
+        for i in range(m):
+            deltaY_mat[i, :] = deltaY_list[i][:min_len]
+        deltaY_avr = np.average(deltaY_mat, axis=0)
+        deltaY_avr = np.round(deltaY_avr).astype(np.int)
+        print(gun_dir, -deltaY_avr)
+        write_to_file_delta(gun_name, -deltaY_avr)
 
 
-    im = cv2.imread("6.png")
-    deltaY = im_to_deltaY(im)
-    print(deltaY)
+    write_delta("m762")
