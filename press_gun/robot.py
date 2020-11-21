@@ -1,4 +1,5 @@
 import os
+import shutil
 import threading
 from pynput import keyboard, mouse
 from PyQt5.QtCore import pyqtSignal, QObject
@@ -44,6 +45,8 @@ class Robot:
         self.mouse_listener.start()
 
         self.temp_qobject = Temp_QObject()
+        if is_calibrating:
+            shutil.rmtree("calibrate_distance/gun_dist_screen")
 
     def on_press(self, key):
         if key == keyboard.Key.tab:
@@ -85,7 +88,7 @@ class Robot:
     def ctrl_save_screen(self):
         n = self.all_states.weapon_n
         gun_name = self.all_states.weapon[n].name
-        save_dir = os.path.join('calibrate_distance', gun_name)
+        save_dir = os.path.join('calibrate_distance', "gun_dist_screen", gun_name)
         if not os.path.exists(save_dir):
             os.makedirs(save_dir, exist_ok=True)
         i = len(os.listdir(save_dir))

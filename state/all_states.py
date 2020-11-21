@@ -56,7 +56,7 @@ def calculate_press_seq(name, factor):
     time_interval = time_periods.get(name, 0.01)
     divide_num0 = math.floor(time_interval / 0.01)  # 整数分割
     time_sequence = list()
-    time_accumulate = 0
+    time_accumulate = time_interval / 4
     dist_sequence = list()
     for dist in dist_interval:
         divide_num1 = math.floor(dist / 3)  # 整数分割
