@@ -26,10 +26,10 @@ def im_to_deltaY(im):
     deltaY /= 3
     print(-deltaY.astype(np.int))
 
-    # for x, y in centroids:
-    #     cv2.circle(im, (int(x), int(y)), 2, (255, 0, 0), 6)
-    # cv2.imshow("keypoints.png", im)
-    # cv2.waitKey()
+    for x, y in centroids:
+        cv2.circle(im, (int(x), int(y)), 2, (255, 0, 0), 6)
+    cv2.imshow("keypoints.png", im)
+    cv2.waitKey()
 
     return deltaY
 
@@ -63,4 +63,4 @@ if __name__ == '__main__':
         write_to_file_delta(gun_name, -deltaY_avr)
 
 
-    write_delta("m762")
+    write_delta("scar")
