@@ -72,8 +72,3 @@ screen_position_states = \
      'ground11': [],
      'ground12': []
      }
-
-
-def crop_screen(screen, pos):
-    x0, y0, x1, y1 = pos
-    return screen[y0:y1, x0:x1, :]

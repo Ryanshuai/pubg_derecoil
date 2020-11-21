@@ -77,13 +77,13 @@ class Detector:
             return ""
         pos_name_dict = {
             'gun_scope': ['x15', 'x1h', 'x1r', 'x2', 'x3', 'x4', 'x6', 'x8', ],
-            'gun_muzzle': ['com_ar', 'com_sm', 'com_sr', 'fla_ar', 'fla_sm', 'fla_s4', 'sup_ar', 'sup_sm', 'sup_sr'],
+            'gun_muzzle': ['com_ar', 'com_sm', 'com_sr', 'fla_ar', 'fla_sm', 'fla_sr', 'sup_ar', 'sup_sm', 'sup_sr'],
             'gun_grip': ['ang', 'hal', 'las', 'lig', 'thu', 'ver'],
             'gun_butt': ['sto'],
 
             'gun_name': ["98k", "akm", "aug", "awm", "dbs", "dp28", "g36c", "groza", "m16", "m24", "m249", "m416",
-                         "m762", "mg3", "mini14", "mk14", "mk47", "mosin", "mp5k", "pp19", "qbu", "qbz", "s12k", "s686",
-                         "s1897", "scar", "sks", "slr", "tommy", "ump45", "uzi", "vector", "vss", "win94"],
+                         "m762", "mg3", "mini14", "mk14", "mk47", "mosin", "mp5k", "pp19", "qbu", "qbz", "s12k",
+                         "s1897", "s686", "scar", "sks", "slr", "tommy", "ump45", "uzi", "vector", "vss", "win94"],
             'fire_mode': ["burst2", "burst3", "full", "high", "single", ],
             'in_tab': ["in_tab"],
         }

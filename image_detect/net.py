@@ -3,7 +3,7 @@ import torch.nn as nn
 size_config = {
     64: [[8, 'M', 16, 'M', 16, 'M'], [1024, 256, 128]],
     32: [[8, 'M', 16, 'M', 16, 'M'], [256, 256, 128]],
-    "fire_mode": [[8, 'M', 16, 'M', 16], [1024, 256, 128]],
+    "fire_mode": [[8, 'M', 16, 'M', 32, 'M'], [512, 256, 128]],
 }
 
 
@@ -24,10 +24,10 @@ def make_layers(cfg, batch_norm=False):
 
 
 class VGG(nn.Module):
-    def __init__(self, in_size, num_classes, batch_norm=True, init_weights=True):
+    def __init__(self, net_cfg, num_classes, batch_norm=True, init_weights=True):
         super(VGG, self).__init__()
-        self.features = make_layers(size_config[in_size][0], batch_norm=batch_norm)
-        a, b, c = size_config[in_size][1]
+        self.features = make_layers(size_config[net_cfg][0], batch_norm=batch_norm)
+        a, b, c = size_config[net_cfg][1]
         self.classifier = nn.Sequential(
             nn.Linear(a, b),
             nn.ReLU(True),

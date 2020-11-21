@@ -83,8 +83,8 @@ ballistic = {
     'ump45': (
         (1, 0),
         (5, 18),
-        (15, 30),
-        (35, 32),
+        (15, 27),
+        (35, 30),
     ),
     'vector': (
         (1, 0),
@@ -109,4 +109,4 @@ def decode_seq(seq):
 
 for gun_name, seq in ballistic.items():
     heights = decode_seq(seq)
-    write_to_file_abs(gun_name, heights)
+    write_to_file_abs(gun_name, heights[1:])
