@@ -122,7 +122,8 @@ class Weapon():
         if pos == 'fire_mode':
             self.is_press = False
             self.fire_mode = state
-            if self.fire_mode == "full" and self.type in ['ar', 'smg', 'mg']:
+            # if self.fire_mode == "full" and self.type in ['ar', 'smg', 'mg']:
+            if self.type in ['ar', 'smg', 'mg']:
                 self.is_press = True
             if self.fire_mode == "single" and self.type in ['dmr', 'shotgun']:
                 self.is_press = True

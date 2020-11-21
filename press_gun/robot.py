@@ -51,6 +51,9 @@ class Robot:
         if key == keyboard.Key.f12:
             self.all_states.dont_press = True
 
+        if key == keyboard.Key.ctrl_l and self.calibrate:
+            self.ctrl_save_screen()
+
         if hasattr(key, 'char'):
             key = key.char
         if key == 'g' or key == '5':
@@ -78,6 +81,15 @@ class Robot:
         if button in [mouse.Button.right, mouse.Button.left] and (not pressed):
             if self.all_states.screen_state == 'tab':
                 threading.Timer(0.2, self.tab_func).start()
+
+    def ctrl_save_screen(self):
+        n = self.all_states.weapon_n
+        gun_name = self.all_states.weapon[n].name
+        save_dir = os.path.join('calibrate_distance', gun_name)
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir, exist_ok=True)
+        i = len(os.listdir(save_dir))
+        win32_cap(os.path.join(save_dir, str(i) + ".png"))
 
     def is_in_tab(self):
         if 'in_tab' == self.in_tab_detect.im2name(get_screen('in_tab')):

@@ -16,6 +16,19 @@ def write_to_file_abs(gun_name, new_dist):
     write_to_file(dist_lists, 'gun_distance_constant.py')
 
 
+def write_to_file_delta(gun_name, delta_dist):
+    original = dist_lists[gun_name]
+    new_dist = []
+    for i in range(max(len(delta_dist), len(original))):
+        dist = 0
+        if i < len(delta_dist):
+            dist += delta_dist[i]
+        if i < len(original):
+            dist += delta_dist[i]
+        new_dist.append(dist)
+    write_to_file(new_dist, 'gun_distance_constant.py')
+
+
 def write_to_file_average(gun_name, new_dist):
     num, dist = dist_lists.get(gun_name, [0])
     if len(new_dist) > len(dist):
