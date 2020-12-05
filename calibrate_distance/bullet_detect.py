@@ -63,4 +63,4 @@ if __name__ == '__main__':
         write_to_file_delta(gun_name, -deltaY_avr)
 
 
-    write_delta("m416")
+    write_delta("mg3")

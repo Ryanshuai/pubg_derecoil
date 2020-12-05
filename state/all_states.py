@@ -19,7 +19,7 @@ sp = {'98k', 'm24', 'awm', }
 dmr = {'mini14', 'mk14', 'qbu', 'sks', 'slr', 'vss', }
 ar = {'akm', 'aug', 'groza', 'm416', 'qbz', 'scar', 'm762', 'g36c', 'm16', 'mk47', }
 smg = {'tommy', 'uzi', 'ump45', 'vector', 'pp19', 'mp5k'}
-mg = {'m249', 'dp28', }
+mg = {'m249', 'dp28', "mg3"}
 shotgun = {'s12k', 's1987', 's686', }
 
 bullet_762_guns = ['98k', 'm24', 'mk14', 'sks', 'slr', 'akm', 'groza', 'm762', 'mk47', 'dp28', ]
@@ -123,7 +123,8 @@ class Weapon():
             # if self.fire_mode == "full" and self.type in ['ar', 'smg', 'mg']:
             if self.type in ['ar', 'smg', 'mg']:
                 self.is_press = True
-            if self.fire_mode == "single" and self.type in ['dmr', 'shotgun']:
+            # if self.fire_mode == "single" and self.type in ['dmr', 'shotgun']:
+            if self.type in ['dmr', 'shotgun']:
                 self.is_press = True
         if pos == 'scope':
             self.scope = state
@@ -140,11 +141,11 @@ class Weapon():
             if self.muzzle.startswith('fla'):
                 self.muzzle_factor = 0.9
             elif self.muzzle.startswith('com'):
-                if self.name in ar:
+                if self.type == 'ar':
                     self.muzzle_factor = 0.85
-                elif self.name in smg:
+                elif self.type == 'smg':
                     self.muzzle_factor = 0.75
-                elif self.name in sp:
+                elif self.type in ['dmr', "sp"]:
                     self.muzzle_factor = 0.8
         if pos == 'grip':
             self.grip = state
