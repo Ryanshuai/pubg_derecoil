@@ -12,7 +12,7 @@ class Press(threading.Thread):
         self.dist_seq, self.time_seq = dist_seq[:self.len], time_seq[:self.len]
         self._loop = True
         self.i = 0
-        self.x_move = 1500 / len(dist_seq)
+        self.x_move = 1500 // (len(dist_seq) + 0.00001)
         # self.mouse = Controller()
 
     def run(self):

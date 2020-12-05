@@ -102,8 +102,6 @@ class Weapon():
         self.is_press = False
 
     def set(self, pos, state):
-        if state == "":
-            return
         if pos == 'name':
             self.name = state
             self.time_interval = time_periods.get(self.name, 0.1)
@@ -129,8 +127,11 @@ class Weapon():
                 self.is_press = True
         if pos == 'scope':
             self.scope = state
-            self.scope_factor = int(self.scope.replace('r', '').replace('h', '').replace('x', ''))
-            self.scope_factor = factor_scope(self.scope_factor)
+            if state == "":
+                self.scope_factor = 1
+            else:
+                self.scope_factor = int(self.scope.replace('r', '').replace('h', '').replace('x', ''))
+                self.scope_factor = factor_scope(self.scope_factor)
             if self.name == 'vss':
                 self.scope_factor = 4
         if pos == 'muzzle':
@@ -150,13 +151,13 @@ class Weapon():
             if self.grip == 'thu':
                 self.grip_factor = 0.85
             elif self.grip == 'lig':
-                self.grip_factor = 1.25
+                self.grip_factor = 1.1
             elif self.grip == 'hal':
-                self.grip_factor = 0.9
+                self.grip_factor = 0.85
             elif self.grip == 'ang':
                 self.grip_factor = 1.0
             elif self.grip == 'ver':
-                self.grip_factor = 0.85
+                self.grip_factor = 0.8
             elif self.grip == '':
                 self.grip_factor = 1.0
         if pos == 'butt':
@@ -166,7 +167,7 @@ class Weapon():
 
     def set_seq(self):
         # self.all_factor = self.scope_factor * self.muzzle_factor * self.grip_factor * self.butt_factor
-        self.all_factor = self.scope_factor
+        self.all_factor = self.scope_factor * self.muzzle_factor * self.grip_factor
         factor = factor_scope(self.all_factor)
         if self.type in ['ar', 'smg', 'mg']:
             self.dist_seq, self.time_seq = calculate_press_seq(self.name, factor)

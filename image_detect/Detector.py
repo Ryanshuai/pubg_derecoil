@@ -12,7 +12,7 @@ except ImportError:
     from image_detect.net import VGG
 
 name_size_dict = {
-    'gun_scope': [64, 64, 9],
+    'gun_scope': ['gun_scope', 64, 9],
     'gun_muzzle': [64, 64, 10],
     'gun_grip': [64, 64, 7],
     'gun_butt': [64, 64, 2],
@@ -38,7 +38,7 @@ class Detector:
     def im2name(self, im):
         im_cv2 = im
         if not isinstance(im, Image.Image):
-            im = Image.fromarray(cv2.cvtColor(im, cv2.COLOR_BGR2RGB))
+            im = Image.fromarray(im)
         im = self.preprocess(im)
         input_batch = im.unsqueeze(0)  # create a mini-batch as expected by the model
 
