@@ -24,8 +24,8 @@ class Ui_Dialog(object):
         self.label.setObjectName("label")
         QtCore.QMetaObject.connectSlotsByName(Dialog)
 
-        self.robot = Robot(All_States(), is_calibrating=True)
-        # self.robot = Robot(All_States())
+        # self.robot = Robot(All_States(), is_calibrating=True)
+        self.robot = Robot(All_States())
         self.robot.temp_qobject.state_str_signal[str].connect(self.retranslateUi)
 
     def retranslateUi(self, text):
