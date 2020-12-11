@@ -15,10 +15,10 @@ name_size_dict = {
     'gun_scope': ['gun_scope', 64, 9],
     'gun_muzzle': [64, 64, 10],
     'gun_grip': [64, 64, 7],
-    'gun_butt': [64, 64, 2],
+    'gun_butt': [64, 64, 3],
     'gun_name': [64, 64, 35],
 
-    'fire_mode': ['fire_mode', 32, 5],
+    'fire_mode': ['fire_mode', 32, 6],
     'in_tab': [32, 32, 2],
 }
 
@@ -79,7 +79,7 @@ class Detector:
             'gun_scope': ['x15', 'x1h', 'x1r', 'x2', 'x3', 'x4', 'x6', 'x8', ],
             'gun_muzzle': ['com_ar', 'com_sm', 'com_sr', 'fla_ar', 'fla_sm', 'fla_sr', 'sup_ar', 'sup_sm', 'sup_sr'],
             'gun_grip': ['ang', 'hal', 'las', 'lig', 'thu', 'ver'],
-            'gun_butt': ['sto'],
+            'gun_butt': ['sto', "cheek"],
 
             'gun_name': ["98k", "akm", "aug", "awm", "dbs", "dp28", "g36c", "groza", "m16", "m24", "m249", "m416",
                          "m762", "mg3", "mini14", "mk14", "mk47", "mosin", "mp5k", "pp19", "qbu", "qbz", "s12k",
@@ -87,10 +87,10 @@ class Detector:
             'fire_mode': ["burst2", "burst3", "full", "high", "single", ],
             'in_tab': ["in_tab"],
         }
-        if self.class_name == "fire_mode":
-            name = pos_name_dict[self.class_name][idx]
-        else:
-            name = pos_name_dict[self.class_name][idx - 1]
+        # if self.class_name == "fire_mode":
+        #     name = pos_name_dict[self.class_name][idx]
+        # else:
+        name = pos_name_dict[self.class_name][idx - 1]
         return name
 
 

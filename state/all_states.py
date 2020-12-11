@@ -154,7 +154,7 @@ class Weapon():
             elif self.grip == 'lig':
                 self.grip_factor = 1.1
             elif self.grip == 'hal':
-                self.grip_factor = 0.85
+                self.grip_factor = 0.8
             elif self.grip == 'ang':
                 self.grip_factor = 1.0
             elif self.grip == 'ver':
@@ -167,8 +167,7 @@ class Weapon():
                 self.butt_factor = 0.85
 
     def set_seq(self):
-        # self.all_factor = self.scope_factor * self.muzzle_factor * self.grip_factor * self.butt_factor
-        self.all_factor = self.scope_factor * self.muzzle_factor * self.grip_factor
+        self.all_factor = self.scope_factor * self.muzzle_factor * self.grip_factor * self.butt_factor
         factor = factor_scope(self.all_factor)
         if self.type in ['ar', 'smg', 'mg']:
             self.dist_seq, self.time_seq = calculate_press_seq(self.name, factor)

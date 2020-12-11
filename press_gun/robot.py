@@ -50,6 +50,7 @@ class Robot:
 
     def on_press(self, key):
         if key == keyboard.Key.tab:
+            self.screen = get_screen()
             threading.Timer(0.5, self.is_in_tab).start()
         if key == keyboard.Key.f12:
             self.all_states.dont_press = True
@@ -95,17 +96,18 @@ class Robot:
         win32_cap(os.path.join(save_dir, str(i) + ".png"))
 
     def is_in_tab(self):
-        if 'in_tab' == self.in_tab_detect.im2name(get_screen('in_tab')):
+        if 'in_tab' == self.in_tab_detect.im2name(crop_screen(self.screen, 'in_tab')):
             self.all_states.screen_state = 'tab'
             self.all_states.dont_press = True
         else:
+            if self.all_states.screen_state == 'tab':
+                threading.Timer(0.5, self.set_fire_mode).start()
             self.all_states.screen_state = 'default'
             self.all_states.dont_press = False
-            threading.Timer(0.5, self.set_fire_mode).start()
 
     def tab_func(self):
         for pos_name in pos_names:
-            corp_im = get_screen(pos_name)
+            corp_im = crop_screen(self.screen, pos_name)
             pos = pos_name.split('_')[-1]
             crop_name = self.gun_detector[pos].im2name(corp_im)
             if pos_name.startswith("gun1"):
@@ -136,6 +138,11 @@ class Robot:
         else:
             emit_str = gun1_state + '\n' + ' * ' + gun2_state
         self.temp_qobject.state_str_signal.emit(emit_str)
+
+
+def crop_screen(screen, name):
+    y, x, h, w = get_pos(name)
+    return screen[y:y + h, x:x + w]
 
 
 def get_screen(name=None):
