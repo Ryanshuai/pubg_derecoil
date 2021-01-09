@@ -1,7 +1,7 @@
 import math
 
-from state.time_periods_constant import time_periods
 from calibrate_distance.gun_distance_constant import dist_lists
+from state.time_periods_constant import time_periods
 
 all_guns = ['98k', 'm24', 'awm', 'mini14', 'mk14', 'qbu', 'sks', 'slr', 'vss', 'akm', 'aug', 'groza', 'm416', 'qbz',
             'scar', 'm762', 'g36c', 'm16', 'mk47', 'tommy', 'uzi', 'ump45', 'vector', 'pp19', 'm249', 'dp28', 's12k',
@@ -35,13 +35,13 @@ def factor_scope(scope):
     if scope == 1:
         factor = 1.
     if scope == 2:
-        factor = 1
+        factor = 0.85
     if scope == 3:
-        factor = 1
+        factor = 0.85
     if scope == 4:
-        factor = 1
+        factor = 0.85
     if scope == 6:
-        factor = 1
+        factor = 0.85
     screen_factor = 1  # screen_h_factor
     return scope * factor * screen_factor
 
@@ -117,16 +117,17 @@ class Weapon():
                 self.type = 'mg'
             elif self.name in shotgun:
                 self.type = 'shotgun'
-        if pos == 'fire_mode':
+        elif pos == 'fire_mode':
             self.is_press = False
-            self.fire_mode = state
             # if self.fire_mode == "full" and self.type in ['ar', 'smg', 'mg']:
             if self.type in ['ar', 'smg', 'mg']:
+                self.fire_mode = "full"
                 self.is_press = True
             # if self.fire_mode == "single" and self.type in ['dmr', 'shotgun']:
             if self.type in ['dmr', 'shotgun']:
+                self.fire_mode = "single"
                 self.is_press = True
-        if pos == 'scope':
+        elif pos == 'scope':
             self.scope = state
             if state == "":
                 self.scope_factor = 1
@@ -135,7 +136,7 @@ class Weapon():
                 self.scope_factor = factor_scope(self.scope_factor)
             if self.name == 'vss':
                 self.scope_factor = 4
-        if pos == 'muzzle':
+        elif pos == 'muzzle':
             self.muzzle = state
             self.muzzle_factor = 1.0
             if self.muzzle.startswith('fla'):
@@ -147,7 +148,7 @@ class Weapon():
                     self.muzzle_factor = 0.75
                 elif self.type in ['dmr', "sp"]:
                     self.muzzle_factor = 0.8
-        if pos == 'grip':
+        elif pos == 'grip':
             self.grip = state
             if self.grip == 'thu':
                 self.grip_factor = 0.85
@@ -161,24 +162,26 @@ class Weapon():
                 self.grip_factor = 0.8
             elif self.grip == '':
                 self.grip_factor = 1.0
-        if pos == 'butt':
+        elif pos == 'butt':
             self.butt = state
             if self.butt == 'sto':
                 self.butt_factor = 0.85
 
     def set_seq(self):
-        self.all_factor = self.scope_factor * self.muzzle_factor * self.grip_factor * self.butt_factor
-        factor = factor_scope(self.all_factor)
         if self.type in ['ar', 'smg', 'mg']:
+            self.all_factor = self.scope_factor * self.muzzle_factor * self.grip_factor * self.butt_factor
+            factor = factor_scope(self.all_factor)
             self.dist_seq, self.time_seq = calculate_press_seq(self.name, factor)
         elif self.type in ['dmr', 'shotgun']:
+            self.all_factor = self.scope_factor * self.muzzle_factor * self.grip_factor
+            factor = factor_scope(self.all_factor)
             self.dist_seq = [i * factor for i in dist_lists.get(self.name, [0])]
             self.time_seq = [x * 0.01 for x in range(len(self.dist_seq))]
 
 
 class All_States():
     def __init__(self):
-        self.dont_press = False
+        self.to_press = True
         self.screen_state = '3p'  # 1p, 3p, tab, map s1, s2, ... s15
 
         self.weapon_n = 0

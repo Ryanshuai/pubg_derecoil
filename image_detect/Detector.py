@@ -1,10 +1,10 @@
-from torchvision import transforms
-import torch
-
-from PIL import Image
-import cv2
 import os
+
+import cv2
 import numpy as np
+import torch
+from PIL import Image
+from torchvision import transforms
 
 try:
     from .net import VGG
@@ -47,6 +47,9 @@ class Detector:
         idx = int(np.argmax(output[0]))
         name = self.idx2name(idx)
 
+        if name in ['x1h', 'x1r', 'x2', 'x3', 'x4', 'x6', 'x8', "hal", "ang"]:
+            return name
+
         save_dir = os.path.join("for_database", name)
         os.makedirs(save_dir, exist_ok=True)
         howMany = len(os.listdir(save_dir))
@@ -63,13 +66,6 @@ class Detector:
             cv2.imwrite(save_path, im_cv2)
             print(save_path)
 
-        save_dir = os.path.join("for_database", "in_tab_background")
-        os.makedirs(save_dir, exist_ok=True)
-        howMany = len(os.listdir(save_dir))
-        if name == "" and self.class_name == "in_tab":
-            save_path = os.path.join(save_dir, str(howMany) + ".png")
-            cv2.imwrite(save_path, im_cv2)
-            print(save_path)
         return name
 
     def idx2name(self, idx):
@@ -79,7 +75,7 @@ class Detector:
             'gun_scope': ['x15', 'x1h', 'x1r', 'x2', 'x3', 'x4', 'x6', 'x8', ],
             'gun_muzzle': ['com_ar', 'com_sm', 'com_sr', 'fla_ar', 'fla_sm', 'fla_sr', 'sup_ar', 'sup_sm', 'sup_sr'],
             'gun_grip': ['ang', 'hal', 'las', 'lig', 'thu', 'ver'],
-            'gun_butt': ['sto', "cheek"],
+            'gun_butt': ["cheek", 'sto', ],
 
             'gun_name': ["98k", "akm", "aug", "awm", "dbs", "dp28", "g36c", "groza", "m16", "m24", "m249", "m416",
                          "m762", "mg3", "mini14", "mk14", "mk47", "mosin", "mp5k", "pp19", "qbu", "qbz", "s12k",
@@ -87,9 +83,6 @@ class Detector:
             'fire_mode': ["burst2", "burst3", "full", "high", "single", ],
             'in_tab': ["in_tab"],
         }
-        # if self.class_name == "fire_mode":
-        #     name = pos_name_dict[self.class_name][idx]
-        # else:
         name = pos_name_dict[self.class_name][idx - 1]
         return name
 
