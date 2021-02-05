@@ -47,7 +47,7 @@ class Detector:
         idx = int(np.argmax(output[0]))
         name = self.idx2name(idx)
 
-        if name in ['x1h', 'x1r', 'x2', 'x3', 'x4', 'x6', 'x8', "hal", "ang"]:
+        if name in ['x1h', 'x1r', 'x2', 'x3', 'x4', 'x6', 'x8', "hal", "ang", "akm", "slr", "sks", "m416", "m762"]:
             return name
 
         save_dir = os.path.join("for_database", name)
