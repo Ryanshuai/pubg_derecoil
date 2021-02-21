@@ -47,24 +47,24 @@ class Detector:
         idx = int(np.argmax(output[0]))
         name = self.idx2name(idx)
 
-        if name in ['x1h', 'x1r', 'x2', 'x3', 'x4', 'x6', 'x8', "hal", "ang", "akm", "slr", "sks", "m416", "m762"]:
-            return name
-
-        save_dir = os.path.join("for_database", name)
-        os.makedirs(save_dir, exist_ok=True)
-        howMany = len(os.listdir(save_dir))
-        if name and howMany < 1000:
-            save_path = os.path.join(save_dir, str(howMany) + ".png")
-            cv2.imwrite(save_path, im_cv2)
-            print(save_path)
-
-        save_dir = os.path.join("for_database", "fire_mode_background")
-        os.makedirs(save_dir, exist_ok=True)
-        howMany = len(os.listdir(save_dir))
-        if name == "" and self.class_name == "fire_mode":
-            save_path = os.path.join(save_dir, str(howMany) + ".png")
-            cv2.imwrite(save_path, im_cv2)
-            print(save_path)
+        # if name in ['x1h', 'x1r', 'x2', 'x3', 'x4', 'x6', 'x8', "hal", "ang", "akm", "slr", "sks", "m416", "m762"]:
+        #     return name
+        #
+        # save_dir = os.path.join("for_database", name)
+        # os.makedirs(save_dir, exist_ok=True)
+        # howMany = len(os.listdir(save_dir))
+        # if name and howMany < 1000:
+        #     save_path = os.path.join(save_dir, str(howMany) + ".png")
+        #     cv2.imwrite(save_path, im_cv2)
+        #     print(save_path)
+        #
+        # save_dir = os.path.join("for_database", "fire_mode_background")
+        # os.makedirs(save_dir, exist_ok=True)
+        # howMany = len(os.listdir(save_dir))
+        # if name == "" and self.class_name == "fire_mode":
+        #     save_path = os.path.join(save_dir, str(howMany) + ".png")
+        #     cv2.imwrite(save_path, im_cv2)
+        #     print(save_path)
 
         return name
 
