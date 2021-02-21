@@ -2,6 +2,9 @@
 
  1 install all python libraries including pytorch, cv2, pyinput\
  2 change all the positions in state.position_constants.py\
+this step means telling the program which area to be cropped for image detection\
+![](readme/495.png)
+the ratio of height to width should be similar to original\
  &nbsp; &nbsp; in the list named crop_position:\
  &nbsp; &nbsp; &nbsp; &nbsp; when there are four values:\
  &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; it means [x1, y1, x2, y2]\
