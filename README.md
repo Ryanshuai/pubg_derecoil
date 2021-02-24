@@ -7,7 +7,7 @@ this step means telling the program which area to be cropped for image detection
 
 | position need to be fine tune  |
 | ----        |
-| 'in_tab' under the inventory for checking if it is in tab | 
+| 'in_tab' (type) under the inventory for checking if it is in tab | 
 | 'gun1_name' | 
 | 'gun1_scope' | 
 | 'gun1_muzzle' | 
