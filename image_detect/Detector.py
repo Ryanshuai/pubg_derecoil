@@ -41,7 +41,7 @@ class Detector:
         save_dir = "for_data_check"
         os.makedirs(save_dir, exist_ok=True)
         howMany = len(os.listdir(save_dir))
-        if howMany < 10:
+        if howMany < 100:
             save_path = os.path.join(save_dir, str(howMany) + ".png")
             cv2.imwrite(save_path, im_cv2)
             print(save_path)
