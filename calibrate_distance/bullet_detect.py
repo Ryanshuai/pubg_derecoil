@@ -11,8 +11,8 @@ def im_to_deltaY(im):
     im_gray = im_gray[:, :, 0] & im_gray[:, :, 1] & im_gray[:, :, 2]
     im_gray = im_gray.astype(np.uint8)
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))  # 定义矩形结构元素
-    b_im = cv2.morphologyEx(im_gray, cv2.MORPH_OPEN, kernel, iterations=1)  # 开运算1
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    b_im = cv2.morphologyEx(im_gray, cv2.MORPH_OPEN, kernel, iterations=1)
 
     # cv2.imwrite("b_im.png", b_im)
 

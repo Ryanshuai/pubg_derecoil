@@ -1,6 +1,7 @@
 # Pubg derecoil
 
-1 install all python libraries including pytorch, cv2, pyinput\
+1 install all python libraries:\
+&nbsp; &nbsp; &nbsp; &nbsp;pip install -r requirements.txt\
 2 change all the positions in state.position_constants.py\
 this step means telling the program which area to be cropped for image detection\
 ![](readme/495.png)
