@@ -72,7 +72,7 @@ class Robot:
 
     def on_click(self, x, y, button, pressed):
         if button == mouse.Button.left and pressed and self.all_states.to_press:
-        # if button == mouse.Button.left and pressed:
+            # if button == mouse.Button.left and pressed:
             n = self.all_states.weapon_n
             if self.all_states.weapon[n].is_press:
                 self.press = Press(self.all_states.weapon[n].dist_seq, self.all_states.weapon[n].time_seq,

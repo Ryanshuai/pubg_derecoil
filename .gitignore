@@ -1,8 +1,9 @@
-
-*.png
+for_data_check
+for_database
+temp_image
+.idea
+__pycache__
 *.tar
 *.pyc
-*.png
-*.png
 *.xml
 *.iml
