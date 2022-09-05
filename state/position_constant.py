@@ -14,11 +14,11 @@ pos_names = ['gun1_name', 'gun1_scope', 'gun1_muzzle', 'gun1_grip', 'gun1_butt',
 
 crop_position = {
     'fire_mode': [1330, 1648, 1364, 1676],
-    'in_tab': [132, 926, 155, 974],
+    'in_tab': [198, 747, 231, 815],
     'posture': [1005, 705, 1048, 743],
     # 'in_scope': [1669, 1179, 1766, 1208],
 
-    'gun1_name': [130, 2245, 130 + 35, 2250 + 64],
+    'gun1_name': [190, 2740, 195 + 60, 2742 + 500],
     'gun1_scope': [152, 2554],
     'gun1_muzzle': [330, 2191],
     'gun1_grip': [330, 2327],

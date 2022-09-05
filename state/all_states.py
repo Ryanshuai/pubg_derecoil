@@ -1,6 +1,8 @@
-import math
+import numpy as np
+import json
+from scipy.interpolate import interp1d
 
-from calibrate_distance.gun_distance_constant import dist_lists
+# from calibrate_distance.gun_distance_constant import dist_lists
 from state.time_periods_constant import time_periods
 
 all_guns = ['98k', 'm24', 'awm', 'mini14', 'mk14', 'qbu', 'sks', 'slr', 'vss', 'akm', 'aug', 'groza', 'm416', 'qbz',
@@ -46,29 +48,33 @@ def factor_scope(scope):
     return scope * factor * screen_factor
 
 
-def calculate_press_seq(name, factor):
-    dist_interval = dist_lists.get(name, [0])
-    if len(dist_interval) > 2:
-        a, dist_interval = dist_interval[0], dist_interval[1:]
-        dist_interval[0] += a
-    # dist_interval.append(dist_interval[-1] * (40 - len(dist_interval)))
-    dist_interval = [i * factor for i in dist_interval]
-    time_interval = time_periods.get(name, 0.01)
-    divide_num0 = math.floor(time_interval / 0.01)  # 整数分割
-    time_sequence = list()
-    time_accumulate = time_interval / 4
-    dist_sequence = list()
-    for dist in dist_interval:
-        divide_num1 = math.floor(dist / 3)  # 整数分割
-        divide_num = min(divide_num0, divide_num1)
-        for i in range(divide_num):
-            time_accumulate += time_interval / divide_num
-            time_sequence.append(time_accumulate)
-            dist_sequence.append(dist // divide_num)
-        if divide_num != 0:
-            dist_sequence[-1] += dist % divide_num
+with open(r"calibrate_distance\distance_dict.json", "r") as f:
+    dist_lists = json.load(f)
 
-    return dist_sequence, time_sequence
+
+def calculate_press_seq(name, factor, is_calibrating=False):
+    if name not in dist_lists:
+        return [0], [0], [0.1]
+
+    y_s = np.array(dist_lists.get(name, [0])) * factor
+    x_s = np.ones_like(y_s) * is_calibrating * factor * 30
+
+    t_s = time_periods.get(name, 0.1) * np.ones_like(y_s)
+    t_s[0] = 0
+    t_s = np.cumsum(t_s)
+    x_s = np.cumsum(x_s)
+    y_s = np.cumsum(y_s)
+
+    print(len(x_s), len(y_s), len(t_s))
+    y_fun = interp1d(t_s, y_s, kind=2)
+    x_fun = interp1d(t_s, x_s, kind=2)
+
+    t_s = np.linspace(0, t_s[-1], num=int(t_s[-1] / 0.01))
+    y_s = y_fun(t_s)
+    y_s = np.diff(y_s)
+    x_s = x_fun(t_s)
+    x_s = np.diff(x_s)
+    return x_s, y_s, t_s
 
 
 class Ground():
@@ -80,7 +86,7 @@ class Back():
 
 
 class Weapon():
-    def __init__(self):
+    def __init__(self, is_calibrating=False):
         self.fire_mode = 'full'
         self.name = ''
         self.scope = '1'
@@ -88,7 +94,7 @@ class Weapon():
         self.grip = ''
         self.butt = ''
 
-        self.type = ''
+        self.type = 'ar'
 
         self.all_factor = 1
         self.scope_factor = 1
@@ -97,9 +103,11 @@ class Weapon():
         self.butt_factor = 1
 
         self.time_interval = 0.1
-        self.dist_seq = list()
-        self.time_seq = list()
+        self.t_s = []
+        self.dx_s = []
+        self.dy_s = []
         self.is_press = False
+        self.is_calibrating = is_calibrating
 
     def set(self, pos, state):
         if pos == 'name':
@@ -171,7 +179,7 @@ class Weapon():
         if self.type in ['ar', 'smg', 'mg']:
             self.all_factor = self.scope_factor * self.muzzle_factor * self.grip_factor * self.butt_factor
             factor = factor_scope(self.all_factor)
-            self.dist_seq, self.time_seq = calculate_press_seq(self.name, factor)
+            self.dx_s, self.dy_s, self.t_s = calculate_press_seq(self.name, factor, is_calibrating=self.is_calibrating)
         elif self.type in ['dmr', 'shotgun']:
             self.all_factor = self.scope_factor * self.muzzle_factor * self.grip_factor
             factor = factor_scope(self.all_factor)
@@ -180,12 +188,12 @@ class Weapon():
 
 
 class All_States():
-    def __init__(self):
+    def __init__(self, is_calibrating=False):
         self.to_press = True
         self.screen_state = '3p'  # 1p, 3p, tab, map s1, s2, ... s15
 
         self.weapon_n = 0
-        self.weapon = [Weapon(), Weapon()]
+        self.weapon = [Weapon(is_calibrating), Weapon(is_calibrating)]
 
         self.hm = None
         self.bp = None
@@ -197,3 +205,5 @@ class All_States():
 
 if __name__ == '__main__':
     states = All_States()
+    states.weapon[0].set('name', 'm416')
+    states.weapon[0].set_seq()

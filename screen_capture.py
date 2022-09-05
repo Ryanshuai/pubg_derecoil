@@ -10,7 +10,7 @@ from os.path import join
 from pynput import keyboard
 
 
-def win32_cap(filename=None, rect=None):
+def win32_cap(filename=None, yxhw=None):
     if filename == None or filename[-4:] != '.png':
         i = random.randrange(1, 1000)
         file_dir = filename if filename else 'temp_image'
@@ -23,9 +23,7 @@ def win32_cap(filename=None, rect=None):
     MoniterDev = win32api.EnumDisplayMonitors(None, None)
     w = MoniterDev[0][2][2]
     h = MoniterDev[0][2][3]
-    x, y = 0, 0
-    if rect is not None:
-        y, x, h, w = rect
+    y, x, h, w = yxhw or (0, 0, h, w)
 
     hwnd = 0
     hwndDC = win32gui.GetWindowDC(hwnd)
