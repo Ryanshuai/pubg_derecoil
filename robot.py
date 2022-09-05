@@ -97,9 +97,6 @@ class Robot:
             if hasattr(self, 'press'):
                 self.press.stop()
 
-        # if button in [mouse.Button.right, mouse.Button.left] and (not pressed):
-        #     if self.all_states.screen_state == 'tab':
-        #         threading.Timer(0.2, self.tab_func).start()
 
     def is_in_tab(self):
         go_out_of_tab = 'in_tab' == self.in_tab_detect.im2name(crop_screen(self.screen, 'in_tab'))
