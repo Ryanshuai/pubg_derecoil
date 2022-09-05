@@ -2,7 +2,6 @@ import numpy as np
 import json
 from scipy.interpolate import interp1d
 
-# from calibrate_distance.gun_distance_constant import dist_lists
 from state.time_periods_constant import time_periods
 
 all_guns = ['98k', 'm24', 'awm', 'mini14', 'mk14', 'qbu', 'sks', 'slr', 'vss', 'akm', 'aug', 'groza', 'm416', 'qbz',
@@ -52,33 +51,39 @@ with open(r"calibrate_distance\distance_dict.json", "r") as f:
     dist_lists = json.load(f)
 
 
-def calculate_press_seq(name, factor, is_calibrating=False):
-    if is_calibrating:
-        print("loading")
+class BulletCalculator:
+    def __init__(self):
         with open(r"calibrate_distance\distance_dict.json", "r") as f:
-            dist_lists = json.load(f)
-    if name not in dist_lists:
-        return [0], [0], [0.1]
+            self.dist_lists = json.load(f)
 
-    y_s = np.array(dist_lists.get(name, [0])) * factor
-    x_s = np.ones_like(y_s) * is_calibrating * factor * 30
+    def calculate_press_seq(self, name, factor, is_calibrating=False):
+        if is_calibrating:
+            print("loading")
+            with open(r"calibrate_distance\distance_dict.json", "r") as f:
+                self.dist_lists = json.load(f)
 
-    t_s = time_periods.get(name, 0.1) * np.ones_like(y_s)
-    t_s[0] = 0
-    t_s = np.cumsum(t_s)
-    x_s = np.cumsum(x_s)
-    y_s = np.cumsum(y_s)
+        if name not in self.dist_lists:
+            return [0], [0], [0.1]
 
-    print(len(x_s), len(y_s), len(t_s))
-    y_fun = interp1d(t_s, y_s, kind=2)
-    x_fun = interp1d(t_s, x_s, kind=2)
+        y_s = np.array(dist_lists.get(name, [0])) * factor
+        y_s = np.pad(y_s, (0, 50 - len(y_s)), 'constant', constant_values=y_s[-1])
+        x_s = np.ones_like(y_s) * is_calibrating * factor * 30
 
-    t_s = np.linspace(0, t_s[-1], num=int(t_s[-1] / 0.01))
-    y_s = y_fun(t_s)
-    y_s = np.diff(y_s)
-    x_s = x_fun(t_s)
-    x_s = np.diff(x_s)
-    return x_s, y_s, t_s
+        t_s = time_periods.get(name, 0.1) * np.ones_like(y_s)
+        t_s[0] = 0
+        t_s = np.cumsum(t_s)
+        x_s = np.cumsum(x_s)
+        y_s = np.cumsum(y_s)
+
+        y_fun = interp1d(t_s, y_s, kind=2)
+        x_fun = interp1d(t_s, x_s, kind=2)
+
+        t_s = np.linspace(0, t_s[-1], num=int(t_s[-1] / 0.01))
+        y_s = y_fun(t_s)
+        y_s = np.diff(y_s)
+        x_s = x_fun(t_s)
+        x_s = np.diff(x_s)
+        return x_s, y_s, t_s
 
 
 class Ground():
@@ -112,6 +117,7 @@ class Weapon():
         self.dy_s = []
         self.is_press = False
         self.is_calibrating = is_calibrating
+        self.bullet_calculator = BulletCalculator()
 
     def set(self, pos, state):
         if pos == 'name':
@@ -183,7 +189,8 @@ class Weapon():
         if self.type in ['ar', 'smg', 'mg']:
             self.all_factor = self.scope_factor * self.muzzle_factor * self.grip_factor * self.butt_factor
             factor = factor_scope(self.all_factor)
-            self.dx_s, self.dy_s, self.t_s = calculate_press_seq(self.name, factor, is_calibrating=self.is_calibrating)
+            self.dx_s, self.dy_s, self.t_s = self.bullet_calculator.calculate_press_seq(self.name, factor,
+                                                                                        is_calibrating=self.is_calibrating)
         elif self.type in ['dmr', 'shotgun']:
             self.all_factor = self.scope_factor * self.muzzle_factor * self.grip_factor
             factor = factor_scope(self.all_factor)

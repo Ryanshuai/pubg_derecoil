@@ -47,9 +47,9 @@ class Updater:
             self.time_dict = json.load(f)
 
         original_distance = np.array(self.distance_dict[self.gun_name])
-        n = max(len(original_distance), len(self.detect_diff))
-        detect_diff = np.pad(self.detect_diff, (0, n - len(self.detect_diff)), 'constant', constant_values=0)
-        original_distance = np.pad(original_distance, (0, n - len(original_distance)), 'constant', constant_values=0)
+        detect_diff = np.pad(self.detect_diff, (0, 50 - len(self.detect_diff)), 'constant', constant_values=0)
+        original_distance = np.pad(original_distance, (0, 50 - len(original_distance)), 'constant',
+                                   constant_values=original_distance[-1])
 
         detect_res = original_distance + detect_diff
 
