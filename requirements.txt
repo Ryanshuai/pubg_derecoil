@@ -1,9 +1,0 @@
-torchvision==0.7.0
-numpy==1.19.2
-pynput==1.7.1
-opencv_python==4.4.0.42
-pywin32==227
-torch==1.6.0
-Pillow==8.1.0
-PyQt5==5.15.3
-win32gui==221.6
