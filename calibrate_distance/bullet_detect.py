@@ -35,41 +35,36 @@ def detect_bullet(img_uint8):
 
 
 class Updater:
-    def __init__(self):
+    def update(self, gun_name):
+        self.gun_name = gun_name
+        im = win32_cap(yxhw=(0, 960, 900, 3840))
+        self.detect_diff = detect_bullet(im)
+
+    def determine(self):
         with open(r"calibrate_distance\distance_dict.json", "r") as f:
             self.distance_dict = json.load(f)
         with open(r"calibrate_distance\time_dict.json", "r") as f:
             self.time_dict = json.load(f)
 
-        # with open(r"distance_dict.json", "r") as f:
-        # self.distance_dict = json.load(f)
-        # with open(r"time_dict.json", "r") as f:
-        #     self.time_dict = json.load(f)
-
-    def update(self, gun_name):
-        self.gun_name = gun_name
-        im = win32_cap(yxhw=(300, 960, 600, 1920))
-        self.detect_diff = detect_bullet(im)
-
-    def determine(self):
         original_distance = np.array(self.distance_dict[self.gun_name])
-        n = min(len(original_distance), len(self.detect_diff))
-        detect_diff = self.detect_diff[:n]
-        original_distance = original_distance[:n]
+        n = max(len(original_distance), len(self.detect_diff))
+        detect_diff = np.pad(self.detect_diff, (0, n - len(self.detect_diff)), 'constant', constant_values=0)
+        original_distance = np.pad(original_distance, (0, n - len(original_distance)), 'constant', constant_values=0)
 
-        t = self.time_dict[self.gun_name]
         detect_res = original_distance + detect_diff
 
-        distance = (original_distance * t + detect_res) / (t + 1)
+        t = self.time_dict[self.gun_name]
+        distance = (original_distance * (t - 0.2) + detect_res * 1.2) / (t + 1)
         distance[10:] = gaussian_filter1d(distance[10:], 1)
-        for i in range(n):
-            self.distance_dict[self.gun_name][i] = distance[i]
-        self.time_dict[self.gun_name] = t + 1
+        self.distance_dict[self.gun_name] = distance.tolist()
+        self.time_dict[self.gun_name] = min(t + 1, 5)
 
         with open(r"calibrate_distance\distance_dict.json", "w") as f:
             f.write(json.dumps(self.distance_dict))
         with open(r"calibrate_distance\time_dict.json", "w") as f:
             f.write(json.dumps(self.time_dict))
+
+        cv2.destroyAllWindows()
 
 
 if __name__ == '__main__':

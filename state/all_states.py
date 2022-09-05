@@ -53,6 +53,10 @@ with open(r"calibrate_distance\distance_dict.json", "r") as f:
 
 
 def calculate_press_seq(name, factor, is_calibrating=False):
+    if is_calibrating:
+        print("loading")
+        with open(r"calibrate_distance\distance_dict.json", "r") as f:
+            dist_lists = json.load(f)
     if name not in dist_lists:
         return [0], [0], [0.1]
 
