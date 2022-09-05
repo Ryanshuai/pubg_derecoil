@@ -6,7 +6,7 @@ from PyQt5.QtCore import pyqtSignal, QObject
 from pynput import keyboard, mouse
 
 from image_detect.Detector import Detector
-from press_gun.press import Press
+from press import Press
 from screen_capture import win32_cap
 from state.all_states import All_States
 from state.position_constant import get_pos, pos_names
@@ -118,8 +118,6 @@ class Robot:
             pos = pos_name.split('_')[-1]
             crop_name = self.gun_detector[pos].im2name(corp_im)
             if pos_name.startswith("gun1"):
-                if pos == "name":
-                    crop_name = "m762"
                 self.all_states.weapon[0].set(pos, crop_name)
             if pos_name.startswith("gun2"):
                 self.all_states.weapon[1].set(pos, crop_name)
@@ -145,19 +143,6 @@ class Robot:
         else:
             emit_str = gun1_state + '\n' + ' * ' + gun2_state
         print(emit_str)
-
-        # def print_state(self):
-        #     w = self.all_states.weapon[0]
-        #     gun1_state = str(w.name) + '-' + str(w.fire_mode) + '-' + str(w.scope) + '-' + str(w.muzzle)[:3] + '-' + str(
-        #         w.grip) + '-' + str(w.butt)
-        #     w = self.all_states.weapon[1]
-        #     gun2_state = str(w.name) + '-' + str(w.fire_mode) + '-' + str(w.scope) + '-' + str(w.muzzle)[:3] + '-' + str(
-        #         w.grip) + '-' + str(w.butt)
-        #     if self.all_states.weapon_n == 0:
-        #         emit_str = ' * ' + gun1_state + '\n' + gun2_state
-        #     else:
-        #         emit_str = gun1_state + '\n' + ' * ' + gun2_state
-        #     self.temp_qobject.state_str_signal.emit(emit_str)
 
 
 def crop_screen(screen, name):
