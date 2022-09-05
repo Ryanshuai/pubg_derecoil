@@ -97,7 +97,6 @@ class Robot:
             if hasattr(self, 'press'):
                 self.press.stop()
 
-
     def is_in_tab(self):
         go_out_of_tab = 'in_tab' == self.in_tab_detect.im2name(crop_screen(self.screen, 'in_tab'))
         if go_out_of_tab:
