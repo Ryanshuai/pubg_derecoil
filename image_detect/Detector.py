@@ -43,7 +43,6 @@ class Detector:
         if howMany < 100:
             save_path = os.path.join(save_dir, str(howMany) + ".png")
             cv2.imwrite(save_path, im_cv2)
-            print(save_path)
 
         if not isinstance(im, Image.Image):
             im = Image.fromarray(im)

@@ -37,7 +37,6 @@ if main_monitor.width == 1920 and main_monitor.height == 1080:
 
 def get_pos(name):
     yxhw = crop_position[name]
-    print(yxhw)
     return yxhw
 
 
