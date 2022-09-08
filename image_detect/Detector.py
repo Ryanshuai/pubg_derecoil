@@ -5,7 +5,6 @@ import numpy as np
 import torch
 from PIL import Image
 from torchvision import transforms
-from screen_capture import win32_cap
 
 try:
     from .net import VGG
