@@ -1,5 +1,4 @@
 import random
-import time
 import cv2
 import win32api
 import win32con
@@ -8,6 +7,8 @@ import win32ui
 import os
 from os.path import join
 from pynput import keyboard
+
+from state.position_constant import main_monitor
 
 
 def win32_cap(filename=None, yxhw=None):
@@ -20,10 +21,7 @@ def win32_cap(filename=None, yxhw=None):
         file_dir = os.path.dirname(filename)
         os.makedirs(file_dir, exist_ok=True)
 
-    MoniterDev = win32api.EnumDisplayMonitors(None, None)
-    w = MoniterDev[0][2][2]
-    h = MoniterDev[0][2][3]
-    y, x, h, w = yxhw or (0, 0, h, w)
+    y, x, h, w = yxhw or (0, 0, main_monitor.height, main_monitor.width)
 
     hwnd = 0
     hwndDC = win32gui.GetWindowDC(hwnd)
