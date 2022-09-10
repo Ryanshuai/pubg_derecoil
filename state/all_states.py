@@ -66,7 +66,8 @@ class BulletCalculator:
             return [0], [0], [0.1]
 
         y_s = np.array(dist_lists.get(name, [0])) * factor
-        y_s = np.pad(y_s, (0, 50 - len(y_s)), 'constant', constant_values=y_s[-1])
+        if name in ar | smg | mg:
+            y_s = np.pad(y_s, (0, 55 - len(y_s)), 'constant', constant_values=y_s[-1])
         x_s = np.ones_like(y_s) * is_calibrating * factor * 30
 
         t_s = time_periods.get(name, 0.1) * np.ones_like(y_s)

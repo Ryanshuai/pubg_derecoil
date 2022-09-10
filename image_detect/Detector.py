@@ -3,8 +3,6 @@ import os
 import cv2
 import numpy as np
 import torch
-from PIL import Image
-from torchvision import transforms
 
 try:
     from .net import VGG
@@ -27,13 +25,13 @@ class Detector:
     def __init__(self, class_name):
         self.class_name = class_name
         net_cfg, im_size, out_size = name_size_dict[class_name]
+        self.im_size = im_size
         self.model = VGG(net_cfg, out_size)
         try:
             self.model.load_state_dict(torch.load(class_name + ".pth.tar"))
         except:
             self.model.load_state_dict(torch.load('image_detect/' + class_name + ".pth.tar"))
         self.model.eval()
-        self.preprocess = transforms.Compose([transforms.Resize((im_size, im_size)), transforms.ToTensor()])
 
     def im2name(self, im):
         im_cv2 = im
@@ -44,10 +42,11 @@ class Detector:
             save_path = os.path.join(save_dir, str(howMany) + ".png")
             cv2.imwrite(save_path, im_cv2)
 
-        if not isinstance(im, Image.Image):
-            im = Image.fromarray(im)
-        im = self.preprocess(im)
-        input_batch = im.unsqueeze(0)  # create a mini-batch as expected by the model
+        im = im.astype(np.float32) / 255.0
+        im = cv2.resize(im, (self.im_size, self.im_size))
+        im = np.transpose(im, (2, 0, 1))
+        im = torch.from_numpy(im).float()
+        input_batch = im.unsqueeze(0)
 
         with torch.no_grad():
             output = self.model(input_batch)

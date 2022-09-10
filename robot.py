@@ -2,7 +2,6 @@ import os
 import shutil
 import threading
 
-from PyQt5.QtCore import pyqtSignal, QObject
 from pynput import keyboard, mouse
 
 from image_detect.Detector import Detector
@@ -14,18 +13,14 @@ from state.position_constant import get_pos, pos_names
 from calibrate_distance.bullet_detect import Updater
 
 
-class Temp_QObject(QObject):
-    state_str_signal = pyqtSignal(str)
-
-
 class Robot:
     def __init__(self, all_states, is_calibrating=False):
         self.all_states = all_states
-        self.screen = None
         self.in_block = False
         self.in_right = False
 
         self.is_calibrating = is_calibrating
+        self.is_tab_valid = True
 
         self.fire_mode_detect = Detector('fire_mode')
         self.in_tab_detect = Detector('in_tab')
@@ -46,7 +41,6 @@ class Robot:
         self.key_listener.start()
         self.mouse_listener.start()
 
-        self.temp_qobject = Temp_QObject()
         if is_calibrating:
             self.updater = Updater()
 
@@ -54,8 +48,9 @@ class Robot:
             shutil.rmtree("calibrate_distance/gun_dist_screen")
 
     def on_press(self, key):
-        if key == keyboard.Key.tab:
-            self.screen = get_screen()
+        if key == keyboard.Key.tab and self.is_tab_valid:
+            self.is_tab_valid = False
+            threading.Timer(2, self.set_tab_valid).start()
             threading.Timer(0.01, self.is_in_tab).start()
             self.all_states.to_press = True
 
@@ -98,7 +93,7 @@ class Robot:
                 self.press.stop()
 
     def is_in_tab(self):
-        go_out_of_tab = 'in_tab' == self.in_tab_detect.im2name(crop_screen(self.screen, 'in_tab'))
+        go_out_of_tab = 'in_tab' == self.in_tab_detect.im2name(get_screen('in_tab'))
         if go_out_of_tab:
             self.all_states.to_press = False
             self.all_states.screen_state = 'tab'
@@ -108,9 +103,12 @@ class Robot:
             self.all_states.screen_state = 'default'
             self.all_states.to_press = True
 
+    def set_tab_valid(self):
+        self.is_tab_valid = True
+
     def tab_func(self):
         for pos_name in pos_names:
-            corp_im = crop_screen(self.screen, pos_name)
+            corp_im = get_screen(pos_name)
             pos = pos_name.split('_')[-1]
             crop_name = self.gun_detector[pos].im2name(corp_im)
             if pos_name.startswith("gun1"):
@@ -139,11 +137,6 @@ class Robot:
         else:
             emit_str = gun1_state + '\n' + ' * ' + gun2_state
         print(emit_str)
-
-
-def crop_screen(screen, name):
-    y, x, h, w = get_pos(name)
-    return screen[y:y + h, x:x + w]
 
 
 def get_screen(name=None):
