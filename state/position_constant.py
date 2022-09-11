@@ -3,8 +3,8 @@ from screeninfo import get_monitors
 monitors = get_monitors()
 main_monitor = [monitor for monitor in monitors if monitor.is_primary][0]
 
-crop_position_3840_2160 = {
-    'fire_mode': [1330, 1648, 34, 28],
+crop_position_3840_2160 = {  # y, x, h, w
+    'fire_mode': [1988, 1810, 64, 49],
     'in_tab': [198, 747, 33, 68],
     'posture': [1005, 705, 43, 38],
     # 'in_scope': [?, ?, ?, ?],

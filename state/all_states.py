@@ -121,6 +121,8 @@ class Weapon():
         self.bullet_calculator = BulletCalculator()
 
     def set(self, pos, state):
+        if state == "":
+            return
         if pos == 'name':
             self.name = state
             self.time_interval = time_periods.get(self.name, 0.1)
@@ -137,15 +139,15 @@ class Weapon():
             elif self.name in shotgun:
                 self.type = 'shotgun'
         elif pos == 'fire_mode':
-            self.is_press = False
             # if self.fire_mode == "full" and self.type in ['ar', 'smg', 'mg']:
             if self.type in ['ar', 'smg', 'mg']:
-                self.fire_mode = "full"
-                self.is_press = True
+                if not state:
+                    self.fire_mode = 'full'
+                else:
+                    self.fire_mode = state
             # if self.fire_mode == "single" and self.type in ['dmr', 'shotgun']:
             if self.type in ['dmr', 'shotgun']:
                 self.fire_mode = "single"
-                self.is_press = True
         elif pos == 'scope':
             self.scope = state
             if state == "":
