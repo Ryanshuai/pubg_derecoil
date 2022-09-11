@@ -50,10 +50,10 @@ class Robot:
 
     def on_release(self, key):
         if key == keyboard.Key.f12:
-            self.stop_press = True
+            self.is_in_tab = True
 
         if key == keyboard.Key.esc:
-            self.stop_press = True
+            self.is_in_tab = True
 
         if key == keyboard.Key.tab and time.time() > self.tab_func_time + 1:
             self.stop_press = False
@@ -86,7 +86,7 @@ class Robot:
             self.stop_press = True
 
     def on_click(self, x, y, button, pressed):
-        if button == mouse.Button.left and pressed and not self.is_in_tab and not self.stop_press:
+        if button == mouse.Button.left and pressed and not self.is_in_tab:
             n = self.all_states.weapon_n
             weapon = self.all_states.weapon[n]
             self.press = Press(weapon.dx_s, weapon.dy_s, weapon.t_s)
@@ -147,7 +147,7 @@ def get_screen(name=None):
 
 
 if __name__ == '__main__':
-    is_calibrating = True
-    # is_calibrating = False
+    # is_calibrating = True
+    is_calibrating = False
     robot = Robot(All_States(is_calibrating), is_calibrating=is_calibrating)
     robot.key_listener.run()

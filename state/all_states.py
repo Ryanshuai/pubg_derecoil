@@ -64,7 +64,6 @@ class BulletCalculator:
 
         if name not in self.dist_lists:
             return [0], [0], [0.1]
-
         y_s = np.array(dist_lists.get(name, [0])) * factor
         if name in ar | smg | mg:
             y_s = np.pad(y_s, (0, 55 - len(y_s)), 'constant', constant_values=y_s[-1])
@@ -145,6 +144,7 @@ class Weapon():
                     self.fire_mode = 'full'
                 else:
                     self.fire_mode = state
+                self.fire_mode = 'full'
             # if self.fire_mode == "single" and self.type in ['dmr', 'shotgun']:
             if self.type in ['dmr', 'shotgun']:
                 self.fire_mode = "single"
@@ -197,8 +197,9 @@ class Weapon():
         elif self.type in ['dmr', 'shotgun']:
             self.all_factor = self.scope_factor * self.muzzle_factor * self.grip_factor
             factor = factor_scope(self.all_factor)
-            self.dist_seq = [i * factor for i in dist_lists.get(self.name, [0])]
-            self.time_seq = [x * 0.01 for x in range(len(self.dist_seq))]
+            self.dy_s = [factor * dist_lists[self.name][0]]
+            self.dx_s = [0]
+            self.t_s = [0.05]
 
 
 class All_States():
