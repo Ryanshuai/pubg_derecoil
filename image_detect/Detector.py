@@ -14,7 +14,7 @@ name_size_dict = {
     'gun_muzzle': [64, 64, 10],
     'gun_grip': [64, 64, 7],
     'gun_butt': [64, 64, 3],
-    'gun_name': [64, 64, 35],
+    'gun_name': [64, 64, 41],
 
     'fire_mode': ['fire_mode', 32, 6],
     'in_tab': [32, 32, 2],
