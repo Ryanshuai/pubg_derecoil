@@ -37,7 +37,7 @@ def detect_bullet(img_uint8):
 class Updater:
     def update(self, gun_name):
         self.gun_name = gun_name
-        im = win32_cap(yxhw=(0, 960, 900, 3840))
+        im = win32_cap(yxhw=(0, 960, 900, 3840-960))
         self.detect_diff = detect_bullet(im)
 
     def determine(self):
@@ -54,7 +54,7 @@ class Updater:
         detect_res = original_distance + detect_diff
 
         t = self.time_dict[self.gun_name]
-        distance = (original_distance * (t - 0.2) + detect_res * 1.2) / (t + 1)
+        distance = (original_distance * t + detect_res) / (t + 1)
         distance[10:] = gaussian_filter1d(distance[10:], 1)
         self.distance_dict[self.gun_name] = distance.tolist()
         self.time_dict[self.gun_name] = min(t + 1, 5)

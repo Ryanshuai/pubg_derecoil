@@ -35,12 +35,6 @@ class Detector:
 
     def im2name(self, im):
         im_cv2 = im
-        save_dir = "for_data_check"
-        os.makedirs(save_dir, exist_ok=True)
-        howMany = len(os.listdir(save_dir))
-        if howMany < 100:
-            save_path = os.path.join(save_dir, str(howMany) + ".png")
-            cv2.imwrite(save_path, im_cv2)
 
         im = im.astype(np.float32) / 255.0
         im = cv2.resize(im, (self.im_size, self.im_size))
@@ -52,6 +46,16 @@ class Detector:
             output = self.model(input_batch)
         idx = int(np.argmax(output[0]))
         name = self.idx2name(idx)
+
+        name = name or "background"
+
+        save_dir = os.path.join("for_data_check", name)
+        os.makedirs(save_dir, exist_ok=True)
+        howMany = len(os.listdir(save_dir))
+        if howMany < 500:
+            save_path = os.path.join(save_dir, str(howMany) + ".png")
+            cv2.imwrite(save_path, im_cv2)
+
         return name
 
     def idx2name(self, idx):
@@ -63,8 +67,9 @@ class Detector:
             'gun_grip': ['ang', 'hal', 'las', 'lig', 'thu', 'ver'],
             'gun_butt': ["cheek", 'sto', ],
 
-            'gun_name': ["98k", "akm", "aug", "awm", "dbs", "dp28", "g36c", "groza", "m16", "m24", "m249", "m416",
-                         "m762", "mg3", "mini14", "mk14", "mk47", "mosin", "mp5k", "pp19", "qbu", "qbz", "s12k",
+            'gun_name': ["98k", "ace32", "akm", "aug", "awm", "dbs", "dp28", "g36c", "groza", "m16", "m24", "m249",
+                         "m416",
+                         "m762", "mg3", "mini14", "mk14", "mk47", "mosin", "mp5k", "p90", "pp19", "qbu", "qbz", "s12k",
                          "s1897", "s686", "scar", "sks", "slr", "tommy", "ump45", "uzi", "vector", "vss", "win94"],
             'fire_mode': ["burst2", "burst3", "full", "high", "single", ],
             'in_tab': ["in_tab"],
