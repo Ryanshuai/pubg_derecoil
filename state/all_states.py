@@ -18,8 +18,8 @@ can_full_guns = ['akm', 'aug', 'groza', 'm416', 'qbz', 'scar', 'mk14', 'tommy', 
 
 sp = {'98k', 'm24', 'awm', }
 dmr = {'mini14', 'mk14', 'qbu', 'sks', 'slr', 'vss', }
-ar = {'akm', 'aug', 'groza', 'm416', 'qbz', 'scar', 'm762', 'g36c', 'm16', 'mk47', }
-smg = {'tommy', 'uzi', 'ump45', 'vector', 'pp19', 'mp5k'}
+ar = {'akm', 'aug', 'groza', 'm416', 'qbz', 'scar', 'm762', 'g36c', 'm16', 'mk47', "k2", "ace32"}
+smg = {'tommy', 'uzi', 'ump45', 'vector', 'pp19', 'mp5k', "p90"}
 mg = {'m249', 'dp28', "mg3"}
 shotgun = {'s12k', 's1987', 's686', }
 
@@ -67,7 +67,7 @@ class BulletCalculator:
         y_s = np.array(dist_lists.get(name, [0])) * factor
         if name in ar | smg | mg:
             y_s = np.pad(y_s, (0, 55 - len(y_s)), 'constant', constant_values=y_s[-1])
-        x_s = np.ones_like(y_s) * is_calibrating * factor * 30
+        x_s = np.ones_like(y_s) * is_calibrating * factor * 25
 
         t_s = time_periods.get(name, 0.1) * np.ones_like(y_s)
         t_s[0] = 0
