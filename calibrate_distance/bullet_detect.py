@@ -3,7 +3,7 @@ import numpy as np
 import json
 from scipy.ndimage import gaussian_filter1d
 
-from screen_capture import win32_cap
+from image_detect.cropper import win32_cap
 
 
 def detect_bullet(img_uint8):
@@ -37,7 +37,7 @@ def detect_bullet(img_uint8):
 class Updater:
     def update(self, gun_name):
         self.gun_name = gun_name
-        im = win32_cap(yxhw=(0, 960, 800, 3840-960))
+        im = win32_cap(yxhw=(0, 960, 800, 3840 - 960))
         self.detect_diff = detect_bullet(im)
 
     def determine(self):
@@ -47,8 +47,9 @@ class Updater:
             self.time_dict = json.load(f)
 
         original_distance = np.array(self.distance_dict[self.gun_name])
-        detect_diff = np.pad(self.detect_diff, (0, 50 - len(self.detect_diff)), 'constant', constant_values=0)
-        original_distance = np.pad(original_distance, (0, 50 - len(original_distance)), 'constant',
+        l = max([50, len(self.detect_diff), len(original_distance)])
+        detect_diff = np.pad(self.detect_diff, (0, l - len(self.detect_diff)), 'constant', constant_values=0)
+        original_distance = np.pad(original_distance, (0, l - len(original_distance)), 'constant',
                                    constant_values=original_distance[-1])
 
         detect_res = original_distance + detect_diff
