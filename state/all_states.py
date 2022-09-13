@@ -197,7 +197,7 @@ class Weapon():
         elif self.type in ['dmr', 'shotgun']:
             self.all_factor = self.scope_factor * self.muzzle_factor * self.grip_factor
             factor = factor_scope(self.all_factor)
-            self.dy_s = [factor * dist_lists[self.name][0]]
+            self.dy_s = [factor * dist_lists.get(self.name, [0])[0]]
             self.dx_s = [0]
             self.t_s = [0.05]
 

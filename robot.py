@@ -147,7 +147,7 @@ def get_screen(name=None):
 
 
 if __name__ == '__main__':
-    is_calibrating = True
-    # is_calibrating = False
+    # is_calibrating = True
+    is_calibrating = False
     robot = Robot(All_States(is_calibrating), is_calibrating=is_calibrating)
     robot.key_listener.run()

@@ -10,26 +10,26 @@ except ImportError:
     from image_detect.net import VGG
 
 name_size_dict = {
-    'gun_scope': ['gun_scope', 64, 9],
-    'gun_muzzle': [64, 64, 10],
-    'gun_grip': [64, 64, 7],
-    'gun_butt': [64, 64, 3],
-    'gun_name': [64, 64, 41],
+    'gun_scope': ['gun_scope', 64],
+    'gun_muzzle': [64, 64],
+    'gun_grip': [64, 64],
+    'gun_butt': [64, 64],
+    'gun_name': [64, 64],
 
-    'fire_mode': ['fire_mode', 32, 6],
-    'in_tab': [32, 32, 2],
+    'fire_mode': ['fire_mode', 32],
+    'in_tab': [32, 32],
 }
 
 pos_name_dict = {
     'gun_scope': ['x15', 'x1h', 'x1r', 'x2', 'x3', 'x4', 'x6', 'x8', ],
     'gun_muzzle': ['com_ar', 'com_sm', 'com_sr', 'fla_ar', 'fla_sm', 'fla_sr', 'sup_ar', 'sup_sm', 'sup_sr'],
     'gun_grip': ['ang', 'hal', 'las', 'lig', 'thu', 'ver'],
-    'gun_butt': ["cheek", 'sto', ],
+    'gun_butt': ['cheek', 'heavy', 'sto'],
 
     'gun_name': ['98k', 'ace32', 'akm', 'aug', 'awm', 'dbs', 'dp28', 'g36c', 'groza', 'k2', 'lynx', 'm16', 'm24',
-                 'm249', 'm416', 'm762', 'mg3', 'mini14', 'mk12', 'mk14', 'mk47', 'mosin', 'mp5k', 'o12', 'p90', 'pp19',
-                 'qbu', 'qbz', 's12k', 's1897', 's686', 'scar', 'sks', 'slr', 'tommy', 'ump45', 'uzi', 'vector', 'vss',
-                 'win94'],
+                 'm249', 'm416', 'm762', 'mg3', 'mini14', 'mk12', 'mk14', 'mk47', 'mosin', 'mp5k', 'mp9', 'o12', 'p90',
+                 'pp19', 'qbu', 'qbz', 's12k', 's1897', 's686', 'scar', 'sks', 'slr', 'tommy', 'ump45', 'uzi', 'vector',
+                 'vss', 'win94'],
 
     'fire_mode': ["burst2", "burst3", "full", "high", "single", ],
     'in_tab': ["in_tab"],
@@ -39,7 +39,9 @@ pos_name_dict = {
 class Detector:
     def __init__(self, class_name):
         self.class_name = class_name
-        net_cfg, im_size, out_size = name_size_dict[class_name]
+        net_cfg, im_size = name_size_dict[class_name]
+        out_size = len(pos_name_dict[class_name]) + 1
+
         self.im_size = im_size
         self.model = VGG(net_cfg, out_size)
         try:
