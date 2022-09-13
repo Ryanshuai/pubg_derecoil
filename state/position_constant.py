@@ -25,14 +25,11 @@ crop_position_3840_2160 = {  # y, x, h, w
 }
 
 print(main_monitor.width, main_monitor.height)
-
-if main_monitor.width == 3840 and main_monitor.height == 2160:
-    crop_position = crop_position_3840_2160
-
-if main_monitor.width == 1920 and main_monitor.height == 1080:
+if abs(main_monitor.width / main_monitor.height - 3840 / 2160) < 1e-6:
+    factor = main_monitor.width / 3840
     crop_position = crop_position_3840_2160
     for k, v in crop_position.items():
-        crop_position[k] = [int(x * 0.5) for x in v]
+        crop_position[k] = [int(x * factor) for x in v]
 
 
 def get_pos(name):
