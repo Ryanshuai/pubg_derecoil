@@ -2,7 +2,35 @@ import numpy as np
 import json
 from scipy.interpolate import interp1d
 
-from state.time_periods_constant import time_periods
+time_periods = {
+    'akm': 0.1,
+    'aug': 0.08571,
+    "ace32": 0.088,
+    'pp19': 0.086,
+    'dp28': 0.109,
+    'g36c': 0.086,
+    'groza': 0.08,
+    'm416': 0.086,
+    'm16': 0.075,
+    'm249': 0.075,
+    'mk14': 0.09,
+    'm762': 0.086,
+    "mg3": 0.06,
+    'qbz': 0.092,
+    'scar': 0.096,
+    'tommy': 0.08,
+    'ump45': 0.09,
+    'uzi': 0.048,
+    'mp5k': 0.0666,
+    "p90": 0.06,
+    'vector': 0.055,
+    'slr': 0.01,
+    'mini14': 0.01,
+    'qbu': 0.01,
+    'sks': 0.01,
+    's12k': 0.01,
+    's686': 0.01,
+}
 
 all_guns = ['98k', 'm24', 'awm', 'mini14', 'mk14', 'qbu', 'sks', 'slr', 'vss', 'akm', 'aug', 'groza', 'm416', 'qbz',
             'scar', 'm762', 'g36c', 'm16', 'mk47', 'tommy', 'uzi', 'ump45', 'vector', 'pp19', 'm249', 'dp28', 's12k',
@@ -47,29 +75,26 @@ def factor_scope(scope):
     return scope * factor * screen_factor
 
 
-with open(r"calibrate_distance\distance_dict.json", "r") as f:
-    dist_lists = json.load(f)
-
-
 class BulletCalculator:
     def __init__(self):
         with open(r"calibrate_distance\distance_dict.json", "r") as f:
-            self.dist_lists = json.load(f)
+            self.gun_name__y_s = json.load(f)
 
-    def calculate_press_seq(self, name, factor, is_calibrating=False):
+    def calculate_press_seq(self, gun_name, factor, is_calibrating=False):
         if is_calibrating:
             print("loading")
             with open(r"calibrate_distance\distance_dict.json", "r") as f:
-                self.dist_lists = json.load(f)
+                self.gun_name__y_s = json.load(f)
 
-        if name not in self.dist_lists:
+        if gun_name not in self.gun_name__y_s:
             return [0], [0], [0.1]
-        y_s = np.array(dist_lists.get(name, [0])) * factor
-        if name in ar | smg | mg:
-            y_s = np.pad(y_s, (0, 55 - len(y_s)), 'constant', constant_values=y_s[-1])
+        y_s = np.array(self.gun_name__y_s.get(gun_name, [0])) * factor
+        l = max(len(y_s), 55)
+        if gun_name in ar | smg | mg:
+            y_s = np.pad(y_s, (0, l - len(y_s)), 'constant', constant_values=y_s[-1])
         x_s = np.ones_like(y_s) * is_calibrating * factor * 25
 
-        t_s = time_periods.get(name, 0.1) * np.ones_like(y_s)
+        t_s = time_periods.get(gun_name, 0.1) * np.ones_like(y_s)
         t_s[0] = 0
         t_s = np.cumsum(t_s)
         x_s = np.cumsum(x_s)
@@ -84,14 +109,6 @@ class BulletCalculator:
         x_s = x_fun(t_s)
         x_s = np.diff(x_s)
         return x_s, y_s, t_s
-
-
-class Ground():
-    pass
-
-
-class Back():
-    pass
 
 
 class Weapon():
@@ -119,9 +136,10 @@ class Weapon():
         self.is_calibrating = is_calibrating
         self.bullet_calculator = BulletCalculator()
 
+    def __str__(self):
+        return "-".join((self.name, self.fire_mode, self.scope, self.muzzle[:3], self.grip, self.butt))
+
     def set(self, pos, state):
-        if state == "":
-            return
         if pos == 'name':
             self.name = state
             self.time_interval = time_periods.get(self.name, 0.1)
@@ -194,31 +212,16 @@ class Weapon():
             factor = factor_scope(self.all_factor)
             self.dx_s, self.dy_s, self.t_s = self.bullet_calculator.calculate_press_seq(self.name, factor,
                                                                                         is_calibrating=self.is_calibrating)
+
         elif self.type in ['dmr', 'shotgun']:
             self.all_factor = self.scope_factor * self.muzzle_factor * self.grip_factor
             factor = factor_scope(self.all_factor)
-            self.dy_s = [factor * dist_lists.get(self.name, [0])[0]]
+
+            self.dy_s = [factor * self.bullet_calculator.gun_name__y_s.get(self.name, [0])[0]]
             self.dx_s = [0]
             self.t_s = [0.05]
 
-
-class All_States():
-    def __init__(self, is_calibrating=False):
-        self.to_press = True
-        self.screen_state = '3p'  # 1p, 3p, tab, map s1, s2, ... s15
-
-        self.weapon_n = 0
-        self.weapon = [Weapon(is_calibrating), Weapon(is_calibrating)]
-
-        self.hm = None
-        self.bp = None
-        self.vt = None
-
-    def set_weapon_n(self, weapon_n):
-        self.weapon_n = weapon_n
-
-
-if __name__ == '__main__':
-    states = All_States()
-    states.weapon[0].set('name', 'm416')
-    states.weapon[0].set_seq()
+# if __name__ == '__main__':
+#     states = All_States()
+#     states.weapon[0].set('name', 'm416')
+#     states.weapon[0].set_seq()

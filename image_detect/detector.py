@@ -4,10 +4,8 @@ import cv2
 import numpy as np
 import torch
 
-try:
-    from .net import VGG
-except ImportError:
-    from image_detect.net import VGG
+from image_detect.net import VGG
+from image_detect.cropper import Cropper
 
 name_size_dict = {
     'gun_scope': ['gun_scope', 64],
@@ -37,21 +35,24 @@ pos_name_dict = {
 
 
 class Detector:
-    def __init__(self, class_name):
-        self.class_name = class_name
-        net_cfg, im_size = name_size_dict[class_name]
-        out_size = len(pos_name_dict[class_name]) + 1
+    def __init__(self, pos_name):
+        self.crop = Cropper(pos_name)
+
+        self.cls_name = pos_name.replace("1", "").replace("2", "")
+        net_cfg, im_size = name_size_dict[self.cls_name]
+        out_size = len(pos_name_dict[self.cls_name]) + 1
 
         self.im_size = im_size
         self.model = VGG(net_cfg, out_size)
         try:
-            self.model.load_state_dict(torch.load(class_name + ".pth.tar"))
+            self.model.load_state_dict(torch.load(self.cls_name + ".pth.tar"))
         except:
-            self.model.load_state_dict(torch.load('image_detect/' + class_name + ".pth.tar"))
+            self.model.load_state_dict(torch.load('image_detect/' + self.cls_name + ".pth.tar"))
         self.model.eval()
 
-    def im2name(self, im):
-        im_cv2 = im
+    def __call__(self):
+        im = self.crop()
+        im_cv2 = im.copy()
 
         im = im.astype(np.float32) / 255.0
         im = cv2.resize(im, (self.im_size, self.im_size))
@@ -62,7 +63,8 @@ class Detector:
         with torch.no_grad():
             output = self.model(input_batch)
         idx = int(np.argmax(output[0]))
-        name = self.idx2name(idx)
+
+        name = pos_name_dict[self.cls_name][idx - 1] if idx > 0 else ""
 
         save_dir = os.path.join("for_data_check", name or "background")
         os.makedirs(save_dir, exist_ok=True)
@@ -73,22 +75,6 @@ class Detector:
 
         return name
 
-    def idx2name(self, idx):
-        if idx == 0:
-            return ""
-
-        name = pos_name_dict[self.class_name][idx - 1]
-        return name
-
 
 if __name__ == '__main__':
     de = Detector('gun_scope')
-
-    # test_dir = "test"
-    # for image_name in os.listdir(test_dir):
-    #     image_path = os.path.join(test_dir, image_name)
-    #     im = Image.open(image_path).convert('RGB')
-    #
-    #     name = ""
-    #
-    #     print(image_name + "----->" + name)

@@ -4,9 +4,8 @@ import numpy as np
 import time
 import win32api
 import win32con
-from pynput.mouse import Controller
 
-from screen_capture import win32_cap
+from image_detect.cropper import win32_cap
 
 
 class Detector:

@@ -1,14 +1,14 @@
 import random
 import cv2
-import win32api
 import win32con
 import win32gui
 import win32ui
 import os
 from os.path import join
 from pynput import keyboard
+from screeninfo import get_monitors
 
-from state.position_constant import main_monitor
+main_monitor = [monitor for monitor in get_monitors() if monitor.is_primary][0]
 
 
 def win32_cap(filename=None, yxhw=None):
