@@ -8,19 +8,19 @@ from image_detect.net import VGG
 from image_detect.cropper import Cropper
 
 name_size_dict = {
-    'gun_scope': ['gun_scope', 64],
+    'gun_scope': [64, 64],
     'gun_muzzle': [64, 64],
     'gun_grip': [64, 64],
     'gun_butt': [64, 64],
-    'gun_name': [64, 64],
+    'gun_name': [64, 128],
 
-    'fire_mode': ['fire_mode', 32],
-    'in_tab': [32, 32],
+    'fire_mode': [32, 32],
+    'in_tab': [32, 64],
 }
 
 pos_name_dict = {
     'gun_scope': ['x15', 'x1h', 'x1r', 'x2', 'x3', 'x4', 'x6', 'x8', ],
-    'gun_muzzle': ['com_ar', 'com_sm', 'com_sr', 'fla_ar', 'fla_sm', 'fla_sr', 'sup_ar', 'sup_sm', 'sup_sr'],
+    'gun_muzzle': ['com_ar', 'com_sm', 'com_sr', 'fla_ar', 'fla_sm', 'fla_sr', 'sup_ar'],
     'gun_grip': ['ang', 'hal', 'las', 'lig', 'thu', 'ver'],
     'gun_butt': ['cheek', 'heavy', 'sto'],
 
@@ -39,11 +39,10 @@ class Detector:
         self.crop = Cropper(pos_name)
 
         self.cls_name = pos_name.replace("1", "").replace("2", "")
-        net_cfg, im_size = name_size_dict[self.cls_name]
+        self.im_hw = name_size_dict[self.cls_name]
         out_size = len(pos_name_dict[self.cls_name]) + 1
 
-        self.im_size = im_size
-        self.model = VGG(net_cfg, out_size)
+        self.model = VGG(self.im_hw, out_size)
         try:
             self.model.load_state_dict(torch.load(self.cls_name + ".pth.tar"))
         except:
@@ -55,7 +54,7 @@ class Detector:
         im_cv2 = im.copy()
 
         im = im.astype(np.float32) / 255.0
-        im = cv2.resize(im, (self.im_size, self.im_size))
+        im = cv2.resize(im, self.im_hw)
         im = np.transpose(im, (2, 0, 1))
         im = torch.from_numpy(im).float()
         input_batch = im.unsqueeze(0)

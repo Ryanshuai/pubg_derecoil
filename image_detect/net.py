@@ -1,62 +1,60 @@
+import torch
 import torch.nn as nn
 
-size_config = {
-    64: [[8, 'M', 16, 'M', 16, 'M'], [1024, 256, 128]],
-    "gun_scope": [[8, 'M', 16, 'M', 32, 'M', 64, 'M'], [1024, 128, 128]],
-    32: [[8, 'M', 16, 'M', 16, 'M'], [256, 256, 128]],
-    "fire_mode": [[8, 'M', 16, 'M', 32, 'M'], [512, 256, 128]],
-}
+
+class Flatten(torch.nn.Module):
+    def forward(self, x):
+        batch_size = x.shape[0]
+        return x.view(batch_size, -1)
 
 
-def make_layers(cfg, batch_norm=False):
+def make_layers(input_h, input_w, output_size):
+    cfg = [("C", 8), ("C", 8), ('M', 0),
+           ("C", 16), ("C", 16), ('M', 0),
+           # ("C", 16), ("C", 16), ('M', 0),
+           ("C", 32), ("C", 32), ('M', 0),
+           ("C", 64), ("C", 64), ('M', 0),
+           ("C", 128), ("C", 128), ('M', 0),
+           ("FL", 0),
+           ("F", 0), ("F", 0), ("F", 0),
+           ("E", output_size)]
+
     layers = []
-    in_channels = 3
-    for v in cfg:
-        if v == 'M':
+    ch = 3
+    maxpool_counter = 0
+    for layer, para in cfg:
+        if layer == 'M':
             layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
-        else:
-            conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
-            if batch_norm:
-                layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
-            else:
-                layers += [conv2d, nn.ReLU(inplace=True)]
-            in_channels = v
+            maxpool_counter += 1
+        if layer == "C":
+            conv2d = nn.Conv2d(ch, para, kernel_size=3, padding=1)
+            layers += [conv2d, nn.BatchNorm2d(para), nn.ReLU(inplace=True)]
+            ch = para
+
+        if layer == "FL":
+            layers += [Flatten()]
+
+            factor = 2 ** maxpool_counter
+            assert input_h % factor == 0 and input_w % factor == 0
+            fc_in_feature = (input_h // factor) * (input_w // factor) * ch
+
+        if layer == "F":
+            layers += [nn.Linear(fc_in_feature, fc_in_feature // 2), nn.ReLU(inplace=True), nn.Dropout(0.1)]
+            fc_in_feature = fc_in_feature // 2
+
+        if layer == "E":
+            layers += [nn.Linear(fc_in_feature, para)]
+
     return nn.Sequential(*layers)
 
 
 class VGG(nn.Module):
-    def __init__(self, net_cfg, num_classes, batch_norm=True, init_weights=True):
+    def __init__(self, in_hw, output_size):
         super(VGG, self).__init__()
-        self.features = make_layers(size_config[net_cfg][0], batch_norm=batch_norm)
-        a, b, c = size_config[net_cfg][1]
-        self.classifier = nn.Sequential(
-            nn.Linear(a, b),
-            nn.ReLU(True),
-            nn.Dropout(),
-            nn.Linear(b, c),
-            nn.ReLU(True),
-            nn.Dropout(),
-            nn.Linear(c, num_classes),
-        )
-        if init_weights:
-            self._initialize_weights()
+        input_h, input_w = in_hw
+        self.features = make_layers(input_h, input_w, output_size)
 
     def forward(self, x):
         x = self.features(x)
-        x = x.view(x.size(0), -1)
-        x = self.classifier(x)
         return x
 
-    def _initialize_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(
-                    m.weight, mode='fan_out', nonlinearity='relu')
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.BatchNorm2d):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, 0, 0.01)
-                nn.init.constant_(m.bias, 0)

@@ -47,7 +47,7 @@ class Robot:
         if key == keyboard.Key.tab:
             self.stop_press = False
 
-        if key == keyboard.Key.tab and time.time() > self.tab_func_time + 1:
+        if key == keyboard.Key.tab and time.time() > self.tab_func_time:# + 1:
             self.in_tab_detect()
 
         if hasattr(key, 'char'):
