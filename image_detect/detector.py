@@ -20,9 +20,9 @@ name_size_dict = {
 
 pos_name_dict = {
     'gun_scope': ['x15', 'x1h', 'x1r', 'x2', 'x3', 'x4', 'x6', 'x8', ],
-    'gun_muzzle': ['com_ar', 'com_sm', 'com_sr', 'fla_ar', 'fla_sm', 'fla_sr', 'sup_ar'],
+    'gun_muzzle': ['com_ar', 'com_sm', 'com_sr', 'fla_ar', 'fla_sm', 'fla_sr', 'sup_ar', 'sup_sm'],
     'gun_grip': ['ang', 'hal', 'las', 'lig', 'thu', 'ver'],
-    'gun_butt': ['cheek', 'heavy', 'sto'],
+    'gun_butt': ['cheek', 'heavy', 'sto', 'uzi'],
 
     'gun_name': ['98k', 'ace32', 'akm', 'aug', 'awm', 'dbs', 'dp28', 'g36c', 'groza', 'k2', 'lynx', 'm16', 'm24',
                  'm249', 'm416', 'm762', 'mg3', 'mini14', 'mk12', 'mk14', 'mk47', 'mosin', 'mp5k', 'mp9', 'o12', 'p90',
@@ -53,8 +53,8 @@ class Detector:
         im = self.crop()
         im_cv2 = im.copy()
 
-        im = im.astype(np.float32) / 255.0
         im = cv2.resize(im, self.im_hw)
+        im = im.astype(np.float32) / 255
         im = np.transpose(im, (2, 0, 1))
         im = torch.from_numpy(im).float()
         input_batch = im.unsqueeze(0)
