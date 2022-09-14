@@ -47,7 +47,8 @@ class Robot:
         if key == keyboard.Key.tab:
             self.stop_press = False
 
-        if key == keyboard.Key.tab and time.time() > self.tab_func_time:# + 1:
+        if key == keyboard.Key.tab and time.time() > self.tab_func_time + 1:
+            self.tab_func_time = time.time()
             self.in_tab_detect()
 
         if hasattr(key, 'char'):
@@ -93,7 +94,6 @@ class Robot:
     def in_tab_detect(self):
         self.is_in_tab = self.in_tab_detector() == "in_tab"
         if not self.is_in_tab:
-            self.tab_func_time = time.time()
             return
         self.gun_detect()
 
@@ -108,8 +108,11 @@ class Robot:
 
         self.weapon_1.set_seq()
         self.weapon_2.set_seq()
-        print(self.weapon_1)
-        print(self.weapon_2)
+        if self.weapon is self.weapon_1:
+            print(f"*{self.weapon_1}\n{self.weapon_2}")
+        else:
+
+            print(f"{self.weapon_1}\n*{self.weapon_2}")
 
 
 if __name__ == '__main__':
