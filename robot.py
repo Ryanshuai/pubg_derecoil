@@ -99,6 +99,8 @@ class Robot:
 
     def gun_detect(self):
         for gun_pos, detector in self.gun_detector.items():
+            if not self.is_in_tab:
+                break
             pos_detect_res = detector()
             gun, pos = gun_pos.split('_')
             if gun == "gun1":
