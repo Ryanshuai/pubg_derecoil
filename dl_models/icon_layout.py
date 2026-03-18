@@ -355,6 +355,7 @@ class PostureIconLayout(RegionLayout):
 
     - 白色图标, alpha 通道自带强度 (~0.75 peak)
     - 合成: output = icon_alpha * 255 + (1 - icon_alpha) * background
+    - 4通道输入 (BGR + dewhite)
     - 3 类 + 背景 = 4 类
     """
 
@@ -392,6 +393,13 @@ class PostureIconLayout(RegionLayout):
     def crop_hw(self):
         return (POSTURE['y2'] - POSTURE['y1'], POSTURE['x2'] - POSTURE['x1'])
 
+    @property
+    def in_channels(self):
+        return 4
+
+    def preprocess(self, img_bgr):
+        return np.dstack([img_bgr, dewhite(img_bgr)])
+
     # ── HOW ──
 
     def apply(self, canvas):
@@ -418,7 +426,7 @@ class TabDetectLayout(RegionLayout):
 
     - 正样本: blur+darken 背景 + Type 文字
     - 负样本: 原始背景
-    - 3通道 BGR
+    - 4通道输入 (BGR + dewhite)
     """
 
     def __init__(self, icons_dir=None, positive_prob=0.5, jitter_px=1):
@@ -444,6 +452,13 @@ class TabDetectLayout(RegionLayout):
     def label_names(self):
         return {'tab_open': 2}
 
+    @property
+    def in_channels(self):
+        return 4
+
+    def preprocess(self, img_bgr):
+        return np.dstack([img_bgr, dewhite(img_bgr)])
+
     # ── HOW ──
 
     def apply(self, canvas):
@@ -461,15 +476,16 @@ class TabDetectLayout(RegionLayout):
 # Fire mode icons (bottom HUD, left of ammo count)
 # ============================================================
 
-FIRE_MODE_CLASSES = ['single', 'burst2', 'burst3', 'full', 'single_bot', 'high']
+FIRE_MODE_CLASSES = ['single', 'burst2', 'burst3', 'full', 'single_bot_sniper', 'single_bot_shotgun', 'high']
 
 FIRE_MODE_ICON_MAP = {
-    'fire_mode_single.png':     'single',
-    'fire_mode_burst2.png':     'burst2',
-    'fire_mode_burst3.png':     'burst3',
-    'fire_mode_full.png':       'full',
-    'fire_mode_single_bot.png': 'single_bot',
-    'fire_mode_high.png':       'high',
+    'fire_mode_single.png':             'single',
+    'fire_mode_burst2.png':             'burst2',
+    'fire_mode_burst3.png':             'burst3',
+    'fire_mode_full.png':               'full',
+    'fire_mode_single_bot_sniper.png':  'single_bot_sniper',
+    'fire_mode_single_bot_shotgun.png': 'single_bot_shotgun',
+    'fire_mode_high.png':               'high',
 }
 
 
@@ -512,6 +528,13 @@ class FireModeLayout(RegionLayout):
     @property
     def crop_hw(self):
         return (FIRE_MODE['y2'] - FIRE_MODE['y1'], FIRE_MODE['x2'] - FIRE_MODE['x1'])
+
+    @property
+    def in_channels(self):
+        return 4
+
+    def preprocess(self, img_bgr):
+        return np.dstack([img_bgr, dewhite(img_bgr)])
 
     # ── HOW ──
 

@@ -82,6 +82,9 @@ class KeyFeedback:
             if crop is not None:
                 self._save(trigger, state_key, crop, pred_before, pred_after)
 
+        # Notify check modules to update ground truth
+        self.poller.notify_key(trigger.lower())
+
         # Log
         changes = []
         for state_key in regions:
@@ -153,6 +156,13 @@ class KeyFeedback:
             trigger = 'Tab'
             regions = {
                 'tab_open': RECTS['tab'],
+            }
+
+        elif key == keyboard.Key.space:
+            # Space = jump, clears posture GT
+            trigger = 'Space'
+            regions = {
+                'posture': RECTS['posture'],
             }
 
         if trigger:

@@ -10,7 +10,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from config import IN_TAB
 from detector.cropper import win32_cap
-from detector.utils import load_model as _load, crop_to_tensor
+from detector.utils import load_model as _load, crop_to_tensor_4ch
 
 import torch
 
@@ -19,17 +19,17 @@ SLOT_RECT = (IN_TAB['y1'], IN_TAB['x1'],
              IN_TAB['y2'] - IN_TAB['y1'],
              IN_TAB['x2'] - IN_TAB['x1'])
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), 'tab_detect.pth.tar')
+MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'dl_models', 'tab_detect.pth.tar')
 HEAD_SIZES = {'tab_open': 2}
 
 
 def load_model(device):
-    return _load(MODEL_PATH, HEAD_SIZES, device)
+    return _load(MODEL_PATH, HEAD_SIZES, device, in_channels=4)
 
 
 def classify(model, crop, device):
     """Classify whether Tab is open. Returns True/False."""
-    t = crop_to_tensor(crop, device)
+    t = crop_to_tensor_4ch(crop, device)
     with torch.no_grad():
         out = model(t)
     return out['tab_open'].argmax(1).item() == 1

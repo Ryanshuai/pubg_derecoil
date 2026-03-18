@@ -30,7 +30,7 @@ SLOT_RECTS = {
     2: _icon_rect(WEAPON_HUD_2),
 }
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), 'gun_name.pth.tar')
+MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'dl_models', 'gun_name.pth.tar')
 HEAD_SIZES = {'gun_name': len(WEAPON_CLASSES) + 1, 'highlighted': 3}
 
 

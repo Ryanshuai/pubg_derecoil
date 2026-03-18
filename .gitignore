@@ -15,4 +15,5 @@ __pycache__
 *.mkv
 temp_debug
 training_data/pubg_assets/Item
+InGameScreenshot
 

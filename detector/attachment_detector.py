@@ -45,7 +45,7 @@ SLOT_NAMES = ['scope', 'muzzle', 'grip', 'magazine', 'stock']
 def _slot_rect(x1, y1, x2, y2):
     return (y1, x1, y2 - y1, x2 - x1)
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), 'weapon_attachment.pth.tar')
+MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'dl_models', 'weapon_attachment.pth.tar')
 HEAD_SIZES = {'attachment': len(ATTACHMENT_CLASSES) + 1}
 
 

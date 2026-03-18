@@ -3,8 +3,8 @@
 5 detectors staggered at 40ms intervals = 5Hz total, each detector ~1Hz.
 GPU load spread evenly, no spikes.
 
-Delegates all detection logic to individual detector modules.
-Poller only handles: scheduling, state management, constraint feedback.
+Delegates detection to individual detector modules.
+Delegates constraint checks to detector/checks/*.py modules.
 
 Usage:
     poller = HUDPoller()
@@ -29,29 +29,10 @@ from detector import (
     tab_detector, attachment_detector, weapon_name_detector,
 )
 from detector.cropper import win32_cap
+from detector.checks import ALL_CHECKS, ALL_KEY_HANDLERS
 from config import ATTACHMENT_SLOTS
-from weapon import (
-    single_guns, full_guns, single_burst_guns,
-    single_full_guns, single_burst_full_guns,
-)
 
-# ── Fire mode constraints per weapon ──
-WEAPON_FIRE_MODES = {}
-for g in single_guns:
-    WEAPON_FIRE_MODES[g] = {'single', 'single_bot'}
-for g in full_guns:
-    WEAPON_FIRE_MODES[g] = {'full'}
-for g in single_burst_guns:
-    WEAPON_FIRE_MODES[g] = {'single', 'single_bot', 'burst2', 'burst3'}
-for g in single_full_guns:
-    WEAPON_FIRE_MODES[g] = {'single', 'single_bot', 'full'}
-for g in single_burst_full_guns:
-    WEAPON_FIRE_MODES[g] = {'single', 'single_bot', 'burst2', 'burst3', 'full'}
-WEAPON_FIRE_MODES['mg3'] = {'full', 'high'}
-WEAPON_FIRE_MODES['mp9'] = {'single', 'single_bot', 'burst2', 'full'}
-WEAPON_FIRE_MODES['p90'] = {'full'}
-
-# ── Screen rects (for crop caching) ──
+# ── Screen rects (for crop caching / key_feedback) ──
 RECTS = {
     'weapon_1': weapon_detector.SLOT_RECTS[1],
     'weapon_2': weapon_detector.SLOT_RECTS[2],
@@ -88,9 +69,6 @@ class HUDPoller:
         # Last crops for constraint feedback
         self._crops = {}
 
-        # Tab ground truth: locked when tab closes
-        self._tab_gt = {'weapon_1': '', 'weapon_2': ''}
-
         # Current state
         self.state = {
             'weapon_1': '', 'weapon_1_hl': '',
@@ -125,7 +103,7 @@ class HUDPoller:
                     except Exception:
                         pass
 
-    # ── Constraint feedback (log only, no correction) ──
+    # ── Feedback saving ──
 
     def _save_feedback(self, violation, crops_to_save, predictions):
         ts = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -139,76 +117,24 @@ class HUDPoller:
         pred_str = ', '.join(f'{k}={v}' for k, v in predictions.items())
         print(f'[Feedback] {violation} | {pred_str}')
 
-    def _check_constraints(self):
-        s = self.state
+    def _run_checks(self):
+        """Run all constraint checks, save feedback on violations."""
+        for check_fn in ALL_CHECKS:
+            try:
+                violations = check_fn(self.state, self._crops, None)
+                for violation, crops, preds in violations:
+                    self._save_feedback(violation, crops, preds)
+            except Exception as e:
+                print(f'[HUDPoller] check error: {e}')
 
-        # 1. Highlight mutex
-        if s['weapon_1_hl'] == 'highlighted' and s['weapon_2_hl'] == 'highlighted':
-            self._save_feedback('both_highlighted', {
-                'weapon_1': self._crops.get('weapon_1'),
-                'weapon_2': self._crops.get('weapon_2'),
-            }, {
-                'weapon_1': f'{s["weapon_1"]}_{s["weapon_1_hl"]}',
-                'weapon_2': f'{s["weapon_2"]}_{s["weapon_2_hl"]}',
-            })
-
-        # 2. No weapon = no fire mode
-        if not s['weapon_1'] and not s['weapon_2'] and s['fire_mode']:
-            self._save_feedback('fire_mode_without_weapon', {
-                'weapon_1': self._crops.get('weapon_1'),
-                'weapon_2': self._crops.get('weapon_2'),
-                'fire_mode': self._crops.get('fire_mode'),
-            }, {
-                'weapon_1': s['weapon_1'] or 'empty',
-                'weapon_2': s['weapon_2'] or 'empty',
-                'fire_mode': s['fire_mode'],
-            })
-
-        # 3. Fire mode vs active weapon
-        active_weapon = ''
-        if s['weapon_1_hl'] == 'highlighted':
-            active_weapon = s['weapon_1']
-        elif s['weapon_2_hl'] == 'highlighted':
-            active_weapon = s['weapon_2']
-
-        if active_weapon and s['fire_mode']:
-            valid_modes = WEAPON_FIRE_MODES.get(active_weapon)
-            if valid_modes and s['fire_mode'] not in valid_modes:
-                self._save_feedback('invalid_fire_mode', {
-                    'weapon_1': self._crops.get('weapon_1'),
-                    'weapon_2': self._crops.get('weapon_2'),
-                    'fire_mode': self._crops.get('fire_mode'),
-                }, {
-                    'weapon_1': f'{s["weapon_1"]}_{s["weapon_1_hl"]}',
-                    'weapon_2': f'{s["weapon_2"]}_{s["weapon_2_hl"]}',
-                    'fire_mode': s['fire_mode'],
-                    'active_gun': active_weapon,
-                })
-
-        # 4. Tab open → other detections unreliable
-        if s['tab_open'] and (s['fire_mode'] or s['posture']):
-            self._save_feedback('detect_during_tab', {
-                'tab': self._crops.get('tab'),
-                'fire_mode': self._crops.get('fire_mode'),
-                'posture': self._crops.get('posture'),
-            }, {
-                'tab_open': str(s['tab_open']),
-                'fire_mode': s['fire_mode'] or 'empty',
-                'posture': s['posture'] or 'empty',
-            })
-
-        # 5. Weapon detection vs Tab OCR ground truth
-        if not s['tab_open']:
-            for slot_id in ['weapon_1', 'weapon_2']:
-                gt = self._tab_gt.get(slot_id, '')
-                det = s[slot_id]
-                if gt and det and gt != det:
-                    self._save_feedback('weapon_mismatch_vs_tab', {
-                        slot_id: self._crops.get(slot_id),
-                    }, {
-                        slot_id: det,
-                        'tab_gt': gt,
-                    })
+    def notify_key(self, key):
+        """Called by key_feedback after a key press + settle delay.
+        Forwards to all check modules' on_key handlers."""
+        for handler in ALL_KEY_HANDLERS:
+            try:
+                handler(key, self)
+            except Exception as e:
+                print(f'[HUDPoller] on_key error: {e}')
 
     # ── Detectors (delegate to modules) ──
 
@@ -240,15 +166,9 @@ class HUDPoller:
         is_open = tab_detector.classify(self.tab_model, crop, self.device)
         self._update('tab_open', is_open)
 
-        # Tab just closed → lock OCR result as ground truth
+        # Tab just closed → notify checks to lock ground truth
         if was_open and not is_open:
-            ocr = self.ocr_detector.detect_from_screen()
-            for slot_id in [1, 2]:
-                name, conf = ocr[slot_id]
-                if name and conf > 0.6:
-                    self._tab_gt[f'weapon_{slot_id}'] = name
-            print(f'[TabGT] weapon_1={self._tab_gt["weapon_1"]!r}, '
-                  f'weapon_2={self._tab_gt["weapon_2"]!r}')
+            self.notify_key('tab_close')
 
     def _detect_attachments(self):
         if not self.state['tab_open']:
@@ -280,10 +200,7 @@ class HUDPoller:
                 print(f'[HUDPoller] {name} error: {e}')
             idx += 1
             if idx % n == 0:
-                try:
-                    self._check_constraints()
-                except Exception as e:
-                    print(f'[HUDPoller] constraint check error: {e}')
+                self._run_checks()
             time.sleep(self.INTERVAL)
 
     def start(self):

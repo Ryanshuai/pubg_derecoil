@@ -119,7 +119,7 @@ class MultiHeadMobileNet(nn.Module):
 def train(task_name):
     cfg = TASKS[task_name]
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    save_path = os.path.join(os.path.dirname(__file__), '..', 'detector', cfg['save_name'])
+    save_path = os.path.join(os.path.dirname(__file__), cfg['save_name'])
 
     print(f'Task: {task_name}, Device: {device}')
 

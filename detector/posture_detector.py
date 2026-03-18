@@ -12,7 +12,7 @@ import cv2
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from config import POSTURE
 from detector.cropper import win32_cap
-from detector.utils import load_model as _load, classify_single
+from detector.utils import load_model as _load, crop_to_tensor_4ch
 from dl_models.icon_layout import POSTURE_CLASSES
 
 # Screen rect: (y, x, h, w) for win32_cap
@@ -20,16 +20,21 @@ SLOT_RECT = (POSTURE['y1'], POSTURE['x1'],
              POSTURE['y2'] - POSTURE['y1'],
              POSTURE['x2'] - POSTURE['x1'])
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), 'posture.pth.tar')
+MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'dl_models', 'posture.pth.tar')
 HEAD_SIZES = {'posture': len(POSTURE_CLASSES) + 1}
 
 
 def load_model(device):
-    return _load(MODEL_PATH, HEAD_SIZES, device)
+    return _load(MODEL_PATH, HEAD_SIZES, device, in_channels=4)
 
 
 def classify(model, crop, device):
-    return classify_single(model, crop, device, 'posture', POSTURE_CLASSES)
+    import torch
+    t = crop_to_tensor_4ch(crop, device)
+    with torch.no_grad():
+        out = model(t)
+    idx = out['posture'].argmax(1).item()
+    return POSTURE_CLASSES[idx - 1] if idx > 0 else ''
 
 
 def main():
