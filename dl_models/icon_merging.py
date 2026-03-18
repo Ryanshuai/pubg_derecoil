@@ -80,27 +80,29 @@ def blend_tab_background(canvas):
 # ============================================================
 
 def blend_attachment(canvas, icon_bgra_scaled, x, y,
-                     blur_k=49, blur_sigma=8, brightness=0.857,
+                     blur_k=49, blur_sigma=8, brightness=1.0,
                      outline_dilate=1, outline_sigma=1.0, outline_pad=8):
     """
-    Tab 界面配件格子: 模糊 + bevel 边框 + 黑描边 + 图标叠加
+    Tab 界面配件格子: 模糊 + 暗化 + 黑描边 + 图标叠加
+    全程 63×63 (已裁掉 2px bevel 边框)
 
     Parameters:
-        canvas:             (H, W, 3) float32, full Tab background
+        canvas:             (H, W, 3) uint8/float32, raw background (not tab-darkened)
         icon_bgra_scaled:   (sh, sw, 4) uint8, already scaled icon (or None for empty)
-        x, y:               top-left of the 67x67 slot in canvas
+        x, y:               top-left of the 63x63 slot in canvas
         blur_k/blur_sigma:  background blur params
-        brightness:         icon darkening factor (0.857)
+        brightness:         icon color scale (1.0 = original API color)
         outline_dilate:     hard black outline width (1px)
         outline_sigma:      fade sigma (1.0)
         outline_pad:        padding for fade (8px)
 
     Rendering:
-        1. box_bg = bevel_template * GaussianBlur(bg)
-        2. outline = dilate(alpha, 1px) → blur(σ=1) → max(solid, blur)
-        3. icon alpha blend with brightness correction
+        1. Empty slot: 0.50 * blur(bg)
+        2. Occupied slot bg: 0.37 * blur(bg) + 44
+        3. outline = dilate(alpha, 1px) → blur(σ=1) → max(solid, blur) → black blend
+        4. icon alpha blend (INTER_NEAREST scaled, original color)
     """
-    slot_h, slot_w = 67, 67
+    slot_h, slot_w = 63, 63
     region = canvas[y:y + slot_h, x:x + slot_w].astype(np.float32)
     blurred = cv2.GaussianBlur(region, (blur_k, blur_k), blur_sigma).astype(np.float32)
 
@@ -111,13 +113,8 @@ def blend_attachment(canvas, icon_bgra_scaled, x, y,
         ).astype(np.uint8)
         return
 
-    # Step 1: bevel border background
-    tmpl = np.ones((slot_h, slot_w, 3), dtype=np.float32) * 0.74
-    tmpl[0, :] = 0.50                  # top edge (dark)
-    tmpl[:, 0] = 0.50                  # left edge (dark)
-    tmpl[slot_h - 1, 1:] = 0.94       # bottom highlight
-    tmpl[1:, slot_w - 1] = 0.88       # right highlight
-    box_bg = tmpl * blurred
+    # Step 1: occupied slot background (no bevel, inner area only)
+    box_bg = 0.37 * blurred + 44
 
     # Step 2: prepare icon
     sh, sw = icon_bgra_scaled.shape[:2]

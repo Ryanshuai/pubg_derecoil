@@ -16,7 +16,7 @@ from torchvision.models import mobilenet_v3_small
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from dl_models.dataset import BackgroundProvider, SyntheticHUDDataset
-from dl_models.icon_layout import WeaponIconLayout, TabDetectLayout
+from dl_models.icon_layout import WeaponIconLayout, TabDetectLayout, AttachmentIconLayout
 
 # ── Task configs ──
 BG_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data', 'backgrounds')
@@ -41,6 +41,16 @@ TASKS = {
         'lr': 3e-4,
         'batch_size': 64,
         'hidden_dim': 128,
+    },
+    'attachment': {
+        'layout_cls': AttachmentIconLayout,
+        'save_name': 'weapon_attachment.pth.tar',
+        'train_samples': 32000,
+        'val_samples': 4000,
+        'epochs': 25,
+        'lr': 2e-4,
+        'batch_size': 64,
+        'hidden_dim': 512,
     },
 }
 
@@ -89,7 +99,7 @@ class MultiHeadMobileNet(nn.Module):
 def train(task_name):
     cfg = TASKS[task_name]
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    save_path = os.path.join(os.path.dirname(__file__), '..', cfg['save_name'])
+    save_path = os.path.join(os.path.dirname(__file__), '..', 'detector', cfg['save_name'])
 
     print(f'Task: {task_name}, Device: {device}')
 

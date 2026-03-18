@@ -18,7 +18,7 @@ from config import (
     WEAPON_HUD_1, WEAPON_HUD_2, ATTACHMENT_SLOTS, IN_TAB,
     ASSET_DIR, ALPHA, MODEL_CLASSES, MODEL_INPUT_SIZE,
 )
-from dl_models.icon_merging import alpha_blend, dewhite, blend_tab_background
+from dl_models.icon_merging import alpha_blend, dewhite, blend_tab_background, blend_attachment
 
 
 # ============================================================
@@ -166,7 +166,7 @@ class WeaponIconLayout(RegionLayout):
             h, w = bgra.shape[:2]
             scale = _ICON_HEIGHT / h
             new_w = int(w * scale)
-            resized = cv2.resize(bgra, (new_w, _ICON_HEIGHT), interpolation=cv2.INTER_AREA)
+            resized = cv2.resize(bgra, (new_w, _ICON_HEIGHT), interpolation=cv2.INTER_NEAREST)
             self.icons[cls] = (resized[:, :, :3], resized[:, :, 3].astype(np.float32) / 255.0, new_w)
 
         self.available = [c for c in WEAPON_CLASSES if c in self.icons]
@@ -225,36 +225,107 @@ class WeaponIconLayout(RegionLayout):
 # Attachment icons (Tab screen, centered in 67x67 grid)
 # ============================================================
 
+ATTACHMENT_CLASSES = sorted([
+    # Lower (grip)
+    'Lower_AngledForeGrip_C', 'Lower_Foregrip_C', 'Lower_Foregrip_Crossbow',
+    'Lower_HalfGrip_C', 'Lower_LaserPointer_C', 'Lower_LightweightForeGrip_C',
+    'Lower_QuickDraw_Large_Crossbow_C', 'Lower_Sniper_CheekPad_Vss_setting',
+    'Lower_ThumbGrip_C',
+    # Magazine
+    'Magazine_ExtendedQuickDraw_Large_C', 'Magazine_ExtendedQuickDraw_Medium_C',
+    'Magazine_ExtendedQuickDraw_Small_C', 'Magazine_ExtendedQuickDraw_SniperRifle_C',
+    'Magazine_Extended_DrumMagazine', 'Magazine_Extended_Large_C',
+    'Magazine_Extended_Medium_C', 'Magazine_Extended_Small_C',
+    'Magazine_Extended_SniperRifle_C', 'Magazine_QuickDraw_Large_C',
+    'Magazine_QuickDraw_Medium_C', 'Magazine_QuickDraw_Small_C',
+    'Magazine_QuickDraw_SniperRifle_C',
+    'Magazine_SR_ExtendedQuick_Mag_Vss_setting',
+    'Magazine_SR_Extended_Mag_Vss_setting',
+    'Magazine_SR_QucikDraw_Magazine_Vss_setting',
+    'Medium_ExtendedQuickDraw_Magazine_Vector',
+    'Medium_Extended_Magazine_Vector', 'Medium_QuickDraw_Magazine_Vector',
+    # Muzzle
+    'Muzzle_Choke_C', 'Muzzle_Compensator_Large_C', 'Muzzle_Compensator_Medium_C',
+    'Muzzle_Compensator_SniperRifle_C', 'Muzzle_Duckbill_C',
+    'Muzzle_FlashHider_Large_C', 'Muzzle_FlashHider_Medium_C',
+    'Muzzle_FlashHider_SniperRifle_C', 'Muzzle_Suppressor_Large_C',
+    'Muzzle_Suppressor_Medium_C', 'Muzzle_Suppressor_Small_C',
+    'Muzzle_Suppressor_SniperRifle_C',
+    # SideRail
+    'SideRail_DotSight_RMR_C',
+    # Stock
+    'Stock_AR_Composite_C', 'Stock_Shotgun_BulletLoops_C',
+    'Stock_SniperRifle_BulletLoops_C', 'Stock_SniperRifle_CheekPad_C',
+    'Stock_UZI_C',
+    # Upper (scope)
+    'Upper_ACOG_01_C', 'Upper_Aimpoint_C', 'Upper_CQBSS_C',
+    'Upper_DotSight_01_C', 'Upper_Holosight_C', 'Upper_PM2_01_C',
+    'Upper_Scope3x_C', 'Upper_Scope6x_C',
+    # Vector special
+    'Vector_VerGrip',
+])
+
+
 class AttachmentIconLayout(RegionLayout):
-    """配件图标 (Tab 界面), 5 slot × 67×67."""
+    """配件图标 (Tab 界面), 63×63, 单 head 分所有配件."""
 
     ICON_SCALE_PCT = 9
-    OUTLINE_PAD = 8
 
-    def __init__(self, icons_dir=None):
+    def __init__(self, icons_dir=None, bg_prob=0.15, jitter_px=2):
         if icons_dir is None:
             icons_dir = os.path.join(os.path.dirname(__file__), '..', ASSET_DIR['attachment'])
         self.icons_dir = icons_dir
+        self.bg_prob = bg_prob
+        self.jitter_px = jitter_px
+
+        # Load all icons
+        self.icons = {}  # cls_name -> (bgra_scaled, sw, sh)
+        for fname in os.listdir(icons_dir):
+            if not fname.endswith('.png'):
+                continue
+            cls = fname.replace('Item_Attach_Weapon_', '').replace('.png', '')
+            if cls not in ATTACHMENT_CLASSES:
+                continue
+            bgra = load_bgra(os.path.join(icons_dir, fname))
+            if bgra is None:
+                continue
+            ih, iw = bgra.shape[:2]
+            sh = int(ih * self.ICON_SCALE_PCT / 100)
+            sw = int(iw * self.ICON_SCALE_PCT / 100)
+            scaled = cv2.resize(bgra, (sw, sh), interpolation=cv2.INTER_NEAREST)
+            self.icons[cls] = scaled
+
+        self.available = [c for c in ATTACHMENT_CLASSES if c in self.icons]
+        print(f'Loaded {len(self.available)} attachment icons')
 
     def get_slot_rect(self, gun_id=1, slot_name='scope'):
+        """63×63 rect (bevel border excluded)."""
         return tuple(ATTACHMENT_SLOTS[gun_id][slot_name])
 
-    def load_icon(self, icon_name):
-        return load_bgra(os.path.join(self.icons_dir, f'{icon_name}.png'))
+    # ── META ──
 
-    def place_icon(self, icon_bgra, slot_w, slot_h):
-        ih, iw = icon_bgra.shape[:2]
-        sh = int(ih * self.ICON_SCALE_PCT / 100)
-        sw = int(iw * self.ICON_SCALE_PCT / 100)
-        scaled = cv2.resize(icon_bgra, (sw, sh), interpolation=cv2.INTER_AREA)
-        return scaled, (slot_w - sw) // 2, (slot_h - sh) // 2
+    @property
+    def label_names(self):
+        return {'attachment': len(ATTACHMENT_CLASSES) + 1}  # 0=empty
 
-    def list_icons(self):
-        return [f.replace('.png', '') for f in sorted(os.listdir(self.icons_dir)) if f.endswith('.png')]
+    @property
+    def crop_hw(self):
+        return (63, 63)
 
-    @staticmethod
-    def slot_names():
-        return ['scope', 'muzzle', 'grip', 'magazine', 'stock']
+    # ── HOW ──
+
+    def apply(self, canvas):
+        if random.random() < self.bg_prob:
+            # Empty slot: 0.50 * blur(bg)
+            blend_attachment(canvas, None, 0, 0)
+            return {'attachment': 0}
+
+        cls_name = random.choice(self.available)
+        icon_scaled = self.icons[cls_name]
+
+        blend_attachment(canvas, icon_scaled, 0, 0)
+
+        return {'attachment': ATTACHMENT_CLASSES.index(cls_name) + 1}
 
 
 # ============================================================
