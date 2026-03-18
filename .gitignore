@@ -7,3 +7,11 @@ __pycache__
 *.pyc
 *.xml
 *.iml
+*.png
+*.jpg
+*.jpeg
+*.log
+*.webm
+*.json
+*.mp4
+*.mkv
