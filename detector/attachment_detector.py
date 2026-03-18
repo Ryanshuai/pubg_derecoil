@@ -17,7 +17,7 @@ import torch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from config import ATTACHMENT_SLOTS
 from detector.cropper import win32_cap
-from dl_models.train import MultiHeadMobileNet
+from detector.utils import load_model as _load, crop_to_tensor
 from dl_models.icon_layout import ATTACHMENT_CLASSES
 
 # ── Slot → valid attachment mapping ──
@@ -50,10 +50,7 @@ HEAD_SIZES = {'attachment': len(ATTACHMENT_CLASSES) + 1}
 
 
 def load_model(device):
-    model = MultiHeadMobileNet(HEAD_SIZES, in_channels=3, hidden_dim=512).to(device)
-    model.load_state_dict(torch.load(MODEL_PATH, map_location=device, weights_only=True))
-    model.eval()
-    return model
+    return _load(MODEL_PATH, HEAD_SIZES, device, hidden_dim=512)
 
 
 BRIGHT_THRESHOLD = 250
@@ -72,9 +69,7 @@ def classify_slot(model, crop, slot_name, device):
     if is_slot_empty(crop):
         return ''
 
-    t = torch.from_numpy(
-        crop.transpose(2, 0, 1).astype(np.float32) / 255.0
-    ).unsqueeze(0).to(device)
+    t = crop_to_tensor(crop, device)
 
     with torch.no_grad():
         out = model(t)

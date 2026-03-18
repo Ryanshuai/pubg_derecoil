@@ -2,35 +2,6 @@
 SCREEN_W = 3440
 SCREEN_H = 1440
 
-# Attachment slot size (px) — all boxes are 67x67
-SLOT_SIZE = 67
-
-# Slot positions (x1, y1) at 3440x1440, detected via edge/line detection
-# Bottom row: muzzle, grip, magazine, stock (left to right)
-# Scope is above the weapon on its own row
-SLOT_X1 = {
-    'muzzle':   2217,
-    'grip':     2353,
-    'magazine': 2500,
-    'stock':    2783,
-    'scope':    2579,
-}
-
-GUN1_Y1 = {
-    'bottom': 314,   # muzzle, grip, magazine, stock
-    'scope':  151,
-}
-
-GUN2_Y1 = {
-    'bottom': 615,   # muzzle, grip, magazine, stock
-    'scope':  453,
-}
-
-Y_DIFF = 301  # gun2_y - gun1_y
-
-# Laplacian variance threshold: empty slot < 19, has attachment > 318
-LAPLACIAN_THRESHOLD = 100
-
 # Posture icon (bottom-center HUD, left of health bar)
 POSTURE = {
     'x1': 1373,
@@ -41,7 +12,7 @@ POSTURE = {
 
 # Fire mode icon (bottom-center HUD, left of ammo count)
 FIRE_MODE = {
-    'x1': 1638,
+    'x1': 1626,
     'y1': 1325,
     'x2': 1682,
     'y2': 1368,
@@ -66,7 +37,6 @@ WEAPON_HUD_2 = {  # secondary (top, unselected)
 ALPHA = {
     'weapon_highlighted':     0.80,   # selected weapon icon
     'weapon_non_highlighted': 0.405,  # unselected weapon icon
-    'posture':                0.75,   # posture icon
 }
 
 
@@ -75,9 +45,9 @@ ASSET_DIR = {
     'weapon':     'training_data/pubg_assets/Item/Weapon/Main',
     'attachment':  'training_data/pubg_assets/Item/Attachment',
     'tab_detect':  'training_data/pubg_assets/type',
+    'posture':     'training_data/pubg_assets/posture',
+    'fire_mode':   'training_data/pubg_assets/fire_mode',
 }
-
-# ── VGG detector configs ────────────────────────────────────
 
 # In-tab detection: "Type" text region (white text, only visible in Tab view)
 IN_TAB = {
@@ -94,24 +64,6 @@ GAME_SENSITIVITY = 50  # default
 # Tune this: bigger = more compensation
 COUNTS_PER_RECOIL_UNIT = 60
 
-# ── VGG detector configs (only for detectors not yet replaced) ──
-
-# Model input sizes [H, W]
-# gun_name: uses original crop size (53x206), no resize needed
-MODEL_INPUT_SIZE = {
-    'gun_name':   [53, 206],
-    'fire_mode':  [32, 32],
-}
-
-# Classification labels (index 0 = background/empty)
-MODEL_CLASSES = {
-    'gun_name':   ['98k', 'ace32', 'akm', 'aug', 'awm', 'dbs', 'dp28', 'g36c', 'groza', 'k2',
-                   'lynx', 'm16', 'm24', 'm249', 'm416', 'm762', 'mg3', 'mini14', 'mk12', 'mk14',
-                   'mk47', 'mosin', 'mp5k', 'mp9', 'o12', 'p90', 'pp19', 'qbu', 'qbz', 's12k',
-                   's1897', 's686', 'scar', 'sks', 'slr', 'tommy', 'ump45', 'uzi', 'vector',
-                   'vss', 'win94'],
-    'fire_mode':  ['burst2', 'burst3', 'full', 'high', 'single'],
-}
 
 # Gun name text position in Tab view (3440x1440)
 GUN_NAME_1 = {
@@ -125,21 +77,20 @@ GUN_NAME_2 = {
 
 
 
-BORDER_CROP = 2  # bevel border pixels to exclude
-SLOT_INNER = SLOT_SIZE - 2 * BORDER_CROP  # 63
-
-def get_slot_rects(gun_idx=1):
-    """Return dict of {slot_name: (x1, y1, x2, y2)} for given gun (1 or 2).
-    63×63 inner area (bevel border excluded)."""
-    gun_y = GUN1_Y1 if gun_idx == 1 else GUN2_Y1
-    c = BORDER_CROP
-    rects = {}
-    for slot_name, x1 in SLOT_X1.items():
-        y1 = gun_y['scope'] if slot_name == 'scope' else gun_y['bottom']
-        rects[slot_name] = (x1 + c, y1 + c, x1 + SLOT_SIZE - c, y1 + SLOT_SIZE - c)
-    return rects
-
+# Attachment slot rects: 63×63 inner area (67×67 minus 2px bevel border each side)
 ATTACHMENT_SLOTS = {
-    1: get_slot_rects(1),
-    2: get_slot_rects(2),
+    1: {
+        'scope':    (2581, 153, 2644, 216),
+        'muzzle':   (2219, 316, 2282, 379),
+        'grip':     (2355, 316, 2418, 379),
+        'magazine': (2502, 316, 2565, 379),
+        'stock':    (2785, 316, 2848, 379),
+    },
+    2: {
+        'scope':    (2581, 455, 2644, 518),
+        'muzzle':   (2219, 617, 2282, 680),
+        'grip':     (2355, 617, 2418, 680),
+        'magazine': (2502, 617, 2565, 680),
+        'stock':    (2785, 617, 2848, 680),
+    },
 }
