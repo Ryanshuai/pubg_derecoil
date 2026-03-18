@@ -15,7 +15,7 @@ import numpy as np
 import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from config import ATTACHMENT_SLOTS, LAPLACIAN_THRESHOLD
+from config import ATTACHMENT_SLOTS
 from detector.cropper import win32_cap
 from dl_models.train import MultiHeadMobileNet
 from dl_models.icon_layout import ATTACHMENT_CLASSES
@@ -56,11 +56,11 @@ def load_model(device):
     return model
 
 
+BRIGHT_THRESHOLD = 250
+
 def is_slot_empty(crop):
-    """Check if slot is empty via Laplacian variance (low = empty)."""
-    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    lap_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-    return lap_var < LAPLACIAN_THRESHOLD
+    """Check if slot is empty via max brightness (icon is white 255 on dark bg)."""
+    return crop.max() < BRIGHT_THRESHOLD
 
 
 def classify_slot(model, crop, slot_name, device):

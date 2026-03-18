@@ -12,11 +12,10 @@ import numpy as np
 import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from config import WEAPON_HUD_1, WEAPON_HUD_2, MODEL_CLASSES
+from config import WEAPON_HUD_1, WEAPON_HUD_2
 from detector.cropper import win32_cap
 from dl_models.train import MultiHeadMobileNet
-
-WEAPON_CLASSES = MODEL_CLASSES['gun_name']
+from dl_models.icon_layout import WEAPON_CLASSES
 HL_NAMES = {0: '', 1: 'highlighted', 2: 'non-highlighted'}
 
 # Icon screen coordinates: (y, x, h, w) for win32_cap

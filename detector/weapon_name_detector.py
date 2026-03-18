@@ -7,11 +7,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from config import GUN_NAME_1, GUN_NAME_2, MODEL_CLASSES
+from config import GUN_NAME_1, GUN_NAME_2
 from detector.cropper import win32_cap
 from rapidocr_onnxruntime import RapidOCR
-
-WEAPON_CLASSES = MODEL_CLASSES['gun_name']
+from dl_models.icon_layout import WEAPON_CLASSES
 
 # Screen rects: (y, x, h, w) for win32_cap
 SLOT_RECTS = {
