@@ -3,11 +3,9 @@ for_database
 temp_image
 .idea
 __pycache__
-*.tar
 *.pyc
 *.xml
 *.iml
-*.png
 *.jpg
 *.jpeg
 *.log
@@ -15,3 +13,6 @@ __pycache__
 *.json
 *.mp4
 *.mkv
+temp_debug
+training_data/pubg_assets/Item
+

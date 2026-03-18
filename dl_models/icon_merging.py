@@ -165,14 +165,16 @@ def blend_attachment(canvas, icon_bgra_scaled, x, y,
 
 
 # ============================================================
-# Posture / fire mode blend (TBD, placeholder)
+# Fire mode blend
 # ============================================================
 
-def blend_status_bar(canvas, icon_alpha_mask, x, y, blur_k=21, gradient=0.66):
+def blend_status_bar(canvas, icon_alpha_mask, x, y, blur_k=21, gradient=0.67):
     """
-    底部状态栏: 模糊 + 暗化 + 图标叠加 (placeholder, needs calibration)
+    底部状态栏 (开火模式): 模糊 + 暗化 + 白色图标叠加
 
-    Formula: output = alpha * 255 + (1 - alpha) * gradient * blur(bg)
+    Verified on 0020/0023: gradient=0.67 (range 0.65~0.69), blur_k=21
+    Bar region: y=1312~1370
+    Formula: output = icon_alpha * 255 + (1 - icon_alpha) * 0.67 * blur(bg, k=21)
     """
     ih, iw = icon_alpha_mask.shape[:2]
     region = canvas[y:y + ih, x:x + iw].astype(np.float32)

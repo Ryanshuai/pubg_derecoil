@@ -16,7 +16,7 @@ from torchvision.models import mobilenet_v3_small
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from dl_models.dataset import BackgroundProvider, SyntheticHUDDataset
-from dl_models.icon_layout import WeaponIconLayout, TabDetectLayout, AttachmentIconLayout
+from dl_models.icon_layout import WeaponIconLayout, TabDetectLayout, AttachmentIconLayout, PostureIconLayout, FireModeLayout
 
 # ── Task configs ──
 BG_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data', 'backgrounds')
@@ -51,6 +51,26 @@ TASKS = {
         'lr': 2e-4,
         'batch_size': 64,
         'hidden_dim': 512,
+    },
+    'posture': {
+        'layout_cls': PostureIconLayout,
+        'save_name': 'posture.pth.tar',
+        'train_samples': 8000,
+        'val_samples': 1000,
+        'epochs': 15,
+        'lr': 3e-4,
+        'batch_size': 64,
+        'hidden_dim': 128,
+    },
+    'fire_mode': {
+        'layout_cls': FireModeLayout,
+        'save_name': 'fire_mode.pth.tar',
+        'train_samples': 8000,
+        'val_samples': 1000,
+        'epochs': 15,
+        'lr': 3e-4,
+        'batch_size': 64,
+        'hidden_dim': 128,
     },
 }
 

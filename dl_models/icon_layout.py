@@ -15,10 +15,12 @@ import cv2
 import numpy as np
 import os
 from config import (
-    WEAPON_HUD_1, WEAPON_HUD_2, ATTACHMENT_SLOTS, IN_TAB,
-    ASSET_DIR, ALPHA, MODEL_CLASSES, MODEL_INPUT_SIZE,
+    WEAPON_HUD_1, WEAPON_HUD_2, ATTACHMENT_SLOTS, IN_TAB, POSTURE, FIRE_MODE,
+    ASSET_DIR, ALPHA,
 )
-from dl_models.icon_merging import alpha_blend, dewhite, blend_tab_background, blend_attachment
+from dl_models.icon_merging import (
+    alpha_blend, dewhite, blend_tab_background, blend_attachment, blend_status_bar,
+)
 
 
 # ============================================================
@@ -134,7 +136,13 @@ WEAPON_ICON_MAP = {
     'Item_Weapon_Win1894_C_w.png':     'win94',
 }
 
-WEAPON_CLASSES = MODEL_CLASSES['gun_name']
+WEAPON_CLASSES = [
+    '98k', 'ace32', 'akm', 'aug', 'awm', 'dbs', 'dp28', 'g36c', 'groza', 'k2',
+    'lynx', 'm16', 'm24', 'm249', 'm416', 'm762', 'mg3', 'mini14', 'mk12', 'mk14',
+    'mk47', 'mosin', 'mp5k', 'mp9', 'o12', 'p90', 'pp19', 'qbu', 'qbz', 's12k',
+    's1897', 's686', 'scar', 'sks', 'slr', 'tommy', 'ump45', 'uzi', 'vector',
+    'vss', 'win94',
+]
 _ICON_HEIGHT = 53
 
 
@@ -185,7 +193,7 @@ class WeaponIconLayout(RegionLayout):
 
     @property
     def model_input_hw(self):
-        return tuple(MODEL_INPUT_SIZE['gun_name'])
+        return (53, 206)
 
     @property
     def in_channels(self):
@@ -329,6 +337,78 @@ class AttachmentIconLayout(RegionLayout):
 
 
 # ============================================================
+# Posture icons (bottom HUD, left of health bar)
+# ============================================================
+
+POSTURE_CLASSES = ['standing', 'crouching', 'prone']
+
+POSTURE_ICON_MAP = {
+    'posture_standing_icon_bgra.png':  'standing',
+    'posture_crouching_icon_bgra.png': 'crouching',
+    'posture_prone_icon_bgra.png':     'prone',
+}
+
+
+class PostureIconLayout(RegionLayout):
+    """
+    姿态图标 (底部 HUD, 血条左侧)
+
+    - 白色图标, alpha 通道自带强度 (~0.75 peak)
+    - 合成: output = icon_alpha * 255 + (1 - icon_alpha) * background
+    - 3 类 + 背景 = 4 类
+    """
+
+    def __init__(self, icons_dir=None, bg_prob=0.15, jitter_px=2):
+        if icons_dir is None:
+            icons_dir = os.path.join(os.path.dirname(__file__), '..', ASSET_DIR['posture'])
+        self.bg_prob = bg_prob
+        self.jitter_px = jitter_px
+
+        self.icons = {}
+        for fname, cls in POSTURE_ICON_MAP.items():
+            bgra = load_bgra(os.path.join(icons_dir, fname))
+            if bgra is None:
+                continue
+            self.icons[cls] = (
+                bgra[:, :, :3],
+                bgra[:, :, 3].astype(np.float32) / 255.0,
+            )
+
+        self.available = [c for c in POSTURE_CLASSES if c in self.icons]
+        print(f'Loaded {len(self.available)} posture icons')
+
+    # ── WHERE ──
+
+    def get_slot_rect(self):
+        return (POSTURE['x1'], POSTURE['y1'], POSTURE['x2'], POSTURE['y2'])
+
+    # ── META ──
+
+    @property
+    def label_names(self):
+        return {'posture': len(POSTURE_CLASSES) + 1}  # 0=background
+
+    @property
+    def crop_hw(self):
+        return (POSTURE['y2'] - POSTURE['y1'], POSTURE['x2'] - POSTURE['x1'])
+
+    # ── HOW ──
+
+    def apply(self, canvas):
+        if random.random() < self.bg_prob:
+            return {'posture': 0}
+
+        cls_name = random.choice(self.available)
+        icon_bgr, icon_alpha = self.icons[cls_name]
+
+        jx = random.randint(-self.jitter_px, self.jitter_px)
+        jy = random.randint(-self.jitter_px, self.jitter_px)
+        alpha_blend(canvas, icon_bgr, icon_alpha, jx, jy)
+
+        return {'posture': POSTURE_CLASSES.index(cls_name) + 1}
+
+
+# ============================================================
 # Tab detection ("Type" text region)
 # ============================================================
 
@@ -378,13 +458,103 @@ class TabDetectLayout(RegionLayout):
 
 
 # ============================================================
+# Fire mode icons (bottom HUD, left of ammo count)
+# ============================================================
+
+FIRE_MODE_CLASSES = ['single', 'burst2', 'burst3', 'full', 'single_bot', 'high']
+
+FIRE_MODE_ICON_MAP = {
+    'fire_mode_single.png':     'single',
+    'fire_mode_burst2.png':     'burst2',
+    'fire_mode_burst3.png':     'burst3',
+    'fire_mode_full.png':       'full',
+    'fire_mode_single_bot.png': 'single_bot',
+    'fire_mode_high.png':       'high',
+}
+
+
+class FireModeLayout(RegionLayout):
+    """
+    开火模式图标 (底部 HUD, 弹药数左侧)
+
+    - 白色图标, BGRA alpha 通道 = 亮度
+    - 合成: blend_status_bar (模糊 + 暗化 + 白色叠加)
+    - 6 类 + 背景 = 7 类
+    """
+
+    def __init__(self, icons_dir=None, bg_prob=0.15, jitter_px=2):
+        if icons_dir is None:
+            icons_dir = os.path.join(os.path.dirname(__file__), '..', ASSET_DIR['fire_mode'])
+        self.bg_prob = bg_prob
+        self.jitter_px = jitter_px
+
+        self.icons = {}
+        for fname, cls in FIRE_MODE_ICON_MAP.items():
+            bgra = load_bgra(os.path.join(icons_dir, fname))
+            if bgra is None:
+                continue
+            self.icons[cls] = bgra[:, :, 3].astype(np.float32) / 255.0
+
+        self.available = [c for c in FIRE_MODE_CLASSES if c in self.icons]
+        print(f'Loaded {len(self.available)} fire mode icons')
+
+    # ── WHERE ──
+
+    def get_slot_rect(self):
+        return (FIRE_MODE['x1'], FIRE_MODE['y1'], FIRE_MODE['x2'], FIRE_MODE['y2'])
+
+    # ── META ──
+
+    @property
+    def label_names(self):
+        return {'fire_mode': len(FIRE_MODE_CLASSES) + 1}  # 0=background
+
+    @property
+    def crop_hw(self):
+        return (FIRE_MODE['y2'] - FIRE_MODE['y1'], FIRE_MODE['x2'] - FIRE_MODE['x1'])
+
+    # ── HOW ──
+
+    def apply(self, canvas):
+        if random.random() < self.bg_prob:
+            # 50% raw background, 50% blur+darken without icon
+            if random.random() < 0.5:
+                zero_alpha = np.zeros(canvas.shape[:2], dtype=np.float32)
+                blend_status_bar(canvas, zero_alpha, 0, 0)
+            return {'fire_mode': 0}
+
+        cls_name = random.choice(self.available)
+        icon_alpha = self.icons[cls_name]
+
+        jx = random.randint(-self.jitter_px, self.jitter_px)
+        jy = random.randint(-self.jitter_px, self.jitter_px)
+
+        # Build full-canvas alpha: entire region gets blur+darken, icon placed at offset
+        ch, cw = canvas.shape[:2]
+        full_alpha = np.zeros((ch, cw), dtype=np.float32)
+        ih, iw = icon_alpha.shape[:2]
+        # Clip to canvas bounds
+        sx1, sy1 = max(0, -jx), max(0, -jy)
+        dx1, dy1 = max(0, jx), max(0, jy)
+        dx2 = min(cw, jx + iw)
+        dy2 = min(ch, jy + ih)
+        full_alpha[dy1:dy2, dx1:dx2] = icon_alpha[sy1:sy1+(dy2-dy1), sx1:sx1+(dx2-dx1)]
+
+        blend_status_bar(canvas, full_alpha, 0, 0)
+
+        return {'fire_mode': FIRE_MODE_CLASSES.index(cls_name) + 1}
+
+
+# ============================================================
 # Registry
 # ============================================================
 
 LAYOUTS = {
     'weapon': WeaponIconLayout,
     'attachment': AttachmentIconLayout,
+    'posture': PostureIconLayout,
     'tab_detect': TabDetectLayout,
+    'fire_mode': FireModeLayout,
 }
 
 def get_layout(name, **kwargs):
