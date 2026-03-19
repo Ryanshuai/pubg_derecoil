@@ -175,11 +175,10 @@ class HUDPoller:
             self._update(f'weapon_{slot_id}', gun_name)
             self._update(f'weapon_{slot_id}_hl', hl_name)
 
-            # Weapon or highlight changed → GT no longer reliable
+            # Weapon name changed → GT no longer reliable
+            # (highlight change = just switching active slot, weapons unchanged)
             if gun_name != prev_name and prev_name:
                 weapon_detector.invalidate_gt(f'weapon_{slot_id} changed {prev_name}->{gun_name}')
-            elif hl_name != prev_hl and prev_hl:
-                weapon_detector.invalidate_gt(f'highlight_{slot_id} changed {prev_hl}->{hl_name}')
 
     def _detect_fire_mode(self):
         crop = win32_cap(fire_mode_detector.SLOT_RECT)

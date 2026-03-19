@@ -146,7 +146,7 @@ class Robot:
         self.weapon_2.set_seq()
 
     def on_press(self, key):
-        if key == keyboard.Key.f13:
+        if key in [keyboard.Key.f13, keyboard.Key.esc]:
             self.shutdown()
             return False  # stops pynput listener → unblocks join()
 

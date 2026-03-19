@@ -56,8 +56,6 @@ HEAD_SIZES = {'gun_name': len(WEAPON_CLASSES) + 1, 'highlighted': 3}
 
 FEEDBACK_BASE = os.path.join(os.path.dirname(__file__), '..', 'InGameScreenshot', 'weapon')
 FEEDBACK_GT_DIR = os.path.join(FEEDBACK_BASE, 'gt_mismatch')
-FEEDBACK_OCR_DIR = os.path.join(FEEDBACK_BASE, 'ocr_changed')
-FEEDBACK_HL_DIR = os.path.join(FEEDBACK_BASE, 'highlight')
 FEEDBACK_HARD_DIR = os.path.join(FEEDBACK_BASE, 'hard_case')
 OCR_CONF_THRESHOLD = 0.6
 
@@ -78,11 +76,9 @@ class WeaponDetector:
         # Tab OCR ground truth
         self._gt = {'weapon_1': '', 'weapon_2': ''}
         self._gt_valid = False
-        self._ocr_cache = {'weapon_1': '', 'weapon_2': ''}
+        self._ocr_votes = {'weapon_1': {}, 'weapon_2': {}}  # {name: count}
 
-        # Track highlight state for mutex check
-        self._hl = {1: '', 2: ''}
-        self._last_crops = {1: None, 2: None}
+
 
 
     # ── OCR ──
@@ -115,34 +111,26 @@ class WeaponDetector:
     # ── Tab OCR ground truth ──
 
     def update_ocr_cache(self):
-        """Called while Tab is open. Read weapon names and cache them.
-        Empty OCR = no weapon → cache cleared. Changed = save for review."""
+        """Called while Tab is open. Accumulate votes for each weapon name."""
         ocr = self.ocr_from_screen()
         for slot_id in [1, 2]:
             name, conf = ocr[slot_id]
             key = f'weapon_{slot_id}'
-            prev = self._ocr_cache.get(key, '')
 
             if name and conf > OCR_CONF_THRESHOLD:
-                # Got a valid name
-                if prev and prev != name:
-                    crop = win32_cap(OCR_RECTS[slot_id])
-                    os.makedirs(FEEDBACK_OCR_DIR, exist_ok=True)
-                    h = _img_hash(crop)
-                    fname = f'was={prev}_now={name}_{h}.png'
-                    path = os.path.join(FEEDBACK_OCR_DIR, fname)
-                    if not os.path.exists(path):
-                        cv2.imwrite(path, crop)
-                self._ocr_cache[key] = name
-            else:
-                # OCR empty → no weapon in this slot
-                self._ocr_cache[key] = ''
+                votes = self._ocr_votes[key]
+                votes[name] = votes.get(name, 0) + 1
 
     def lock_ocr_gt(self):
-        """Called when Tab closes. Lock cached OCR as ground truth.
-        Empty cache = no weapon in that slot, GT updated accordingly."""
+        """Called when Tab closes. Pick name with most votes as GT.
+        No votes = no weapon in that slot."""
         for slot_key in ['weapon_1', 'weapon_2']:
-            self._gt[slot_key] = self._ocr_cache.get(slot_key, '')
+            votes = self._ocr_votes[slot_key]
+            if votes:
+                self._gt[slot_key] = max(votes, key=votes.get)
+            else:
+                self._gt[slot_key] = ''
+            self._ocr_votes[slot_key] = {}  # reset for next Tab
         self._gt_valid = True
         print(f'[GT weapon] locked: weapon_1={self._gt["weapon_1"]!r}, '
               f'weapon_2={self._gt["weapon_2"]!r}')
@@ -185,20 +173,11 @@ class WeaponDetector:
             # GT mismatch (only when GT is valid)
             if gt and gt != model_name:
                 self._save_gt_mismatch(gt, model_name, hl_name, crop)
-                self._save_highlight(gt, model_name, hl_name, crop)
 
             # Hard case (only when GT is available)
             elif gt and HARD_CASE_CONF[0] < gun_conf < HARD_CASE_CONF[1]:
                 self._save_hard_case(gt, model_name, hl_name, gun_conf, crop)
-                self._save_highlight(gt, model_name, hl_name, crop)
 
-        # Track highlight + crop for mutex check
-        self._hl[slot_id] = hl_name
-        self._last_crops[slot_id] = crop
-
-        # Highlight mutex: both slots can't be highlighted
-        if self._hl[1] == 'highlighted' and self._hl[2] == 'highlighted':
-            self._save_highlight('unk', model_name, hl_name, crop)
 
         # Output: prefer valid GT, fallback to model
         out_name = gt if (gt and self._gt_valid) else model_name
@@ -214,16 +193,6 @@ class WeaponDetector:
         h = _img_hash(crop)
         fname = f'ocr_{ocr_name}_dl_{model_name}_{hl_tag}_{h}.png'
         path = os.path.join(FEEDBACK_GT_DIR, fname)
-        if not os.path.exists(path):
-            cv2.imwrite(path, crop)
-
-    def _save_highlight(self, ocr_name, model_name, hl_name, crop):
-        """Save highlight info: ocr_A_dl_B_l/h_<hash>.png"""
-        os.makedirs(FEEDBACK_HL_DIR, exist_ok=True)
-        hl_tag = 'h' if hl_name == 'highlighted' else 'l'
-        h = _img_hash(crop)
-        fname = f'ocr_{ocr_name}_dl_{model_name}_{hl_tag}_{h}.png'
-        path = os.path.join(FEEDBACK_HL_DIR, fname)
         if not os.path.exists(path):
             cv2.imwrite(path, crop)
 
