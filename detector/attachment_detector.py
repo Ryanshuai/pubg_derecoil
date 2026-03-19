@@ -21,7 +21,7 @@ import torch.nn.functional as F
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from config import ATTACHMENT_SLOTS, HARD_CASE_CONF
 from detector.cropper import win32_cap
-from detector.utils import load_model as _load, crop_to_tensor
+from detector.utils import load_model as _load, crop_to_tensor, img_hash as _img_hash
 from dl_models.icon_layout import ATTACHMENT_CLASSES
 
 # ── Slot → valid attachment mapping ──
@@ -54,8 +54,6 @@ HEAD_SIZES = {'attachment': len(ATTACHMENT_CLASSES) + 1}
 
 # Hard case feedback
 FEEDBACK_DIR = os.path.join(os.path.dirname(__file__), '..', 'InGameScreenshot', 'attachment')
-_feedback_idx = 0
-
 
 def load_model(device):
     return _load(MODEL_PATH, HEAD_SIZES, device, hidden_dim=512)
@@ -103,18 +101,20 @@ def classify_slot(model, crop, slot_name, device):
     if unconstrained_idx != best_global and unconstrained_idx > 0:
         unc_name = ATTACHMENT_CLASSES[unconstrained_idx - 1]
         os.makedirs(FEEDBACK_DIR, exist_ok=True)
-        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-        fname = f'{_feedback_idx:04d}_{ts}_{slot_name}_slot_violation_wants={unc_name}_constrained={name or "empty"}.png'
-        cv2.imwrite(os.path.join(FEEDBACK_DIR, fname), crop)
-        _feedback_idx += 1
+        h = _img_hash(crop)
+        fname = f'violation_{slot_name}_wants={unc_name}_got={name or "empty"}_{h}.png'
+        path = os.path.join(FEEDBACK_DIR, fname)
+        if not os.path.exists(path):
+            cv2.imwrite(path, crop)
 
     # Hard case: model is uncertain → save for labeling
     elif HARD_CASE_CONF[0] < conf < HARD_CASE_CONF[1] and name:
         os.makedirs(FEEDBACK_DIR, exist_ok=True)
-        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-        fname = f'{_feedback_idx:04d}_{ts}_{slot_name}_pred={name}_conf={conf:.2f}.png'
-        cv2.imwrite(os.path.join(FEEDBACK_DIR, fname), crop)
-        _feedback_idx += 1
+        h = _img_hash(crop)
+        fname = f'{slot_name}_{name}_{h}.png'
+        path = os.path.join(FEEDBACK_DIR, fname)
+        if not os.path.exists(path):
+            cv2.imwrite(path, crop)
 
     return name
 

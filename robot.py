@@ -146,9 +146,9 @@ class Robot:
         self.weapon_2.set_seq()
 
     def on_press(self, key):
-        if key in [keyboard.Key.f12, keyboard.Key.esc]:
-            self.stop_press = True
-            self.running = False
+        if key == keyboard.Key.f13:
+            self.shutdown()
+            return False  # stops pynput listener → unblocks join()
 
         if key == keyboard.Key.f5:
             threading.Thread(target=self._save_keyframe, daemon=True).start()
@@ -169,8 +169,11 @@ class Robot:
                 self.stop_press = True
 
     def shutdown(self):
-        self.poller.stop()
+        print('[robot] shutting down...', flush=True)
+        self.stop_press = True
         self.running = False
+        self.poller.stop()
+        self.mouse_listener.stop()
 
 
 if __name__ == '__main__':

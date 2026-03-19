@@ -15,7 +15,7 @@ import torch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from config import IN_TAB
 from detector.cropper import win32_cap
-from detector.utils import load_model as _load, crop_to_tensor_4ch
+from detector.utils import load_model as _load, crop_to_tensor_4ch, img_hash as _img_hash
 
 # Screen rect: (y, x, h, w) for win32_cap
 SLOT_RECT = (IN_TAB['y1'], IN_TAB['x1'],
@@ -31,7 +31,6 @@ COUNT_MIN = 150
 COUNT_MAX = 400
 
 FEEDBACK_DIR = os.path.join(os.path.dirname(__file__), '..', 'InGameScreenshot', 'tab')
-_feedback_idx = 0
 
 
 def load_model(device):
@@ -57,13 +56,13 @@ def classify(model, crop, device):
     # Model says open but pixels say closed → model may be wrong, save feedback
     if model_open and not pixels_open:
         os.makedirs(FEEDBACK_DIR, exist_ok=True)
-        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-        m = 'open' if model_open else 'closed'
-        p = 'open' if pixels_open else 'closed'
-        fname = f'{_feedback_idx:04d}_{ts}_tab_model={m}_pixels={p}_count={bright_count}.png'
-        cv2.imwrite(os.path.join(FEEDBACK_DIR, fname), crop)
-        _feedback_idx += 1
-        print(f'[tab feedback] model={m}, pixels={p}, count={bright_count}')
+        gt = 'closed'  # pixels say closed = GT
+        dl = 'open'    # model says open
+        h = _img_hash(crop)
+        fname = f'gt_{gt}_dl_{dl}_{h}.png'
+        path = os.path.join(FEEDBACK_DIR, fname)
+        if not os.path.exists(path):
+            cv2.imwrite(path, crop)
 
     return model_open
 

@@ -6,8 +6,6 @@ Hard case mining: saves crops with confidence 0.3~0.8 for later labeling.
 import os
 import sys
 import time
-from datetime import datetime
-
 import cv2
 import torch
 import torch.nn.functional as F
@@ -15,7 +13,7 @@ import torch.nn.functional as F
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from config import FIRE_MODE, HARD_CASE_CONF
 from detector.cropper import win32_cap
-from detector.utils import load_model as _load, crop_to_tensor_4ch
+from detector.utils import load_model as _load, crop_to_tensor_4ch, img_hash as _img_hash
 from dl_models.icon_layout import FIRE_MODE_CLASSES
 
 # Screen rect: (y, x, h, w) for win32_cap
@@ -28,7 +26,6 @@ HEAD_SIZES = {'fire_mode': len(FIRE_MODE_CLASSES) + 1}
 
 # Hard case feedback
 FEEDBACK_DIR = os.path.join(os.path.dirname(__file__), '..', 'InGameScreenshot', 'fire_mode')
-_feedback_idx = 0
 
 
 def load_model(device):
@@ -36,9 +33,7 @@ def load_model(device):
 
 
 def classify(model, crop, device):
-    """Classify fire mode. Saves hard cases (confidence 0.3~0.8)."""
-    global _feedback_idx
-
+    """Classify fire mode. Saves hard cases with hash-based dedup."""
     t = crop_to_tensor_4ch(crop, device)
     with torch.no_grad():
         out = model(t)
@@ -52,10 +47,11 @@ def classify(model, crop, device):
     # Hard case: model is uncertain → save for labeling
     if HARD_CASE_CONF[0] < conf < HARD_CASE_CONF[1] and name:
         os.makedirs(FEEDBACK_DIR, exist_ok=True)
-        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-        fname = f'{_feedback_idx:04d}_{ts}_pred={name}_conf={conf:.2f}.png'
-        cv2.imwrite(os.path.join(FEEDBACK_DIR, fname), crop)
-        _feedback_idx += 1
+        h = _img_hash(crop)
+        fname = f'{name}_{h}.png'
+        path = os.path.join(FEEDBACK_DIR, fname)
+        if not os.path.exists(path):
+            cv2.imwrite(path, crop)
 
     return name
 

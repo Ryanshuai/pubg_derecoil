@@ -13,9 +13,9 @@ POSTURE = {
 # Fire mode icon (bottom-center HUD, left of ammo count)
 FIRE_MODE = {
     'x1': 1626,
-    'y1': 1318,
+    'y1': 1317,
     'x2': 1682,
-    'y2': 1361,
+    'y2': 1360,
 }
 
 # Weapon watermark HUD (bottom-right, normal gameplay, NOT Tab view)

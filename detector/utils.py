@@ -1,8 +1,22 @@
 """Shared utilities for all detectors."""
+import cv2
 import numpy as np
 import torch
 from dl_models.train import MultiHeadMobileNet
 from dl_models.icon_merging import dewhite
+
+
+def img_hash(img, hash_size=4):
+    """Low-resolution perceptual hash — similar images get same hash.
+    hash_size=4 → 16 bits → 4 hex chars → ~65K buckets. Auto dedup."""
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+    resized = cv2.resize(gray, (hash_size, hash_size), interpolation=cv2.INTER_AREA)
+    mean = resized.mean()
+    bits = (resized > mean).flatten()
+    val = 0
+    for b in bits:
+        val = (val << 1) | int(b)
+    return f'{val:0{hash_size * hash_size // 4}x}'
 
 
 def load_model(path, head_sizes, device, in_channels=3, hidden_dim=128):
