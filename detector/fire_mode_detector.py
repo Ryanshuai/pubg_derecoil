@@ -1,16 +1,19 @@
 """Real-time fire mode detector.
 
 Captures fire mode icon region from screen, classifies current fire mode.
-Prints only when state changes.
+Hard case mining: saves crops with confidence 0.3~0.8 for later labeling.
 """
 import os
 import sys
 import time
+from datetime import datetime
 
 import cv2
+import torch
+import torch.nn.functional as F
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from config import FIRE_MODE
+from config import FIRE_MODE, HARD_CASE_CONF
 from detector.cropper import win32_cap
 from detector.utils import load_model as _load, crop_to_tensor_4ch
 from dl_models.icon_layout import FIRE_MODE_CLASSES
@@ -23,22 +26,41 @@ SLOT_RECT = (FIRE_MODE['y1'], FIRE_MODE['x1'],
 MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'dl_models', 'fire_mode.pth.tar')
 HEAD_SIZES = {'fire_mode': len(FIRE_MODE_CLASSES) + 1}
 
+# Hard case feedback
+FEEDBACK_DIR = os.path.join(os.path.dirname(__file__), '..', 'InGameScreenshot', 'fire_mode')
+_feedback_idx = 0
+
 
 def load_model(device):
     return _load(MODEL_PATH, HEAD_SIZES, device, in_channels=4)
 
 
 def classify(model, crop, device):
-    import torch
+    """Classify fire mode. Saves hard cases (confidence 0.3~0.8)."""
+    global _feedback_idx
+
     t = crop_to_tensor_4ch(crop, device)
     with torch.no_grad():
         out = model(t)
-    idx = out['fire_mode'].argmax(1).item()
-    return FIRE_MODE_CLASSES[idx - 1] if idx > 0 else ''
+
+    logits = out['fire_mode'][0]
+    probs = F.softmax(logits, dim=0)
+    conf = probs.max().item()
+    idx = probs.argmax().item()
+    name = FIRE_MODE_CLASSES[idx - 1] if idx > 0 else ''
+
+    # Hard case: model is uncertain → save for labeling
+    if HARD_CASE_CONF[0] < conf < HARD_CASE_CONF[1] and name:
+        os.makedirs(FEEDBACK_DIR, exist_ok=True)
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        fname = f'{_feedback_idx:04d}_{ts}_pred={name}_conf={conf:.2f}.png'
+        cv2.imwrite(os.path.join(FEEDBACK_DIR, fname), crop)
+        _feedback_idx += 1
+
+    return name
 
 
 def main():
-    import torch
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Device: {device}')
     model = load_model(device)
@@ -48,10 +70,6 @@ def main():
     prev = None
     hz = 5
 
-    debug_dir = 'temp_debug'
-    os.makedirs(debug_dir, exist_ok=True)
-    debug_idx = 0
-
     while True:
         crop = win32_cap(SLOT_RECT)
         name = classify(model, crop, device)
@@ -60,10 +78,6 @@ def main():
             prev = name
             label = name if name else '(none)'
             print(f'[fire_mode] {label}')
-
-            fname = f'{debug_idx:04d}_fire_mode_{name or "none"}.png'
-            cv2.imwrite(os.path.join(debug_dir, fname), crop)
-            debug_idx += 1
 
         time.sleep(1.0 / hz)
 

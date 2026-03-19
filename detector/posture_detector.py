@@ -13,7 +13,7 @@ import torch
 import torch.nn.functional as F
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from config import POSTURE
+from config import POSTURE, HARD_CASE_CONF
 from detector.cropper import win32_cap
 from detector.utils import load_model as _load, crop_to_tensor_4ch
 from dl_models.icon_layout import POSTURE_CLASSES
@@ -28,7 +28,6 @@ HEAD_SIZES = {'posture': len(POSTURE_CLASSES) + 1}
 
 # Hard case feedback
 FEEDBACK_DIR = os.path.join(os.path.dirname(__file__), '..', 'InGameScreenshot', 'posture')
-CONFIDENCE_THRESHOLD = 0.8
 _feedback_idx = 0
 
 
@@ -51,7 +50,7 @@ def classify(model, crop, device):
     name = POSTURE_CLASSES[idx - 1] if idx > 0 else ''
 
     # Hard case: model is uncertain (not bg, not confident) → save for labeling
-    if 0.3 < conf < CONFIDENCE_THRESHOLD and name:
+    if HARD_CASE_CONF[0] < conf < HARD_CASE_CONF[1] and name:
         os.makedirs(FEEDBACK_DIR, exist_ok=True)
         ts = datetime.now().strftime('%Y%m%d_%H%M%S')
         fname = f'{_feedback_idx:04d}_{ts}_pred={name}_conf={conf:.2f}.png'

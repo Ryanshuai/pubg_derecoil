@@ -5,17 +5,21 @@ Only runs when Tab is open. Prints on state change.
 
 Inference constraint: each slot only considers its valid attachment subset,
 taking argmax over allowed classes rather than all 56.
+
+Hard case mining: saves crops with confidence 0.3~0.8 for later labeling.
 """
 import os
 import sys
 import time
+from datetime import datetime
 
 import cv2
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from config import ATTACHMENT_SLOTS
+from config import ATTACHMENT_SLOTS, HARD_CASE_CONF
 from detector.cropper import win32_cap
 from detector.utils import load_model as _load, crop_to_tensor
 from dl_models.icon_layout import ATTACHMENT_CLASSES
@@ -48,6 +52,10 @@ def _slot_rect(x1, y1, x2, y2):
 MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'dl_models', 'weapon_attachment.pth.tar')
 HEAD_SIZES = {'attachment': len(ATTACHMENT_CLASSES) + 1}
 
+# Hard case feedback
+FEEDBACK_DIR = os.path.join(os.path.dirname(__file__), '..', 'InGameScreenshot', 'attachment')
+_feedback_idx = 0
+
 
 def load_model(device):
     return _load(MODEL_PATH, HEAD_SIZES, device, hidden_dim=512)
@@ -65,7 +73,10 @@ def classify_slot(model, crop, slot_name, device):
 
     Returns attachment class name or '' if empty.
     Uses slot-constrained argmax: only considers valid attachments for this slot type.
+    Saves hard cases (confidence 0.3~0.8) for later labeling.
     """
+    global _feedback_idx
+
     if is_slot_empty(crop):
         return ''
 
@@ -79,12 +90,33 @@ def classify_slot(model, crop, slot_name, device):
     # Constrained argmax: only consider valid indices for this slot
     valid_idx = SLOT_VALID_IDX[slot_name]
     valid_logits = logits[valid_idx]
-    best_local = valid_logits.argmax().item()
+    valid_probs = F.softmax(valid_logits, dim=0)
+    conf = valid_probs.max().item()
+    best_local = valid_probs.argmax().item()
     best_global = valid_idx[best_local]
 
-    if best_global == 0:
-        return ''
-    return ATTACHMENT_CLASSES[best_global - 1]
+    name = ATTACHMENT_CLASSES[best_global - 1] if best_global > 0 else ''
+
+    # Slot constraint check: unconstrained vs constrained argmax
+    all_probs = F.softmax(logits, dim=0)
+    unconstrained_idx = all_probs.argmax().item()
+    if unconstrained_idx != best_global and unconstrained_idx > 0:
+        unc_name = ATTACHMENT_CLASSES[unconstrained_idx - 1]
+        os.makedirs(FEEDBACK_DIR, exist_ok=True)
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        fname = f'{_feedback_idx:04d}_{ts}_{slot_name}_slot_violation_wants={unc_name}_constrained={name or "empty"}.png'
+        cv2.imwrite(os.path.join(FEEDBACK_DIR, fname), crop)
+        _feedback_idx += 1
+
+    # Hard case: model is uncertain → save for labeling
+    elif HARD_CASE_CONF[0] < conf < HARD_CASE_CONF[1] and name:
+        os.makedirs(FEEDBACK_DIR, exist_ok=True)
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        fname = f'{_feedback_idx:04d}_{ts}_{slot_name}_pred={name}_conf={conf:.2f}.png'
+        cv2.imwrite(os.path.join(FEEDBACK_DIR, fname), crop)
+        _feedback_idx += 1
+
+    return name
 
 
 def detect_all_slots(model, gun_id, device):

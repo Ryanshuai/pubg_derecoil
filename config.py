@@ -33,6 +33,9 @@ WEAPON_HUD_2 = {  # secondary (top, unselected)
 }
 
 
+# Hard case mining: save crops when model confidence is in this range
+HARD_CASE_CONF = (0.4, 0.7)
+
 # Alpha blending values for synthetic data generation
 ALPHA = {
     'weapon_highlighted':     0.80,   # selected weapon icon

@@ -82,9 +82,6 @@ class KeyFeedback:
             if crop is not None:
                 self._save(trigger, state_key, crop, pred_before, pred_after)
 
-        # Notify check modules to update ground truth
-        self.poller.notify_key(trigger.lower())
-
         # Log
         changes = []
         for state_key in regions:

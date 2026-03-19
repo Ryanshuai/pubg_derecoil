@@ -26,11 +26,30 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 # ── Import detector modules ──
 from detector import (
     weapon_detector, fire_mode_detector, posture_detector,
-    tab_detector, attachment_detector, weapon_name_detector,
+    tab_detector, attachment_detector,
 )
 from detector.cropper import win32_cap
-from detector.checks import ALL_CHECKS, ALL_KEY_HANDLERS
 from config import ATTACHMENT_SLOTS
+from weapon import (
+    single_guns, full_guns, single_burst_guns,
+    single_full_guns, single_burst_full_guns,
+)
+
+# ── Fire mode constraints per weapon ──
+WEAPON_FIRE_MODES = {}
+for g in single_guns:
+    WEAPON_FIRE_MODES[g] = {'single', 'single_bot_sniper', 'single_bot_shotgun'}
+for g in full_guns:
+    WEAPON_FIRE_MODES[g] = {'full'}
+for g in single_burst_guns:
+    WEAPON_FIRE_MODES[g] = {'single', 'single_bot_sniper', 'single_bot_shotgun', 'burst2', 'burst3'}
+for g in single_full_guns:
+    WEAPON_FIRE_MODES[g] = {'single', 'single_bot_sniper', 'single_bot_shotgun', 'full'}
+for g in single_burst_full_guns:
+    WEAPON_FIRE_MODES[g] = {'single', 'single_bot_sniper', 'single_bot_shotgun', 'burst2', 'burst3', 'full'}
+WEAPON_FIRE_MODES['mg3'] = {'full', 'high'}
+WEAPON_FIRE_MODES['mp9'] = {'single', 'single_bot_sniper', 'single_bot_shotgun', 'burst2', 'full'}
+WEAPON_FIRE_MODES['p90'] = {'full'}
 
 # ── Screen rects (for crop caching / key_feedback) ──
 RECTS = {
@@ -43,7 +62,7 @@ RECTS = {
 
 SLOT_NAMES = ['scope', 'muzzle', 'grip', 'magazine', 'stock']
 
-FEEDBACK_DIR = os.path.join(os.path.dirname(__file__), '..', 'InGameScreenshot')
+FEEDBACK_DIR = os.path.join(os.path.dirname(__file__), '..', 'InGameScreenshot', 'constraints')
 
 
 class HUDPoller:
@@ -60,7 +79,6 @@ class HUDPoller:
         self.posture_model = posture_detector.load_model(self.device)
         self.tab_model = tab_detector.load_model(self.device)
         self.attach_model = attachment_detector.load_model(self.device)
-        self.ocr_detector = weapon_name_detector.WeaponNameDetector()
 
         # Feedback
         os.makedirs(FEEDBACK_DIR, exist_ok=True)
@@ -118,23 +136,30 @@ class HUDPoller:
         print(f'[Feedback] {violation} | {pred_str}')
 
     def _run_checks(self):
-        """Run all constraint checks, save feedback on violations."""
-        for check_fn in ALL_CHECKS:
-            try:
-                violations = check_fn(self.state, self._crops, None)
-                for violation, crops, preds in violations:
-                    self._save_feedback(violation, crops, preds)
-            except Exception as e:
-                print(f'[HUDPoller] check error: {e}')
+        """Run cross-detector constraint checks, save feedback on violations."""
+        s = self.state
 
-    def notify_key(self, key):
-        """Called by key_feedback after a key press + settle delay.
-        Forwards to all check modules' on_key handlers."""
-        for handler in ALL_KEY_HANDLERS:
-            try:
-                handler(key, self)
-            except Exception as e:
-                print(f'[HUDPoller] on_key error: {e}')
+        # Fire mode vs active weapon type
+        if not s['tab_open']:
+            active_weapon = ''
+            if s['weapon_1_hl'] == 'highlighted':
+                active_weapon = s['weapon_1']
+            elif s['weapon_2_hl'] == 'highlighted':
+                active_weapon = s['weapon_2']
+
+            if active_weapon and s['fire_mode']:
+                valid_modes = WEAPON_FIRE_MODES.get(active_weapon)
+                if valid_modes and s['fire_mode'] not in valid_modes:
+                    self._save_feedback('invalid_fire_mode', {
+                        'fire_mode': self._crops.get('fire_mode'),
+                        'weapon_1': self._crops.get('weapon_1'),
+                        'weapon_2': self._crops.get('weapon_2'),
+                    }, {
+                        'fire_mode': s['fire_mode'],
+                        'active_gun': active_weapon,
+                    })
+
+
 
     # ── Detectors (delegate to modules) ──
 
@@ -143,7 +168,7 @@ class HUDPoller:
             crop = win32_cap(weapon_detector.SLOT_RECTS[slot_id])
             self._crops[f'weapon_{slot_id}'] = crop
             gun_name, hl_name = weapon_detector.classify_slot(
-                self.weapon_model, crop, self.device)
+                self.weapon_model, crop, self.device, slot_id)
             self._update(f'weapon_{slot_id}', gun_name)
             self._update(f'weapon_{slot_id}_hl', hl_name)
 
@@ -166,9 +191,9 @@ class HUDPoller:
         is_open = tab_detector.classify(self.tab_model, crop, self.device)
         self._update('tab_open', is_open)
 
-        # Tab just closed → notify checks to lock ground truth
+        # Tab just closed → lock weapon OCR ground truth
         if was_open and not is_open:
-            self.notify_key('tab_close')
+            weapon_detector.notify_tab_close()
 
     def _detect_attachments(self):
         if not self.state['tab_open']:
