@@ -478,14 +478,16 @@ class TabDetectLayout(RegionLayout):
 
 FIRE_MODE_CLASSES = ['single', 'burst2', 'burst3', 'full', 'single_bot_sniper', 'single_bot_shotgun', 'high']
 
-FIRE_MODE_ICON_MAP = {
-    'fire_mode_single.png':             'single',
-    'fire_mode_burst2.png':             'burst2',
-    'fire_mode_burst3.png':             'burst3',
-    'fire_mode_full.png':               'full',
-    'fire_mode_single_bot_sniper.png':  'single_bot_sniper',
-    'fire_mode_single_bot_shotgun.png': 'single_bot_shotgun',
-    'fire_mode_high.png':               'high',
+# Two variants per class: original position + _low (shifted down 7px for new crop)
+# Training randomly picks one variant per sample
+FIRE_MODE_ICON_PAIRS = {
+    'single':             ('fire_mode_single.png', 'fire_mode_single_low.png'),
+    'burst2':             ('fire_mode_burst2.png', 'fire_mode_burst2_low.png'),
+    'burst3':             ('fire_mode_burst3.png', 'fire_mode_burst3_low.png'),
+    'full':               ('fire_mode_full.png', 'fire_mode_full_low.png'),
+    'single_bot_sniper':  ('fire_mode_single_bot_sniper.png', 'fire_mode_single_bot_sniper_low.png'),
+    'single_bot_shotgun': ('fire_mode_single_bot_shotgun.png', 'fire_mode_single_bot_shotgun_low.png'),
+    'high':               ('fire_mode_high.png', 'fire_mode_high_low.png'),
 }
 
 
@@ -495,7 +497,8 @@ class FireModeLayout(RegionLayout):
 
     - 白色图标, BGRA alpha 通道 = 亮度
     - 合成: blend_status_bar (模糊 + 暗化 + 白色叠加)
-    - 6 类 + 背景 = 7 类
+    - 每类两个模板变体 (原位 + 下移7px), 训练时随机二选一
+    - 7 类 + 背景 = 8 类
     """
 
     def __init__(self, icons_dir=None, bg_prob=0.15, jitter_px=2):
@@ -504,15 +507,19 @@ class FireModeLayout(RegionLayout):
         self.bg_prob = bg_prob
         self.jitter_px = jitter_px
 
+        # icons[cls] = [alpha_variant_1, alpha_variant_2]
         self.icons = {}
-        for fname, cls in FIRE_MODE_ICON_MAP.items():
-            bgra = load_bgra(os.path.join(icons_dir, fname))
-            if bgra is None:
-                continue
-            self.icons[cls] = bgra[:, :, 3].astype(np.float32) / 255.0
+        for cls, (fname1, fname2) in FIRE_MODE_ICON_PAIRS.items():
+            variants = []
+            for fname in (fname1, fname2):
+                bgra = load_bgra(os.path.join(icons_dir, fname))
+                if bgra is not None:
+                    variants.append(bgra[:, :, 3].astype(np.float32) / 255.0)
+            if variants:
+                self.icons[cls] = variants
 
         self.available = [c for c in FIRE_MODE_CLASSES if c in self.icons]
-        print(f'Loaded {len(self.available)} fire mode icons')
+        print(f'Loaded {len(self.available)} fire mode icons ({sum(len(v) for v in self.icons.values())} variants)')
 
     # ── WHERE ──
 
@@ -547,7 +554,7 @@ class FireModeLayout(RegionLayout):
             return {'fire_mode': 0}
 
         cls_name = random.choice(self.available)
-        icon_alpha = self.icons[cls_name]
+        icon_alpha = random.choice(self.icons[cls_name])
 
         jx = random.randint(-self.jitter_px, self.jitter_px)
         jy = random.randint(-self.jitter_px, self.jitter_px)
