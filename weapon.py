@@ -104,13 +104,22 @@ class BulletCalculator:
                 self.recoil_data[weapon] = {}
             self.recoil_data[weapon][stance] = data['shots']
 
-    def calculate_press_seq(self, gun_name, factor, stance='standing'):
+    def calculate_press_seq(self, gun_name, factor, stance='standing', has_att=False):
         """Return (dx_s, dy_s, t_s) arrays for press.py.
 
         stance: 'standing' or 'crouching' — selects the matching recoil pattern.
+        has_att: True → use '{gun_name}_att' variant if available.
         """
-        data = self.recoil_data.get(gun_name, {})
+        # Try _att variant first when has attachments
+        key = f'{gun_name}_att' if has_att else gun_name
+        data = self.recoil_data.get(key, {})
         shots = data.get(stance, data.get('standing', []))
+
+        # Fallback to base if _att not found
+        if not shots and has_att:
+            data = self.recoil_data.get(gun_name, {})
+            shots = data.get(stance, data.get('standing', []))
+
         if not shots:
             return [0], [0], [0.1]
 
@@ -141,9 +150,6 @@ class Weapon():
 
         self.all_factor = 1
         self.scope_factor = 1
-        self.muzzle_factor = 1
-        self.grip_factor = 1
-        self.butt_factor = 1
 
         self.time_interval = 0.1
         self.t_s = []
@@ -199,56 +205,27 @@ class Weapon():
                 self.scope_factor = factor_scope(4)
         elif pos == 'muzzle':
             self.muzzle = state
-            self.muzzle_factor = 1.0
-            # flash hider
-            if 'flash' in state or state.startswith('fla'):
-                self.muzzle_factor = 0.9
-            # compensator
-            elif 'compensator' in state or state.startswith('com'):
-                if self.type == 'ar':
-                    self.muzzle_factor = 0.85
-                elif self.type == 'smg':
-                    self.muzzle_factor = 0.75
-                elif self.type in ['dmr', 'sp']:
-                    self.muzzle_factor = 0.8
-            # suppressor: no recoil change
         elif pos == 'grip':
             self.grip = state
-            grip_factors = {
-                '': 1.0,
-                'thumb_grip': 0.85, 'thu': 0.85,
-                'light_grip': 1.1, 'lig': 1.1,
-                'half_grip': 0.8, 'hal': 0.8,
-                'lower_angledforegrip': 1.0, 'ang': 1.0,
-                'lower_foregrip': 0.8, 'ver': 0.8,
-                'lower_laserpointer': 1.0, 'las': 1.0,
-            }
-            self.grip_factor = grip_factors.get(state, 1.0)
         elif pos == 'butt':
             self.butt = state
-            butt_factors = {
-                '': 1.0,
-                'stock_ar_composite': 0.85, 'sto': 0.85,
-                'stock_sniperrifle_cheekpad': 0.85, 'cheek': 0.85,
-                'stock_sniperrifle_bulletloops': 1.0,
-                'stock_shotgun_bulletloops': 1.0,
-                'stock_uzi': 0.85, 'uzi': 0.85,
-                'lower_sniper_cheekpad_vss': 0.85,
-                'heavy': 0.85,
-            }
-            self.butt_factor = butt_factors.get(state, 1.0)
 
     def set_seq(self):
         # Map posture to Kava4 stance (prone uses crouching data)
         stance = 'crouching' if self.posture in ('crouching', 'prone') else 'standing'
 
+        # Has any recoil-affecting attachment → use _att curve from Kava4
+        has_att = bool(self.muzzle or self.grip or self.butt)
+
         if self.type in ['ar', 'smg', 'mg']:
-            self.all_factor = self.scope_factor * self.muzzle_factor * self.grip_factor * self.butt_factor
-            self.dx_s, self.dy_s, self.t_s = self.bullet_calculator.calculate_press_seq(self.name, self.all_factor, stance)
+            self.all_factor = self.scope_factor
+            self.dx_s, self.dy_s, self.t_s = self.bullet_calculator.calculate_press_seq(
+                self.name, self.all_factor, stance, has_att)
 
         elif self.type in ['dmr', 'shotgun']:
-            self.all_factor = self.scope_factor * self.muzzle_factor * self.grip_factor
-            self.dx_s, self.dy_s, self.t_s = self.bullet_calculator.calculate_press_seq(self.name, self.all_factor, stance)
+            self.all_factor = self.scope_factor
+            self.dx_s, self.dy_s, self.t_s = self.bullet_calculator.calculate_press_seq(
+                self.name, self.all_factor, stance, has_att)
 
 # if __name__ == '__main__':
 #     states = All_States()
