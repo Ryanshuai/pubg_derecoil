@@ -51,7 +51,7 @@ WEAPON_FIRE_MODES['mg3'] = {'full', 'high'}
 WEAPON_FIRE_MODES['mp9'] = {'single', 'single_bot_sniper', 'single_bot_shotgun', 'burst2', 'full'}
 WEAPON_FIRE_MODES['p90'] = {'full'}
 
-# ── Screen rects (for crop caching / key_feedback) ──
+# ── Screen rects (for crop caching) ──
 RECTS = {
     'weapon_1': weapon_detector.SLOT_RECTS[1],
     'weapon_2': weapon_detector.SLOT_RECTS[2],
@@ -101,6 +101,7 @@ class HUDPoller:
         self._running = False
         self._thread = None
         self._callbacks = []
+
 
     def on_change(self, callback):
         """Register callback(key, old_val, new_val) for state changes."""
@@ -167,10 +168,18 @@ class HUDPoller:
         for slot_id in [1, 2]:
             crop = win32_cap(weapon_detector.SLOT_RECTS[slot_id])
             self._crops[f'weapon_{slot_id}'] = crop
+            prev_name = self.state[f'weapon_{slot_id}']
+            prev_hl = self.state[f'weapon_{slot_id}_hl']
             gun_name, hl_name = weapon_detector.classify_slot(
                 self.weapon_model, crop, self.device, slot_id)
             self._update(f'weapon_{slot_id}', gun_name)
             self._update(f'weapon_{slot_id}_hl', hl_name)
+
+            # Weapon or highlight changed → GT no longer reliable
+            if gun_name != prev_name and prev_name:
+                weapon_detector.invalidate_gt(f'weapon_{slot_id} changed {prev_name}->{gun_name}')
+            elif hl_name != prev_hl and prev_hl:
+                weapon_detector.invalidate_gt(f'highlight_{slot_id} changed {prev_hl}->{hl_name}')
 
     def _detect_fire_mode(self):
         crop = win32_cap(fire_mode_detector.SLOT_RECT)
@@ -191,9 +200,17 @@ class HUDPoller:
         is_open = tab_detector.classify(self.tab_model, crop, self.device)
         self._update('tab_open', is_open)
 
-        # Tab just closed → lock weapon OCR ground truth
+        # Tab just opened → invalidate old GT (weapons may change in Tab)
+        if not was_open and is_open:
+            weapon_detector.invalidate_gt('tab opened')
+
+        # Tab is open → update OCR cache (weapon names visible in Tab view)
+        if is_open:
+            weapon_detector.update_ocr_cache()
+
+        # Tab just closed → lock cached OCR as ground truth
         if was_open and not is_open:
-            weapon_detector.notify_tab_close()
+            weapon_detector.lock_ocr_gt()
 
     def _detect_attachments(self):
         if not self.state['tab_open']:

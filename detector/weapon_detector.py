@@ -72,6 +72,8 @@ class WeaponDetector:
 
         # Tab OCR ground truth
         self._gt = {'weapon_1': '', 'weapon_2': ''}
+        self._gt_valid = False
+        self._ocr_cache = {'weapon_1': '', 'weapon_2': ''}
 
         # Track highlight state for mutex check
         self._hl = {1: '', 2: ''}
@@ -106,17 +108,41 @@ class WeaponDetector:
             results[slot_id] = self._ocr_recognize(crop)
         return results
 
-    # ── Tab close → lock GT ──
+    # ── Tab OCR ground truth ──
 
-    def notify_tab_close(self):
-        """Called when Tab closes. Lock OCR result as ground truth."""
+    def update_ocr_cache(self):
+        """Called while Tab is open. Read weapon names and cache them.
+        If OCR result changes from last read, save both crops for review."""
         ocr = self.ocr_from_screen()
         for slot_id in [1, 2]:
             name, conf = ocr[slot_id]
             if name and conf > OCR_CONF_THRESHOLD:
-                self._gt[f'weapon_{slot_id}'] = name
-        print(f'[GT weapon] weapon_1={self._gt["weapon_1"]!r}, '
+                key = f'weapon_{slot_id}'
+                prev = self._ocr_cache.get(key, '')
+                if prev and prev != name:
+                    # OCR result changed inside Tab — save for review
+                    crop = win32_cap(OCR_RECTS[slot_id])
+                    self._save(f'ocr_changed_slot{slot_id}_was={prev}_now={name}_conf={conf:.2f}', crop)
+                self._ocr_cache[key] = name
+
+    def lock_ocr_gt(self):
+        """Called when Tab closes. Lock cached OCR as ground truth."""
+        for slot_key in ['weapon_1', 'weapon_2']:
+            cached = self._ocr_cache.get(slot_key, '')
+            if cached:
+                self._gt[slot_key] = cached
+        self._gt_valid = True
+        print(f'[GT weapon] locked: weapon_1={self._gt["weapon_1"]!r}, '
               f'weapon_2={self._gt["weapon_2"]!r}')
+
+    def invalidate_gt(self, reason=''):
+        """Called when weapon state may have changed (switch/pickup/drop).
+        Clears GT so no more feedback until next Tab."""
+        if self._gt_valid:
+            self._gt_valid = False
+            self._gt = {'weapon_1': '', 'weapon_2': ''}
+            if reason:
+                print(f'[GT weapon] invalidated: {reason}')
 
     # ── Model classify ──
 
@@ -141,10 +167,10 @@ class WeaponDetector:
         hl_name = HL_NAMES[hl_id]
 
         slot_key = f'weapon_{slot_id}'
-        gt = self._gt.get(slot_key, '')
+        gt = self._gt.get(slot_key, '') if self._gt_valid else ''
 
         if model_name:
-            # GT mismatch
+            # GT mismatch (only when GT is valid)
             if gt and gt != model_name:
                 self._save(f'slot{slot_id}_gt={gt}_pred={model_name}_conf={gun_conf:.2f}', crop)
 
@@ -160,8 +186,8 @@ class WeaponDetector:
         if self._hl[1] == 'highlighted' and self._hl[2] == 'highlighted':
             self._save(f'both_highlighted_slot{slot_id}', crop)
 
-        # Output: prefer GT, fallback to model
-        out_name = gt if gt else model_name
+        # Output: prefer valid GT, fallback to model
+        out_name = gt if (gt and self._gt_valid) else model_name
 
         return out_name, hl_name
 
@@ -192,10 +218,20 @@ def classify_slot(model_or_instance, crop, device, slot_id=None):
         slot_id = 1
     return inst.classify_slot(crop, slot_id)
 
-def notify_tab_close(ocr_detector=None):
+def update_ocr_cache():
+    """Called by poller while tab is open."""
+    if _instance:
+        _instance.update_ocr_cache()
+
+def lock_ocr_gt():
     """Called by poller when tab closes."""
     if _instance:
-        _instance.notify_tab_close()
+        _instance.lock_ocr_gt()
+
+def invalidate_gt(reason=''):
+    """Called when weapon state may have changed."""
+    if _instance:
+        _instance.invalidate_gt(reason)
 
 
 # ── Standalone main ──

@@ -1,23 +1,8 @@
 import os
 import numpy as np
 import json
-from scipy.interpolate import interp1d
 
-CURVE_DIR = os.path.join(os.path.dirname(__file__), 'calibrate_distance', 'weapon_curve')
-
-# Map code weapon name → recoil JSON filename (without C_Recoil_ prefix and .json suffix)
-RECOIL_FILE_MAP = {
-    'akm': 'AKM', 'aug': 'AUG', 'ace32': 'ACE32', 'm416': 'HK416',
-    'm762': 'BerylM762', 'groza': 'Groza', 'scar': 'SCAR', 'm16': 'M16A4',
-    'g36c': 'G36C', 'qbz': 'QBZ', 'mk47': 'Mutant', 'k2': 'K2',
-    'dp28': 'DP28', 'm249': 'M249', 'mg3': 'MG3',
-    'mk14': 'M14', 'mini14': 'Mini14', 'sks': 'SKS', 'qbu': 'QBU', 'vss': 'VSS',
-    'mk12': 'Mk12',
-    'tommy': 'SMG_Thompson', 'uzi': 'SMG_Uzi', 'ump45': 'SMG_UMP',
-    'vector': 'SMG_Vector', 'pp19': 'SMG_Bizon', 'mp5k': 'SMG_MP5K', 'p90': 'SMG_P90',
-    's12k': 'Saiga', 's686': '686', 'win94': 'W94',
-    '98k': 'K98',
-}
+CURVE_DIR = os.path.join(os.path.dirname(__file__), 'calibrate_distance', 'weapon_curve_kava4')
 
 time_periods = {
     'akm': 0.1,
@@ -92,80 +77,61 @@ def factor_scope(scope):
     return scope * factor * screen_factor
 
 
-def _parse_recoil_curve(filepath):
-    """Parse a C_Recoil_*.json file, return (vertical_curve, horizontal_curve).
-    Each curve is a list of (time, value) tuples sorted by time.
-    """
-    with open(filepath, 'r') as f:
-        data = json.load(f)
-    root = list(data.values())[0]
-
-    curves = []
-    for key in ['__FloatCurves_1', '__FloatCurves_2']:
-        if key not in root:
-            curves.append([(0, 0)])
-            continue
-        points = []
-        for kf in root[key]['Keys']:
-            t = kf['value']['Time']
-            v = kf['value']['Value']
-            points.append((t, v))
-        points.sort()
-        curves.append(points)
-
-    return curves[0], curves[1]  # vertical, horizontal
-
-
 class BulletCalculator:
+    """Load per-shot recoil data from Kava4 JSON files.
+
+    Data format: list of {delay_ms, dx, dy} per shot.
+    dx/dy are raw mouse move counts (at SensSetting=1, VerticalSensitivity=1).
+    4 variants per weapon: standing, crouching, standing+att, crouching+att.
+    """
+
     def __init__(self):
         from config import COUNTS_PER_RECOIL_UNIT
         self.counts_per_unit = COUNTS_PER_RECOIL_UNIT
 
-        # Load official recoil curves
-        self.recoil_curves = {}
-        for gun_name, file_key in RECOIL_FILE_MAP.items():
-            filepath = os.path.join(CURVE_DIR, f'C_Recoil_{file_key}.json')
-            if not os.path.exists(filepath):
+        # recoil_data[gun_name][stance] = shots list
+        # stance: 'standing', 'crouching'
+        # gun_name may end with '_att' for attachment variant
+        self.recoil_data = {}
+        for fname in os.listdir(CURVE_DIR):
+            if not fname.endswith('.json'):
                 continue
-            vert, horiz = _parse_recoil_curve(filepath)
-            vt, vv = zip(*vert)
-            ht, hv = zip(*horiz)
-            self.recoil_curves[gun_name] = {
-                'vert': interp1d(vt, vv, kind='linear', fill_value=vv[-1], bounds_error=False),
-                'horiz': interp1d(ht, hv, kind='linear', fill_value=hv[-1], bounds_error=False),
-            }
+            with open(os.path.join(CURVE_DIR, fname), 'r') as f:
+                data = json.load(f)
+            weapon = data['weapon']  # e.g. 'akm' or 'akm_att'
+            stance = data.get('stance', 'standing')
+            if weapon not in self.recoil_data:
+                self.recoil_data[weapon] = {}
+            self.recoil_data[weapon][stance] = data['shots']
 
-    def calculate_press_seq(self, gun_name, factor):
-        if gun_name not in self.recoil_curves:
+    def calculate_press_seq(self, gun_name, factor, stance='standing'):
+        """Return (dx_s, dy_s, t_s) arrays for press.py.
+
+        stance: 'standing' or 'crouching' — selects the matching recoil pattern.
+        """
+        data = self.recoil_data.get(gun_name, {})
+        shots = data.get(stance, data.get('standing', []))
+        if not shots:
             return [0], [0], [0.1]
 
-        curves = self.recoil_curves[gun_name]
-        dt = time_periods.get(gun_name, 0.1)
+        t = 0.0
+        t_s = []
+        dx_s = []
+        dy_s = []
+        for shot in shots:
+            t += shot['delay_ms'] / 1000.0
+            t_s.append(t)
+            dx_s.append(shot['dx'] * self.counts_per_unit * factor)
+            dy_s.append(shot['dy'] * self.counts_per_unit * factor)
 
-        # 55 bullets or fill to max curve time
-        num_bullets = max(55, int(3.5 / dt))
-        t_s = dt * np.arange(num_bullets)
-
-        # Sample curve at each bullet time → recoil value per bullet
-        y_s = curves['vert'](t_s) * self.counts_per_unit * factor
-        x_s = np.zeros_like(y_s)  # horizontal disabled for now
-
-        y_s = np.cumsum(y_s)
-        x_s = np.cumsum(x_s)
-
-        y_fun = interp1d(t_s, y_s, kind=2)
-        x_fun = interp1d(t_s, x_s, kind=2)
-
-        t_out = np.linspace(0, t_s[-1], num=int(t_s[-1] / 0.01))
-        y_out = np.diff(y_fun(t_out))
-        x_out = np.diff(x_fun(t_out))
-        return x_out, y_out, t_out
+        return np.array(dx_s), np.array(dy_s), np.array(t_s)
 
 
 class Weapon():
     def __init__(self, is_calibrating=False):
         self.fire_mode = 'full'
         self.name = ''
+        self.posture = 'standing'
         self.scope = '1'
         self.muzzle = ''
         self.grip = ''
@@ -206,6 +172,8 @@ class Weapon():
                 self.type = 'mg'
             elif self.name in shotgun:
                 self.type = 'shotgun'
+        elif pos == 'posture':
+            self.posture = state if state in ('standing', 'crouching', 'prone') else 'standing'
         elif pos == 'fire_mode':
             # if self.fire_mode == "full" and self.type in ['ar', 'smg', 'mg']:
             if self.type in ['ar', 'smg', 'mg']:
@@ -271,13 +239,16 @@ class Weapon():
             self.butt_factor = butt_factors.get(state, 1.0)
 
     def set_seq(self):
+        # Map posture to Kava4 stance (prone uses crouching data)
+        stance = 'crouching' if self.posture in ('crouching', 'prone') else 'standing'
+
         if self.type in ['ar', 'smg', 'mg']:
             self.all_factor = self.scope_factor * self.muzzle_factor * self.grip_factor * self.butt_factor
-            self.dx_s, self.dy_s, self.t_s = self.bullet_calculator.calculate_press_seq(self.name, self.all_factor)
+            self.dx_s, self.dy_s, self.t_s = self.bullet_calculator.calculate_press_seq(self.name, self.all_factor, stance)
 
         elif self.type in ['dmr', 'shotgun']:
             self.all_factor = self.scope_factor * self.muzzle_factor * self.grip_factor
-            self.dx_s, self.dy_s, self.t_s = self.bullet_calculator.calculate_press_seq(self.name, self.all_factor)
+            self.dx_s, self.dy_s, self.t_s = self.bullet_calculator.calculate_press_seq(self.name, self.all_factor, stance)
 
 # if __name__ == '__main__':
 #     states = All_States()

@@ -9,7 +9,6 @@ from press import Press
 from weapon import Weapon, can_full_guns
 from detector.cropper import win32_cap
 from detector.hud_poller import HUDPoller
-from detector.key_feedback import KeyFeedback
 import config
 from config import SCREEN_W, SCREEN_H
 
@@ -30,10 +29,6 @@ class Robot:
         self.poller = HUDPoller()
         self.poller.on_change(self._on_hud_change)
         self.poller.start()
-
-        # ── Key Feedback (data collection) ──
-        self.key_feedback = KeyFeedback(self.poller)
-        self.key_feedback.start()
 
         # ── Mouse hook ──
         self.mouse_listener = mouse.Listener(on_click=self.on_click)
@@ -82,8 +77,12 @@ class Robot:
             if new:
                 print(f'[fire_mode] {new}', flush=True)
 
-        # Posture changed
+        # Posture changed → update recoil (crouch has different pattern)
         elif key == 'posture' and new:
+            self.weapon_1.set('posture', new)
+            self.weapon_2.set('posture', new)
+            self.weapon_1.set_seq()
+            self.weapon_2.set_seq()
             print(f'[posture] {new}', flush=True)
 
         # Tab state
@@ -155,14 +154,14 @@ class Robot:
             threading.Thread(target=self._save_keyframe, daemon=True).start()
 
         if key == keyboard.Key.up:
-            config.COUNTS_PER_RECOIL_UNIT += 5
+            config.COUNTS_PER_RECOIL_UNIT += 0.05
             self._reload_seq()
-            print(f"[counts] {config.COUNTS_PER_RECOIL_UNIT}", flush=True)
+            print(f"[scale] {config.COUNTS_PER_RECOIL_UNIT:.2f}", flush=True)
 
         if key == keyboard.Key.down:
-            config.COUNTS_PER_RECOIL_UNIT = max(5, config.COUNTS_PER_RECOIL_UNIT - 5)
+            config.COUNTS_PER_RECOIL_UNIT = max(0.05, config.COUNTS_PER_RECOIL_UNIT - 0.05)
             self._reload_seq()
-            print(f"[counts] {config.COUNTS_PER_RECOIL_UNIT}", flush=True)
+            print(f"[scale] {config.COUNTS_PER_RECOIL_UNIT:.2f}", flush=True)
 
         if hasattr(key, 'char') and key.char:
             ch = key.char
@@ -171,7 +170,6 @@ class Robot:
 
     def shutdown(self):
         self.poller.stop()
-        self.key_feedback.stop()
         self.running = False
 
 

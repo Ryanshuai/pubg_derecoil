@@ -34,7 +34,7 @@ WEAPON_HUD_2 = {  # secondary (top, unselected)
 
 
 # Hard case mining: save crops when model confidence is in this range
-HARD_CASE_CONF = (0.4, 0.7)
+HARD_CASE_CONF = (0.3, 0.8)
 
 # Alpha blending values for synthetic data generation
 ALPHA = {
@@ -63,9 +63,9 @@ IN_TAB = {
 # Mouse / sensitivity settings
 MOUSE_DPI = 2000
 GAME_SENSITIVITY = 50  # default
-# Recoil curve value → mouse counts conversion
-# Tune this: bigger = more compensation
-COUNTS_PER_RECOIL_UNIT = 60
+# Global recoil scale factor (1.0 = Kava4 default, adjust for your sensitivity)
+# ↑/↓ arrow keys adjust by 0.05 in-game
+COUNTS_PER_RECOIL_UNIT = 0.4
 
 
 # Gun name text position in Tab view (3440x1440)
