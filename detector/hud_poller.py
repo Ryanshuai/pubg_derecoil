@@ -175,10 +175,8 @@ class HUDPoller:
             self._update(f'weapon_{slot_id}', gun_name)
             self._update(f'weapon_{slot_id}_hl', hl_name)
 
-            # Weapon name changed → GT no longer reliable
-            # (highlight change = just switching active slot, weapons unchanged)
-            if gun_name != prev_name and prev_name:
-                weapon_detector.invalidate_gt(f'weapon_{slot_id} changed {prev_name}->{gun_name}')
+            # NOTE: weapon name change does NOT invalidate GT.
+            # GT exists to correct model errors — if model flickers, GT stays.
 
     def _detect_fire_mode(self):
         crop = win32_cap(fire_mode_detector.SLOT_RECT)

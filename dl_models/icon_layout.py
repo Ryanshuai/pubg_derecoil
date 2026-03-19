@@ -134,14 +134,20 @@ WEAPON_ICON_MAP = {
     'Item_Weapon_VSS_C_w.png':         'vss',
     'Item_Weapon_Vector_C_w.png':      'vector',
     'Item_Weapon_Win1894_C_w.png':     'win94',
+    'Item_Weapon_dragunov_C_w.png':    'dragunov',
+    'Item_Weapon_famas_C_w.png':       'famas',
+    'Item_Weapon_js9_C_w.png':         'js9',
+    'Item_Weapon_crossbow_C_w.png':    'crossbow',
+    'Item_Weapon_panzerfaust_C_w.png': 'panzerfaust',
+    'Item_Weapon_mortar_C_w.png':      'mortar',
 }
 
 WEAPON_CLASSES = [
-    '98k', 'ace32', 'akm', 'aug', 'awm', 'dbs', 'dp28', 'g36c', 'groza', 'k2',
-    'lynx', 'm16', 'm24', 'm249', 'm416', 'm762', 'mg3', 'mini14', 'mk12', 'mk14',
-    'mk47', 'mosin', 'mp5k', 'mp9', 'o12', 'p90', 'pp19', 'qbu', 'qbz', 's12k',
-    's1897', 's686', 'scar', 'sks', 'slr', 'tommy', 'ump45', 'uzi', 'vector',
-    'vss', 'win94',
+    '98k', 'ace32', 'akm', 'aug', 'awm', 'crossbow', 'dbs', 'dp28', 'dragunov',
+    'famas', 'g36c', 'groza', 'js9', 'k2', 'lynx', 'm16', 'm24', 'm249', 'm416',
+    'm762', 'mg3', 'mini14', 'mk12', 'mk14', 'mk47', 'mortar', 'mosin', 'mp5k',
+    'mp9', 'o12', 'p90', 'panzerfaust', 'pp19', 'qbu', 'qbz', 's12k', 's1897',
+    's686', 'scar', 'sks', 'slr', 'tommy', 'ump45', 'uzi', 'vector', 'vss', 'win94',
 ]
 _ICON_HEIGHT = 53
 
@@ -216,7 +222,7 @@ class WeaponIconLayout(RegionLayout):
 
         color = None
         if random.random() < self.red_prob:
-            color = (9, 12, 150) if highlighted else (9, 12, 100)
+            color = (1, 1, 248)
 
         slot_w = self.crop_hw[1]
         jx = random.randint(-self.jitter_px, self.jitter_px)

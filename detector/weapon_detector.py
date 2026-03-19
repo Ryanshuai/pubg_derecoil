@@ -59,6 +59,67 @@ FEEDBACK_GT_DIR = os.path.join(FEEDBACK_BASE, 'gt_mismatch')
 FEEDBACK_HARD_DIR = os.path.join(FEEDBACK_BASE, 'hard_case')
 OCR_CONF_THRESHOLD = 0.6
 
+# Game display name (lowercased) → internal code
+# OCR can ONLY produce codes from this table; anything else is discarded.
+OCR_DISPLAY_MAP = {
+    # AR
+    'akm': 'akm',
+    'beryl m762': 'm762',
+    'g36c': 'g36c',
+    'm416': 'm416',
+    'm16a4': 'm16',
+    'scar-l': 'scar',
+    'mk47 mutant': 'mk47',
+    'qbz': 'qbz',
+    'aug': 'aug',
+    'groza': 'groza',
+    'ace32': 'ace32',
+    'k2': 'k2',
+    'famas': 'famas',
+    # SR
+    'kar98k': '98k',
+    'm24': 'm24',
+    'awm': 'awm',
+    'lynx amr': 'lynx',
+    'win94': 'win94',
+    'mosin nagant': 'mosin',
+    # DMR
+    'slr': 'slr',
+    'mini14': 'mini14',
+    'sks': 'sks',
+    'vss': 'vss',
+    'qbu': 'qbu',
+    'mk14': 'mk14',
+    'mk12': 'mk12',
+    'dragunov': 'dragunov',
+    # Shotgun
+    's686': 's686',
+    's12k': 's12k',
+    's1897': 's1897',
+    'dbs': 'dbs',
+    'o12': 'o12',
+    # SMG
+    'pp-19 bizon': 'pp19',
+    'tommy gun': 'tommy',
+    'ump': 'ump45',
+    'micro uzi': 'uzi',
+    'vector': 'vector',
+    'mp5k': 'mp5k',
+    'p90': 'p90',
+    'js9': 'js9',
+    'mp9': 'mp9',
+    # LMG
+    'dp-28': 'dp28',
+    'm249': 'm249',
+    'mg3': 'mg3',
+    # Special
+    'crossbow': 'crossbow',
+    'mortar': 'mortar',
+    'panzerfaust': 'panzerfaust',
+}
+# Pre-sort by key length descending for longest-match-first substring search
+_OCR_KEYS_BY_LEN = sorted(OCR_DISPLAY_MAP.keys(), key=len, reverse=True)
+
 
 
 class WeaponDetector:
@@ -76,7 +137,7 @@ class WeaponDetector:
         # Tab OCR ground truth
         self._gt = {'weapon_1': '', 'weapon_2': ''}
         self._gt_valid = False
-        self._ocr_votes = {'weapon_1': {}, 'weapon_2': {}}  # {name: count}
+        self._ocr_recent = {'weapon_1': [], 'weapon_2': []}  # last N reads
 
 
 
@@ -84,7 +145,10 @@ class WeaponDetector:
     # ── OCR ──
 
     def _ocr_recognize(self, crop):
-        """Recognize weapon name from Tab text crop. Returns (name, conf)."""
+        """Recognize weapon name from Tab text crop. Returns (code, conf).
+
+        Strict matching: only known game display names produce output.
+        """
         result, _ = self.ocr(crop, use_det=False, use_cls=False)
         if not result:
             return '', 0.0
@@ -92,13 +156,15 @@ class WeaponDetector:
         if conf < OCR_CONF_THRESHOLD or not text.strip():
             return '', conf
         text_lower = text.strip().lower()
-        for cls in WEAPON_CLASSES:
-            if cls == text_lower:
-                return cls, conf
-        for cls in WEAPON_CLASSES:
-            if cls in text_lower or text_lower in cls:
-                return cls, conf
-        return text_lower, conf
+        # Exact match
+        if text_lower in OCR_DISPLAY_MAP:
+            return OCR_DISPLAY_MAP[text_lower], conf
+        # Longest substring match (display name contained in OCR text)
+        for key in _OCR_KEYS_BY_LEN:
+            if key in text_lower:
+                return OCR_DISPLAY_MAP[key], conf
+        # No known weapon → discard
+        return '', 0.0
 
     def ocr_from_screen(self):
         """Capture and OCR both weapon name slots. Returns {1: (name, conf), 2: (name, conf)}."""
@@ -110,27 +176,34 @@ class WeaponDetector:
 
     # ── Tab OCR ground truth ──
 
+    OCR_VOTE_N = 3  # vote among last N reads
+
     def update_ocr_cache(self):
-        """Called while Tab is open. Accumulate votes for each weapon name."""
+        """Called while Tab is open. Append valid reads."""
         ocr = self.ocr_from_screen()
         for slot_id in [1, 2]:
             name, conf = ocr[slot_id]
             key = f'weapon_{slot_id}'
-
             if name and conf > OCR_CONF_THRESHOLD:
-                votes = self._ocr_votes[key]
-                votes[name] = votes.get(name, 0) + 1
+                self._ocr_recent[key].append(name)
 
     def lock_ocr_gt(self):
-        """Called when Tab closes. Pick name with most votes as GT.
-        No votes = no weapon in that slot."""
+        """Called when Tab closes. Majority of last 3 reads; tie → latest."""
         for slot_key in ['weapon_1', 'weapon_2']:
-            votes = self._ocr_votes[slot_key]
-            if votes:
-                self._gt[slot_key] = max(votes, key=votes.get)
+            recent = self._ocr_recent[slot_key][-self.OCR_VOTE_N:]
+            if recent:
+                counts = {}
+                for name in recent:
+                    counts[name] = counts.get(name, 0) + 1
+                max_count = max(counts.values())
+                # Tie → pick latest
+                for name in reversed(recent):
+                    if counts[name] == max_count:
+                        self._gt[slot_key] = name
+                        break
             else:
                 self._gt[slot_key] = ''
-            self._ocr_votes[slot_key] = {}  # reset for next Tab
+            self._ocr_recent[slot_key] = []
         self._gt_valid = True
         print(f'[GT weapon] locked: weapon_1={self._gt["weapon_1"]!r}, '
               f'weapon_2={self._gt["weapon_2"]!r}')
@@ -169,13 +242,15 @@ class WeaponDetector:
         slot_key = f'weapon_{slot_id}'
         gt = self._gt.get(slot_key, '') if self._gt_valid else ''
 
-        if model_name:
-            # GT mismatch (only when GT is valid)
+        if model_name and self._gt_valid:
             if gt and gt != model_name:
+                # GT says weapon A, model says weapon B
                 self._save_gt_mismatch(gt, model_name, hl_name, crop)
-
-            # Hard case (only when GT is available)
+            elif not gt:
+                # GT says empty, model says has weapon
+                self._save_gt_mismatch('bg', model_name, hl_name, crop)
             elif gt and HARD_CASE_CONF[0] < gun_conf < HARD_CASE_CONF[1]:
+                # GT matches but model confidence is low
                 self._save_hard_case(gt, model_name, hl_name, gun_conf, crop)
 
 

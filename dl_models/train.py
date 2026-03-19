@@ -11,15 +11,16 @@ import sys
 
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import ConcatDataset, DataLoader
 from torchvision.models import mobilenet_v3_small
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from dl_models.dataset import BackgroundProvider, SyntheticHUDDataset
+from dl_models.dataset import BackgroundProvider, RealHUDDataset, SyntheticHUDDataset
 from dl_models.icon_layout import WeaponIconLayout, TabDetectLayout, AttachmentIconLayout, PostureIconLayout, FireModeLayout
 
 # ── Task configs ──
 BG_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data', 'backgrounds')
+REAL_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data', 'Manual')
 
 TASKS = {
     'weapon': {
@@ -134,6 +135,15 @@ def train(task_name):
 
     train_ds = SyntheticHUDDataset(bg, layout, cfg['train_samples'], augment=True)
     val_ds = SyntheticHUDDataset(bg, layout, cfg['val_samples'], augment=False)
+
+    # Mix real data for weapon task
+    if task_name == 'weapon' and os.path.isdir(REAL_DIR):
+        real_train = RealHUDDataset(REAL_DIR, layout, augment=True, oversample=4)
+        real_val = RealHUDDataset(REAL_DIR, layout, augment=False)
+        train_ds = ConcatDataset([train_ds, real_train])
+        val_ds = ConcatDataset([val_ds, real_val])
+        print(f'Mixed: train={len(train_ds)}, val={len(val_ds)}')
+
     train_loader = DataLoader(train_ds, cfg['batch_size'], shuffle=True,
                               num_workers=0, pin_memory=True)
     val_loader = DataLoader(val_ds, cfg['batch_size'], shuffle=False,

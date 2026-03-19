@@ -9,6 +9,7 @@ from press import Press
 from weapon import Weapon, can_full_guns
 from detector.cropper import win32_cap
 from detector.hud_poller import HUDPoller
+from detector import weapon_detector
 import config
 from config import SCREEN_W, SCREEN_H
 
@@ -150,6 +151,9 @@ class Robot:
             self.shutdown()
             return False  # stops pynput listener → unblocks join()
 
+        if key == keyboard.Key.tab:
+            weapon_detector.invalidate_gt('Tab pressed')
+
         if key == keyboard.Key.f5:
             threading.Thread(target=self._save_keyframe, daemon=True).start()
 
@@ -164,9 +168,11 @@ class Robot:
             print(f"[scale] {config.COUNTS_PER_RECOIL_UNIT:.2f}", flush=True)
 
         if hasattr(key, 'char') and key.char:
-            ch = key.char
+            ch = key.char.lower()
             if ch == 'g' or ch == '5':
                 self.stop_press = True
+            if ch == 'f':
+                weapon_detector.invalidate_gt('F pressed (pickup/interact)')
 
     def shutdown(self):
         print('[robot] shutting down...', flush=True)
