@@ -1,13 +1,16 @@
 """Real-time posture detector.
 
 Captures posture icon region from screen, classifies standing/crouching/prone.
-Prints only when state changes.
+Saves hard cases (low confidence) for later labeling.
 """
 import os
 import sys
 import time
+from datetime import datetime
 
 import cv2
+import torch
+import torch.nn.functional as F
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from config import POSTURE
@@ -23,22 +26,42 @@ SLOT_RECT = (POSTURE['y1'], POSTURE['x1'],
 MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'dl_models', 'posture.pth.tar')
 HEAD_SIZES = {'posture': len(POSTURE_CLASSES) + 1}
 
+# Hard case feedback
+FEEDBACK_DIR = os.path.join(os.path.dirname(__file__), '..', 'InGameScreenshot', 'posture')
+CONFIDENCE_THRESHOLD = 0.8
+_feedback_idx = 0
+
 
 def load_model(device):
     return _load(MODEL_PATH, HEAD_SIZES, device, in_channels=4)
 
 
 def classify(model, crop, device):
-    import torch
+    """Classify posture. Saves crop when confidence < threshold."""
+    global _feedback_idx
+
     t = crop_to_tensor_4ch(crop, device)
     with torch.no_grad():
         out = model(t)
-    idx = out['posture'].argmax(1).item()
-    return POSTURE_CLASSES[idx - 1] if idx > 0 else ''
+
+    logits = out['posture'][0]
+    probs = F.softmax(logits, dim=0)
+    conf = probs.max().item()
+    idx = probs.argmax().item()
+    name = POSTURE_CLASSES[idx - 1] if idx > 0 else ''
+
+    # Hard case: model is uncertain (not bg, not confident) → save for labeling
+    if 0.3 < conf < CONFIDENCE_THRESHOLD and name:
+        os.makedirs(FEEDBACK_DIR, exist_ok=True)
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        fname = f'{_feedback_idx:04d}_{ts}_pred={name}_conf={conf:.2f}.png'
+        cv2.imwrite(os.path.join(FEEDBACK_DIR, fname), crop)
+        _feedback_idx += 1
+
+    return name
 
 
 def main():
-    import torch
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Device: {device}')
     model = load_model(device)
@@ -48,10 +71,6 @@ def main():
     prev = None
     hz = 5
 
-    debug_dir = 'temp_debug'
-    os.makedirs(debug_dir, exist_ok=True)
-    debug_idx = 0
-
     while True:
         crop = win32_cap(SLOT_RECT)
         name = classify(model, crop, device)
@@ -60,10 +79,6 @@ def main():
             prev = name
             label = name if name else '(none)'
             print(f'[posture] {label}')
-
-            fname = f'{debug_idx:04d}_posture_{name or "none"}.png'
-            cv2.imwrite(os.path.join(debug_dir, fname), crop)
-            debug_idx += 1
 
         time.sleep(1.0 / hz)
 

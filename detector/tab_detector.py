@@ -30,7 +30,7 @@ PIXEL_THRESHOLD = 200
 COUNT_MIN = 150
 COUNT_MAX = 400
 
-FEEDBACK_DIR = os.path.join(os.path.dirname(__file__), '..', 'InGameScreenshot')
+FEEDBACK_DIR = os.path.join(os.path.dirname(__file__), '..', 'InGameScreenshot', 'tab')
 _feedback_idx = 0
 
 
