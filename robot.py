@@ -147,12 +147,18 @@ class Robot:
         self.weapon_2.set_seq()
 
     def on_press(self, key):
-        if key in [keyboard.Key.f13, keyboard.Key.esc]:
+        if key in [keyboard.Key.f13]:
             self.shutdown()
             return False  # stops pynput listener → unblocks join()
 
         if key == keyboard.Key.tab:
             weapon_detector.invalidate_gt('Tab pressed')
+
+        try:
+            if key.char == 'f':
+                weapon_detector.invalidate_gt('F pressed (pickup)')
+        except AttributeError:
+            pass
 
         if key == keyboard.Key.f5:
             threading.Thread(target=self._save_keyframe, daemon=True).start()
