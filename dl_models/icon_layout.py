@@ -482,7 +482,7 @@ class TabDetectLayout(RegionLayout):
 # Fire mode icons (bottom HUD, left of ammo count)
 # ============================================================
 
-FIRE_MODE_CLASSES = ['single', 'burst2', 'burst3', 'full', 'single_bot_sniper', 'single_bot_shotgun', 'high']
+FIRE_MODE_CLASSES = ['single', 'burst2', 'burst3', 'full', 'single_bot_sniper', 'single_bot_shotgun', 'high', 'single_bot_smook']
 
 # Two variants per class: original position + _low (shifted down 7px for new crop)
 # Training randomly picks one variant per sample
@@ -494,6 +494,7 @@ FIRE_MODE_ICON_PAIRS = {
     'single_bot_sniper':  ('fire_mode_single_bot_sniper.png', 'fire_mode_single_bot_sniper_low.png'),
     'single_bot_shotgun': ('fire_mode_single_bot_shotgun.png', 'fire_mode_single_bot_shotgun_low.png'),
     'high':               ('fire_mode_high.png', 'fire_mode_high_low.png'),
+    'single_bot_smook':   ('fire_mode_single_bot_smook.png', 'fire_mode_single_bot_smook_low.png'),
 }
 
 

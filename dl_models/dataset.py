@@ -192,3 +192,74 @@ class RealHUDDataset(Dataset):
             processed.transpose(2, 0, 1).astype(np.float32) / 255.0
         )
         return tensor, {'gun_name': gun_label, 'highlighted': hl_label}
+
+
+# ═══════════════════════════════════════════════════════════════
+#  RealClassifyDataset (generic: posture, fire_mode, etc.)
+# ═══════════════════════════════════════════════════════════════
+
+class RealClassifyDataset(Dataset):
+    """
+    Real in-game screenshots. Filename: {class}_{hash}.png
+    Files in a flat directory (no subdirectories).
+    """
+
+    def __init__(self, data_dir, layout, head_name, class_list,
+                 augment=True, oversample=1):
+        self.layout = layout
+        self.augment = augment
+        self.head_name = head_name
+        self.input_h, self.input_w = layout.model_input_hw
+
+        cls_set = set(class_list)
+        self.samples = []  # (path, label)
+        for cls_name in os.listdir(data_dir):
+            cls_dir = os.path.join(data_dir, cls_name)
+            if not os.path.isdir(cls_dir):
+                continue
+            if cls_name == 'bg':
+                label = 0
+            elif cls_name in cls_set:
+                label = class_list.index(cls_name) + 1
+            else:
+                print(f'RealClassifyDataset({head_name}): skipping "{cls_name}"')
+                continue
+            for fname in os.listdir(cls_dir):
+                if not fname.endswith('.png'):
+                    continue
+                self.samples.append((os.path.join(cls_dir, fname), label))
+
+        self.samples *= oversample
+        print(f'RealClassifyDataset({head_name}): {len(self.samples)} samples '
+              f'({len(self.samples) // oversample} unique, {oversample}x)')
+
+    def __len__(self):
+        return len(self.samples)
+
+    def _augment(self, img):
+        img = img.astype(np.float32)
+        img += random.uniform(-15, 15)
+        img *= random.uniform(0.85, 1.15)
+        for c in range(3):
+            img[:, :, c] += random.uniform(-8, 8)
+        if random.random() < 0.5:
+            img += np.random.normal(0, random.uniform(1, 4), img.shape)
+        r = random.random()
+        if r < 0.25:
+            img = cv2.GaussianBlur(img, (3, 3), random.uniform(0.5, 1.0))
+        elif r < 0.5:
+            blur = cv2.GaussianBlur(img, (3, 3), 1.0)
+            img = img + random.uniform(0.3, 0.8) * (img - blur)
+        return np.clip(img, 0, 255).astype(np.uint8)
+
+    def __getitem__(self, idx):
+        path, label = self.samples[idx]
+        img = cv2.imread(path)
+        img = cv2.resize(img, (self.input_w, self.input_h))
+        if self.augment:
+            img = self._augment(img)
+        processed = self.layout.preprocess(img)
+        tensor = torch.from_numpy(
+            processed.transpose(2, 0, 1).astype(np.float32) / 255.0
+        )
+        return tensor, {self.head_name: label}

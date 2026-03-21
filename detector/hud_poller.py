@@ -4,8 +4,6 @@
 GPU load spread evenly, no spikes.
 
 Delegates detection to individual detector modules.
-Delegates constraint checks to detector/checks/*.py modules.
-
 Usage:
     poller = HUDPoller()
     poller.start()
@@ -16,9 +14,6 @@ import os
 import sys
 import time
 import threading
-from datetime import datetime
-
-import cv2
 import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -30,26 +25,6 @@ from detector import (
 )
 from detector.cropper import win32_cap
 from config import ATTACHMENT_SLOTS
-from weapon import (
-    single_guns, full_guns, single_burst_guns,
-    single_full_guns, single_burst_full_guns,
-)
-
-# ── Fire mode constraints per weapon ──
-WEAPON_FIRE_MODES = {}
-for g in single_guns:
-    WEAPON_FIRE_MODES[g] = {'single', 'single_bot_sniper', 'single_bot_shotgun'}
-for g in full_guns:
-    WEAPON_FIRE_MODES[g] = {'full'}
-for g in single_burst_guns:
-    WEAPON_FIRE_MODES[g] = {'single', 'single_bot_sniper', 'single_bot_shotgun', 'burst2', 'burst3'}
-for g in single_full_guns:
-    WEAPON_FIRE_MODES[g] = {'single', 'single_bot_sniper', 'single_bot_shotgun', 'full'}
-for g in single_burst_full_guns:
-    WEAPON_FIRE_MODES[g] = {'single', 'single_bot_sniper', 'single_bot_shotgun', 'burst2', 'burst3', 'full'}
-WEAPON_FIRE_MODES['mg3'] = {'full', 'high'}
-WEAPON_FIRE_MODES['mp9'] = {'single', 'single_bot_sniper', 'single_bot_shotgun', 'burst2', 'full'}
-WEAPON_FIRE_MODES['p90'] = {'full'}
 
 # ── Screen rects (for crop caching) ──
 RECTS = {
@@ -62,7 +37,6 @@ RECTS = {
 
 SLOT_NAMES = ['scope', 'muzzle', 'grip', 'magazine', 'stock']
 
-FEEDBACK_DIR = os.path.join(os.path.dirname(__file__), '..', 'InGameScreenshot', 'constraints')
 
 
 class HUDPoller:
@@ -79,13 +53,6 @@ class HUDPoller:
         self.posture_model = posture_detector.load_model(self.device)
         self.tab_model = tab_detector.load_model(self.device)
         self.attach_model = attachment_detector.load_model(self.device)
-
-        # Feedback
-        os.makedirs(FEEDBACK_DIR, exist_ok=True)
-        self._feedback_idx = 0
-
-        # Last crops for constraint feedback
-        self._crops = {}
 
         # Current state
         self.state = {
@@ -122,56 +89,17 @@ class HUDPoller:
                     except Exception:
                         pass
 
-    # ── Feedback saving ──
-
-    def _save_feedback(self, violation, crops_to_save, predictions):
-        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-        idx = self._feedback_idx
-        self._feedback_idx += 1
-        for crop_name, crop in crops_to_save.items():
-            if crop is not None:
-                pred = predictions.get(crop_name, 'unk')
-                fname = f'{idx:04d}_{ts}_{violation}_{crop_name}={pred}.png'
-                cv2.imwrite(os.path.join(FEEDBACK_DIR, fname), crop)
-        pred_str = ', '.join(f'{k}={v}' for k, v in predictions.items())
-        print(f'[Feedback] {violation} | {pred_str}')
-
-    def _run_checks(self):
-        """Run cross-detector constraint checks, save feedback on violations."""
-        s = self.state
-
-        # Fire mode vs active weapon type
-        if not s['tab_open']:
-            active_weapon = ''
-            if s['weapon_1_hl'] == 'highlighted':
-                active_weapon = s['weapon_1']
-            elif s['weapon_2_hl'] == 'highlighted':
-                active_weapon = s['weapon_2']
-
-            if active_weapon and s['fire_mode']:
-                valid_modes = WEAPON_FIRE_MODES.get(active_weapon)
-                if valid_modes and s['fire_mode'] not in valid_modes:
-                    self._save_feedback('invalid_fire_mode', {
-                        'fire_mode': self._crops.get('fire_mode'),
-                        'weapon_1': self._crops.get('weapon_1'),
-                        'weapon_2': self._crops.get('weapon_2'),
-                    }, {
-                        'fire_mode': s['fire_mode'],
-                        'active_gun': active_weapon,
-                    })
-
-
-
     # ── Detectors (delegate to modules) ──
 
     def _detect_weapon(self):
         for slot_id in [1, 2]:
             crop = win32_cap(weapon_detector.SLOT_RECTS[slot_id])
-            self._crops[f'weapon_{slot_id}'] = crop
+
             prev_name = self.state[f'weapon_{slot_id}']
             prev_hl = self.state[f'weapon_{slot_id}_hl']
             gun_name, hl_name = weapon_detector.classify_slot(
-                self.weapon_model, crop, self.device, slot_id)
+                self.weapon_model, crop, self.device, slot_id,
+                tab_open=self.state['tab_open'])
             self._update(f'weapon_{slot_id}', gun_name)
             self._update(f'weapon_{slot_id}_hl', hl_name)
 
@@ -180,19 +108,19 @@ class HUDPoller:
 
     def _detect_fire_mode(self):
         crop = win32_cap(fire_mode_detector.SLOT_RECT)
-        self._crops['fire_mode'] = crop
+
         name = fire_mode_detector.classify(self.fire_mode_model, crop, self.device)
         self._update('fire_mode', name)
 
     def _detect_posture(self):
         crop = win32_cap(posture_detector.SLOT_RECT)
-        self._crops['posture'] = crop
+
         name = posture_detector.classify(self.posture_model, crop, self.device)
         self._update('posture', name)
 
     def _detect_tab(self):
         crop = win32_cap(tab_detector.SLOT_RECT)
-        self._crops['tab'] = crop
+
         was_open = self.state['tab_open']
         is_open = tab_detector.classify(self.tab_model, crop, self.device)
         self._update('tab_open', is_open)
@@ -201,13 +129,14 @@ class HUDPoller:
         if not was_open and is_open:
             weapon_detector.invalidate_gt('tab opened')
 
-        # Tab is open → update OCR cache (weapon names visible in Tab view)
-        if is_open:
-            weapon_detector.update_ocr_cache()
-
         # Tab just closed → lock cached OCR as ground truth
         if was_open and not is_open:
             weapon_detector.lock_ocr_gt()
+
+    def _detect_weapon_name(self):
+        """Template match weapon names while Tab is open."""
+        if self.state['tab_open']:
+            weapon_detector.update_ocr_cache()
 
     def _detect_attachments(self):
         if not self.state['tab_open']:
@@ -219,28 +148,46 @@ class HUDPoller:
 
     # ── Round-robin loop ──
 
-    DETECTORS = ['weapon', 'fire_mode', 'posture', 'tab', 'attachment']
+    # (name, interval_ms, phase_ms) — each detector runs at its own frequency
+    DETECTORS = [
+        ('weapon',        200,   0),
+        ('fire_mode',     200,  40),
+        ('posture',       200,  80),
+        ('tab',            20, 120),
+        ('weapon_name',    10,  10),
+        ('attachment',    200, 160),
+    ]
 
     def _loop(self):
-        idx = 0
         dispatch = {
             'weapon': self._detect_weapon,
             'fire_mode': self._detect_fire_mode,
             'posture': self._detect_posture,
             'tab': self._detect_tab,
+            'weapon_name': self._detect_weapon_name,
             'attachment': self._detect_attachments,
         }
-        n = len(self.DETECTORS)
+        # Initialize next-run times with staggered phase
+        now = time.monotonic()
+        schedule = {}
+        for name, interval_ms, phase_ms in self.DETECTORS:
+            phase = phase_ms / 1000.0
+            schedule[name] = {
+                'interval': interval_ms / 1000.0,
+                'next': now + phase,
+                'fn': dispatch[name],
+            }
+
         while self._running:
-            name = self.DETECTORS[idx % n]
-            try:
-                dispatch[name]()
-            except Exception as e:
-                print(f'[HUDPoller] {name} error: {e}')
-            idx += 1
-            if idx % n == 0:
-                self._run_checks()
-            time.sleep(self.INTERVAL)
+            now = time.monotonic()
+            for name, s in schedule.items():
+                if now >= s['next']:
+                    try:
+                        s['fn']()
+                    except Exception as e:
+                        print(f'[HUDPoller] {name} error: {e}')
+                    s['next'] = now + s['interval']
+            time.sleep(0.01)
 
     def start(self):
         if self._running:

@@ -162,6 +162,11 @@ class WeaponDetector:
         self._gt_valid = False
         self._ocr_recent = {'weapon_1': [], 'weapon_2': []}  # last N reads
 
+        # Auto-invalidate: consecutive high-conf model disagreements with GT
+        self._mismatch_streak = {'weapon_1': 0, 'weapon_2': 0}
+        self.MISMATCH_STREAK_LIMIT = 1  # invalidate immediately on first high-conf mismatch
+        self.MISMATCH_CONF_THRESHOLD = 0.9  # only count high-conf disagreements
+
 
 
 
@@ -217,7 +222,7 @@ class WeaponDetector:
 
         crop_pixels = np.count_nonzero(binary)
         if crop_pixels == 0:
-            return '', 0.0
+            return []
 
         results = []
         for code, tmpls in self._tmpl.items():
@@ -309,20 +314,21 @@ class WeaponDetector:
         """Called while Tab is open. Append valid reads."""
         ocr_results = self.ocr_from_screen()
         for slot_id in [1, 2]:
-            name, conf = ocr_results[slot_id]
+            result = ocr_results[slot_id]
+            if not result or len(result) < 2:
+                continue
+            name, conf = result
             key = f'weapon_{slot_id}'
             if name and conf > OCR_CONF_THRESHOLD:
                 self._ocr_recent[key].append(name)
 
     def lock_ocr_gt(self):
-        """Called when Tab closes. Use last read (template matching is stable)."""
+        """Called when Tab closes. Use last read. Auto-invalidate handles errors."""
         for slot_key in ['weapon_1', 'weapon_2']:
             all_reads = self._ocr_recent[slot_key]
             _logger.info(f'VOTE {slot_key} | all={all_reads}')
             if all_reads:
                 self._gt[slot_key] = all_reads[-1]
-            else:
-                self._gt[slot_key] = ''
             else:
                 self._gt[slot_key] = ''
             self._ocr_recent[slot_key] = []
@@ -337,16 +343,17 @@ class WeaponDetector:
         if self._gt_valid:
             self._gt_valid = False
             self._gt = {'weapon_1': '', 'weapon_2': ''}
+            _logger.info(f'INVALIDATED | {reason}')
             if reason:
                 print(f'[GT weapon] invalidated: {reason}')
 
     # ── Model classify ──
 
-    def classify_slot(self, crop, slot_id):
+    def classify_slot(self, crop, slot_id, tab_open=False):
         """Classify weapon from HUD watermark crop.
 
         Returns (gun_name, hl_name).
-        Saves feedback: GT mismatch or hard case.
+        Saves feedback: GT mismatch or hard case (only when tab closed).
         Output priority: GT (if available) > model.
         """
         tensor = crop_to_tensor_4ch(crop, self.device)
@@ -365,18 +372,27 @@ class WeaponDetector:
         slot_key = f'weapon_{slot_id}'
         gt = self._gt.get(slot_key, '') if self._gt_valid else ''
 
-        if model_name and self._gt_valid:
+        if model_name and self._gt_valid and not tab_open:
             if gt and gt != model_name:
-                # GT says weapon A, model says weapon B
                 self._save_gt_mismatch(gt, model_name, hl_name, crop,
                                        slot_id, gun_conf, gun_probs)
-            elif not gt:
-                pass  # GT empty, model sees weapon — skip, not useful
-            elif gt and HARD_CASE_CONF[0] < gun_conf < HARD_CASE_CONF[1]:
-                # GT matches but model confidence is low
-                self._save_hard_case(gt, model_name, hl_name, gun_conf, crop,
-                                     slot_id, gun_probs)
 
+                # Auto-invalidate: model disagrees with high confidence
+                if gun_conf >= self.MISMATCH_CONF_THRESHOLD:
+                    self._mismatch_streak[slot_key] += 1
+                    if self._mismatch_streak[slot_key] >= self.MISMATCH_STREAK_LIMIT:
+                        _logger.info(f'AUTO_INVALIDATE | {slot_key} gt={gt} '
+                                     f'model={model_name} streak={self._mismatch_streak[slot_key]}')
+                        self.invalidate_gt(f'model disagrees: gt={gt} model={model_name}')
+                else:
+                    self._mismatch_streak[slot_key] = 0
+            elif not gt:
+                pass
+            else:
+                self._mismatch_streak[slot_key] = 0
+                if HARD_CASE_CONF[0] < gun_conf < HARD_CASE_CONF[1]:
+                    self._save_hard_case(gt, model_name, hl_name, gun_conf, crop,
+                                         slot_id, gun_probs)
 
         # Output: prefer valid GT, fallback to model
         out_name = gt if (gt and self._gt_valid) else model_name
@@ -442,12 +458,12 @@ def load_model(device):
     _instance = WeaponDetector(device)
     return _instance
 
-def classify_slot(model_or_instance, crop, device, slot_id=None):
+def classify_slot(model_or_instance, crop, device, slot_id=None, tab_open=False):
     """Poller calls this. model_or_instance is the WeaponDetector."""
     inst = model_or_instance
     if slot_id is None:
         slot_id = 1
-    return inst.classify_slot(crop, slot_id)
+    return inst.classify_slot(crop, slot_id, tab_open=tab_open)
 
 def update_ocr_cache():
     """Called by poller while tab is open."""

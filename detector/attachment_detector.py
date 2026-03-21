@@ -2,10 +2,6 @@
 
 Captures 5 attachment slots per weapon from screen, classifies each.
 Only runs when Tab is open. Prints on state change.
-
-Inference constraint: each slot only considers its valid attachment subset,
-taking argmax over allowed classes rather than all 56.
-
 Hard case mining: saves crops with confidence 0.3~0.8 for later labeling.
 """
 import os
@@ -23,25 +19,6 @@ from config import ATTACHMENT_SLOTS, HARD_CASE_CONF
 from detector.cropper import win32_cap
 from detector.utils import load_model as _load, crop_to_tensor, img_hash as _img_hash
 from dl_models.icon_layout import ATTACHMENT_CLASSES
-
-# ── Slot → valid attachment mapping ──
-# Each slot type can only hold certain attachments
-SLOT_VALID = {
-    'scope': [c for c in ATTACHMENT_CLASSES if c.startswith('Upper_') or c.startswith('SideRail_')],
-    'muzzle': [c for c in ATTACHMENT_CLASSES if c.startswith('Muzzle_')],
-    'grip': [c for c in ATTACHMENT_CLASSES if c.startswith('Lower_') or c == 'Vector_VerGrip'],
-    'magazine': [c for c in ATTACHMENT_CLASSES if c.startswith('Magazine_') or c.startswith('Medium_')],
-    'stock': [c for c in ATTACHMENT_CLASSES if c.startswith('Stock_')],
-}
-
-# Convert to index masks (label 0 = empty, 1..N = attachment classes)
-SLOT_VALID_IDX = {}
-for slot_name, valid_classes in SLOT_VALID.items():
-    indices = [0]  # always allow empty
-    for cls in valid_classes:
-        if cls in ATTACHMENT_CLASSES:
-            indices.append(ATTACHMENT_CLASSES.index(cls) + 1)
-    SLOT_VALID_IDX[slot_name] = indices
 
 SLOT_NAMES = ['scope', 'muzzle', 'grip', 'magazine', 'stock']
 
@@ -70,11 +47,8 @@ def classify_slot(model, crop, slot_name, device):
     """Classify a single attachment slot crop.
 
     Returns attachment class name or '' if empty.
-    Uses slot-constrained argmax: only considers valid attachments for this slot type.
     Saves hard cases (confidence 0.3~0.8) for later labeling.
     """
-    global _feedback_idx
-
     if is_slot_empty(crop):
         return ''
 
@@ -83,32 +57,14 @@ def classify_slot(model, crop, slot_name, device):
     with torch.no_grad():
         out = model(t)
 
-    logits = out['attachment'][0]  # (num_classes,)
-
-    # Constrained argmax: only consider valid indices for this slot
-    valid_idx = SLOT_VALID_IDX[slot_name]
-    valid_logits = logits[valid_idx]
-    valid_probs = F.softmax(valid_logits, dim=0)
-    conf = valid_probs.max().item()
-    best_local = valid_probs.argmax().item()
-    best_global = valid_idx[best_local]
-
-    name = ATTACHMENT_CLASSES[best_global - 1] if best_global > 0 else ''
-
-    # Slot constraint check: unconstrained vs constrained argmax
-    all_probs = F.softmax(logits, dim=0)
-    unconstrained_idx = all_probs.argmax().item()
-    if unconstrained_idx != best_global and unconstrained_idx > 0:
-        unc_name = ATTACHMENT_CLASSES[unconstrained_idx - 1]
-        os.makedirs(FEEDBACK_DIR, exist_ok=True)
-        h = _img_hash(crop)
-        fname = f'violation_{slot_name}_wants={unc_name}_got={name or "empty"}_{h}.png'
-        path = os.path.join(FEEDBACK_DIR, fname)
-        if not os.path.exists(path):
-            cv2.imwrite(path, crop)
+    logits = out['attachment'][0]
+    probs = F.softmax(logits, dim=0)
+    conf = probs.max().item()
+    idx = probs.argmax().item()
+    name = ATTACHMENT_CLASSES[idx - 1] if idx > 0 else ''
 
     # Hard case: model is uncertain → save for labeling
-    elif HARD_CASE_CONF[0] < conf < HARD_CASE_CONF[1] and name:
+    if HARD_CASE_CONF[0] < conf < HARD_CASE_CONF[1] and name:
         os.makedirs(FEEDBACK_DIR, exist_ok=True)
         h = _img_hash(crop)
         fname = f'{slot_name}_{name}_{h}.png'
