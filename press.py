@@ -5,15 +5,16 @@ import win32con
 
 
 class Press(threading.Thread):
-    def __init__(self, dx_s, dy_s, t_s):
+    def __init__(self, dx_s, dy_s, t_s, start_time=None):
         threading.Thread.__init__(self, daemon=True)
         self.dx_s = dx_s
         self.dy_s = dy_s
         self.t_s = t_s
         self._loop = True
+        self._start_time = start_time or time.perf_counter()
 
     def run(self):
-        start = time.perf_counter()
+        start = self._start_time
         accum_x, accum_y = 0.0, 0.0
         for dx, dy, t in zip(self.dx_s, self.dy_s, self.t_s):
             if not self._loop:

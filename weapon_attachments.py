@@ -1,0 +1,118 @@
+"""Per-weapon attachment compatibility and recoil factors.
+
+Each weapon defines which muzzle and grip it can equip.
+Recoil factors are from PUBG Wiki (pubg.wiki.gg):
+  - Compensator: 0.85 vertical recoil
+  - Vertical Foregrip: 0.85 vertical recoil
+  - Suppressor: 1.0 (no recoil effect)
+  - Other grips: not modeled (only vertical foregrip used as calibration baseline)
+
+weapon_scales.json was calibrated in training ground with default attachments
+(compensator + vertical grip where available). The calibration_factor below
+represents what was equipped during calibration.
+
+At runtime:
+  effective_scale = base_scale * current_factor
+  base_scale = weapon_scales[gun] / calibration_factor
+"""
+
+COMP = 0.85    # compensator vertical recoil multiplier
+GRIP = 0.85    # vertical foregrip vertical recoil multiplier
+
+# muzzle_type: 'comp' = can equip compensator, 'supp_only' = suppressor only, None = nothing
+# grip: True = can equip vertical foregrip, False = cannot
+# calibration_factor: what was equipped during training ground calibration
+#   comp + grip → 0.85 * 0.85 = 0.7225
+#   comp only  → 0.85
+#   grip only  → 0.85 (tommy: suppressor + vertical)
+#   nothing    → 1.0
+
+WEAPON_SLOTS = {
+    # ── AR ─────────────────────────────────────────
+    'akm':    {'muzzle': 'comp', 'grip': False},
+    'm416':   {'muzzle': 'comp', 'grip': True},
+    'scar':   {'muzzle': 'comp', 'grip': True},
+    'm762':   {'muzzle': 'comp', 'grip': True},
+    'aug':    {'muzzle': 'comp', 'grip': True},
+    'qbz':    {'muzzle': 'comp', 'grip': True},
+    'g36c':   {'muzzle': 'comp', 'grip': True},
+    'm16':    {'muzzle': 'comp', 'grip': False},
+    'mk47':   {'muzzle': 'comp', 'grip': True},
+    'groza':  {'muzzle': 'supp_only', 'grip': False},
+    'k2':     {'muzzle': 'comp', 'grip': False},
+    'ace32':  {'muzzle': 'comp', 'grip': True},
+    'famas':  {'muzzle': 'comp', 'grip': False},
+
+    # ── SMG ────────────────────────────────────────
+    'tommy':  {'muzzle': 'supp_only', 'grip': True},   # suppressor only + vertical only
+    'uzi':    {'muzzle': 'comp', 'grip': False},
+    'ump45':  {'muzzle': 'comp', 'grip': True},
+    'vector': {'muzzle': 'comp', 'grip': True},
+    'pp19':   {'muzzle': 'comp', 'grip': False},
+    'mp5k':   {'muzzle': 'comp', 'grip': True},
+    'p90':    {'muzzle': None, 'grip': False},          # built-in suppressor, no attachments
+    'mp9':    {'muzzle': 'comp', 'grip': False},
+    'js9':    {'muzzle': 'comp', 'grip': True},
+
+    # ── MG ─────────────────────────────────────────
+    'dp28':   {'muzzle': None, 'grip': False},
+    'm249':   {'muzzle': None, 'grip': False},
+    'mg3':    {'muzzle': None, 'grip': False},
+
+    # ── DMR ────────────────────────────────────────
+    'vss':    {'muzzle': None, 'grip': False},          # built-in suppressor + scope
+    'mk14':   {'muzzle': 'comp', 'grip': False},
+    'sks':    {'muzzle': 'comp', 'grip': True},
+    'mini14': {'muzzle': 'comp', 'grip': False},
+    'slr':    {'muzzle': 'comp', 'grip': False},
+    'qbu':    {'muzzle': 'comp', 'grip': False},
+}
+
+
+def calibration_factor(gun_name):
+    """Factor that was applied during training ground calibration.
+
+    Training ground equips compensator + vertical grip by default (where available).
+    """
+    slots = WEAPON_SLOTS.get(gun_name)
+    if not slots:
+        return 1.0
+    f = 1.0
+    if slots['muzzle'] == 'comp':
+        f *= COMP
+    if slots['grip']:
+        f *= GRIP
+    return f
+
+
+def attachment_factor(gun_name, muzzle='', grip=''):
+    """Current recoil factor based on equipped attachments.
+
+    muzzle: attachment_detector class name or ''
+    grip: attachment_detector class name or ''
+    """
+    slots = WEAPON_SLOTS.get(gun_name)
+    if not slots:
+        return 1.0
+    f = 1.0
+    # Compensator check (only if gun supports comp, not supp_only)
+    if slots['muzzle'] == 'comp' and muzzle and 'Compensator' in muzzle:
+        f *= COMP
+    # Vertical foregrip check
+    if slots['grip'] and grip and 'Foregrip' in grip:
+        f *= GRIP
+    return f
+
+
+def runtime_factor(gun_name, muzzle='', grip=''):
+    """Scale adjustment relative to calibration baseline.
+
+    Returns a multiplier to apply on top of weapon_scales[gun].
+    = current_factor / calibration_factor
+
+    If gun has same attachments as calibration (comp+grip): returns 1.0
+    If gun is naked but was calibrated with comp+grip: returns 1/0.7225 ≈ 1.38
+    """
+    cal = calibration_factor(gun_name)
+    cur = attachment_factor(gun_name, muzzle, grip)
+    return cur / cal

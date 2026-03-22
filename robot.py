@@ -9,9 +9,6 @@ from loguru import logger
 # Configure loguru before detector imports
 logger.remove()
 logger.add(sys.stderr, level="WARNING", format="{time:HH:mm:ss} | {message}")
-logger.add(sys.stderr, level="INFO",
-           filter=lambda record: record["extra"].get("detector") == "attachment",
-           format="{time:HH:mm:ss} | {message}")
 for _det_name in ['weapon', 'fire_mode', 'attachment']:
     logger.add(
         os.path.join('InGameScreenshot', _det_name, f'{_det_name}.log'),

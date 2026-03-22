@@ -126,6 +126,24 @@ class GameState:
             if attr:
                 w.set(attr, val)
         w.set_seq()
+        self._check_attachments(w, attachments)
+
+    @staticmethod
+    def _check_attachments(w, attachments):
+        """Warn if expected calibration attachments are missing."""
+        from weapon_attachments import WEAPON_SLOTS
+        slots = WEAPON_SLOTS.get(w.name)
+        if not slots:
+            return
+        muzzle = attachments.get('muzzle', '')
+        grip = attachments.get('grip', '')
+        warns = []
+        if slots['muzzle'] == 'comp' and (not muzzle or 'Compensator' not in muzzle):
+            warns.append('no comp')
+        if slots['grip'] and (not grip or 'Foregrip' not in grip):
+            warns.append('no grip')
+        if warns:
+            print(f'[WARN] {w.name}: {", ".join(warns)} — scale calibrated with full attachments', flush=True)
 
     def reload_seq(self):
         for w in (self.weapon_1, self.weapon_2):

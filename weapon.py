@@ -83,8 +83,9 @@ class BulletCalculator:
         t_s = []
         dx_s = []
         dy_s = []
-        for shot in shots:
-            t += shot['delay_ms'] / 1000.0
+        for i, shot in enumerate(shots):
+            if i > 0:
+                t += shot['delay_ms'] / 1000.0
             t_s.append(t)
             dx_s.append(shot['dx'] * self.counts_per_unit * factor)
             dy_s.append(shot['dy'] * self.counts_per_unit * factor)
@@ -101,8 +102,11 @@ def _load_scales():
     return {}
 
 def _save_scales(scales):
+    # Merge with existing file to preserve scales from other sessions
+    existing = _load_scales()
+    existing.update(scales)
     with open(SCALES_PATH, 'w') as f:
-        json.dump(scales, f, indent=2)
+        json.dump(existing, f, indent=2)
 
 # Per-weapon scale overrides (loaded once, saved on change)
 _weapon_scales = _load_scales()
@@ -172,24 +176,25 @@ class Weapon():
             self.butt = state
 
     def adjust_scale(self, delta):
-        """Adjust per-weapon scale and save to file."""
+        """Adjust per-weapon scale (saved to file on shutdown)."""
         if not self.name:
             return
-        self.scale = max(0.01, self.scale + delta)
-        _weapon_scales[self.name] = round(self.scale, 3)
-        _save_scales(_weapon_scales)
+        self.scale = max(0.01, round(self.scale + delta, 3))
+        _weapon_scales[self.name] = self.scale
         self.set_seq()
+
+    @staticmethod
+    def save_scales():
+        _save_scales(_weapon_scales)
 
     def set_seq(self):
         # Map posture to Kava4 stance (prone uses crouching data)
         stance = 'crouching' if self.posture in ('crouching', 'prone') else 'standing'
 
-        # Has any recoil-affecting attachment → use _att curve from Kava4
-        has_att = bool(self.muzzle or self.grip or self.butt)
-
         if self.type in ['ar', 'smg', 'mg', 'dmr', 'shotgun']:
+            # Always use _att curve (calibrated with compensator+grip in training ground)
             self.dx_s, self.dy_s, self.t_s = self.bullet_calculator.calculate_press_seq(
-                self.name, self.scope_factor * self.scale, stance, has_att)
+                self.name, self.scope_factor * self.scale, stance, has_att=True)
         else:
             # sp (bolt-action snipers) etc. — no recoil control
             self.dx_s, self.dy_s, self.t_s = [], [], []
