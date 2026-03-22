@@ -5,7 +5,46 @@ Pure state model. Weapon objects auto-recalculate recoil on changes.
 from weapon import Weapon
 from press import Press
 import config
-import display_names
+
+# ── Short display names for attachments ───────────────────
+
+_SCOPE = {
+    'Upper_DotSight_01_C': '1x', 'Upper_Holosight_C': '1x holo',
+    'Upper_Aimpoint_C': '2x', 'Upper_Scope3x_C': '3x',
+    'Upper_ACOG_01_C': '4x', 'Upper_Scope6x_C': '6x',
+    'Upper_CQBSS_C': '8x', 'Upper_PM2_01_C': '15x',
+    'SideRail_DotSight_RMR_C': 'canted',
+}
+
+_ATTACH = {
+    'Muzzle_Compensator_Large_C': 'comp', 'Muzzle_Compensator_Medium_C': 'comp',
+    'Muzzle_Compensator_SniperRifle_C': 'comp',
+    'Muzzle_Suppressor_Large_C': 'supp', 'Muzzle_Suppressor_Medium_C': 'supp',
+    'Muzzle_Suppressor_Small_C': 'supp', 'Muzzle_Suppressor_SniperRifle_C': 'supp',
+    'Muzzle_FlashHider_Large_C': 'flash', 'Muzzle_FlashHider_Medium_C': 'flash',
+    'Muzzle_FlashHider_SniperRifle_C': 'flash',
+    'Muzzle_Choke_C': 'choke', 'Muzzle_Duckbill_C': 'duck',
+    'Lower_Foregrip_C': 'vert', 'Lower_AngledForeGrip_C': 'angled',
+    'Lower_HalfGrip_C': 'half', 'Lower_ThumbGrip_C': 'thumb',
+    'Lower_LightweightForeGrip_C': 'light', 'Lower_LaserPointer_C': 'laser',
+    'Lower_Foregrip_Crossbow': 'vert', 'Lower_QuickDraw_Large_Crossbow_C': 'qd',
+    'Lower_Sniper_CheekPad_Vss_setting': 'cheek', 'Vector_VerGrip': 'vert',
+    'Stock_AR_Composite_C': 'tac', 'Stock_SniperRifle_CheekPad_C': 'cheek',
+    'Stock_SniperRifle_BulletLoops_C': 'loops', 'Stock_Shotgun_BulletLoops_C': 'loops',
+    'Stock_UZI_C': 'stock',
+}
+
+
+def _short(name):
+    if name in _SCOPE:
+        return _SCOPE[name]
+    if name in _ATTACH:
+        return _ATTACH[name]
+    if 'ExtendedQuickDraw' in name: return 'ext+qd'
+    if 'Extended_DrumMagazine' in name: return 'drum'
+    if 'Extended' in name: return 'ext'
+    if 'QuickDraw' in name: return 'qd'
+    return name
 
 _SLOT_TO_ATTR = {'scope': 'scope', 'muzzle': 'muzzle', 'grip': 'grip', 'stock': 'butt'}
 
@@ -21,6 +60,26 @@ class GameState:
         self.gt_valid = False
         self.tab_open = False
         self._press = None
+        self._apply_handlers = {
+            'active':      lambda v: self.set_active(1 if v == 'weapon_1' else 2),
+            'stop_recoil': lambda v: setattr(self, 'stop_recoil', v),
+            'gt_valid':    lambda v: setattr(self, 'gt_valid', v),
+            'counts':      self._adjust_counts,
+            'start_press': lambda _: self.start_press(),
+            'stop_press':  lambda _: self.stop_press(),
+        }
+
+    # ── Generic dispatch (driven by KEY_STATE_TABLE) ─────────
+
+    def apply(self, field, value):
+        handler = self._apply_handlers.get(field)
+        if handler:
+            handler(value)
+
+    def _adjust_counts(self, delta):
+        self.active.adjust_scale(delta)
+        name = self.active.name or '(empty)'
+        print(f"[scale] {name} = {self.active.scale:.3f}", flush=True)
 
     # ── Recoil control ───────────────────────────────────────
 
@@ -60,22 +119,6 @@ class GameState:
             w.set('posture', posture)
             w.set_seq()
 
-    def on_crouch_key(self):
-        """C key: standing↔crouching, prone→crouching."""
-        if self.posture == 'standing':
-            self.set_posture('crouching')
-        elif self.posture == 'crouching':
-            self.set_posture('standing')
-        elif self.posture == 'prone':
-            self.set_posture('crouching')
-
-    def on_prone_key(self):
-        """Z key: →prone if standing/crouching, →standing if prone."""
-        if self.posture == 'prone':
-            self.set_posture('standing')
-        else:
-            self.set_posture('prone')
-
     def set_attachments(self, slot, attachments):
         """attachments: dict {scope, muzzle, grip, magazine, stock} → class name or ''."""
         w = self.weapon_1 if slot == 1 else self.weapon_2
@@ -97,13 +140,13 @@ class GameState:
         if not w.name:
             return f'  {mark} (empty)'
         parts = [w.name, w.fire_mode or '?']
-        scope = display_names.scope_short(getattr(w, 'scope', ''))
+        scope = _SCOPE.get(getattr(w, 'scope', ''), '')
         if scope:
             parts.append(scope)
         for attr, label in [('muzzle', 'muz'), ('grip', 'grip'), ('butt', 'stock')]:
             val = getattr(w, attr, '')
             if val:
-                parts.append(f'{label}={display_names.short(val)}')
+                parts.append(f'{label}={_short(val)}')
         if self.posture != 'standing':
             parts.append(self.posture)
         return f'  {mark} ' + ' | '.join(parts)

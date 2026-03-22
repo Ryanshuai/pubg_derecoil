@@ -102,9 +102,11 @@ class FireModeDetector:
         return rf_name if (rf_name and rf_name != 'bg') else model_name
 
     def query(self):
-        """Capture fire mode region and classify."""
+        """Capture fire mode region, classify, update state."""
         crop = win32_cap(SLOT_RECT)
-        return self.classify(crop)
+        fm = self.classify(crop)
+        if fm:
+            self.state.set_fire_mode(fm)
 
     def _save_feedback(self, out_dir, reason, rf_name, model_name, conf, crop, probs):
         os.makedirs(out_dir, exist_ok=True)

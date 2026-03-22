@@ -56,10 +56,7 @@ class AttachmentDetector:
         return name
 
     def classify_gun(self, screen, gun_id):
-        """Classify all 5 slots for a gun from fullscreen image.
-
-        Returns dict {slot_name: attachment_class_name or ''}.
-        """
+        """Classify all 5 slots for a gun. Updates state directly."""
         from config import ATTACHMENT_SLOTS
         rects = ATTACHMENT_SLOTS[gun_id]
         result = {}
@@ -67,4 +64,4 @@ class AttachmentDetector:
             x1, y1, x2, y2 = rects[slot_name]
             crop = screen[y1:y2, x1:x2].copy()
             result[slot_name] = self.classify_slot(crop, slot_name)
-        return result
+        self.state.set_attachments(gun_id, result)

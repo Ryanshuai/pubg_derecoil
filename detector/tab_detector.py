@@ -36,7 +36,7 @@ class TabDetector:
         self.model = _load(MODEL_PATH, HEAD_SIZES, device, in_channels=4)
 
     def classify(self, crop):
-        """Returns True if Tab is open (inventory visible)."""
+        """Classify and update state. Returns True if Tab is open."""
         t = crop_to_tensor_4ch(crop, self.device)
         with torch.no_grad():
             out = self.model(t)
@@ -54,9 +54,8 @@ class TabDetector:
             if not os.path.exists(path):
                 cv2.imwrite(path, crop)
 
-        return model_open
+        self.state.tab_open = model_open
+        if model_open:
+            self.state.stop_recoil = True
 
-    def query(self):
-        """Capture tab region and classify."""
-        crop = win32_cap(SLOT_RECT)
-        return self.classify(crop)
+        return model_open

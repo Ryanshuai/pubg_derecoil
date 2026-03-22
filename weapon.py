@@ -4,77 +4,33 @@ import json
 
 CURVE_DIR = os.path.join(os.path.dirname(__file__), 'calibrate_distance', 'weapon_curve_kava4')
 
-time_periods = {
-    'akm': 0.1,
-    'aug': 0.08571,
-    "ace32": 0.088,
-    'pp19': 0.086,
-    'dp28': 0.109,
-    'g36c': 0.086,
-    'groza': 0.08,
-    'm416': 0.086,
-    'm16': 0.075,
-    'm249': 0.075,
-    'mk14': 0.09,
-    'm762': 0.086,
-    "mg3": 0.06,
-    'qbz': 0.092,
-    'scar': 0.096,
-    'tommy': 0.08,
-    'ump45': 0.09,
-    'uzi': 0.048,
-    'mp5k': 0.0666,
-    "p90": 0.06,
-    'vector': 0.055,
-    'slr': 0.01,
-    'mini14': 0.01,
-    'qbu': 0.01,
-    'sks': 0.01,
-    's12k': 0.01,
-    's686': 0.01,
+
+sp = {'98k', 'm24', 'awm'}
+dmr = {'mini14', 'mk14', 'qbu', 'sks', 'slr', 'vss'}
+ar = {'akm', 'aug', 'groza', 'm416', 'qbz', 'scar', 'm762', 'g36c', 'm16', 'mk47', 'k2', 'ace32', 'famas'}
+smg = {'tommy', 'uzi', 'ump45', 'vector', 'pp19', 'mp5k', 'p90', 'mp9', 'js9'}
+mg = {'m249', 'dp28', 'mg3'}
+shotgun = {'s12k', 's1987', 's686'}
+
+# Weapons that can fire in full-auto or burst (used for fire_mode logic)
+can_full_guns = {
+    'akm', 'aug', 'groza', 'm416', 'qbz', 'scar', 'mk14', 'tommy', 'uzi', 'vss',
+    'm762', 'ump45', 'vector', 'dp28', 'm249', 'pp19', 'g36c',
+    'k2', 'ace32', 'famas', 'mg3', 'mp5k', 'p90', 'mp9', 'js9',
 }
 
-all_guns = ['98k', 'm24', 'awm', 'mini14', 'mk14', 'qbu', 'sks', 'slr', 'vss', 'akm', 'aug', 'groza', 'm416', 'qbz',
-            'scar', 'm762', 'g36c', 'm16', 'mk47', 'tommy', 'uzi', 'ump45', 'vector', 'pp19', 'm249', 'dp28', 's12k',
-            's1987', 's686', 'win94', ]
 
-single_guns = ['98k', 'awm', 'm16', 'm24', 'mini14', 's12k', 's1987', 's686', 'sks', 'slr', 'win94', ]
-full_guns = ['dp28', 'm249', ]
-single_burst_guns = ['m16', 'mk47', ]
-single_full_guns = ['akm', 'aug', 'groza', 'm416', 'qbz', 'scar', 'mk14', 'tommy', 'uzi', 'vss', ]
-single_burst_full_guns = ['m762', 'ump45', 'vector', ]
-can_full_guns = ['akm', 'aug', 'groza', 'm416', 'qbz', 'scar', 'mk14', 'tommy', 'uzi', 'vss', 'm762', 'ump45', 'vector',
-                 'dp28', 'm249', 'pp19', 'g36c', ]
-
-sp = {'98k', 'm24', 'awm', }
-dmr = {'mini14', 'mk14', 'qbu', 'sks', 'slr', 'vss', }
-ar = {'akm', 'aug', 'groza', 'm416', 'qbz', 'scar', 'm762', 'g36c', 'm16', 'mk47', "k2", "ace32"}
-smg = {'tommy', 'uzi', 'ump45', 'vector', 'pp19', 'mp5k', "p90"}
-mg = {'m249', 'dp28', "mg3"}
-shotgun = {'s12k', 's1987', 's686', }
-
-bullet_762_guns = ['98k', 'm24', 'mk14', 'sks', 'slr', 'akm', 'groza', 'm762', 'mk47', 'dp28', ]
-bullet_556_guns = ['mini14', 'qbu', 'aug', 'm416', 'qbz', 'scar', 'g36c', 'm16', ]
-bullet_9_guns = ['vss', 'uzi', 'vector', 'pp19', ]
-bullet_45_guns = ['tommy', 'ump45', 'win94', ]
-bullet_12_guns = ['s12k', 's1987', 's686', ]
-bullet_300_guns = ['awm', ]
-
-
-def factor_scope(scope):
-    factor = 1
-    if scope == 1:
-        factor = 1.
-    if scope == 2:
-        factor = 0.85
-    if scope == 3:
-        factor = 0.85
-    if scope == 4:
-        factor = 0.85
-    if scope == 6:
-        factor = 0.85
-    screen_factor = 1  # screen_h_factor
-    return scope * factor * screen_factor
+# Actual magnification from PUBG Wiki FOV data (base FOV=80°)
+# https://pubg.wiki.gg/wiki/
+SCOPE_MAGNIFICATION = {
+    1:  1.0,    # red dot / holo: 80°
+    2:  2.0,    # 2x aimpoint: 40°
+    3:  3.0,    # 3x backlit: 26.66°
+    4:  4.21,   # 4x ACOG: 19° (not 20°)
+    6:  6.0,    # 6x: 13.33°
+    8:  8.0,    # 8x CQBSS: 10°
+    15: 12.0,   # 15x PM II: 6.67° (actually 12x)
+}
 
 
 class BulletCalculator:
@@ -136,36 +92,46 @@ class BulletCalculator:
         return np.array(dx_s), np.array(dy_s), np.array(t_s)
 
 
+SCALES_PATH = os.path.join(os.path.dirname(__file__), 'weapon_scales.json')
+
+def _load_scales():
+    if os.path.exists(SCALES_PATH):
+        with open(SCALES_PATH, 'r') as f:
+            return json.load(f)
+    return {}
+
+def _save_scales(scales):
+    with open(SCALES_PATH, 'w') as f:
+        json.dump(scales, f, indent=2)
+
+# Per-weapon scale overrides (loaded once, saved on change)
+_weapon_scales = _load_scales()
+
+
 class Weapon():
-    def __init__(self, is_calibrating=False):
-        self.fire_mode = 'full'
+    def __init__(self):
+        self.fire_mode = ''
         self.name = ''
         self.posture = 'standing'
-        self.scope = '1'
+        self.scope = ''
         self.muzzle = ''
         self.grip = ''
         self.butt = ''
 
         self.type = 'ar'
 
-        self.all_factor = 1
         self.scope_factor = 1
+        self.scale = 1.0  # per-weapon scale, adjusted by ↑↓
 
-        self.time_interval = 0.1
         self.t_s = []
         self.dx_s = []
         self.dy_s = []
-        self.is_press = False
-        self.is_calibrating = is_calibrating
         self.bullet_calculator = BulletCalculator()
-
-    def __str__(self):
-        return "-".join((self.name, self.fire_mode, self.scope, self.muzzle[:3], self.grip, self.butt))
 
     def set(self, pos, state):
         if pos == 'name':
             self.name = state
-            self.time_interval = time_periods.get(self.name, 0.1)
+            self.scale = _weapon_scales.get(state, 1.0)
             if self.name in sp:
                 self.type = 'sp'
             elif self.name in dmr:
@@ -181,34 +147,38 @@ class Weapon():
         elif pos == 'posture':
             self.posture = state if state in ('standing', 'crouching', 'prone') else 'standing'
         elif pos == 'fire_mode':
-            # if self.fire_mode == "full" and self.type in ['ar', 'smg', 'mg']:
-            if self.type in ['ar', 'smg', 'mg']:
+            if self.name in can_full_guns:
                 self.fire_mode = state if state else 'full'
-            # if self.fire_mode == "single" and self.type in ['dmr', 'shotgun']:
-            if self.type in ['dmr', 'shotgun']:
-                self.fire_mode = "single"
+            else:
+                self.fire_mode = 'single'
         elif pos == 'scope':
             self.scope = state
-            # Map attachment_detector names to magnification
-            scope_mag = {
+            # Map attachment_detector class name → nominal magnification
+            _SCOPE_TO_MAG = {
                 '': 1, 'upper_dotsight_01': 1, 'upper_holosight': 1,
                 'upper_aimpoint2x_01': 2, 'upper_canted_sight': 1,
                 'upper_3x': 3, 'upper_acog_01': 4,
                 'upper_6x': 6, 'upper_cqbss': 8, 'upper_pm2_01': 15,
-                # Old format compat
-                'x1h': 1, 'x1r': 1, 'x15': 15,
-                'x2': 2, 'x3': 3, 'x4': 4, 'x6': 6, 'x8': 8,
             }
-            mag = scope_mag.get(state, 1)
-            self.scope_factor = factor_scope(mag)
+            nominal = _SCOPE_TO_MAG.get(state, 1)
             if self.name == 'vss':
-                self.scope_factor = factor_scope(4)
+                nominal = 4
+            self.scope_factor = SCOPE_MAGNIFICATION.get(nominal, nominal)
         elif pos == 'muzzle':
             self.muzzle = state
         elif pos == 'grip':
             self.grip = state
         elif pos == 'butt':
             self.butt = state
+
+    def adjust_scale(self, delta):
+        """Adjust per-weapon scale and save to file."""
+        if not self.name:
+            return
+        self.scale = max(0.01, self.scale + delta)
+        _weapon_scales[self.name] = round(self.scale, 3)
+        _save_scales(_weapon_scales)
+        self.set_seq()
 
     def set_seq(self):
         # Map posture to Kava4 stance (prone uses crouching data)
@@ -217,17 +187,9 @@ class Weapon():
         # Has any recoil-affecting attachment → use _att curve from Kava4
         has_att = bool(self.muzzle or self.grip or self.butt)
 
-        if self.type in ['ar', 'smg', 'mg']:
-            self.all_factor = self.scope_factor
+        if self.type in ['ar', 'smg', 'mg', 'dmr', 'shotgun']:
             self.dx_s, self.dy_s, self.t_s = self.bullet_calculator.calculate_press_seq(
-                self.name, self.all_factor, stance, has_att)
-
-        elif self.type in ['dmr', 'shotgun']:
-            self.all_factor = self.scope_factor
-            self.dx_s, self.dy_s, self.t_s = self.bullet_calculator.calculate_press_seq(
-                self.name, self.all_factor, stance, has_att)
-
-# if __name__ == '__main__':
-#     states = All_States()
-#     states.weapon[0].set('name', 'm416')
-#     states.weapon[0].set_seq()
+                self.name, self.scope_factor * self.scale, stance, has_att)
+        else:
+            # sp (bolt-action snipers) etc. — no recoil control
+            self.dx_s, self.dy_s, self.t_s = [], [], []

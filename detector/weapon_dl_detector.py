@@ -76,13 +76,10 @@ class WeaponClassifier:
         return (gt or model_name), hl_name
 
     def query(self):
-        """Capture both weapon slots and return which is highlighted (1, 2, or None)."""
+        """Capture both weapon slots for feedback only (active is set by key 1/2)."""
         for slot_id in [1, 2]:
             crop = win32_cap(SLOT_RECTS[slot_id])
-            _, hl_name = self.classify(crop, slot_id)
-            if hl_name == 'highlighted':
-                return slot_id
-        return None
+            self.classify(crop, slot_id)
 
     def _save_feedback(self, out_dir, reason, gt, model_name, hl_name,
                        conf, crop, probs, slot_id):

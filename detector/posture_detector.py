@@ -56,6 +56,8 @@ class PostureDetector:
         return name
 
     def query(self):
-        """Capture posture region and classify."""
+        """Capture posture region, classify, update state."""
         crop = win32_cap(SLOT_RECT)
-        return self.classify(crop)
+        pos = self.classify(crop)
+        if pos:
+            self.state.set_posture(pos)

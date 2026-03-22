@@ -1,7 +1,7 @@
 """Tab scan — composite detector for inventory screen.
 
-Captures fullscreen, verifies Tab is open, reads weapon names + attachments.
-Updates GameState directly.
+Captures fullscreen, verifies Tab is open, dispatches to sub-detectors.
+Each sub-detector updates GameState directly.
 """
 import os
 import sys
@@ -29,22 +29,13 @@ class TabScan:
 
         tab_crop = screen[TAB_RECT[0]:TAB_RECT[0]+TAB_RECT[2],
                           TAB_RECT[1]:TAB_RECT[1]+TAB_RECT[3]].copy()
-        is_open = self._tab.classify(tab_crop)
-        self.state.tab_open = is_open
-
-        if not is_open:
+        if not self._tab.classify(tab_crop):
             return
 
-        self.state.stop_recoil = True
-
         r1, r2 = OCR_RECTS[1], OCR_RECTS[2]
-        names = self._weapon_tpl.read_from_crops(
+        self._weapon_tpl.read_from_crops(
             screen[r1[0]:r1[0]+r1[2], r1[1]:r1[1]+r1[3]].copy(),
             screen[r2[0]:r2[0]+r2[2], r2[1]:r2[1]+r2[3]].copy())
-        for slot_id, name in names.items():
-            self.state.set_weapon(slot_id, name)
-        self.state.gt_valid = True
 
         for gun_id in [1, 2]:
-            result = self._attach.classify_gun(screen, gun_id)
-            self.state.set_attachments(gun_id, result)
+            self._attach.classify_gun(screen, gun_id)

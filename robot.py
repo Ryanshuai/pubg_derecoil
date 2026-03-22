@@ -1,191 +1,110 @@
 import os
-import threading
+import sys
 import time
-from datetime import datetime
+import threading
+from collections import defaultdict
+import torch
+from loguru import logger
+
+# Configure loguru before detector imports
+logger.remove()
+logger.add(sys.stderr, level="WARNING", format="{time:HH:mm:ss} | {message}")
+for _det_name in ['weapon', 'fire_mode', 'attachment']:
+    logger.add(
+        os.path.join('InGameScreenshot', _det_name, f'{_det_name}.log'),
+        filter=lambda record, d=_det_name: record["extra"].get("detector") == d,
+        format="{time:YYYY-MM-DD HH:mm:ss} | {message}",
+        rotation="10 MB", encoding="utf-8",
+    )
+
 from pynput import keyboard, mouse
-import cv2
 
-from press import Press
-from weapon import Weapon, can_full_guns
-from detector.cropper import win32_cap
-from detector.hud_poller import HUDPoller
-from detector import weapon_detector
-import config
-from config import SCREEN_W, SCREEN_H
-
-SCREENSHOT_DIR = 'in_game_screenshot'
+from game_state import GameState
+from weapon import Weapon
+from detector.weapon_dl_detector import WeaponClassifier
+from detector.fire_mode_detector import FireModeDetector
+from detector.posture_detector import PostureDetector
+from detector.tab_scan import TabScan
+from config import DETECT_TABLE, KEY_STATE_TABLE, SPECIAL_KEYS
 
 
 class Robot:
     def __init__(self):
-        self.weapon_1 = Weapon()
-        self.weapon_2 = Weapon()
-        self.weapon = self.weapon_1  # active weapon reference
-        self.stop_press = False
-        self.running = True
+        self.state = GameState()
 
-        os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+        # Load all detectors
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self._detectors = {
+            'weapon_hud': WeaponClassifier(device, self.state),
+            'fire_mode':  FireModeDetector(device, self.state),
+            'posture':    PostureDetector(device, self.state),
+            'tab_scan':   TabScan(device, self.state),
+        }
 
-        # ── HUD Poller (round-robin detection) ──
-        self.poller = HUDPoller()
-        self.poller.on_change(self._on_hud_change)
-        self.poller.start()
+        # Build dispatch: key_name → list of (detector, delay_sec)
+        self._detect_map = defaultdict(list)
+        for entry in DETECT_TABLE:
+            det = self._detectors[entry['detect']]
+            delay = entry['delay'] / 1000.0
+            for key in entry['keys']:
+                self._detect_map[key].append((det, delay))
 
-        # ── Mouse hook ──
-        self.mouse_listener = mouse.Listener(on_click=self.on_click)
-        self.mouse_listener.start()
+        # Build dispatch: key_name → list of (state_field, value)
+        self._state_map = defaultdict(list)
+        for entry in KEY_STATE_TABLE:
+            self._state_map[entry['key']].append((entry['state'], entry['value']))
 
-        # ── Keyboard hook ──
+        mouse.Listener(on_click=self.on_click).start()
         self.key_listener = keyboard.Listener(on_press=self.on_press)
         self.key_listener.start()
-
         print("init done", flush=True)
 
-    # ── HUD state change handler ─────────────────────────────
-    def _on_hud_change(self, key, old, new):
-        """Called by poller when any HUD state changes."""
+    # ── Config-driven dispatch ────────────────────────────────
 
-        # Weapon name changed
-        if key == 'weapon_1':
-            self.weapon_1.set('name', new)
-            self.weapon_1.set_seq()
-            if new:
-                print(f'[weapon 1] {new}', flush=True)
+    def _run_detect(self, detector, delay):
+        if delay > 0:
+            time.sleep(delay)
+        detector.query()
 
-        elif key == 'weapon_2':
-            self.weapon_2.set('name', new)
-            self.weapon_2.set_seq()
-            if new:
-                print(f'[weapon 2] {new}', flush=True)
+    def _dispatch(self, key_name):
+        """Dispatch key event through both config tables."""
+        # Immediate state updates
+        for state_field, value in self._state_map.get(key_name, []):
+            self.state.apply(state_field, value)
 
-        # Highlight changed → switch active weapon
-        elif key == 'weapon_1_hl' and new == 'highlighted':
-            self.weapon = self.weapon_1
-            self.stop_press = False
-            print(f'[active] weapon 1 ({self.weapon_1.name})', flush=True)
+        # Deferred detector queries
+        for detector, delay in self._detect_map.get(key_name, []):
+            threading.Thread(
+                target=self._run_detect, args=(detector, delay), daemon=True
+            ).start()
 
-        elif key == 'weapon_2_hl' and new == 'highlighted':
-            self.weapon = self.weapon_2
-            self.stop_press = False
-            print(f'[active] weapon 2 ({self.weapon_2.name})', flush=True)
+    # ── Input listeners ───────────────────────────────────────
 
-        # Fire mode changed
-        elif key == 'fire_mode':
-            self.weapon_1.set('fire_mode', new)
-            self.weapon_2.set('fire_mode', new)
-            self.weapon_1.set_seq()
-            self.weapon_2.set_seq()
-            if new:
-                print(f'[fire_mode] {new}', flush=True)
-
-        # Posture changed → update recoil (crouch has different pattern)
-        elif key == 'posture' and new:
-            self.weapon_1.set('posture', new)
-            self.weapon_2.set('posture', new)
-            self.weapon_1.set_seq()
-            self.weapon_2.set_seq()
-            print(f'[posture] {new}', flush=True)
-
-        # Tab state
-        elif key == 'tab_open':
-            if new:
-                self.stop_press = True
-                print('[tab] opened', flush=True)
-            else:
-                self.stop_press = False
-                print('[tab] closed', flush=True)
-
-        # Attachments changed
-        elif key in ('attachments_1', 'attachments_2'):
-            gun_id = key[-1]
-            weapon = self.weapon_1 if gun_id == '1' else self.weapon_2
-            if isinstance(new, dict):
-                for slot, val in new.items():
-                    if slot == 'scope':
-                        weapon.set('scope', val)
-                    elif slot == 'muzzle':
-                        weapon.set('muzzle', val)
-                    elif slot == 'grip':
-                        weapon.set('grip', val)
-                    elif slot == 'stock':
-                        weapon.set('butt', val)
-                weapon.set_seq()
-                attached = [f'{s}={v}' for s, v in new.items() if v]
-                if attached:
-                    print(f'[attach {gun_id}] {", ".join(attached)}', flush=True)
-
-    # ── Keyframe screenshot (F5) ─────────────────────────────
-    def _save_keyframe(self):
-        screenshot = win32_cap((0, 0, SCREEN_H, SCREEN_W))
-        ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-        filename = f'{ts}.png'
-        path = os.path.join(SCREENSHOT_DIR, filename)
-        cv2.imwrite(path, screenshot)
-        print(f"[screenshot] {filename}", flush=True)
-
-    # ── Mouse hook ────────────────────────────────────────────
-    def on_click(self, x, y, button, pressed):
-        if button == mouse.Button.right and pressed:
-            self.stop_press = False
-
-        if button == mouse.Button.left and pressed:
-            if not self.stop_press and len(self.weapon.dy_s) > 0:
-                # Only compensate in full/high auto mode
-                if self.weapon.fire_mode in ('full', 'high'):
-                    self.press = Press(self.weapon.dx_s, self.weapon.dy_s, self.weapon.t_s)
-                    self.press.start()
-
-        if button == mouse.Button.left and not pressed:
-            if hasattr(self, 'press'):
-                self.press.stop()
-
-    # ── Keyboard hook ─────────────────────────────────────────
-    def _reload_seq(self):
-        self.weapon_1.bullet_calculator.counts_per_unit = config.COUNTS_PER_RECOIL_UNIT
-        self.weapon_2.bullet_calculator.counts_per_unit = config.COUNTS_PER_RECOIL_UNIT
-        self.weapon_1.set_seq()
-        self.weapon_2.set_seq()
+    def on_click(self, _x, _y, button, pressed):
+        if button == mouse.Button.left:
+            self._dispatch('left_down' if pressed else 'left_up')
+        elif button == mouse.Button.right and pressed:
+            self._dispatch('right_down')
 
     def on_press(self, key):
-        if key in [keyboard.Key.f13]:
+        if key == keyboard.Key.f13:
             self.shutdown()
-            return False  # stops pynput listener → unblocks join()
+            return False
 
-        if key == keyboard.Key.tab:
-            weapon_detector.invalidate_gt('Tab pressed')
+        # Special keys
+        key_name = SPECIAL_KEYS.get(key)
+        if key_name:
+            self._dispatch(key_name)
+            return
 
-        try:
-            if key.char == 'f':
-                weapon_detector.invalidate_gt('F pressed (pickup)')
-        except AttributeError:
-            pass
-
-        if key == keyboard.Key.f5:
-            threading.Thread(target=self._save_keyframe, daemon=True).start()
-
-        if key == keyboard.Key.up:
-            config.COUNTS_PER_RECOIL_UNIT += 0.05
-            self._reload_seq()
-            print(f"[scale] {config.COUNTS_PER_RECOIL_UNIT:.2f}", flush=True)
-
-        if key == keyboard.Key.down:
-            config.COUNTS_PER_RECOIL_UNIT = max(0.05, config.COUNTS_PER_RECOIL_UNIT - 0.05)
-            self._reload_seq()
-            print(f"[scale] {config.COUNTS_PER_RECOIL_UNIT:.2f}", flush=True)
-
+        # Char keys
         if hasattr(key, 'char') and key.char:
-            ch = key.char.lower()
-            if ch == 'g' or ch == '5':
-                self.stop_press = True
-            if ch == 'f':
-                weapon_detector.invalidate_gt('F pressed (pickup/interact)')
+            self._dispatch(key.char.lower())
 
     def shutdown(self):
-        print('[robot] shutting down...', flush=True)
-        self.stop_press = True
-        self.running = False
-        self.poller.stop()
-        self.mouse_listener.stop()
+        self.state.stop_recoil = True
+        Weapon.save_scales()
+        print("[shutdown] scales saved", flush=True)
 
 
 if __name__ == '__main__':

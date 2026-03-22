@@ -99,8 +99,7 @@ class WeaponTemplateDetector:
         return ''
 
     def read_from_crops(self, crop_1, crop_2):
-        """Match weapon names from two crops. Returns {slot_id: name} for matched slots."""
-        result = {}
+        """Match weapon names from two crops. Updates state directly."""
         for slot_id, crop in [(1, crop_1), (2, crop_2)]:
             matches = _template_match(crop, self._templates)
             if not matches:
@@ -110,7 +109,7 @@ class WeaponTemplateDetector:
             if best_iou >= TMPL_THRESHOLD:
                 second = f' 2nd={matches[1][1]}={matches[1][0]:.3f}' if len(matches) > 1 else ''
                 _logger.info(f'OCR slot{slot_id} | {best_code} iou={best_iou:.3f}{second}')
-                result[slot_id] = best_code
+                self.state.set_weapon(slot_id, best_code)
             else:
                 _logger.info(f'OCR slot{slot_id} | best={best_code} iou={best_iou:.3f} | rejected')
-        return result
+        self.state.gt_valid = True

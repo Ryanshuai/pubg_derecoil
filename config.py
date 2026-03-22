@@ -1,3 +1,14 @@
+from pynput import keyboard
+
+# ── pynput special key → string name mapping ────────────
+SPECIAL_KEYS = {
+    keyboard.Key.tab: 'tab',
+    keyboard.Key.esc: 'esc',
+    keyboard.Key.up: 'up',
+    keyboard.Key.down: 'down',
+    keyboard.Key.f13: 'f13',
+}
+
 # Resolution: 3440x1440
 SCREEN_W = 3440
 SCREEN_H = 1440
@@ -59,6 +70,35 @@ IN_TAB = {
     'x2': 978,
     'y2': 147,
 }
+
+# ── Key-triggered detection table ─────────────────────────
+# keys:    which key presses trigger this detection
+# detect:  which detector to call
+# delay:   ms to wait for HUD to update before screenshot
+# capture: 'region' = detector's own SLOT_RECT, 'fullscreen' = entire screen
+DETECT_TABLE = [
+    {'keys': ['1', '2'],           'detect': 'weapon_hud', 'delay': 200, 'capture': 'region'},
+    {'keys': ['1', '2', 'b'],      'detect': 'fire_mode',  'delay': 200, 'capture': 'region'},
+    {'keys': ['c', 'z', 'right_down'],  'detect': 'posture',    'delay': 200, 'capture': 'region'},
+    {'keys': ['tab'],              'detect': 'tab_scan',   'delay': 0,   'capture': 'fullscreen'},
+]
+
+# ── Key-triggered immediate state updates ─────────────────
+# key:    the key press
+# state:  which state field to set
+# value:  the value to assign
+KEY_STATE_TABLE = [
+    {'key': '1',           'state': 'active',      'value': 'weapon_1'},
+    {'key': '2',           'state': 'active',      'value': 'weapon_2'},
+    {'key': 'g',           'state': 'stop_recoil', 'value': True},
+    {'key': '5',           'state': 'stop_recoil', 'value': True},
+    {'key': 'f',           'state': 'gt_valid',    'value': False},
+    {'key': 'up',          'state': 'counts',      'value': +0.01},
+    {'key': 'down',        'state': 'counts',      'value': -0.01},
+    {'key': 'right_down',  'state': 'stop_recoil', 'value': False},
+    {'key': 'left_down',   'state': 'start_press', 'value': None},
+    {'key': 'left_up',     'state': 'stop_press',  'value': None},
+]
 
 # Mouse / sensitivity settings
 MOUSE_DPI = 2000
