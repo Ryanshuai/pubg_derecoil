@@ -97,16 +97,15 @@ SCALES_PATH = os.path.join(os.path.dirname(__file__), 'weapon_scales.json')
 
 def _load_scales():
     if os.path.exists(SCALES_PATH):
-        with open(SCALES_PATH, 'r') as f:
+        with open(SCALES_PATH, 'r', encoding='utf-8') as f:
             return json.load(f)
     return {}
 
 def _save_scales(scales):
-    # Merge with existing file to preserve scales from other sessions
     existing = _load_scales()
     existing.update(scales)
-    with open(SCALES_PATH, 'w') as f:
-        json.dump(existing, f, indent=2)
+    with open(SCALES_PATH, 'w', encoding='utf-8') as f:
+        json.dump(existing, f, indent=2, ensure_ascii=False)
 
 # Per-weapon scale overrides (loaded once, saved on change)
 _weapon_scales = _load_scales()
@@ -157,12 +156,13 @@ class Weapon():
                 self.fire_mode = 'single'
         elif pos == 'scope':
             self.scope = state
-            # Map attachment_detector class name → nominal magnification
+            # Map template matcher output → nominal magnification
             _SCOPE_TO_MAG = {
-                '': 1, 'upper_dotsight_01': 1, 'upper_holosight': 1,
-                'upper_aimpoint2x_01': 2, 'upper_canted_sight': 1,
-                'upper_3x': 3, 'upper_acog_01': 4,
-                'upper_6x': 6, 'upper_cqbss': 8, 'upper_pm2_01': 15,
+                '': 1,
+                'Upper_DotSight_01_C': 1, 'Upper_Holosight_C': 1,
+                'Upper_Aimpoint_C': 2, 'SideRail_DotSight_RMR_C': 1,
+                'Upper_Scope3x_C': 3, 'Upper_ACOG_01_C': 4,
+                'Upper_Scope6x_C': 6, 'Upper_CQBSS_C': 8, 'Upper_PM2_01_C': 15,
             }
             nominal = _SCOPE_TO_MAG.get(state, 1)
             if self.name == 'vss':
@@ -192,9 +192,15 @@ class Weapon():
         stance = 'crouching' if self.posture in ('crouching', 'prone') else 'standing'
 
         if self.type in ['ar', 'smg', 'mg', 'dmr', 'shotgun']:
-            # Always use _att curve (calibrated with compensator+grip in training ground)
+            from weapon_attachments import calibration_factor, attachment_factor
+            # Reverse calibration to get naked scale, then apply current attachments
+            cal_f = calibration_factor(self.name)
+            att_f = attachment_factor(self.name, self.muzzle, self.grip)
+            naked_scale = self.scale / cal_f
+            factor = self.scope_factor * naked_scale * att_f
+
             self.dx_s, self.dy_s, self.t_s = self.bullet_calculator.calculate_press_seq(
-                self.name, self.scope_factor * self.scale, stance, has_att=True)
+                self.name, factor, stance, has_att=True)
         else:
             # sp (bolt-action snipers) etc. — no recoil control
             self.dx_s, self.dy_s, self.t_s = [], [], []

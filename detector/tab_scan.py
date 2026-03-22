@@ -1,7 +1,8 @@
 """Tab scan — composite detector for inventory screen.
 
-Captures fullscreen, verifies Tab is open, dispatches to sub-detectors.
-Each sub-detector updates GameState directly.
+UI delay logic: Tab press captures the PREVIOUS state (UI hasn't updated yet).
+  - "Type" visible → Tab is CLOSING (UI still showing) → read weapons/attachments → resume recoil
+  - "Type" NOT visible → Tab is OPENING (UI not loaded) → stop recoil, nothing to read
 """
 import os
 import sys
@@ -24,14 +25,19 @@ class TabScan:
         self._attach = AttachmentDetector(device, state)
 
     def query(self):
-        """Capture fullscreen, verify tab open, read weapons + attachments."""
+        """Tab pressed: immediate capture, use UI delay to infer state."""
         screen = win32_cap((0, 0, SCREEN_H, SCREEN_W))
-
         tab_crop = screen[TAB_RECT[0]:TAB_RECT[0]+TAB_RECT[2],
                           TAB_RECT[1]:TAB_RECT[1]+TAB_RECT[3]].copy()
-        if not self._tab.classify(tab_crop):
+        type_visible = self._tab.classify(tab_crop)
+
+        if not type_visible:
+            # "Type" NOT visible → Tab is OPENING → stop recoil
+            self.state.tab_open = True
+            self.state.stop_recoil = True
             return
 
+        # "Type" visible → Tab is CLOSING → UI still showing, read now
         r1, r2 = OCR_RECTS[1], OCR_RECTS[2]
         self._weapon_tpl.read_from_crops(
             screen[r1[0]:r1[0]+r1[2], r1[1]:r1[1]+r1[3]].copy(),
@@ -41,3 +47,5 @@ class TabScan:
             self._attach.classify_gun(screen, gun_id)
 
         self.state._print_status()
+        self.state.tab_open = False
+        self.state.stop_recoil = False

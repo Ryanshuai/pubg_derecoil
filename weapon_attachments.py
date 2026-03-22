@@ -16,8 +16,25 @@ At runtime:
   base_scale = weapon_scales[gun] / calibration_factor
 """
 
-COMP = 0.85    # compensator vertical recoil multiplier
-GRIP = 0.85    # vertical foregrip vertical recoil multiplier
+# Muzzle vertical recoil multipliers
+MUZZLE_FACTOR = {
+    'Compensator': 0.85,
+    'FlashHider': 0.95,
+    'Suppressor': 1.0,
+}
+
+# Grip vertical recoil multipliers
+GRIP_FACTOR = {
+    'Foregrip': 0.85,       # Vertical Foregrip
+    'HalfGrip': 0.92,
+    'ThumbGrip': 0.95,
+    'AngledForeGrip': 1.0,
+    'LightweightForeGrip': 1.0,
+    'LaserPointer': 1.0,
+}
+
+COMP = 0.85    # shorthand for calibration_factor
+GRIP = 0.85
 
 # muzzle_type: 'comp' = can equip compensator, 'supp_only' = suppressor only, None = nothing
 # grip: True = can equip vertical foregrip, False = cannot
@@ -95,12 +112,18 @@ def attachment_factor(gun_name, muzzle='', grip=''):
     if not slots:
         return 1.0
     f = 1.0
-    # Compensator check (only if gun supports comp, not supp_only)
-    if slots['muzzle'] == 'comp' and muzzle and 'Compensator' in muzzle:
-        f *= COMP
-    # Vertical foregrip check
-    if slots['grip'] and grip and 'Foregrip' in grip:
-        f *= GRIP
+    # Muzzle
+    if slots['muzzle'] == 'comp' and muzzle:
+        for key, factor in MUZZLE_FACTOR.items():
+            if key in muzzle:
+                f *= factor
+                break
+    # Grip
+    if slots['grip'] and grip:
+        for key, factor in GRIP_FACTOR.items():
+            if key in grip:
+                f *= factor
+                break
     return f
 
 
