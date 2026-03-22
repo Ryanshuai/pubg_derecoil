@@ -3,7 +3,7 @@ import numpy as np
 import json
 from scipy.ndimage import gaussian_filter1d
 
-from image_detect.cropper import win32_cap
+from detector.cropper import win32_cap
 
 
 def detect_bullet(img_uint8):

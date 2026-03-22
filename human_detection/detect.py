@@ -5,7 +5,7 @@ import time
 import win32api
 import win32con
 
-from image_detect.cropper import win32_cap
+from detector.cropper import win32_cap
 
 
 class Detector:

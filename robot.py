@@ -9,6 +9,9 @@ from loguru import logger
 # Configure loguru before detector imports
 logger.remove()
 logger.add(sys.stderr, level="WARNING", format="{time:HH:mm:ss} | {message}")
+logger.add(sys.stderr, level="INFO",
+           filter=lambda record: record["extra"].get("detector") == "attachment",
+           format="{time:HH:mm:ss} | {message}")
 for _det_name in ['weapon', 'fire_mode', 'attachment']:
     logger.add(
         os.path.join('InGameScreenshot', _det_name, f'{_det_name}.log'),
@@ -78,11 +81,20 @@ class Robot:
                 target=self._run_detect, args=(detector, delay), daemon=True
             ).start()
 
+    def _dispatch_with_time(self, key_name):
+        """Dispatch with click timestamp as value (for start_press)."""
+        click_time = time.perf_counter()
+        for state_field, _ in self._state_map.get(key_name, []):
+            self.state.apply(state_field, click_time)
+
     # ── Input listeners ───────────────────────────────────────
 
     def on_click(self, _x, _y, button, pressed):
         if button == mouse.Button.left:
-            self._dispatch('left_down' if pressed else 'left_up')
+            if pressed:
+                self._dispatch_with_time('left_down')
+            else:
+                self._dispatch('left_up')
         elif button == mouse.Button.right and pressed:
             self._dispatch('right_down')
 

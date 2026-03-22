@@ -65,7 +65,7 @@ class GameState:
             'stop_recoil': lambda v: setattr(self, 'stop_recoil', v),
             'gt_valid':    lambda v: setattr(self, 'gt_valid', v),
             'counts':      self._adjust_counts,
-            'start_press': lambda _: self.start_press(),
+            'start_press': lambda v: self.start_press(click_time=v),
             'stop_press':  lambda _: self.stop_press(),
         }
 
@@ -83,11 +83,11 @@ class GameState:
 
     # ── Recoil control ───────────────────────────────────────
 
-    def start_press(self):
+    def start_press(self, click_time=None):
         w = self.active
         if self.stop_recoil or len(w.dy_s) == 0:
             return
-        self._press = Press(w.dx_s, w.dy_s, w.t_s)
+        self._press = Press(w.dx_s, w.dy_s, w.t_s, start_time=click_time)
         self._press.start()
 
     def stop_press(self):
@@ -101,7 +101,6 @@ class GameState:
         w = self.weapon_1 if slot == 1 else self.weapon_2
         w.set('name', name)
         w.set_seq()
-        self._print_status()
 
     def set_active(self, slot):
         self.active = self.weapon_1 if slot == 1 else self.weapon_2
@@ -139,20 +138,22 @@ class GameState:
         mark = '*' if is_active else ' '
         if not w.name:
             return f'  {mark} (empty)'
-        parts = [w.name, w.fire_mode or '?']
-        scope = _SCOPE.get(getattr(w, 'scope', ''), '')
-        if scope:
-            parts.append(scope)
-        for attr, label in [('muzzle', 'muz'), ('grip', 'grip'), ('butt', 'stock')]:
-            val = getattr(w, attr, '')
-            if val:
-                parts.append(f'{label}={_short(val)}')
-        if self.posture != 'standing':
-            parts.append(self.posture)
-        return f'  {mark} ' + ' | '.join(parts)
+        # Left: name + fire_mode
+        left = f'{w.name} | {w.fire_mode or "?"}'
+        # Right: attachments (scope | muzzle | grip | stock)
+        scope = _SCOPE.get(getattr(w, 'scope', ''), '') or '-'
+        muzzle = _short(w.muzzle) if w.muzzle else '-'
+        grip = _short(w.grip) if w.grip else '-'
+        stock = _short(w.butt) if w.butt else '-'
+        right = f'{scope:>4s} | {muzzle:>5s} | {grip:>5s} | {stock:>5s}'
+        posture = f' | {self.posture}' if self.posture != 'standing' else ''
+        return f'  {mark} {left:<16s}  {right}{posture}'
 
     def _print_status(self):
-        sep = '--------------------------------------'
         l1 = self._format_weapon(self.weapon_1, self.weapon_1 is self.active)
         l2 = self._format_weapon(self.weapon_2, self.weapon_2 is self.active)
-        print(f'{sep}\n{l1}\n{l2}', flush=True)
+        new_status = f'{l1}\n{l2}'
+        if new_status != getattr(self, '_last_status', ''):
+            self._last_status = new_status
+            sep = '--------------------------------------'
+            print(f'{sep}\n{new_status}', flush=True)
