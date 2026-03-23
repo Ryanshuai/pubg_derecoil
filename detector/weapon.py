@@ -192,7 +192,7 @@ class Weapon():
         stance = 'crouching' if self.posture in ('crouching', 'prone') else 'standing'
 
         if self.type in ['ar', 'smg', 'mg', 'dmr', 'shotgun']:
-            from weapon_attachments import calibration_factor, attachment_factor
+            from detector.weapon_attachments import calibration_factor, attachment_factor
             # Reverse calibration to get naked scale, then apply current attachments
             cal_f = calibration_factor(self.name)
             att_f = attachment_factor(self.name, self.muzzle, self.grip)

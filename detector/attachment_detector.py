@@ -34,7 +34,7 @@ ALPHA_TH = 150        # only opaque pixels participate in MSE
 OFFSET_Y = 8          # fixed offset in 63x63 crop
 OFFSET_X = 8
 STD_EMPTY_TH = 10     # std < 10 → empty slot (no icon)
-MSE_EMPTY_TH = 170    # MSE > 170 → no confident match → empty
+MSE_EMPTY_TH = 300    # MSE > 300 → no confident match → empty
 
 
 # Slot name → template name prefixes
@@ -88,10 +88,6 @@ class AttachmentTemplateMatcher:
 
     def classify(self, crop, slot_name=''):
         """Classify a 63x63 attachment crop. Returns (name, mse)."""
-        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY).astype(np.float32)
-        if gray.std() < STD_EMPTY_TH:
-            return '', 9999.0
-
         crop_f = crop.astype(np.float32)
         h, w = crop_f.shape[:2]
 
@@ -147,14 +143,14 @@ class AttachmentDetector:
         # Log with std for threshold tuning
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY).astype(np.float32)
         std = gray.std()
-        _logger.info(f'{slot_name} | tmpl={name or "empty"} mse={mse:.0f} std={std:.1f}')
+        _logger.info(f'{slot_name} | tmpl={name or "bg"} mse={mse:.0f} std={std:.1f}')
         return name
 
     @staticmethod
     def _short_name(name):
         """Shorten attachment class name for filenames."""
         if not name:
-            return 'mt'
+            return 'bg'
         for prefix in ('Upper_', 'Lower_', 'Muzzle_', 'Magazine_', 'Stock_', 'SideRail_', 'Medium_'):
             if name.startswith(prefix):
                 name = name[len(prefix):]
