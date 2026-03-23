@@ -2,7 +2,7 @@ import os
 import numpy as np
 import json
 
-CURVE_DIR = os.path.join(os.path.dirname(__file__), 'calibrate_distance', 'weapon_curve_kava4')
+CURVE_DIR = os.path.join(os.path.dirname(__file__), '..', 'calibrate_distance', 'weapon_curve_kava4')
 
 
 sp = {'98k', 'm24', 'awm'}
@@ -90,10 +90,18 @@ class BulletCalculator:
             dx_s.append(shot['dx'] * self.counts_per_unit * factor)
             dy_s.append(shot['dy'] * self.counts_per_unit * factor)
 
-        return np.array(dx_s), np.array(dy_s), np.array(t_s)
+        dx_s = np.array(dx_s)
+        dy_s = np.array(dy_s)
+        t_s = np.maximum(0, np.array(t_s) - RECOIL_LEAD_S)
+        return dx_s, dy_s, t_s
 
 
-SCALES_PATH = os.path.join(os.path.dirname(__file__), 'weapon_scales.json')
+# Pre-fire compensation: shift pattern earlier so first shots are front-loaded.
+# Pico detects click before game receives it (~5-20ms USB delay),
+# and game applies recoil in a single frame burst.
+RECOIL_LEAD_S = 0.050  # 50ms lead
+
+SCALES_PATH = os.path.join(os.path.dirname(__file__), '..', 'weapon_scales.json')
 
 def _load_scales():
     if os.path.exists(SCALES_PATH):

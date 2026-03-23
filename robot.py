@@ -111,7 +111,7 @@ class Robot:
             self._dispatch(key.char.lower())
 
     def shutdown(self):
-        self.state.stop_recoil = True
+        self.state._set_stop_recoil(True)
         Weapon.save_scales()
         print("[shutdown] scales saved", flush=True)
 

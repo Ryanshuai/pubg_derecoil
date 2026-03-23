@@ -5,7 +5,7 @@ Recoil patterns are uploaded to the Pico which handles left-click detection
 and compensation directly in hardware.
 """
 from detector.weapon import Weapon
-from pico_mouse import get_mouse
+from press.pico_mouse import get_mouse
 import config
 
 # ── Short display names for attachments ───────────────────

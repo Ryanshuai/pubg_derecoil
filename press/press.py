@@ -1,6 +1,6 @@
 import time
 import threading
-from pico_mouse import get_mouse
+from press.pico_mouse import get_mouse
 
 
 class Press(threading.Thread):
