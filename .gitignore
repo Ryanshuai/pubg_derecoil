@@ -19,3 +19,5 @@ training_data/Manual
 calibrate_distance
 
 .claude/settings.local.json
+training_data/human_detection
+
