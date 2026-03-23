@@ -1,9 +1,11 @@
 """Game state — weapon names, attachments, fire mode, posture, recoil control.
 
 Pure state model. Weapon objects auto-recalculate recoil on changes.
+Recoil patterns are uploaded to the Pico which handles left-click detection
+and compensation directly in hardware.
 """
-from weapon import Weapon
-from press import Press
+from detector.weapon import Weapon
+from pico_mouse import get_mouse
 import config
 
 # ── Short display names for attachments ───────────────────
@@ -59,14 +61,11 @@ class GameState:
         self.stop_recoil = False
         self.gt_valid = False
         self.tab_open = False
-        self._press = None
         self._apply_handlers = {
             'active':      lambda v: self.set_active(1 if v == 'weapon_1' else 2),
-            'stop_recoil': lambda v: setattr(self, 'stop_recoil', v),
+            'stop_recoil': lambda v: self._set_stop_recoil(v),
             'gt_valid':    lambda v: setattr(self, 'gt_valid', v),
             'counts':      self._adjust_counts,
-            'start_press': lambda v: self.start_press(click_time=v),
-            'stop_press':  lambda _: self.stop_press(),
         }
 
     # ── Generic dispatch (driven by KEY_STATE_TABLE) ─────────
@@ -80,20 +79,28 @@ class GameState:
         self.active.adjust_scale(delta)
         name = self.active.name or '(empty)'
         print(f"[scale] {name} = {self.active.scale:.3f}", flush=True)
+        self._upload_active_pattern()
 
     # ── Recoil control ───────────────────────────────────────
 
-    def start_press(self, click_time=None):
-        w = self.active
-        if self.stop_recoil or len(w.dy_s) == 0:
-            return
-        self._press = Press(w.dx_s, w.dy_s, w.t_s, start_time=click_time)
-        self._press.start()
+    def _set_stop_recoil(self, value):
+        self.stop_recoil = value
+        try:
+            get_mouse().set_recoil_enabled(not value)
+        except Exception:
+            pass
 
-    def stop_press(self):
-        if self._press:
-            self._press.stop()
-            self._press = None
+    def _upload_active_pattern(self):
+        """Send the active weapon's recoil pattern to the Pico."""
+        w = self.active
+        try:
+            mouse = get_mouse()
+            if len(w.dy_s) == 0 or self.stop_recoil:
+                mouse.clear_pattern()
+            else:
+                mouse.upload_pattern(w.dx_s, w.dy_s, w.t_s)
+        except Exception:
+            pass
 
     # ── Weapon state ─────────────────────────────────────────
 
@@ -101,15 +108,19 @@ class GameState:
         w = self.weapon_1 if slot == 1 else self.weapon_2
         w.set('name', name)
         w.set_seq()
+        if w is self.active:
+            self._upload_active_pattern()
 
     def set_active(self, slot):
         self.active = self.weapon_1 if slot == 1 else self.weapon_2
+        self._upload_active_pattern()
         self._print_status()
 
     def set_fire_mode(self, mode):
         self.fire_mode = mode
         self.active.set('fire_mode', mode)
         self.active.set_seq()
+        self._upload_active_pattern()
         self._print_status()
 
     def set_posture(self, posture):
@@ -117,6 +128,7 @@ class GameState:
         for w in (self.weapon_1, self.weapon_2):
             w.set('posture', posture)
             w.set_seq()
+        self._upload_active_pattern()
 
     def set_attachments(self, slot, attachments):
         """attachments: dict {scope, muzzle, grip, magazine, stock} → class name or ''."""
@@ -126,6 +138,8 @@ class GameState:
             if attr:
                 w.set(attr, val)
         w.set_seq()
+        if w is self.active:
+            self._upload_active_pattern()
 
 
 
@@ -133,6 +147,7 @@ class GameState:
         for w in (self.weapon_1, self.weapon_2):
             w.bullet_calculator.counts_per_unit = config.COUNTS_PER_RECOIL_UNIT
             w.set_seq()
+        self._upload_active_pattern()
 
     # ── Display ──────────────────────────────────────────────
 

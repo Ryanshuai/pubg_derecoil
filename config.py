@@ -96,9 +96,11 @@ KEY_STATE_TABLE = [
     {'key': 'up',          'state': 'counts',      'value': +0.01},
     {'key': 'down',        'state': 'counts',      'value': -0.01},
     {'key': 'right_down',  'state': 'stop_recoil', 'value': False},
-    {'key': 'left_down',   'state': 'start_press', 'value': None},
-    {'key': 'left_up',     'state': 'stop_press',  'value': None},
+    # left_down/left_up removed — Pico detects left click directly via USB Host
 ]
+
+# Pico HID Mouse serial port (None = auto-detect by VID:PID)
+PICO_PORT = None  # auto-detect by VID:PID (0xCAFE:0x4001)
 
 # Mouse / sensitivity settings
 MOUSE_DPI = 2000

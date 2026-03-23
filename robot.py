@@ -19,8 +19,8 @@ for _det_name in ['weapon', 'fire_mode', 'attachment']:
 
 from pynput import keyboard, mouse
 
-from game_state import GameState
-from weapon import Weapon
+from detector.game_state import GameState
+from detector.weapon import Weapon
 from detector.weapon_dl_detector import WeaponClassifier
 from detector.fire_mode_detector import FireModeDetector
 from detector.posture_detector import PostureDetector

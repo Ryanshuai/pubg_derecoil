@@ -1,7 +1,6 @@
 import time
 import threading
-import win32api
-import win32con
+from pico_mouse import get_mouse
 
 
 class Press(threading.Thread):
@@ -14,6 +13,7 @@ class Press(threading.Thread):
         self._start_time = start_time or time.perf_counter()
 
     def run(self):
+        mouse = get_mouse()
         start = self._start_time
         accum_x, accum_y = 0.0, 0.0
         for dx, dy, t in zip(self.dx_s, self.dy_s, self.t_s):
@@ -28,7 +28,7 @@ class Press(threading.Thread):
                 move_x = int(accum_x)
                 move_y = int(accum_y)
                 if move_x != 0 or move_y != 0:
-                    win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, move_x, move_y)
+                    mouse.move(move_x, move_y)
                     accum_x -= move_x
                     accum_y -= move_y
 
