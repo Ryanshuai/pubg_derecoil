@@ -109,6 +109,9 @@ GAME_SENSITIVITY = 50  # default
 # ↑/↓ arrow keys adjust by 0.05 in-game
 COUNTS_PER_RECOIL_UNIT = 0.4
 
+# Aim assist: mouse counts per screen pixel (calibrate with sniper + ↑↓ keys)
+COUNTS_PER_PIXEL = 0.5
+
 
 # Gun name text position in Tab view (3440x1440)
 GUN_NAME_1 = {

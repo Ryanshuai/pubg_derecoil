@@ -83,6 +83,8 @@ class WeaponTemplateDetector:
             pad = 2
             tmpl = binary[max(0, y-pad):min(binary.shape[0], y+h+pad),
                           max(0, x-pad):min(binary.shape[1], x+w+pad)]
+            if tmpl.ndim == 3:
+                tmpl = tmpl[:, :, 0]
             self._templates.setdefault(m.group(1), []).append(tmpl)
         if self._templates:
             n = sum(len(v) for v in self._templates.values())

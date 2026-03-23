@@ -76,10 +76,15 @@ class GameState:
             handler(value)
 
     def _adjust_counts(self, delta):
-        self.active.adjust_scale(delta)
-        name = self.active.name or '(empty)'
-        print(f"[scale] {name} = {self.active.scale:.3f}", flush=True)
-        self._upload_active_pattern()
+        if self.active.type == 'sp':
+            # Bolt-action sniper: adjust aim pixels_per_count
+            config.COUNTS_PER_PIXEL = max(0.01, round(config.COUNTS_PER_PIXEL + delta, 3))
+            print(f"[aim scale] COUNTS_PER_PIXEL = {config.COUNTS_PER_PIXEL:.3f}", flush=True)
+        else:
+            self.active.adjust_scale(delta)
+            name = self.active.name or '(empty)'
+            print(f"[scale] {name} = {self.active.scale:.3f}", flush=True)
+            self._upload_active_pattern()
 
     # ── Recoil control ───────────────────────────────────────
 

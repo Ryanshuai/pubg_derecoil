@@ -28,6 +28,11 @@ static inline uint32_t board_millis(void) {
 #define CMD_PATTERN_UPLOAD 0x10
 #define CMD_PATTERN_CLEAR  0x11
 #define CMD_RECOIL_ENABLE  0x12
+#define CMD_MOVE           0x13
+#define CMD_CLICK          0x14
+#define CMD_MOVE_CLICK     0x15
+#define CMD_AIM_MODE       0x16
+#define CMD_SET_DELTA      0x17  /* PC sends latest aim delta each frame */
 #define CMD_REBOOT_BOOTSEL 0xFF
 
 /* ── Recoil pattern storage ────────────────────────────── */
@@ -42,6 +47,7 @@ typedef struct {
 static pattern_point_t pattern[MAX_PATTERN_POINTS];
 static volatile uint16_t pattern_len = 0;
 static volatile bool recoil_enabled = true;
+static volatile bool aim_mode = false;  /* suppress real left click, use injected only */
 
 /* ── Recoil playback state ─────────────────────────────── */
 static bool     firing = false;
@@ -275,11 +281,24 @@ static void get_recoil_delta(int16_t *out_dx, int16_t *out_dy) {
     *out_dy = iy;
 }
 
+#define MAX_MOVE_PER_MS 127
+
 /* Mouse state accumulator (updated from FIFO at 125Hz) */
 static int32_t  mouse_accum_x = 0;
 static int32_t  mouse_accum_y = 0;
 static uint8_t  mouse_buttons = 0;
 static int8_t   mouse_wheel_last = 0;
+
+/* Injected click from CDC (duration in ms, 0 = inactive) */
+static volatile uint8_t  inject_buttons = 0;
+static volatile uint32_t inject_start_ms = 0;  /* when to start pressing */
+static volatile uint32_t inject_end_ms = 0;    /* when to release */
+
+/* Aim assist: latest delta from PC (updated every frame) */
+static volatile int16_t aim_dx = 0;
+static volatile int16_t aim_dy = 0;
+static volatile uint32_t aim_delay_until = 0;  /* suppress left click until this time */
+static uint8_t  raw_left_prev = 0;             /* previous raw left button state */
 
 /* Drain all pending mouse data from FIFO into accumulator */
 static void read_mouse_input(void) {
@@ -287,23 +306,41 @@ static void read_mouse_input(void) {
     while (multicore_fifo_pop_timeout_us(0, &w1)) {
         if (!multicore_fifo_pop_timeout_us(100, &w2)) break;
 
-        mouse_buttons = w1 & 0xFF;
+        uint8_t raw_buttons = w1 & 0xFF;
+        uint8_t raw_left = raw_buttons & 0x01;
+        if (aim_mode && raw_left && !raw_left_prev) {
+            /* Left click just pressed in aim mode: apply stored delta.
+             * Inject a guaranteed click after move completes.
+             * Also delay real left button passthrough. */
+            mouse_accum_x += aim_dx;
+            mouse_accum_y += aim_dy;
+            int16_t dist = (aim_dx > 0 ? aim_dx : -aim_dx);
+            int16_t dy_abs = (aim_dy > 0 ? aim_dy : -aim_dy);
+            if (dy_abs > dist) dist = dy_abs;
+            /* delay = move drain time + 1 game frame (~7ms @ 144Hz) */
+            uint32_t delay = (uint32_t)(dist / MAX_MOVE_PER_MS) + 10;
+            uint32_t now_ms = board_millis();
+            aim_delay_until = now_ms + delay;
+            /* Inject click to guarantee at least one shot */
+            inject_buttons = 0x01;
+            inject_start_ms = now_ms + delay;
+            inject_end_ms = now_ms + delay + 80;
+        }
+        raw_left_prev = raw_left;
+        mouse_buttons = raw_buttons;
+        if (aim_mode && aim_delay_until) {
+            /* Suppress real left button until move completes */
+            if (board_millis() < aim_delay_until) {
+                mouse_buttons &= ~0x01;
+            } else {
+                aim_delay_until = 0;
+            }
+        }
         mouse_accum_x += (int16_t)(w1 >> 16);
         mouse_accum_y += (int16_t)(w2 & 0xFFFF);
         mouse_wheel_last = (int8_t)((w2 >> 16) & 0xFF);
 
-        /* Track left button for recoil */
-        bool left_now = (mouse_buttons & 0x01) != 0;
-        if (left_now && !firing) {
-            firing = true;
-            fire_start_ms = board_millis();
-            fire_index = 0;
-            recoil_accum_x = 0.0f;
-            recoil_accum_y = 0.0f;
-            rng_state ^= board_millis(); /* reseed RNG each spray */
-        } else if (!left_now && firing) {
-            firing = false;
-        }
+        /* firing state is tracked in send_hid_output (includes injected clicks) */
     }
 }
 
@@ -319,23 +356,49 @@ static void send_hid_output(void) {
     int16_t rdx = 0, rdy = 0;
     get_recoil_delta(&rdx, &rdy);
 
-    /* Consume accumulated mouse movement */
-    int16_t mx = (mouse_accum_x > 32767) ? 32767 :
-                 (mouse_accum_x < -32767) ? -32767 : (int16_t)mouse_accum_x;
-    int16_t my = (mouse_accum_y > 32767) ? 32767 :
-                 (mouse_accum_y < -32767) ? -32767 : (int16_t)mouse_accum_y;
+    /* Consume accumulated mouse movement (clamped per-report for human-like speed) */
+    int16_t mx = (mouse_accum_x > MAX_MOVE_PER_MS) ? MAX_MOVE_PER_MS :
+                 (mouse_accum_x < -MAX_MOVE_PER_MS) ? -MAX_MOVE_PER_MS : (int16_t)mouse_accum_x;
+    int16_t my = (mouse_accum_y > MAX_MOVE_PER_MS) ? MAX_MOVE_PER_MS :
+                 (mouse_accum_y < -MAX_MOVE_PER_MS) ? -MAX_MOVE_PER_MS : (int16_t)mouse_accum_y;
     mouse_accum_x -= mx;
     mouse_accum_y -= my;
 
+    /* Injected click: wait for start, expire at end */
+    uint8_t inj = 0;
+    if (inject_buttons) {
+        if (now >= inject_end_ms) {
+            inject_buttons = 0;
+        } else if (now >= inject_start_ms) {
+            inj = inject_buttons;
+        }
+    }
+
+    /* Merge real + injected buttons */
+    uint8_t btns = mouse_buttons | inj;
+
     /* Only send if there's something to report (movement, recoil, or button change) */
     static uint8_t last_buttons = 0;
-    bool buttons_changed = (mouse_buttons != last_buttons);
+    bool buttons_changed = (btns != last_buttons);
     if (mx == 0 && my == 0 && rdx == 0 && rdy == 0 && mouse_wheel_last == 0 && !buttons_changed)
         return;
-    last_buttons = mouse_buttons;
+    last_buttons = btns;
+
+    /* Track left button for recoil (injected clicks too) */
+    bool left_now = (btns & 0x01) != 0;
+    if (left_now && !firing) {
+        firing = true;
+        fire_start_ms = now;
+        fire_index = 0;
+        recoil_accum_x = 0.0f;
+        recoil_accum_y = 0.0f;
+        rng_state ^= now;
+    } else if (!left_now && firing) {
+        firing = false;
+    }
 
     mouse_report_out_t report = {
-        .buttons = mouse_buttons,
+        .buttons = btns,
         .x       = mx + rdx,
         .y       = my + rdy,
         .wheel   = mouse_wheel_last,
@@ -376,6 +439,49 @@ static void process_cdc(void) {
             if (pos + 2 > cdc_len) break;
             recoil_enabled = (cdc_buf[pos+1] != 0);
             pos += 2;
+        } else if (cmd == CMD_MOVE) {
+            if (pos + 5 > cdc_len) break;
+            int16_t dx = (int16_t)(cdc_buf[pos+1] | (cdc_buf[pos+2] << 8));
+            int16_t dy = (int16_t)(cdc_buf[pos+3] | (cdc_buf[pos+4] << 8));
+            mouse_accum_x += dx;
+            mouse_accum_y += dy;
+            pos += 5;
+        } else if (cmd == CMD_CLICK) {
+            /* [0x14][buttons][duration_ms_u16_le] */
+            if (pos + 4 > cdc_len) break;
+            inject_buttons = cdc_buf[pos+1];
+            uint32_t now_ms = board_millis();
+            inject_start_ms = now_ms;
+            uint16_t dur = (uint16_t)(cdc_buf[pos+2] | (cdc_buf[pos+3] << 8));
+            inject_end_ms = now_ms + dur;
+            pos += 4;
+        } else if (cmd == CMD_MOVE_CLICK) {
+            /* [0x15][dx_i16][dy_i16][buttons][delay_ms_u16][duration_ms_u16] = 10 bytes */
+            if (pos + 10 > cdc_len) break;
+            int16_t dx = (int16_t)(cdc_buf[pos+1] | (cdc_buf[pos+2] << 8));
+            int16_t dy = (int16_t)(cdc_buf[pos+3] | (cdc_buf[pos+4] << 8));
+            mouse_accum_x += dx;
+            mouse_accum_y += dy;
+            inject_buttons = cdc_buf[pos+5];
+            uint16_t delay = (uint16_t)(cdc_buf[pos+6] | (cdc_buf[pos+7] << 8));
+            uint16_t dur = (uint16_t)(cdc_buf[pos+8] | (cdc_buf[pos+9] << 8));
+            uint32_t now_ms = board_millis();
+            inject_start_ms = now_ms + delay;
+            inject_end_ms = now_ms + delay + dur;
+            pos += 10;
+        } else if (cmd == CMD_AIM_MODE) {
+            /* [0x16][0/1] */
+            if (pos + 2 > cdc_len) break;
+            aim_mode = (cdc_buf[pos+1] != 0);
+            aim_dx = 0;
+            aim_dy = 0;
+            pos += 2;
+        } else if (cmd == CMD_SET_DELTA) {
+            /* [0x17][dx_i16_le][dy_i16_le] = 5 bytes */
+            if (pos + 5 > cdc_len) break;
+            aim_dx = (int16_t)(cdc_buf[pos+1] | (cdc_buf[pos+2] << 8));
+            aim_dy = (int16_t)(cdc_buf[pos+3] | (cdc_buf[pos+4] << 8));
+            pos += 5;
         } else if (cmd == CMD_REBOOT_BOOTSEL) {
             reset_usb_boot(0, 0);
         } else {

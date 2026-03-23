@@ -5,8 +5,8 @@ import json
 CURVE_DIR = os.path.join(os.path.dirname(__file__), '..', 'calibrate_distance', 'weapon_curve_kava4')
 
 
-sp = {'98k', 'm24', 'awm'}
-dmr = {'mini14', 'mk14', 'qbu', 'sks', 'slr', 'vss'}
+sp = {'98k', 'm24', 'awm', 'mosin', 'win94', 'lynx'}
+dmr = {'mini14', 'mk14', 'qbu', 'sks', 'slr', 'vss', 'dragunov', 'mk12'}
 ar = {'akm', 'aug', 'groza', 'm416', 'qbz', 'scar', 'm762', 'g36c', 'm16', 'mk47', 'k2', 'ace32', 'famas'}
 smg = {'tommy', 'uzi', 'ump45', 'vector', 'pp19', 'mp5k', 'p90', 'mp9', 'js9'}
 mg = {'m249', 'dp28', 'mg3'}
@@ -101,7 +101,7 @@ class BulletCalculator:
 # and game applies recoil in a single frame burst.
 RECOIL_LEAD_S = 0.050  # 50ms lead
 
-SCALES_PATH = os.path.join(os.path.dirname(__file__), '..', 'weapon_scales.json')
+SCALES_PATH = os.path.join(os.path.dirname(__file__), '..', 'press', 'weapon_scales.json')
 
 def _load_scales():
     if os.path.exists(SCALES_PATH):

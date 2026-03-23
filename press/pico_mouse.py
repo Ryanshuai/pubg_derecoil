@@ -19,6 +19,11 @@ import serial.tools.list_ports
 CMD_PATTERN_UPLOAD = 0x10
 CMD_PATTERN_CLEAR  = 0x11
 CMD_RECOIL_ENABLE  = 0x12
+CMD_MOVE           = 0x13
+CMD_CLICK          = 0x14
+CMD_MOVE_CLICK     = 0x15
+CMD_AIM_MODE       = 0x16
+CMD_SET_DELTA      = 0x17
 
 _instance = None
 
@@ -42,6 +47,33 @@ class PicoMouse:
 
     def set_recoil_enabled(self, enabled):
         self._ser.write(struct.pack('<BB', CMD_RECOIL_ENABLE, 1 if enabled else 0))
+
+    def move(self, dx, dy):
+        """Inject a mouse move (dx, dy in counts)."""
+        self._ser.write(struct.pack('<Bhh', CMD_MOVE, int(dx), int(dy)))
+
+    def click(self, buttons=0x01, duration_ms=80):
+        """Inject a mouse click. buttons: bit0=left, bit1=right, bit2=middle."""
+        self._ser.write(struct.pack('<BBH', CMD_CLICK, buttons, duration_ms))
+
+    def set_aim_mode(self, enabled):
+        """Enable/disable aim mode. When enabled, real left clicks are suppressed
+        and Pico applies stored delta + click on left press."""
+        self._ser.write(struct.pack('<BB', CMD_AIM_MODE, 1 if enabled else 0))
+
+    def set_delta(self, dx, dy):
+        """Update aim delta stored in Pico (in counts). Called every frame."""
+        self._ser.write(struct.pack('<Bhh', CMD_SET_DELTA, int(dx), int(dy)))
+
+    def move_click(self, dx, dy, buttons=0x01, delay_ms=0, duration_ms=80):
+        """Inject move + delayed click. Pico moves first, clicks after delay_ms.
+        If delay_ms=0, auto-calculates from move distance."""
+        if delay_ms == 0:
+            # Estimate move time: distance / MAX_MOVE_PER_MS (127 counts/ms) + margin
+            dist = max(abs(int(dx)), abs(int(dy)))
+            delay_ms = max(5, dist // 127 + 10)
+        self._ser.write(struct.pack('<BhhBHH', CMD_MOVE_CLICK,
+                        int(dx), int(dy), buttons, delay_ms, duration_ms))
 
     def close(self):
         self._ser.close()
