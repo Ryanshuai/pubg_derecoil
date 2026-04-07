@@ -32,6 +32,7 @@ HEAD_SIZES = {'fire_mode': len(FIRE_MODE_CLASSES) + 1}
 FEEDBACK_BASE = os.path.join(os.path.dirname(__file__), '..', 'InGameScreenshot', 'fire_mode')
 FEEDBACK_MISMATCH_DIR = os.path.join(FEEDBACK_BASE, 'rf_dl_mismatch')
 FEEDBACK_HARD_DIR = os.path.join(FEEDBACK_BASE, 'hard_case')
+FEEDBACK_HIGH_DIR = os.path.join(FEEDBACK_BASE, 'high_collect')
 
 # RF structural classifier
 _RF_PATH = os.path.join(os.path.dirname(__file__), '..', 'dl_models', 'fire_mode_structural_rf.pkl')
@@ -90,8 +91,11 @@ class FireModeDetector:
 
         rf_name = _structural_classify(crop)
 
-        # Feedback
-        if rf_name != model_name and rf_name != 'bg' and model_name != 'bg':
+        # Feedback — always save "high" (rare class, need more data)
+        if rf_name == 'high' or model_name == 'high':
+            self._save_feedback(FEEDBACK_HIGH_DIR, 'high_collect',
+                                rf_name, model_name, conf, crop, probs)
+        elif rf_name != model_name and rf_name != 'bg' and model_name != 'bg':
             self._save_feedback(FEEDBACK_MISMATCH_DIR, 'mismatch',
                                 rf_name, model_name, conf, crop, probs)
             _logger.info(f'MISMATCH | rf={rf_name} dl={model_name} conf={conf:.3f}')
@@ -101,7 +105,7 @@ class FireModeDetector:
 
         return rf_name if (rf_name and rf_name != 'bg') else model_name
 
-    def query(self):
+    def query(self, **_):
         """Capture fire mode region, classify, update state."""
         crop = win32_cap(SLOT_RECT)
         fm = self.classify(crop)

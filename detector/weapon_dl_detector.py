@@ -75,7 +75,7 @@ class WeaponClassifier:
         # Output: GT fallback, then DL
         return (gt or model_name), hl_name
 
-    def query(self):
+    def query(self, **_):
         """Capture both weapon slots for feedback only (active is set by key 1/2)."""
         for slot_id in [1, 2]:
             crop = win32_cap(SLOT_RECTS[slot_id])

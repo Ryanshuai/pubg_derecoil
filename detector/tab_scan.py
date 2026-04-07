@@ -24,7 +24,7 @@ class TabScan:
         self._weapon_tpl = WeaponTemplateDetector(state)
         self._attach = AttachmentDetector(device, state)
 
-    def query(self):
+    def query(self, **_):
         """Tab pressed: immediate capture, use UI delay to infer state."""
         screen = win32_cap((0, 0, SCREEN_H, SCREEN_W))
         tab_crop = screen[TAB_RECT[0]:TAB_RECT[0]+TAB_RECT[2],

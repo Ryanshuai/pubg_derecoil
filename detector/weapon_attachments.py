@@ -102,6 +102,29 @@ def calibration_factor(gun_name):
     return f
 
 
+def validate_attachments(gun_name, attachments):
+    """Filter out attachments that the weapon cannot equip.
+
+    attachments: dict {scope, muzzle, grip, magazine, stock} → class name or ''.
+    Returns filtered copy.
+    """
+    slots = WEAPON_SLOTS.get(gun_name)
+    if not slots:
+        return attachments
+    out = dict(attachments)
+    # Muzzle check
+    muzzle_type = slots['muzzle']
+    if muzzle_type is None:
+        out['muzzle'] = ''
+    elif muzzle_type == 'supp_only':
+        if out.get('muzzle') and 'Suppressor' not in out['muzzle']:
+            out['muzzle'] = ''
+    # Grip check
+    if not slots['grip']:
+        out['grip'] = ''
+    return out
+
+
 def attachment_factor(gun_name, muzzle='', grip=''):
     """Current recoil factor based on equipped attachments.
 
@@ -125,17 +148,3 @@ def attachment_factor(gun_name, muzzle='', grip=''):
                 f *= factor
                 break
     return f
-
-
-def runtime_factor(gun_name, muzzle='', grip=''):
-    """Scale adjustment relative to calibration baseline.
-
-    Returns a multiplier to apply on top of weapon_scales[gun].
-    = current_factor / calibration_factor
-
-    If gun has same attachments as calibration (comp+grip): returns 1.0
-    If gun is naked but was calibrated with comp+grip: returns 1/0.7225 ≈ 1.38
-    """
-    cal = calibration_factor(gun_name)
-    cur = attachment_factor(gun_name, muzzle, grip)
-    return cur / cal

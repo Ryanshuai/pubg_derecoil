@@ -5,6 +5,19 @@ import json
 CURVE_DIR = os.path.join(os.path.dirname(__file__), '..', 'calibrate_distance', 'weapon_curve_kava4')
 
 
+# Weapon RPM (rounds per minute) from PUBG Wiki
+WEAPON_RPM = {
+    'akm': 600, 'aug': 680, 'groza': 750, 'm416': 680, 'qbz': 680,
+    'scar': 600, 'm762': 620, 'g36c': 680, 'm16': 750, 'mk47': 600,
+    'k2': 680, 'ace32': 680, 'famas': 900,
+    'tommy': 700, 'uzi': 1050, 'ump45': 650, 'vector': 1100,
+    'pp19': 700, 'mp5k': 900, 'p90': 900, 'mp9': 1100, 'js9': 900,
+    'dp28': 550, 'm249': 750, 'mg3': 990,
+    'vss': 700, 'mk14': 600, 'mini14': 600, 'qbu': 600,
+    'sks': 600, 'slr': 600, 'dragunov': 600, 'mk12': 600,
+    's12k': 250,
+}
+
 sp = {'98k', 'm24', 'awm', 'mosin', 'win94', 'lynx'}
 dmr = {'mini14', 'mk14', 'qbu', 'sks', 'slr', 'vss', 'dragunov', 'mk12'}
 ar = {'akm', 'aug', 'groza', 'm416', 'qbz', 'scar', 'm762', 'g36c', 'm16', 'mk47', 'k2', 'ace32', 'famas'}
@@ -30,6 +43,14 @@ SCOPE_MAGNIFICATION = {
     6:  6.0,    # 6x: 13.33°
     8:  8.0,    # 8x CQBSS: 10°
     15: 12.0,   # 15x PM II: 6.67° (actually 12x)
+}
+
+_SCOPE_TO_MAG = {
+    '': 1,
+    'Upper_DotSight_01_C': 1, 'Upper_Holosight_C': 1,
+    'Upper_Aimpoint_C': 2, 'SideRail_DotSight_RMR_C': 1,
+    'Upper_Scope3x_C': 3, 'Upper_ACOG_01_C': 4,
+    'Upper_Scope6x_C': 6, 'Upper_CQBSS_C': 8, 'Upper_PM2_01_C': 15,
 }
 
 
@@ -99,7 +120,7 @@ class BulletCalculator:
 # Pre-fire compensation: shift pattern earlier so first shots are front-loaded.
 # Pico detects click before game receives it (~5-20ms USB delay),
 # and game applies recoil in a single frame burst.
-RECOIL_LEAD_S = 0.050  # 50ms lead
+RECOIL_LEAD_S = 0.030  # 30ms lead
 
 SCALES_PATH = os.path.join(os.path.dirname(__file__), '..', 'press', 'weapon_scales.json')
 
@@ -137,12 +158,27 @@ class Weapon():
         self.t_s = []
         self.dx_s = []
         self.dy_s = []
+        self.bullet_interval_s = 0.1  # default 600 RPM
         self.bullet_calculator = BulletCalculator()
 
     def set(self, pos, state):
         if pos == 'name':
             self.name = state
+            if not state:
+                self.fire_mode = ''
+                self.type = 'ar'
+                self.scope = ''
+                self.muzzle = ''
+                self.grip = ''
+                self.butt = ''
+                self.scope_factor = 1
+                self.scale = 1.0
+                return
             self.scale = _weapon_scales.get(state, 1.0)
+            rpm = WEAPON_RPM.get(state, 600)
+            self.bullet_interval_s = 60.0 / rpm
+            if state in can_full_guns:
+                self.fire_mode = 'full'
             if self.name in sp:
                 self.type = 'sp'
             elif self.name in dmr:
@@ -164,14 +200,6 @@ class Weapon():
                 self.fire_mode = 'single'
         elif pos == 'scope':
             self.scope = state
-            # Map template matcher output → nominal magnification
-            _SCOPE_TO_MAG = {
-                '': 1,
-                'Upper_DotSight_01_C': 1, 'Upper_Holosight_C': 1,
-                'Upper_Aimpoint_C': 2, 'SideRail_DotSight_RMR_C': 1,
-                'Upper_Scope3x_C': 3, 'Upper_ACOG_01_C': 4,
-                'Upper_Scope6x_C': 6, 'Upper_CQBSS_C': 8, 'Upper_PM2_01_C': 15,
-            }
             nominal = _SCOPE_TO_MAG.get(state, 1)
             if self.name == 'vss':
                 nominal = 4
@@ -195,7 +223,26 @@ class Weapon():
     def save_scales():
         _save_scales(_weapon_scales)
 
+    def _hot_reload(self):
+        """Reload curves from disk so edits take effect immediately."""
+        # Reload curve files
+        self.bullet_calculator.recoil_data.clear()
+        for fname in os.listdir(CURVE_DIR):
+            if not fname.endswith('.json'):
+                continue
+            with open(os.path.join(CURVE_DIR, fname), 'r') as f:
+                data = json.load(f)
+            weapon = data['weapon']
+            stance = data.get('stance', 'standing')
+            if weapon not in self.bullet_calculator.recoil_data:
+                self.bullet_calculator.recoil_data[weapon] = {}
+            self.bullet_calculator.recoil_data[weapon][stance] = data['shots']
+
     def set_seq(self):
+        import config as _cfg
+        if getattr(_cfg, 'DEBUG_HOT_RELOAD', False):
+            self._hot_reload()
+
         # Map posture to Kava4 stance (prone uses crouching data)
         stance = 'crouching' if self.posture in ('crouching', 'prone') else 'standing'
 

@@ -56,6 +56,11 @@ static uint16_t fire_index = 0;
 static float    recoil_accum_x = 0.0f;
 static float    recoil_accum_y = 0.0f;
 
+/* Per-ms spread: distribute each bullet's delta evenly until next bullet */
+static float    spread_dx_per_ms = 0.0f;
+static float    spread_dy_per_ms = 0.0f;
+static uint16_t spread_until_ms  = 0;   /* elapsed ms when current spread ends */
+
 /* ── HID output report ─────────────────────────────────── */
 typedef struct __attribute__((packed)) {
     uint8_t buttons;
@@ -69,6 +74,8 @@ static uint8_t  cdc_buf[2048];
 static uint32_t cdc_len = 0;
 
 /* ── Razer polling rate state ──────────────────────────── */
+static volatile uint32_t fifo_drop_count = 0;
+
 static uint8_t razer_dev = 0;
 static uint8_t razer_inst = 0;
 static volatile int razer_state = 0; /* 0=idle, 1=need cmd1, 2=need cmd2, 3=done */
@@ -228,7 +235,10 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance,
 
         uint32_t w1 = (uint32_t)buttons | ((uint32_t)(uint16_t)x << 16);
         uint32_t w2 = (uint32_t)(uint16_t)y | ((uint32_t)(uint8_t)wheel << 16);
-        multicore_fifo_push_timeout_us(w1, 0);
+        if (!multicore_fifo_push_timeout_us(w1, 0)) {
+            fifo_drop_count++; /* FIFO full, drop entire pair to stay aligned */
+            goto next;
+        }
         multicore_fifo_push_timeout_us(w2, 100);
     }
 
@@ -259,6 +269,8 @@ static void get_recoil_delta(int16_t *out_dx, int16_t *out_dy) {
     if (!firing || !recoil_enabled || pattern_len == 0) return;
 
     uint32_t elapsed = board_millis() - fire_start_ms;
+
+    /* Advance to newly reached bullet points, compute spread rate */
     while (fire_index < pattern_len && pattern[fire_index].t_ms <= elapsed) {
         float dx = (float)pattern[fire_index].dx;
         float dy = (float)pattern[fire_index].dy;
@@ -269,10 +281,26 @@ static void get_recoil_delta(int16_t *out_dx, int16_t *out_dy) {
         dx += 0.2f * rng_float();
         dy += 0.2f * rng_float();
 
-        recoil_accum_x += dx;
-        recoil_accum_y += dy;
+        /* Spread this bullet's delta evenly until the next bullet */
+        uint16_t next_t = (fire_index + 1 < pattern_len)
+            ? pattern[fire_index + 1].t_ms
+            : pattern[fire_index].t_ms + 100;
+        uint16_t dur = next_t - pattern[fire_index].t_ms;
+        if (dur < 1) dur = 1;
+
+        spread_dx_per_ms = dx / (float)dur;
+        spread_dy_per_ms = dy / (float)dur;
+        spread_until_ms  = next_t;
+
         fire_index++;
     }
+
+    /* Add per-ms spread (called every 1ms from send_hid_output) */
+    if (elapsed < spread_until_ms) {
+        recoil_accum_x += spread_dx_per_ms;
+        recoil_accum_y += spread_dy_per_ms;
+    }
+
     int16_t ix = (int16_t)recoil_accum_x;
     int16_t iy = (int16_t)recoil_accum_y;
     recoil_accum_x -= ix;
@@ -392,6 +420,9 @@ static void send_hid_output(void) {
         fire_index = 0;
         recoil_accum_x = 0.0f;
         recoil_accum_y = 0.0f;
+        spread_dx_per_ms = 0.0f;
+        spread_dy_per_ms = 0.0f;
+        spread_until_ms  = 0;
         rng_state ^= now;
     } else if (!left_now && firing) {
         firing = false;
@@ -405,15 +436,33 @@ static void send_hid_output(void) {
     };
     tud_hid_report(0, &report, sizeof(report));
     mouse_wheel_last = 0; /* wheel is one-shot */
+
+    /* Report FIFO drops once per second via CDC */
+    static uint32_t last_drop_report = 0;
+    static uint32_t last_reported_count = 0;
+    if (now - last_drop_report >= 1000) {
+        last_drop_report = now;
+        if (fifo_drop_count != last_reported_count && tud_cdc_connected()) {
+            char msg[40];
+            int len = snprintf(msg, sizeof(msg), "[fifo] drops=%lu\r\n",
+                               (unsigned long)fifo_drop_count);
+            tud_cdc_write(msg, len);
+            tud_cdc_write_flush();
+            last_reported_count = fifo_drop_count;
+        }
+    }
 }
 
 static void process_cdc(void) {
     uint32_t avail = tud_cdc_available();
-    if (avail == 0) return;
-    if (avail > sizeof(cdc_buf) - cdc_len)
-        avail = sizeof(cdc_buf) - cdc_len;
-    if (avail == 0) { cdc_len = 0; return; }
-    cdc_len += tud_cdc_read(cdc_buf + cdc_len, avail);
+    if (avail == 0 && cdc_len == 0) return;  /* nothing pending */
+    if (avail > 0) {
+        uint32_t free = sizeof(cdc_buf) - cdc_len;
+        if (free > 0) {
+            if (avail > free) avail = free;
+            cdc_len += tud_cdc_read(cdc_buf + cdc_len, avail);
+        }
+    }
 
     uint32_t pos = 0;
     while (pos < cdc_len) {
@@ -491,6 +540,22 @@ static void process_cdc(void) {
     if (pos > 0) {
         cdc_len -= pos;
         if (cdc_len > 0) memmove(cdc_buf, cdc_buf + pos, cdc_len);
+    }
+}
+
+/* ── TinyUSB CDC callback: reset state on disconnect ──── */
+void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts) {
+    (void)itf; (void)rts;
+    if (!dtr) {
+        /* Host closed the serial port — reset all injected state */
+        aim_mode = false;
+        aim_dx = 0;
+        aim_dy = 0;
+        aim_delay_until = 0;
+        inject_buttons = 0;
+        recoil_enabled = true;
+        pattern_len = 0;
+        firing = false;
     }
 }
 

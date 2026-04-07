@@ -22,3 +22,4 @@ calibrate_distance
 training_data/human_detection
 
 pico_firmware/.vscode
+human_detection/test/

@@ -6,17 +6,12 @@ from dl_models.train import MultiHeadMobileNet
 from dl_models.icon_merging import dewhite
 
 
-def img_hash(img, hash_size=4):
-    """Low-resolution perceptual hash — similar images get same hash.
-    hash_size=4 → 16 bits → 4 hex chars → ~65K buckets. Auto dedup."""
+def img_hash(img, length=8):
+    """Content hash — MD5 of downscaled pixels, truncated to `length` hex chars."""
+    import hashlib
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
-    resized = cv2.resize(gray, (hash_size, hash_size), interpolation=cv2.INTER_AREA)
-    mean = resized.mean()
-    bits = (resized > mean).flatten()
-    val = 0
-    for b in bits:
-        val = (val << 1) | int(b)
-    return f'{val:0{hash_size * hash_size // 4}x}'
+    resized = cv2.resize(gray, (16, 16), interpolation=cv2.INTER_AREA)
+    return hashlib.md5(resized.tobytes()).hexdigest()[:length]
 
 
 def load_model(path, head_sizes, device, in_channels=3, hidden_dim=128):
@@ -43,12 +38,3 @@ def crop_to_tensor_4ch(crop, device):
         bgrd.transpose(2, 0, 1).astype(np.float32) / 255.0
     )
     return t.unsqueeze(0).to(device)
-
-
-def classify_single(model, crop, device, head_name, class_list):
-    """Classify a crop with a single-head model. Returns class name or ''."""
-    t = crop_to_tensor(crop, device)
-    with torch.no_grad():
-        out = model(t)
-    idx = out[head_name].argmax(1).item()
-    return class_list[idx - 1] if idx > 0 else ''

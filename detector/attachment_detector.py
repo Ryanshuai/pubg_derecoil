@@ -174,18 +174,41 @@ class AttachmentDetector:
 
         t_tag = self._short_name(tmpl_name)
         d_tag = self._short_name(dl_name)
+        if t_tag == d_tag:
+            return
         fname = f'T_{t_tag}_m{tmpl_mse:.0f}_dl_{d_tag}_c{int(conf*100)}.png'
         path = os.path.join(FEEDBACK_DIR, fname)
         if not os.path.exists(path):
             cv2.imwrite(path, crop)
 
+    CONFLICT_DIR = os.path.join(os.path.dirname(__file__), '..', 'InGameScreenshot', 'attachment_conflict')
+
+    def _save_conflict_crop(self, gun_name, slot_name, detected, crop):
+        """Save crop image when detector returns an attachment the weapon can't equip."""
+        os.makedirs(self.CONFLICT_DIR, exist_ok=True)
+        import time
+        ts = time.strftime('%Y%m%d_%H%M%S')
+        short = self._short_name(detected)
+        fname = f'{ts}_{gun_name}_{slot_name}_{short}.png'
+        cv2.imwrite(os.path.join(self.CONFLICT_DIR, fname), crop)
+        _logger.warning(f'CONFLICT: {gun_name} cannot equip {slot_name}={detected}')
+
     def classify_gun(self, screen, gun_id):
         """Classify all 5 slots for a gun. Updates state directly."""
         from config import ATTACHMENT_SLOTS
+        from detector.weapon_attachments import validate_attachments
         rects = ATTACHMENT_SLOTS[gun_id]
+        w = self.state.weapon_1 if gun_id == 1 else self.state.weapon_2
         result = {}
+        crops = {}
         for slot_name in SLOT_NAMES:
             x1, y1, x2, y2 = rects[slot_name]
             crop = screen[y1:y2, x1:x2].copy()
+            crops[slot_name] = crop
             result[slot_name] = self.classify_slot(crop, slot_name)
+        # Validate and save conflict crops
+        filtered = validate_attachments(w.name, result)
+        for k in ('muzzle', 'grip'):
+            if result.get(k) and result[k] != filtered.get(k):
+                self._save_conflict_crop(w.name, k, result[k], crops[k])
         self.state.set_attachments(gun_id, result)

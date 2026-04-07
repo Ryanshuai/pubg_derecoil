@@ -61,11 +61,13 @@ class GameState:
         self.stop_recoil = False
         self.gt_valid = False
         self.tab_open = False
+        self.aim_enabled = False
         self._apply_handlers = {
             'active':      lambda v: self.set_active(1 if v == 'weapon_1' else 2),
             'stop_recoil': lambda v: self._set_stop_recoil(v),
             'gt_valid':    lambda v: setattr(self, 'gt_valid', v),
             'counts':      self._adjust_counts,
+            'toggle_aim':  lambda v: self._toggle_aim(),
         }
 
     # ── Generic dispatch (driven by KEY_STATE_TABLE) ─────────
@@ -94,6 +96,13 @@ class GameState:
             get_mouse().set_recoil_enabled(not value)
         except Exception:
             pass
+        if not value:
+            # Resuming — re-upload pattern in case it was cleared
+            self._upload_active_pattern()
+
+    def _toggle_aim(self):
+        self.aim_enabled = not self.aim_enabled
+        print(f"[aim] {'ON' if self.aim_enabled else 'OFF'}", flush=True)
 
     def _upload_active_pattern(self):
         """Send the active weapon's recoil pattern to the Pico."""
@@ -103,7 +112,7 @@ class GameState:
             if len(w.dy_s) == 0 or self.stop_recoil:
                 mouse.clear_pattern()
             else:
-                mouse.upload_pattern(w.dx_s, w.dy_s, w.t_s)
+                mouse.upload_pattern(w.dx_s, w.dy_s, w.t_s, w.bullet_interval_s)
         except Exception:
             pass
 
@@ -137,8 +146,10 @@ class GameState:
 
     def set_attachments(self, slot, attachments):
         """attachments: dict {scope, muzzle, grip, magazine, stock} → class name or ''."""
+        from detector.weapon_attachments import validate_attachments
         w = self.weapon_1 if slot == 1 else self.weapon_2
-        for slot_name, val in attachments.items():
+        filtered = validate_attachments(w.name, attachments)
+        for slot_name, val in filtered.items():
             attr = _SLOT_TO_ATTR.get(slot_name)
             if attr:
                 w.set(attr, val)

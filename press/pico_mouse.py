@@ -12,6 +12,7 @@ Protocol (PC → Pico):
   [0x12][0/1]                             enable/disable recoil
 """
 
+import time
 import struct
 import serial
 import serial.tools.list_ports
@@ -29,54 +30,108 @@ _instance = None
 
 
 class PicoMouse:
-    def __init__(self, port):
-        self._ser = serial.Serial(port, baudrate=115200, timeout=0.1)
+    def __init__(self, port=None):
+        self._port = port
+        self._ser = None
+        self._connect()
 
-    def upload_pattern(self, dx_s, dy_s, t_s):
-        """Upload recoil pattern. dx_s/dy_s are float lists, t_s in seconds."""
+    def _connect(self):
+        """Open serial connection. Auto-detects port if not specified."""
+        if self._ser:
+            try:
+                self._ser.close()
+            except Exception:
+                pass
+        port = self._port or _find_pico_port()
+        self._ser = serial.Serial(port, baudrate=115200, timeout=0.1,
+                                  write_timeout=0.1)
+        self._port = port
+        print(f"[pico] connected on {port}", flush=True)
+
+    def _write(self, data):
+        """Write with non-blocking error handling."""
+        try:
+            self._ser.write(data)
+        except serial.SerialTimeoutException:
+            pass  # CDC backpressure — drop this packet, Pico will catch up
+        except Exception:
+            # Mark disconnected; reconnect lazily on next call to avoid blocking
+            print("[pico] write failed, will reconnect on next call", flush=True)
+            self._ser = None
+
+        if self._ser is None:
+            try:
+                self._port = None
+                self._connect()
+            except Exception as e:
+                print(f"[pico] reconnect failed: {e}", flush=True)
+
+    MAX_POINTS = 300  # must match Pico firmware MAX_PATTERN_POINTS
+
+    def upload_pattern(self, dx_s, dy_s, t_s, bullet_interval_s=0.1):
+        """Upload pattern merged to one point per bullet.
+
+        Groups sample points by bullet time windows (from RPM),
+        sums dx/dy per bullet. Total compensation is preserved exactly.
+        """
         n = len(dx_s)
-        header = struct.pack('<BH', CMD_PATTERN_UPLOAD, n)
-        body = b''
-        for dx, dy, t in zip(dx_s, dy_s, t_s):
-            t_ms = int(t * 1000)
-            body += struct.pack('<hhH', int(dx), int(dy), t_ms)
-        self._ser.write(header + body)
+        if n == 0:
+            return
+        m_dx, m_dy, m_t = [], [], []
+        bullet = 0
+        sum_dx, sum_dy = 0.0, 0.0
+        for i in range(n):
+            # Start new bullet when t_s crosses next bullet boundary
+            while t_s[i] >= (bullet + 1) * bullet_interval_s and i > 0:
+                m_dx.append(sum_dx)
+                m_dy.append(sum_dy)
+                m_t.append(bullet * bullet_interval_s)
+                sum_dx, sum_dy = 0.0, 0.0
+                bullet += 1
+            sum_dx += dx_s[i]
+            sum_dy += dy_s[i]
+        # Flush last bullet
+        if sum_dx != 0 or sum_dy != 0:
+            m_dx.append(sum_dx)
+            m_dy.append(sum_dy)
+            m_t.append(bullet * bullet_interval_s)
+
+        nn = min(len(m_dx), self.MAX_POINTS)
+        header = struct.pack('<BH', CMD_PATTERN_UPLOAD, nn)
+        body = b''.join(
+            struct.pack('<hhH', int(m_dx[j]), int(m_dy[j]), int(m_t[j] * 1000))
+            for j in range(nn)
+        )
+        self._write(header + body)
 
     def clear_pattern(self):
-        self._ser.write(bytes([CMD_PATTERN_CLEAR]))
+        self._write(bytes([CMD_PATTERN_CLEAR]))
 
     def set_recoil_enabled(self, enabled):
-        self._ser.write(struct.pack('<BB', CMD_RECOIL_ENABLE, 1 if enabled else 0))
+        self._write(struct.pack('<BB', CMD_RECOIL_ENABLE, 1 if enabled else 0))
 
     def move(self, dx, dy):
-        """Inject a mouse move (dx, dy in counts)."""
-        self._ser.write(struct.pack('<Bhh', CMD_MOVE, int(dx), int(dy)))
+        self._write(struct.pack('<Bhh', CMD_MOVE, int(dx), int(dy)))
 
     def click(self, buttons=0x01, duration_ms=80):
-        """Inject a mouse click. buttons: bit0=left, bit1=right, bit2=middle."""
-        self._ser.write(struct.pack('<BBH', CMD_CLICK, buttons, duration_ms))
+        self._write(struct.pack('<BBH', CMD_CLICK, buttons, duration_ms))
 
     def set_aim_mode(self, enabled):
-        """Enable/disable aim mode. When enabled, real left clicks are suppressed
-        and Pico applies stored delta + click on left press."""
-        self._ser.write(struct.pack('<BB', CMD_AIM_MODE, 1 if enabled else 0))
+        self._write(struct.pack('<BB', CMD_AIM_MODE, 1 if enabled else 0))
 
     def set_delta(self, dx, dy):
-        """Update aim delta stored in Pico (in counts). Called every frame."""
-        self._ser.write(struct.pack('<Bhh', CMD_SET_DELTA, int(dx), int(dy)))
+        self._write(struct.pack('<Bhh', CMD_SET_DELTA, int(dx), int(dy)))
 
     def move_click(self, dx, dy, buttons=0x01, delay_ms=0, duration_ms=80):
-        """Inject move + delayed click. Pico moves first, clicks after delay_ms.
-        If delay_ms=0, auto-calculates from move distance."""
         if delay_ms == 0:
-            # Estimate move time: distance / MAX_MOVE_PER_MS (127 counts/ms) + margin
             dist = max(abs(int(dx)), abs(int(dy)))
             delay_ms = max(5, dist // 127 + 10)
-        self._ser.write(struct.pack('<BhhBHH', CMD_MOVE_CLICK,
-                        int(dx), int(dy), buttons, delay_ms, duration_ms))
+        self._write(struct.pack('<BhhBHH', CMD_MOVE_CLICK,
+                    int(dx), int(dy), buttons, delay_ms, duration_ms))
 
     def close(self):
-        self._ser.close()
+        if self._ser:
+            self._ser.close()
 
 
 def _find_pico_port():
@@ -90,11 +145,16 @@ def _find_pico_port():
 
 
 def get_mouse(port=None):
-    """Return singleton PicoMouse. Auto-detects port if not specified."""
+    """Return singleton mouse backend (PicoMouse or SoftMouse per config)."""
     global _instance
     if _instance is None:
-        if port is None:
-            from config import PICO_PORT
-            port = PICO_PORT or _find_pico_port()
-        _instance = PicoMouse(port)
+        from config import MOUSE_BACKEND
+        if MOUSE_BACKEND == 'soft':
+            from press.soft_mouse import SoftMouse
+            _instance = SoftMouse()
+        else:
+            if port is None:
+                from config import PICO_PORT
+                port = PICO_PORT or None  # None = auto-detect in PicoMouse
+            _instance = PicoMouse(port)
     return _instance

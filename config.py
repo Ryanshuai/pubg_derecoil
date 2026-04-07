@@ -7,6 +7,11 @@ SPECIAL_KEYS = {
     keyboard.Key.up: 'up',
     keyboard.Key.down: 'down',
     keyboard.Key.f13: 'f13',
+    keyboard.Key.alt_l: 'alt',
+    keyboard.Key.alt_r: 'alt',
+    keyboard.Key.cmd: 'win',
+    keyboard.Key.cmd_r: 'win',
+    keyboard.Key.f9: 'f9',
 }
 
 # Resolution: 3440x1440
@@ -96,9 +101,15 @@ KEY_STATE_TABLE = [
     {'key': 'up',          'state': 'counts',      'value': +0.01},
     {'key': 'down',        'state': 'counts',      'value': -0.01},
     {'key': 'right_down',  'state': 'stop_recoil', 'value': False},
+    {'key': 'tab',         'state': 'stop_recoil', 'value': True},
+    {'key': ('alt', 'tab'), 'state': 'stop_recoil', 'value': True},
+    {'key': 'win',         'state': 'stop_recoil', 'value': True},
+    {'key': 'f9',          'state': 'toggle_aim',  'value': True},
     # left_down/left_up removed — Pico detects left click directly via USB Host
 ]
 
+# Mouse backend: 'pico' (hardware) or 'soft' (win32 SendInput)
+MOUSE_BACKEND = 'pico'
 # Pico HID Mouse serial port (None = auto-detect by VID:PID)
 PICO_PORT = None  # auto-detect by VID:PID (0xCAFE:0x4001)
 
@@ -111,6 +122,14 @@ COUNTS_PER_RECOIL_UNIT = 0.4
 
 # Aim assist: mouse counts per screen pixel (calibrate with sniper + ↑↓ keys)
 COUNTS_PER_PIXEL = 0.5
+
+# Debug: hot-reload weapon_scales.json and curve files on every set_seq()
+DEBUG_HOT_RELOAD = False
+
+# Human detection confidence thresholds
+CONF_BODY = 0.85          # body detection (used by sniper)
+CONF_HEAD = 0.3           # head detection
+CONF_BODY_RECOIL = 0.9    # body detection for rifle aim assist (higher = less jitter)
 
 
 # Gun name text position in Tab view (3440x1440)

@@ -10,36 +10,16 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-import threading
-import win32con
-import win32gui
-import win32ui
-
-_cap_lock = threading.Lock()
+from detector.cropper import win32_cap as _win32_cap_yxhw
 
 
 def win32_cap(x, y, w, h):
-    with _cap_lock:
-        hwnd = 0
-        hwndDC = win32gui.GetWindowDC(hwnd)
-        mfcDC = win32ui.CreateDCFromHandle(hwndDC)
-        saveDC = mfcDC.CreateCompatibleDC()
-        bmp = win32ui.CreateBitmap()
-        bmp.CreateCompatibleBitmap(mfcDC, w, h)
-        saveDC.SelectObject(bmp)
-        saveDC.BitBlt((0, 0), (w, h), mfcDC, (x, y), win32con.SRCCOPY)
-        buf = bmp.GetBitmapBits(True)
-        img = np.frombuffer(buf, dtype=np.uint8).reshape(h, w, 4)
-        img = img[:, :, :3].copy()
-        win32gui.DeleteObject(bmp.GetHandle())
-        saveDC.DeleteDC()
-        mfcDC.DeleteDC()
-        win32gui.ReleaseDC(hwnd, hwndDC)
-        return img
+    return _win32_cap_yxhw((y, x, h, w))
 
 
 # ── Config ──────────────────────────────────────────────
-SCREEN_W, SCREEN_H = 3440, 1440
+import config
+from config import SCREEN_W, SCREEN_H
 CX, CY = SCREEN_W // 2, SCREEN_H // 2
 
 
@@ -99,8 +79,8 @@ class CrosshairDetector:
 class TargetDetector:
     """YOLO-based human/head detection in the scope crop area."""
 
-    CONF_BODY = 0.5
-    CONF_HEAD = 0.1
+    CONF_BODY = config.CONF_BODY
+    CONF_HEAD = config.CONF_HEAD
     PRONE_RATIO = 1.5
 
     def __init__(self, crop_w=800, crop_h=800,

@@ -268,7 +268,7 @@ ATTACHMENT_CLASSES = sorted([
     # SideRail
     'SideRail_DotSight_RMR_C',
     # Stock
-    'Stock_AR_Composite_C', 'Stock_Shotgun_BulletLoops_C',
+    'Stock_AR_Composite_C', 'Stock_AR_Heavy_C', 'Stock_Shotgun_BulletLoops_C',
     'Stock_SniperRifle_BulletLoops_C', 'Stock_SniperRifle_CheekPad_C',
     'Stock_UZI_C',
     # Upper (scope)
@@ -365,7 +365,7 @@ class PostureIconLayout(RegionLayout):
     - 3 类 + 背景 = 4 类
     """
 
-    def __init__(self, icons_dir=None, bg_prob=0.15, jitter_px=2):
+    def __init__(self, icons_dir=None, bg_prob=0.30, jitter_px=2):
         if icons_dir is None:
             icons_dir = os.path.join(os.path.dirname(__file__), '..', ASSET_DIR['posture'])
         self.bg_prob = bg_prob
