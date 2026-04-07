@@ -130,6 +130,26 @@ class GameState:
         self._upload_active_pattern()
         self._print_status()
 
+    def auto_select_active(self):
+        """Auto-select: prefer the weapon that needs recoil control.
+
+        If both need it, pick the one with smaller scale (less recoil = primary spray gun).
+        """
+        from detector.weapon import can_full_guns, _weapon_scales
+        w1_full = self.weapon_1.name in can_full_guns
+        w2_full = self.weapon_2.name in can_full_guns
+        if w1_full == w2_full:
+            if not w1_full:
+                return  # neither needs recoil
+            # Both full-auto: pick smaller scale
+            s1 = _weapon_scales.get(self.weapon_1.name, 1.0)
+            s2 = _weapon_scales.get(self.weapon_2.name, 1.0)
+            slot = 1 if s1 <= s2 else 2
+        else:
+            slot = 1 if w1_full else 2
+        self.set_active(slot)
+        print(f'[auto] active → weapon_{slot} ({(self.weapon_1 if slot == 1 else self.weapon_2).name})', flush=True)
+
     def set_fire_mode(self, mode):
         self.fire_mode = mode
         self.active.set('fire_mode', mode)

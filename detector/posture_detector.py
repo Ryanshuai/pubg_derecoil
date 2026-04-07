@@ -110,12 +110,15 @@ class PostureDetector:
                 pos = next(iter(valid))
             else:
                 return
+            self._save_collect(crop, pos)
         elif key_name not in _VALID_TRANSITIONS:
             # No posture-change key (e.g. right_down / ADS) →
-            # current posture is ground truth, save for training
+            # state machine posture is ground truth, only save once
             self._save_collect(crop, cur)
+        else:
+            # Valid transition from c/z
+            self._save_collect(crop, pos)
 
-        self._save_collect(crop, pos)
         self.state.set_posture(pos)
 
     def collect_tick(self):

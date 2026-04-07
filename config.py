@@ -82,7 +82,7 @@ IN_TAB = {
 # delay:   ms to wait for HUD to update before screenshot
 # capture: 'region' = detector's own SLOT_RECT, 'fullscreen' = entire screen
 DETECT_TABLE = [
-    {'keys': ['1', '2'],           'detect': 'weapon_hud', 'delay': 200, 'capture': 'region'},
+    {'keys': ['1', '2', 'f'],      'detect': 'weapon_hud', 'delay': 200, 'capture': 'region'},
     {'keys': ['1', '2', 'b'],      'detect': 'fire_mode',  'delay': 200, 'capture': 'region'},
     {'keys': ['c', 'z', 'right_down'],  'detect': 'posture',    'delay': 200, 'capture': 'region'},
     {'keys': ['tab'],              'detect': 'tab_scan',   'delay': 0,   'capture': 'fullscreen'},

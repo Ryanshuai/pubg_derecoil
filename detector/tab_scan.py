@@ -46,6 +46,6 @@ class TabScan:
         for gun_id in [1, 2]:
             self._attach.classify_gun(screen, gun_id)
 
-        self.state._print_status()
+        self.state.auto_select_active()
         self.state.tab_open = False
         self.state.stop_recoil = False
