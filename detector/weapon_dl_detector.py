@@ -77,19 +77,23 @@ class WeaponClassifier:
 
     def query(self, **_):
         """Capture both weapon slots. When GT not available, set state from DL."""
-        names = {}
+        results = {}
         for slot_id in [1, 2]:
             crop = win32_cap(SLOT_RECTS[slot_id])
             name, hl = self.classify(crop, slot_id)
-            names[slot_id] = name
+            results[slot_id] = (name, hl)
         if not self.state.gt_valid:
             changed = False
-            for slot_id, name in names.items():
+            for slot_id, (name, hl) in results.items():
                 w = self.state.weapon_1 if slot_id == 1 else self.state.weapon_2
                 if name and name != w.name:
                     self.state.set_weapon(slot_id, name)
                     changed = True
-            if changed:
+            # Set active from highlight detection
+            hl_slots = [s for s, (_, hl) in results.items() if hl == 'highlighted']
+            if len(hl_slots) == 1:
+                self.state.set_active(hl_slots[0])
+            elif changed and not self.state.tab_ever_opened:
                 self.state.auto_select_active()
 
     def _save_feedback(self, out_dir, reason, gt, model_name, hl_name,

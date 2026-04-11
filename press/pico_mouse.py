@@ -68,11 +68,17 @@ class PicoMouse:
 
     MAX_POINTS = 300  # must match Pico firmware MAX_PATTERN_POINTS
 
+    # Pre-fire lead: fraction of bullet_interval to shift pattern earlier.
+    # Compensates Pico-click-to-game-recoil latency (~5-20ms USB + frame).
+    # Proportional to RPM so fast guns (Vector) and slow guns (AKM) get
+    # consistent lead relative to their fire rate.
+    RECOIL_LEAD_FRAC = 0.30  # 30% of one bullet interval
+
     def upload_pattern(self, dx_s, dy_s, t_s, bullet_interval_s=0.1):
         """Upload pattern merged to one point per bullet.
 
         Groups sample points by bullet time windows (from RPM),
-        sums dx/dy per bullet. Total compensation is preserved exactly.
+        sums dx/dy per bullet. Lead shift applied after merge.
         """
         n = len(dx_s)
         if n == 0:
@@ -95,6 +101,10 @@ class PicoMouse:
             m_dx.append(sum_dx)
             m_dy.append(sum_dy)
             m_t.append(bullet * bullet_interval_s)
+
+        # Apply lead shift after merge (preserves per-bullet delta totals)
+        lead = bullet_interval_s * self.RECOIL_LEAD_FRAC
+        m_t = [max(0, t - lead) for t in m_t]
 
         nn = min(len(m_dx), self.MAX_POINTS)
         header = struct.pack('<BH', CMD_PATTERN_UPLOAD, nn)

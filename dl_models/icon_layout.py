@@ -15,7 +15,7 @@ import cv2
 import numpy as np
 import os
 from config import (
-    WEAPON_HUD_1, WEAPON_HUD_2, ATTACHMENT_SLOTS, IN_TAB, POSTURE, FIRE_MODE,
+    WEAPON_HUD_1, WEAPON_HUD_2, ATTACHMENT_SLOTS, IN_TAB, FIRE_MODE,
     ASSET_DIR, ALPHA,
 )
 from dl_models.icon_merging import (
@@ -343,86 +343,6 @@ class AttachmentIconLayout(RegionLayout):
 
 
 # ============================================================
-# Posture icons (bottom HUD, left of health bar)
-# ============================================================
-
-POSTURE_CLASSES = ['standing', 'crouching', 'prone']
-
-POSTURE_ICON_MAP = {
-    'posture_standing_icon_bgra.png':  'standing',
-    'posture_crouching_icon_bgra.png': 'crouching',
-    'posture_prone_icon_bgra.png':     'prone',
-}
-
-
-class PostureIconLayout(RegionLayout):
-    """
-    姿态图标 (底部 HUD, 血条左侧)
-
-    - 白色图标, alpha 通道自带强度 (~0.75 peak)
-    - 合成: output = icon_alpha * 255 + (1 - icon_alpha) * background
-    - 4通道输入 (BGR + dewhite)
-    - 3 类 + 背景 = 4 类
-    """
-
-    def __init__(self, icons_dir=None, bg_prob=0.30, jitter_px=2):
-        if icons_dir is None:
-            icons_dir = os.path.join(os.path.dirname(__file__), '..', ASSET_DIR['posture'])
-        self.bg_prob = bg_prob
-        self.jitter_px = jitter_px
-
-        self.icons = {}
-        for fname, cls in POSTURE_ICON_MAP.items():
-            bgra = load_bgra(os.path.join(icons_dir, fname))
-            if bgra is None:
-                continue
-            self.icons[cls] = (
-                bgra[:, :, :3],
-                bgra[:, :, 3].astype(np.float32) / 255.0,
-            )
-
-        self.available = [c for c in POSTURE_CLASSES if c in self.icons]
-        print(f'Loaded {len(self.available)} posture icons')
-
-    # ── WHERE ──
-
-    def get_slot_rect(self):
-        return (POSTURE['x1'], POSTURE['y1'], POSTURE['x2'], POSTURE['y2'])
-
-    # ── META ──
-
-    @property
-    def label_names(self):
-        return {'posture': len(POSTURE_CLASSES) + 1}  # 0=background
-
-    @property
-    def crop_hw(self):
-        return (POSTURE['y2'] - POSTURE['y1'], POSTURE['x2'] - POSTURE['x1'])
-
-    @property
-    def in_channels(self):
-        return 4
-
-    def preprocess(self, img_bgr):
-        return np.dstack([img_bgr, dewhite(img_bgr)])
-
-    # ── HOW ──
-
-    def apply(self, canvas):
-        if random.random() < self.bg_prob:
-            return {'posture': 0}
-
-        cls_name = random.choice(self.available)
-        icon_bgr, icon_alpha = self.icons[cls_name]
-
-        jx = random.randint(-self.jitter_px, self.jitter_px)
-        jy = random.randint(-self.jitter_px, self.jitter_px)
-        alpha_blend(canvas, icon_bgr, icon_alpha, jx, jy)
-
-        return {'posture': POSTURE_CLASSES.index(cls_name) + 1}
-
-
-# ============================================================
 # Tab detection ("Type" text region)
 # ============================================================
 
@@ -589,7 +509,6 @@ class FireModeLayout(RegionLayout):
 LAYOUTS = {
     'weapon': WeaponIconLayout,
     'attachment': AttachmentIconLayout,
-    'posture': PostureIconLayout,
     'tab_detect': TabDetectLayout,
     'fire_mode': FireModeLayout,
 }

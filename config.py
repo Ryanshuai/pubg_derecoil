@@ -64,7 +64,6 @@ ASSET_DIR = {
     'weapon':     'training_data/pubg_assets/Item/Weapon/Main',
     'attachment':  'training_data/pubg_assets/Item/Attachment',
     'tab_detect':  'training_data/pubg_assets/type',
-    'posture':     'training_data/pubg_assets/posture',
     'fire_mode':   'training_data/pubg_assets/fire_mode',
 }
 

@@ -16,7 +16,7 @@ from torchvision.models import mobilenet_v3_small
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from dl_models.dataset import BackgroundProvider, RealHUDDataset, RealClassifyDataset, SyntheticHUDDataset
-from dl_models.icon_layout import WeaponIconLayout, TabDetectLayout, AttachmentIconLayout, PostureIconLayout, FireModeLayout
+from dl_models.icon_layout import WeaponIconLayout, TabDetectLayout, AttachmentIconLayout, FireModeLayout
 
 # ── Task configs ──
 BG_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data', 'backgrounds')
@@ -52,16 +52,6 @@ TASKS = {
         'lr': 2e-4,
         'batch_size': 64,
         'hidden_dim': 512,
-    },
-    'posture': {
-        'layout_cls': PostureIconLayout,
-        'save_name': 'posture.pth.tar',
-        'train_samples': 8000,
-        'val_samples': 1000,
-        'epochs': 15,
-        'lr': 3e-4,
-        'batch_size': 64,
-        'hidden_dim': 128,
     },
     'fire_mode': {
         'layout_cls': FireModeLayout,
@@ -175,18 +165,6 @@ def train(task_name):
                                          [], augment=True, oversample=4)
         real_val = RealClassifyDataset(TAB_REAL_DIR, layout, 'tab_open',
                                        [], augment=False)
-        train_ds = ConcatDataset([train_ds, real_train])
-        val_ds = ConcatDataset([val_ds, real_val])
-        print(f'Mixed: train={len(train_ds)}, val={len(val_ds)}')
-
-    # Mix real data for posture task
-    POSTURE_REAL_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data', 'Manual', 'posture')
-    if task_name == 'posture' and os.path.isdir(POSTURE_REAL_DIR):
-        from dl_models.icon_layout import POSTURE_CLASSES
-        real_train = RealClassifyDataset(POSTURE_REAL_DIR, layout, 'posture',
-                                         POSTURE_CLASSES, augment=True, oversample=4)
-        real_val = RealClassifyDataset(POSTURE_REAL_DIR, layout, 'posture',
-                                       POSTURE_CLASSES, augment=False)
         train_ds = ConcatDataset([train_ds, real_train])
         val_ds = ConcatDataset([val_ds, real_val])
         print(f'Mixed: train={len(train_ds)}, val={len(val_ds)}')

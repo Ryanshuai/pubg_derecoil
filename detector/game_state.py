@@ -61,6 +61,7 @@ class GameState:
         self.stop_recoil = False
         self.gt_valid = False
         self.tab_open = False
+        self.tab_ever_opened = False
         self.aim_enabled = False
         self._apply_handlers = {
             'active':      lambda v: self.set_active(1 if v == 'weapon_1' else 2),
@@ -124,6 +125,7 @@ class GameState:
         w.set_seq()
         if w is self.active:
             self._upload_active_pattern()
+        self._print_status()
 
     def set_active(self, slot):
         self.active = self.weapon_1 if slot == 1 else self.weapon_2

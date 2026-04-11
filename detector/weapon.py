@@ -113,14 +113,8 @@ class BulletCalculator:
 
         dx_s = np.array(dx_s)
         dy_s = np.array(dy_s)
-        t_s = np.maximum(0, np.array(t_s) - RECOIL_LEAD_S)
+        t_s = np.array(t_s)
         return dx_s, dy_s, t_s
-
-
-# Pre-fire compensation: shift pattern earlier so first shots are front-loaded.
-# Pico detects click before game receives it (~5-20ms USB delay),
-# and game applies recoil in a single frame burst.
-RECOIL_LEAD_S = 0.030  # 30ms lead
 
 SCALES_PATH = os.path.join(os.path.dirname(__file__), '..', 'press', 'weapon_scales.json')
 
