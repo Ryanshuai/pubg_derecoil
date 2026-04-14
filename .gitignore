@@ -20,6 +20,7 @@ calibrate_distance
 
 .claude/settings.local.json
 training_data/human_detection
+training_data/highlight_eval
 
 pico_firmware/.vscode
 human_detection/test/

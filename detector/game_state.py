@@ -1,170 +1,96 @@
-"""Game state — weapon names, attachments, fire mode, posture, recoil control.
+"""GameState — pure game state + mutation methods.
 
-Pure state model. Weapon objects auto-recalculate recoil on changes.
-Recoil patterns are uploaded to the Pico which handles left-click detection
-and compensation directly in hardware.
+No key dispatch, no detection scheduling, no hardware communication.
+Just state and methods to change it.
 """
 from detector.weapon import Weapon
-from press.pico_mouse import get_mouse
-import config
-
-# ── Short display names for attachments ───────────────────
-
-_SCOPE = {
-    'Upper_DotSight_01_C': '1x', 'Upper_Holosight_C': '1x holo',
-    'Upper_Aimpoint_C': '2x', 'Upper_Scope3x_C': '3x',
-    'Upper_ACOG_01_C': '4x', 'Upper_Scope6x_C': '6x',
-    'Upper_CQBSS_C': '8x', 'Upper_PM2_01_C': '15x',
-    'SideRail_DotSight_RMR_C': 'canted',
-}
-
-_ATTACH = {
-    'Muzzle_Compensator_Large_C': 'comp', 'Muzzle_Compensator_Medium_C': 'comp',
-    'Muzzle_Compensator_SniperRifle_C': 'comp',
-    'Muzzle_Suppressor_Large_C': 'supp', 'Muzzle_Suppressor_Medium_C': 'supp',
-    'Muzzle_Suppressor_Small_C': 'supp', 'Muzzle_Suppressor_SniperRifle_C': 'supp',
-    'Muzzle_FlashHider_Large_C': 'flash', 'Muzzle_FlashHider_Medium_C': 'flash',
-    'Muzzle_FlashHider_SniperRifle_C': 'flash',
-    'Muzzle_Choke_C': 'choke', 'Muzzle_Duckbill_C': 'duck',
-    'Lower_Foregrip_C': 'vert', 'Lower_AngledForeGrip_C': 'angled',
-    'Lower_HalfGrip_C': 'half', 'Lower_ThumbGrip_C': 'thumb',
-    'Lower_LightweightForeGrip_C': 'light', 'Lower_LaserPointer_C': 'laser',
-    'Lower_Foregrip_Crossbow': 'vert', 'Lower_QuickDraw_Large_Crossbow_C': 'qd',
-    'Lower_Sniper_CheekPad_Vss_setting': 'cheek', 'Vector_VerGrip': 'vert',
-    'Stock_AR_Composite_C': 'tac', 'Stock_SniperRifle_CheekPad_C': 'cheek',
-    'Stock_SniperRifle_BulletLoops_C': 'loops', 'Stock_Shotgun_BulletLoops_C': 'loops',
-    'Stock_UZI_C': 'stock',
-}
-
-
-def _short(name):
-    if name in _SCOPE:
-        return _SCOPE[name]
-    if name in _ATTACH:
-        return _ATTACH[name]
-    if 'ExtendedQuickDraw' in name: return 'ext+qd'
-    if 'Extended_DrumMagazine' in name: return 'drum'
-    if 'Extended' in name: return 'ext'
-    if 'QuickDraw' in name: return 'qd'
-    return name
-
-_SLOT_TO_ATTR = {'scope': 'scope', 'muzzle': 'muzzle', 'grip': 'grip', 'stock': 'butt'}
 
 
 class GameState:
     def __init__(self):
+        # ── Weapon ──
         self.weapon_1 = Weapon()
         self.weapon_2 = Weapon()
         self.active = self.weapon_1
+
+        # ── GT / Pred (int: 0=unknown, 1=slot1, 2=slot2; tuple: weapon names) ──
+        self.weapon_gt = ('', '')         # from Tab scan, e.g. ('akm', 'm416')
+        self.weapon_pred = ('', '')       # from DL weapon_hud
+        self.highlight_gt = 0           # from key 1/2
+        self.highlight_pred = 0         # from CV highlight algorithm
+        self.attachments = {}           # from Tab scan
+
+        # ── Derived state ──
         self.fire_mode = ''
         self.posture = 'standing'
+
+        # ── Flags ──
         self.stop_recoil = False
-        self.gt_valid = False
         self.tab_open = False
-        self.tab_ever_opened = False
         self.aim_enabled = False
-        self._apply_handlers = {
-            'active':      lambda v: self.set_active(1 if v == 'weapon_1' else 2),
-            'stop_recoil': lambda v: self._set_stop_recoil(v),
-            'gt_valid':    lambda v: setattr(self, 'gt_valid', v),
-            'counts':      self._adjust_counts,
-            'toggle_aim':  lambda v: self._toggle_aim(),
-        }
 
-    # ── Generic dispatch (driven by KEY_STATE_TABLE) ─────────
+    # ════════════════════════════════════════════════════════════
+    # Active weapon — two sources
+    # ════════════════════════════════════════════════════════════
 
-    def apply(self, field, value):
-        handler = self._apply_handlers.get(field)
-        if handler:
-            handler(value)
-
-    def _adjust_counts(self, delta):
-        if self.active.type == 'sp':
-            # Bolt-action sniper: adjust aim pixels_per_count
-            config.COUNTS_PER_PIXEL = max(0.01, round(config.COUNTS_PER_PIXEL + delta, 3))
-            print(f"[aim scale] COUNTS_PER_PIXEL = {config.COUNTS_PER_PIXEL:.3f}", flush=True)
-        else:
-            self.active.adjust_scale(delta)
-            name = self.active.name or '(empty)'
-            print(f"[scale] {name} = {self.active.scale:.3f}", flush=True)
-            self._upload_active_pattern()
-
-    # ── Recoil control ───────────────────────────────────────
-
-    def _set_stop_recoil(self, value):
-        self.stop_recoil = value
-        try:
-            get_mouse().set_recoil_enabled(not value)
-        except Exception:
-            pass
-        if not value:
-            # Resuming — re-upload pattern in case it was cleared
-            self._upload_active_pattern()
-
-    def _toggle_aim(self):
-        self.aim_enabled = not self.aim_enabled
-        print(f"[aim] {'ON' if self.aim_enabled else 'OFF'}", flush=True)
-
-    def _upload_active_pattern(self):
-        """Send the active weapon's recoil pattern to the Pico."""
-        w = self.active
-        try:
-            mouse = get_mouse()
-            if len(w.dy_s) == 0 or self.stop_recoil:
-                mouse.clear_pattern()
-            else:
-                mouse.upload_pattern(w.dx_s, w.dy_s, w.t_s, w.bullet_interval_s)
-        except Exception:
-            pass
-
-    # ── Weapon state ─────────────────────────────────────────
-
-    def set_weapon(self, slot, name):
-        w = self.weapon_1 if slot == 1 else self.weapon_2
-        w.set('name', name)
-        w.set_seq()
-        if w is self.active:
-            self._upload_active_pattern()
-        self._print_status()
-
-    def set_active(self, slot):
+    def set_active_by_key(self, slot):
+        """Key 1/2 pressed — GT, authoritative."""
         self.active = self.weapon_1 if slot == 1 else self.weapon_2
-        self._upload_active_pattern()
-        self._print_status()
+        self.highlight_gt = slot
 
-    def auto_select_active(self):
-        """Auto-select: prefer the weapon that needs recoil control.
+    def set_active_by_detect(self, slot):
+        """Algorithm prediction — only applies when no GT."""
+        if self.highlight_gt:
+            return
+        self.active = self.weapon_1 if slot == 1 else self.weapon_2
+        self.highlight_pred = slot
 
-        If both need it, pick the one with smaller scale (less recoil = primary spray gun).
-        """
-        from detector.weapon import can_full_guns, _weapon_scales
-        w1_full = self.weapon_1.name in can_full_guns
-        w2_full = self.weapon_2.name in can_full_guns
-        if w1_full == w2_full:
-            if not w1_full:
-                return  # neither needs recoil
-            # Both full-auto: pick smaller scale
-            s1 = _weapon_scales.get(self.weapon_1.name, 1.0)
-            s2 = _weapon_scales.get(self.weapon_2.name, 1.0)
-            slot = 1 if s1 <= s2 else 2
-        else:
-            slot = 1 if w1_full else 2
-        self.set_active(slot)
-        print(f'[auto] active → weapon_{slot} ({(self.weapon_1 if slot == 1 else self.weapon_2).name})', flush=True)
+    @property
+    def active_slot(self):
+        return 1 if self.active is self.weapon_1 else 2
+
+    # ════════════════════════════════════════════════════════════
+    # Weapon name — two sources
+    # ════════════════════════════════════════════════════════════
+
+    @property
+    def weapon_name(self):
+        """Effective weapon names: GT > pred > existing."""
+        w1 = self.weapon_gt[0] or self.weapon_pred[0] or self.weapon_1.name
+        w2 = self.weapon_gt[1] or self.weapon_pred[1] or self.weapon_2.name
+        return (w1, w2)
+
+    def sync_weapons(self):
+        """Apply effective weapon names to Weapon objects. Call after gt/pred change."""
+        w1, w2 = self.weapon_name
+        for slot, name, w in [(1, w1, self.weapon_1), (2, w2, self.weapon_2)]:
+            if name and name != w.name:
+                w.set('name', name)
+                w.set_seq()
+
+    # ════════════════════════════════════════════════════════════
+    # Fire mode / Posture
+    # ════════════════════════════════════════════════════════════
 
     def set_fire_mode(self, mode):
         self.fire_mode = mode
         self.active.set('fire_mode', mode)
         self.active.set_seq()
-        self._upload_active_pattern()
-        self._print_status()
 
     def set_posture(self, posture):
+        if posture not in ('standing', 'crouching', 'prone'):
+            return
         self.posture = posture
         for w in (self.weapon_1, self.weapon_2):
             w.set('posture', posture)
             w.set_seq()
-        self._upload_active_pattern()
+
+    # ════════════════════════════════════════════════════════════
+    # Attachments
+    # ════════════════════════════════════════════════════════════
+
+    _SLOT_TO_ATTR = {'scope': 'scope', 'muzzle': 'muzzle',
+                     'grip': 'grip', 'stock': 'butt'}
 
     def set_attachments(self, slot, attachments):
         """attachments: dict {scope, muzzle, grip, magazine, stock} → class name or ''."""
@@ -172,43 +98,82 @@ class GameState:
         w = self.weapon_1 if slot == 1 else self.weapon_2
         filtered = validate_attachments(w.name, attachments)
         for slot_name, val in filtered.items():
-            attr = _SLOT_TO_ATTR.get(slot_name)
+            attr = self._SLOT_TO_ATTR.get(slot_name)
             if attr:
                 w.set(attr, val)
         w.set_seq()
-        if w is self.active:
-            self._upload_active_pattern()
+
+    # ════════════════════════════════════════════════════════════
+    # Scale adjust
+    # ════════════════════════════════════════════════════════════
+
+    def adjust_counts(self, delta):
+        import config
+        if self.active.type == 'sp':
+            config.COUNTS_PER_PIXEL = max(0.01, round(config.COUNTS_PER_PIXEL + delta, 3))
+            print(f"[aim scale] COUNTS_PER_PIXEL = {config.COUNTS_PER_PIXEL:.3f}", flush=True)
+        else:
+            self.active.adjust_scale(delta)
+            name = self.active.name or '(empty)'
+            if self.posture == 'standing':
+                print(f"[scale] {name} = {self.active.scale:.3f}", flush=True)
+            else:
+                pf = self.active.get_posture_factor()
+                print(f"[posture] {name} {self.posture} = {pf:.3f}", flush=True)
+
+    # ════════════════════════════════════════════════════════════
+    # Aim toggle
+    # ════════════════════════════════════════════════════════════
+
+    def toggle_tab_open(self):
+        self.tab_open = not self.tab_open
+        print(f"[tab] {'OPEN' if self.tab_open else 'CLOSED'}", flush=True)
+
+    def toggle_aim(self):
+        self.aim_enabled = not self.aim_enabled
+        print(f"[aim] {'ON' if self.aim_enabled else 'OFF'}", flush=True)
 
 
+    # ════════════════════════════════════════════════════════════
+    # Display
+    # ════════════════════════════════════════════════════════════
 
-    def reload_seq(self):
-        for w in (self.weapon_1, self.weapon_2):
-            w.bullet_calculator.counts_per_unit = config.COUNTS_PER_RECOIL_UNIT
-            w.set_seq()
-        self._upload_active_pattern()
+    def print_status(self):
+        l1 = self._fmt(self.weapon_1, self.weapon_1 is self.active)
+        l2 = self._fmt(self.weapon_2, self.weapon_2 is self.active)
+        new = f'{l1}\n{l2}'
+        if new != getattr(self, '_last_status', ''):
+            self._last_status = new
+            print(f'--------------------------------------\n{new}', flush=True)
 
-    # ── Display ──────────────────────────────────────────────
+    _ATTACH_CN = {
+        'Upper_DotSight_01_C': '1x', 'Upper_Holosight_C': '1x',
+        'Upper_Aimpoint_C': '2x', 'Upper_Scope3x_C': '3x',
+        'Upper_ACOG_01_C': '4x', 'Upper_Scope6x_C': '6x',
+        'Upper_CQBSS_C': '8x', 'Upper_PM2_01_C': '15x',
+        'SideRail_DotSight_RMR_C': '侧瞄',
+        'Muzzle_Compensator_Large_C': '补偿', 'Muzzle_Compensator_Medium_C': '补偿',
+        'Muzzle_Compensator_SniperRifle_C': '补偿',
+        'Muzzle_Suppressor_Large_C': '消音', 'Muzzle_Suppressor_Medium_C': '消音',
+        'Muzzle_Suppressor_Small_C': '消音', 'Muzzle_Suppressor_SniperRifle_C': '消音',
+        'Muzzle_FlashHider_Large_C': '消焰', 'Muzzle_FlashHider_Medium_C': '消焰',
+        'Muzzle_FlashHider_SniperRifle_C': '消焰',
+        'Lower_Foregrip_C': '垂直', 'Lower_AngledForeGrip_C': '三角',
+        'Lower_HalfGrip_C': '半截', 'Lower_ThumbGrip_C': '拇指',
+        'Lower_LightweightForeGrip_C': '轻型', 'Lower_LaserPointer_C': '激光',
+    }
 
-    def _format_weapon(self, w, is_active):
+    def _short(self, name):
+        return self._ATTACH_CN.get(name) or ('-' if not name else name[:4])
+
+    def _fmt(self, w, is_active):
         mark = '*' if is_active else ' '
         if not w.name:
             return f'  {mark} (empty)'
-        # Left: name + fire_mode
         left = f'{w.name} | {w.fire_mode or "?"}'
-        # Right: attachments (scope | muzzle | grip | stock)
-        scope = _SCOPE.get(getattr(w, 'scope', ''), '') or '-'
-        muzzle = _short(w.muzzle) if w.muzzle else '-'
-        grip = _short(w.grip) if w.grip else '-'
-        stock = _short(w.butt) if w.butt else '-'
-        right = f'{scope:>4s} | {muzzle:>5s} | {grip:>5s} | {stock:>5s}'
+        scope = self._short(getattr(w, 'scope', ''))
+        muzzle = self._short(getattr(w, 'muzzle', ''))
+        grip = self._short(getattr(w, 'grip', ''))
+        right = f'{scope:>4s} | {muzzle:>5s} | {grip:>5s}'
         posture = f' | {self.posture}' if self.posture != 'standing' else ''
         return f'  {mark} {left:<16s}  {right}{posture}'
-
-    def _print_status(self):
-        l1 = self._format_weapon(self.weapon_1, self.weapon_1 is self.active)
-        l2 = self._format_weapon(self.weapon_2, self.weapon_2 is self.active)
-        new_status = f'{l1}\n{l2}'
-        if new_status != getattr(self, '_last_status', ''):
-            self._last_status = new_status
-            sep = '--------------------------------------'
-            print(f'{sep}\n{new_status}', flush=True)

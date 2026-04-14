@@ -23,7 +23,7 @@ dmr = {'mini14', 'mk14', 'qbu', 'sks', 'slr', 'vss', 'dragunov', 'mk12'}
 ar = {'akm', 'aug', 'groza', 'm416', 'qbz', 'scar', 'm762', 'g36c', 'm16', 'mk47', 'k2', 'ace32', 'famas'}
 smg = {'tommy', 'uzi', 'ump45', 'vector', 'pp19', 'mp5k', 'p90', 'mp9', 'js9'}
 mg = {'m249', 'dp28', 'mg3'}
-shotgun = {'s12k', 's1987', 's686'}
+shotgun = {'s12k', 's1897', 's686'}
 
 # Weapons that can fire in full-auto or burst (used for fire_mode logic)
 can_full_guns = {
@@ -133,6 +133,42 @@ def _save_scales(scales):
 # Per-weapon scale overrides (loaded once, saved on change)
 _weapon_scales = _load_scales()
 
+# ── Per-weapon posture factors ───────────────────────────
+# Structure: {"akm": {"crouching": 0.8, "prone": 0.5}, ...}
+# standing is always 1.0 (not stored).
+POSTURE_SCALES_PATH = os.path.join(os.path.dirname(__file__), '..', 'press', 'posture_scales.json')
+
+# Default posture factors by weapon type
+_POSTURE_DEFAULTS = {
+    'ar':  {'crouching': 0.80, 'prone': 0.50},
+    'smg': {'crouching': 0.80, 'prone': 0.50},
+    'dmr': {'crouching': 0.80, 'prone': 0.50},
+    'mg':  {'crouching': 0.50, 'prone': 0.30},
+    'shotgun': {'crouching': 0.80, 'prone': 0.50},
+}
+
+def _load_posture_scales():
+    if os.path.exists(POSTURE_SCALES_PATH):
+        with open(POSTURE_SCALES_PATH, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+def _save_posture_scales(scales):
+    with open(POSTURE_SCALES_PATH, 'w', encoding='utf-8') as f:
+        json.dump(scales, f, indent=2, ensure_ascii=False)
+
+_posture_scales = _load_posture_scales()
+
+def _get_posture_factor(weapon_name, weapon_type, posture):
+    """Return posture factor for a weapon. standing=1.0 always."""
+    if posture == 'standing':
+        return 1.0
+    per_weapon = _posture_scales.get(weapon_name, {})
+    if posture in per_weapon:
+        return per_weapon[posture]
+    defaults = _POSTURE_DEFAULTS.get(weapon_type, {'crouching': 0.80, 'prone': 0.50})
+    return defaults.get(posture, 1.0)
+
 
 class Weapon():
     def __init__(self):
@@ -206,16 +242,31 @@ class Weapon():
             self.butt = state
 
     def adjust_scale(self, delta):
-        """Adjust per-weapon scale (saved to file on shutdown)."""
+        """Adjust per-weapon scale or posture factor depending on posture.
+
+        standing: adjusts the base scale (as before).
+        crouching/prone: adjusts the posture factor for current weapon+posture.
+        """
         if not self.name:
             return
-        self.scale = max(0.01, round(self.scale + delta, 3))
-        _weapon_scales[self.name] = self.scale
+        if self.posture == 'standing':
+            self.scale = max(0.01, round(self.scale + delta, 3))
+            _weapon_scales[self.name] = self.scale
+        else:
+            cur = _get_posture_factor(self.name, self.type, self.posture)
+            new_f = max(0.01, round(cur + delta, 3))
+            if self.name not in _posture_scales:
+                _posture_scales[self.name] = {}
+            _posture_scales[self.name][self.posture] = new_f
         self.set_seq()
+
+    def get_posture_factor(self):
+        return _get_posture_factor(self.name, self.type, self.posture)
 
     @staticmethod
     def save_scales():
         _save_scales(_weapon_scales)
+        _save_posture_scales(_posture_scales)
 
     def _hot_reload(self):
         """Reload curves from disk so edits take effect immediately."""
@@ -237,8 +288,7 @@ class Weapon():
         if getattr(_cfg, 'DEBUG_HOT_RELOAD', False):
             self._hot_reload()
 
-        # Map posture to Kava4 stance (prone uses crouching data)
-        stance = 'crouching' if self.posture in ('crouching', 'prone') else 'standing'
+        posture_f = _get_posture_factor(self.name, self.type, self.posture)
 
         if self.type in ['ar', 'smg', 'mg', 'dmr', 'shotgun']:
             from detector.weapon_attachments import calibration_factor, attachment_factor
@@ -246,10 +296,10 @@ class Weapon():
             cal_f = calibration_factor(self.name)
             att_f = attachment_factor(self.name, self.muzzle, self.grip)
             naked_scale = self.scale / cal_f
-            factor = self.scope_factor * naked_scale * att_f
+            factor = self.scope_factor * naked_scale * att_f * posture_f
 
             self.dx_s, self.dy_s, self.t_s = self.bullet_calculator.calculate_press_seq(
-                self.name, factor, stance, has_att=True)
+                self.name, factor, 'standing', has_att=True)
         else:
             # sp (bolt-action snipers) etc. — no recoil control
             self.dx_s, self.dy_s, self.t_s = [], [], []

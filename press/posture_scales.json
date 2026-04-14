@@ -1,0 +1,13 @@
+{
+  "vss": {
+    "crouching": 0.75,
+    "prone": 0.58
+  },
+  "vector": {
+    "prone": 0.72,
+    "crouching": 0.8
+  },
+  "aug": {
+    "prone": 0.55
+  }
+}

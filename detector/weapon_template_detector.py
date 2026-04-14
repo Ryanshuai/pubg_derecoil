@@ -1,23 +1,12 @@
-"""Weapon template matching — reads weapon name text from Tab inventory."""
+"""Weapon template matching — reads weapon name text from Tab inventory.
+
+Matches white text in gun name region against OCR templates.
+"""
 import os
-import sys
 import re
 
 import cv2
 import numpy as np
-from loguru import logger
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from config import GUN_NAME_1, GUN_NAME_2
-
-_logger = logger.bind(detector='weapon')
-
-OCR_RECTS = {
-    1: (GUN_NAME_1['y1'], GUN_NAME_1['x1'],
-        GUN_NAME_1['y2'] - GUN_NAME_1['y1'], GUN_NAME_1['x2'] - GUN_NAME_1['x1']),
-    2: (GUN_NAME_2['y1'], GUN_NAME_2['x1'],
-        GUN_NAME_2['y2'] - GUN_NAME_2['y1'], GUN_NAME_2['x2'] - GUN_NAME_2['x1']),
-}
 
 TMPL_THRESHOLD = 0.85
 TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data', 'ocr_white')
@@ -59,10 +48,10 @@ def _template_match(crop, templates):
     return results
 
 
-class WeaponTemplateDetector:
+class TabWeaponDetector:
+    """Reads weapon names from Tab inventory gun_name crops."""
 
-    def __init__(self, state):
-        self.state = state
+    def __init__(self):
         self._templates = {}
         self._load_templates()
 
@@ -86,32 +75,22 @@ class WeaponTemplateDetector:
             if tmpl.ndim == 3:
                 tmpl = tmpl[:, :, 0]
             self._templates.setdefault(m.group(1), []).append(tmpl)
-        if self._templates:
-            n = sum(len(v) for v in self._templates.values())
-            print(f'[Template] {len(self._templates)} weapons, {n} templates')
 
-    def classify(self, crop):
-        """Match weapon name from a single crop. Returns name or ''."""
-        matches = _template_match(crop, self._templates)
-        if not matches:
-            return ''
-        best_iou, best_code = matches[0]
-        if best_iou >= TMPL_THRESHOLD:
-            return best_code
-        return ''
+    def classify(self, crops):
+        """Match weapon names from gun_name crops.
 
-    def read_from_crops(self, crop_1, crop_2):
-        """Match weapon names from two crops. Updates state directly."""
-        for slot_id, crop in [(1, crop_1), (2, crop_2)]:
-            matches = _template_match(crop, self._templates)
-            if not matches:
-                _logger.info(f'OCR slot{slot_id} | no match')
+        crops: {'gun_name_1': np.ndarray, 'gun_name_2': np.ndarray}
+        Returns: (name_1, name_2) tuple, 0 if not matched.
+        """
+        results = []
+        for key in ['gun_name_1', 'gun_name_2']:
+            crop = crops.get(key)
+            if crop is None:
+                results.append('')
                 continue
-            best_iou, best_code = matches[0]
-            if best_iou >= TMPL_THRESHOLD:
-                second = f' 2nd={matches[1][1]}={matches[1][0]:.3f}' if len(matches) > 1 else ''
-                _logger.info(f'OCR slot{slot_id} | {best_code} iou={best_iou:.3f}{second}')
-                self.state.set_weapon(slot_id, best_code)
+            matches = _template_match(crop, self._templates)
+            if matches and matches[0][0] >= TMPL_THRESHOLD:
+                results.append(matches[0][1])
             else:
-                _logger.info(f'OCR slot{slot_id} | best={best_code} iou={best_iou:.3f} | rejected')
-        self.state.gt_valid = True
+                results.append('')
+        return tuple(results)
