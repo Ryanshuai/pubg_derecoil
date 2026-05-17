@@ -6,7 +6,7 @@ from dl_models.train import MultiHeadMobileNet
 from dl_models.icon_merging import dewhite
 
 
-def img_hash(img, length=8):
+def img_hash(img, length=6):
     """Content hash — MD5 of downscaled pixels, truncated to `length` hex chars."""
     import hashlib
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img

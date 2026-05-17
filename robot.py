@@ -3,6 +3,17 @@
 Creates components, registers detectors, starts threads. No business logic.
 All behavior is driven by config tables.
 """
+import sys
+
+# Force UTF-8 stdout so CN attachment names don't crash print_status
+# (Windows defaults to cp936/cp1252 which can't encode them). Must run
+# before any module-level print.
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except (AttributeError, OSError):
+    pass
+
 import torch
 
 from detector.game_state import GameState

@@ -11,8 +11,8 @@ SCREEN_H = 1440
 
 HUD_REGIONS = {
     # Gameplay HUD (bottom)
-    'weapon_1':   (1345, 2808, 53, 206),   # slot1 icon (with icon_offset_y=9)
-    'weapon_2':   (1262, 2808, 53, 206),   # slot2 icon
+    'weapon_1':   (1345, 2808, 53, 206),   # slot1 (bottom, key 1)
+    'weapon_2':   (1262, 2808, 53, 206),   # slot2 (top, key 2)
     'fire_mode':  (1317, 1626, 43, 56),
     'posture':    (1301, 1373, 66, 66),
 
@@ -76,8 +76,10 @@ KEY_ACTION_TABLE = [
      'hw': ['recoil_on', 'upload_pattern']},
 
     # ── Pickup ──
+    # Clear GT + attachments (weapon name falls back to pred/existing, so it persists).
     {'key': 'f', 'event': 'press', 'cond': '!tab_open',
-     'state': [('weapon_gt', ('', '')), ('highlight_gt', 0)]},
+     'state': [('weapon_gt', ('', '')), ('highlight_gt', 0), ('clear_attachments',)],
+     'hw': ['upload_pattern']},
 
     # ── Fire mode ──
     {'key': 'b', 'event': 'press', 'cond': '!tab_open'},
@@ -159,33 +161,33 @@ KEY_ACTION_TABLE = [
 DETECT_TABLE = [
     # ── Weapon HUD (DL classifier) ──
     {'key': '1', 'event': 'press', 'detect': 'weapon_hud',
-     'regions': ['weapon_1', 'weapon_2'], 'delay': 200,
+     'regions': ['weapon_1', 'weapon_2'], 'delay': 500,
      'cond': '!tab_open', 'result': 'weapon_pred'},
 
     {'key': '2', 'event': 'press', 'detect': 'weapon_hud',
-     'regions': ['weapon_1', 'weapon_2'], 'delay': 200,
+     'regions': ['weapon_1', 'weapon_2'], 'delay': 500,
      'cond': '!tab_open', 'result': 'weapon_pred'},
 
     {'key': 'f', 'event': 'press', 'detect': 'weapon_hud',
-     'regions': ['weapon_1', 'weapon_2'], 'delay': 200,
+     'regions': ['weapon_1', 'weapon_2'], 'delay': 500,
      'cond': '!tab_open', 'result': 'weapon_pred'},
 
     # ── Fire mode ──
     {'key': '1', 'event': 'press', 'detect': 'fire_mode',
-     'regions': ['fire_mode'], 'delay': 200,
+     'regions': ['fire_mode'], 'delay': 500,
      'cond': '!tab_open', 'result': 'fire_mode'},
 
     {'key': '2', 'event': 'press', 'detect': 'fire_mode',
-     'regions': ['fire_mode'], 'delay': 200,
+     'regions': ['fire_mode'], 'delay': 500,
      'cond': '!tab_open', 'result': 'fire_mode'},
 
     {'key': 'b', 'event': 'press', 'detect': 'fire_mode',
-     'regions': ['fire_mode'], 'delay': 200,
+     'regions': ['fire_mode'], 'delay': 500,
      'cond': '!tab_open', 'result': 'fire_mode'},
 
     # ── Highlight (CV algorithm, no GT) ──
     {'key': 'f', 'event': 'press', 'detect': 'highlight',
-     'regions': ['weapon_1', 'weapon_2'], 'delay': 200,
+     'regions': ['weapon_1', 'weapon_2'], 'delay': 500,
      'cond': '!tab_open && !stop_recoil', 'result': 'highlight_pred'},
 
     {'key': 'right', 'event': 'release', 'detect': 'highlight',
@@ -238,13 +240,23 @@ DETECT_TABLE = [
 # ════════════════════════════════════════════════════════════
 
 MISMATCH_TABLE = [
+    # Highlight: GT is the key itself (1→slot1 highlighted, 2→slot2)
     {'key': '1', 'event': 'press', 'detect': 'highlight',
-     'regions': ['weapon_1', 'weapon_2'], 'delay': 200,
+     'regions': ['weapon_1', 'weapon_2'], 'delay': 500,
      'cond': '!tab_open', 'gt_field': 'highlight_gt', 'gt_value': 1},
 
     {'key': '2', 'event': 'press', 'detect': 'highlight',
-     'regions': ['weapon_1', 'weapon_2'], 'delay': 200,
+     'regions': ['weapon_1', 'weapon_2'], 'delay': 500,
      'cond': '!tab_open', 'gt_field': 'highlight_gt', 'gt_value': 2},
+
+    # Weapon HUD: GT from state.weapon_gt (set by Tab scan, stable)
+    {'key': '1', 'event': 'press', 'detect': 'weapon_hud',
+     'regions': ['weapon_1', 'weapon_2'], 'delay': 500,
+     'cond': '!tab_open', 'gt_field': 'weapon_gt'},
+
+    {'key': '2', 'event': 'press', 'detect': 'weapon_hud',
+     'regions': ['weapon_1', 'weapon_2'], 'delay': 500,
+     'cond': '!tab_open', 'gt_field': 'weapon_gt'},
 ]
 
 # ════════════════════════════════════════════════════════════
@@ -254,6 +266,10 @@ MISMATCH_TABLE = [
 TAB_PIXEL_THRESH = 200
 TAB_COUNT_MIN = 150
 TAB_COUNT_MAX = 400
+
+# Mismatch polling (ms)
+MISMATCH_POLL_INTERVAL = 500   # ms between mismatch polls
+GT_SETTLE_TIME = 500           # ms wait after GT change before polling (HUD animation)
 
 # ════════════════════════════════════════════════════════════
 # Alpha blending (for highlight hypothesis test)
@@ -282,7 +298,7 @@ HARD_CASE_CONF = (0.3, 0.5)
 MOUSE_BACKEND = 'pico'
 PICO_PORT = None
 MOUSE_DPI = 2000
-GAME_SENSITIVITY = 50
+GAME_SENSITIVITY = 30
 COUNTS_PER_RECOIL_UNIT = 0.4
 COUNTS_PER_PIXEL = 0.5
 

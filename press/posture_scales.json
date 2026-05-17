@@ -9,5 +9,18 @@
   },
   "aug": {
     "prone": 0.55
+  },
+  "mp5k": {
+    "prone": 0.71,
+    "crouching": 0.84
+  },
+  "mg3": {
+    "crouching": 0.42
+  },
+  "js9": {
+    "crouching": 0.79
+  },
+  "p90": {
+    "crouching": 1.0
   }
 }

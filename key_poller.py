@@ -1,61 +1,47 @@
 """KeyPoller — keyboard + mouse input with timestamps.
 
-Keyboard: GetAsyncKeyState polling (5ms), no hooks, no GIL issues.
-Mouse: pynput listener for left/right click.
-All events pushed to a queue for the Dispatcher to consume.
+All input via GetAsyncKeyState polling (5ms). No hooks, no GIL issues.
 """
 import ctypes
 import time
 import threading
 from collections import namedtuple
 
-from pynput import mouse
-
 from config import POLL_VK_MAP
 
 KeyEvent = namedtuple('KeyEvent', ['key', 'event', 'ts', 'held_keys'])
-# key: str key name
-# event: 'press' or 'release'
-# ts: time.perf_counter()
-# held_keys: frozenset of currently held key names (for combo matching)
+
+# VK codes for mouse buttons
+VK_LBUTTON = 0x01
+VK_RBUTTON = 0x02
 
 
 class KeyPoller:
-    """Produces KeyEvent items into a queue."""
+    """Produces KeyEvent items into a queue. Pure polling, no hooks."""
 
     def __init__(self):
-        self._queue = []  # simple list, dispatcher pops from it
+        self._queue = []
         self._lock = threading.Lock()
         self._held_keys = set()
         self._prev_state = {}
         self._get_key = ctypes.windll.user32.GetAsyncKeyState
         self._running = False
-        self._kb_thread = None
-        self._mouse_listener = None
+        self._thread = None
         self.left_held = False  # exposed for aim assist
-
-    # ── Thread lifecycle ──
 
     def start(self):
         self._running = True
-        self._kb_thread = threading.Thread(target=self._poll_loop, daemon=True)
-        self._kb_thread.start()
-        self._mouse_listener = mouse.Listener(on_click=self._on_click)
-        self._mouse_listener.start()
+        self._thread = threading.Thread(target=self._poll_loop, daemon=True)
+        self._thread.start()
 
     def stop(self):
         self._running = False
-        if self._mouse_listener:
-            self._mouse_listener.stop()
 
     def join(self):
-        if self._kb_thread:
-            self._kb_thread.join()
-
-    # ── Event queue ──
+        if self._thread:
+            self._thread.join()
 
     def pop_events(self):
-        """Return and clear all pending events. Called by Dispatcher."""
         with self._lock:
             events = self._queue
             self._queue = []
@@ -67,11 +53,10 @@ class KeyPoller:
         with self._lock:
             self._queue.append(KeyEvent(key, event, ts, held))
 
-    # ── Keyboard polling ──
-
     def _poll_loop(self):
         while self._running:
             try:
+                # Keyboard
                 for vk, key_name in POLL_VK_MAP.items():
                     pressed = bool(self._get_key(vk) & 0x8000)
                     was = self._prev_state.get(vk, False)
@@ -82,18 +67,20 @@ class KeyPoller:
                         self._held_keys.discard(key_name)
                         self._emit(key_name, 'release')
                     self._prev_state[vk] = pressed
-            except Exception as e:
-                print(f"[kb_poll] {e}", flush=True)
-            time.sleep(0.005)
 
-    # ── Mouse listener ──
+                # Mouse left
+                left = bool(self._get_key(VK_LBUTTON) & 0x8000)
+                self.left_held = left
 
-    def _on_click(self, _x, _y, button, pressed):
-        try:
-            if button == mouse.Button.left:
-                self.left_held = pressed
-            elif button == mouse.Button.right:
-                if not pressed:
+                # Mouse right
+                right = bool(self._get_key(VK_RBUTTON) & 0x8000)
+                was_right = self._prev_state.get(VK_RBUTTON, False)
+                if right and not was_right:
+                    self._emit('right', 'press')
+                elif not right and was_right:
                     self._emit('right', 'release')
-        except Exception as e:
-            print(f"[mouse] {e}", flush=True)
+                self._prev_state[VK_RBUTTON] = right
+
+            except Exception as e:
+                print(f"[poll] {e}", flush=True)
+            time.sleep(0.005)

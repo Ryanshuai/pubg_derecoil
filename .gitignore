@@ -24,3 +24,4 @@ training_data/highlight_eval
 
 pico_firmware/.vscode
 human_detection/test/
+human_detection/*.pt

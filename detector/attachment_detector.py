@@ -16,7 +16,7 @@ TMPL_SIZE = 48
 ALPHA_TH = 150
 OFFSET_Y = 8
 OFFSET_X = 8
-MSE_EMPTY_TH = 300
+MSE_EMPTY_TH = 450
 
 SLOT_PREFIXES = {
     'scope':    ('Upper_', 'SideRail_'),

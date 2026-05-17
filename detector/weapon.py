@@ -36,13 +36,13 @@ can_full_guns = {
 # Actual magnification from PUBG Wiki FOV data (base FOV=80°)
 # https://pubg.wiki.gg/wiki/
 SCOPE_MAGNIFICATION = {
-    1:  1.0,    # red dot / holo: 80°
-    2:  2.0,    # 2x aimpoint: 40°
-    3:  3.0,    # 3x backlit: 26.66°
-    4:  4.21,   # 4x ACOG: 19° (not 20°)
-    6:  6.0,    # 6x: 13.33°
-    8:  8.0,    # 8x CQBSS: 10°
-    15: 12.0,   # 15x PM II: 6.67° (actually 12x)
+    1:  1.0,    # red dot / holo
+    2:  2.0,    # 2x aimpoint
+    3:  3.0,    # 3x backlit
+    4:  4.0,    # 4x ACOG
+    6:  6.0,    # 6x
+    8:  8.0,    # 8x CQBSS
+    15: 12.0,   # 15x PM II (actually 12x)
 }
 
 _SCOPE_TO_MAG = {

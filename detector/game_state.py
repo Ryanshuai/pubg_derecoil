@@ -17,6 +17,7 @@ class GameState:
         self.weapon_gt = ('', '')         # from Tab scan, e.g. ('akm', 'm416')
         self.weapon_pred = ('', '')       # from DL weapon_hud
         self.highlight_gt = 0           # from key 1/2
+        self.highlight_gt_ts = 0.0      # when highlight_gt was last set
         self.highlight_pred = 0         # from CV highlight algorithm
         self.attachments = {}           # from Tab scan
 
@@ -35,8 +36,10 @@ class GameState:
 
     def set_active_by_key(self, slot):
         """Key 1/2 pressed — GT, authoritative."""
+        import time
         self.active = self.weapon_1 if slot == 1 else self.weapon_2
         self.highlight_gt = slot
+        self.highlight_gt_ts = time.perf_counter()
 
     def set_active_by_detect(self, slot):
         """Algorithm prediction — only applies when no GT."""
@@ -103,6 +106,14 @@ class GameState:
                 w.set(attr, val)
         w.set_seq()
 
+    def clear_attachments(self):
+        """Clear attachments on both weapons (keep weapon name). Used on pickup (F)."""
+        self.attachments = {}
+        for w in (self.weapon_1, self.weapon_2):
+            for attr in ('scope', 'muzzle', 'grip', 'butt'):
+                w.set(attr, '')
+            w.set_seq()
+
     # ════════════════════════════════════════════════════════════
     # Scale adjust
     # ════════════════════════════════════════════════════════════
@@ -127,7 +138,6 @@ class GameState:
 
     def toggle_tab_open(self):
         self.tab_open = not self.tab_open
-        print(f"[tab] {'OPEN' if self.tab_open else 'CLOSED'}", flush=True)
 
     def toggle_aim(self):
         self.aim_enabled = not self.aim_enabled
@@ -161,6 +171,8 @@ class GameState:
         'Lower_Foregrip_C': '垂直', 'Lower_AngledForeGrip_C': '三角',
         'Lower_HalfGrip_C': '半截', 'Lower_ThumbGrip_C': '拇指',
         'Lower_LightweightForeGrip_C': '轻型', 'Lower_LaserPointer_C': '激光',
+        'Lower_Foregrip_Crossbow': '弩垂', 'Lower_QuickDraw_Large_Crossbow_C': '弩快',
+        'Lower_Sniper_CheekPad_Vss_setting': '腮托', 'Vector_VerGrip': '垂直',
     }
 
     def _short(self, name):
@@ -175,5 +187,4 @@ class GameState:
         muzzle = self._short(getattr(w, 'muzzle', ''))
         grip = self._short(getattr(w, 'grip', ''))
         right = f'{scope:>4s} | {muzzle:>5s} | {grip:>5s}'
-        posture = f' | {self.posture}' if self.posture != 'standing' else ''
-        return f'  {mark} {left:<16s}  {right}{posture}'
+        return f'  {mark} {left:<16s}  {right} | {self.posture}'
