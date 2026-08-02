@@ -125,14 +125,46 @@ afterwards; `--resume` picks up completed cells from the JSONL.
 
 Re-entry is automated (`--session auto`, the default): `lobby_control` drives
 the results screen, the lobby, an open ESC menu or a loading screen back to a
-running round, polling state rather than sleeping. Two things it cannot know,
+running round, polling state rather than sleeping. Measured round trip: in
+11.5 s, out 7.4 s.
+
+**The lobby only takes clicks.** The PLAY button draws an "F" hint and the code
+took it at face value — three F presses, game verified frontmost, lobby
+unmoved. The lobby has a real cursor sitting wherever it was left, so the
+cursor has to be driven to the button rather than avoided.
+
+**Leaving the range needs two clicks.** `LEAVE TRAINING` raises a CONFIRM /
+CANCEL dialog, and that dialog reads as `FULLBLEED` — identical to a loading
+screen, which wants the opposite treatment. `exit_to_lobby` asks
+`leave_confirm_visible()` before it looks at the state. Symptom when this was
+missing: "the exit worked, then we lost focus one step short of the lobby". Two things it cannot know,
 both caught immediately afterwards by trying to open the spawner — **which**
 mode it entered (F starts whatever the lobby had selected, so leave the lobby
 on the training range) and **where** in the range it landed (walking to a
 spawner is not automated).
 
-**Focus is checked by executable.** This repository's own name contains "pubg",
-so a title match calls an editor window the game.
+**Focus is taken, not waited for.** Every tool here launches from a terminal,
+so at t=0 the terminal is frontmost and the game is not — the guard fires and
+the run aborts having done nothing. Do not ask a human to alt-tab; that human
+is exactly what an unattended harvest exists to remove. `ensure_focus()` raises
+the game window, verifies, retries, and only then falls back to the countdown.
+
+    from press.pointer import ensure_focus, focus_keeper
+    if not ensure_focus(countdown_s=args.countdown, label='...'): return 1
+    time.sleep(0.6)          # the game eats input for a few frames after this
+
+Mid-run, `focus_keeper().ok(where)` takes the foreground back — bounded at 5
+regains per process, because a run that keeps losing focus has something
+contending with it and every keypress in between went elsewhere. **To stop a
+run by hand, Ctrl-C the terminal**: it will fight you for focus up to 5 times
+before giving up.
+
+**Focus is checked by executable, and so is the window search.** This
+repository's own name contains "pubg", so a title match calls an editor window
+the game — both for "am I focused" (the guard passes while the game sits in the
+background) and for "which window do I raise" (it raises the editor). Matched
+on `TslGame.exe` at both ends; `game_hwnd()` takes the largest visible window
+of that process, since PUBG owns several and only one takes input.
 
 ## When a thing cannot be seen
 
@@ -197,6 +229,7 @@ presets of 0.800 and 0.550.
 | symptom | first command |
 |---|---|
 | anything at all | `calibration/state.py` |
+| `ABORT: game not focused` | the game is not running, or `game_hwnd()` returns None — check with `python -c "from press.pointer import game_hwnd; print(game_hwnd())"`. Windows can also refuse the handover; run it again |
 | "not on screen" for a part that is | `state.py --tab` → `UNRECOGNISED`? then `collect_icons.py --slot <slot>` |
 | "could not reach posture" | `state.py` — in ADS? inventory closed? |
 | "inventory would not open/close" | `state.py`, check the `type` pixel count against its window |
@@ -221,5 +254,6 @@ presets of 0.800 and 0.550.
 | `detector/lobby_control.py` | drives the lobby back into a match |
 | `calibration/weapon_switcher.py` | weapon supply interface |
 | `detector/view_tracker.py` | the measurement itself |
+| `press/pointer.py` | focus: `ensure_focus`, `focus_keeper`, `game_hwnd` |
 | `docs/game_quirks.md` | mechanics found by hitting them |
 | `docs/recoil_observer_design.md` | why the ROI is where it is |

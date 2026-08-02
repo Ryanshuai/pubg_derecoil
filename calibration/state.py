@@ -127,7 +127,8 @@ def game_focused():
         exe = psutil.Process(pid).name()
     except Exception:
         return False, '?', '?'
-    return exe.lower().startswith('tslgame'), exe, title
+    from press.pointer import GAME_EXES
+    return (any(exe.lower().startswith(k) for k in GAME_EXES), exe, title)
 
 
 def pico_state():

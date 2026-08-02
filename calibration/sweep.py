@@ -79,29 +79,13 @@ TAB_OPEN_S = 0.55
 TAB_CLOSE_S = 0.35
 POSTURE_SETTLE_S = 0.6
 RECENTER_SETTLE_S = 0.25   # let the view stop before the next burst
-GAME_EXES = ('tslgame',)     # PUBG ships as TslGame.exe
 POSTURES = ('standing', 'crouching', 'prone')
 
-
-def game_focused():
-    """Is PUBG the foreground window?
-
-    Matched on the EXECUTABLE, never the title. The title-based version
-    accepted any window whose caption contained "pubg" — which includes this
-    repository open in an editor, so every focus guard in every calibration
-    tool silently passed while the game was in the background. That is the
-    exact failure the guards exist to catch.
-    """
-    try:
-        import win32gui
-        import win32process
-        import psutil
-        hwnd = win32gui.GetForegroundWindow()
-        _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        exe = psutil.Process(pid).name().lower()
-    except Exception:
-        return False
-    return any(exe.startswith(k) for k in GAME_EXES)
+# One implementation, in press/pointer.py, because it guards the mouse calls
+# that live there too. Re-exported under the old names so importers of this
+# module keep working.
+from press.pointer import (game_focused, raise_game, ensure_focus,  # noqa: E402
+                           FocusKeeper, focus_keeper, GAME_EXES)
 
 
 class Rig:
@@ -498,8 +482,7 @@ def calibrate_combo(rig, weapon, posture, mags, log):
 
     rows = []
     for i in range(mags):
-        if not game_focused():
-            print("    [!] lost focus — aborting this combo")
+        if not focus_keeper().ok(f'{weapon}/{posture} mag {i}'):
             break
         if i > 0:                    # auto-reload drops us to the hip
             if not rig.ensure_ads():
@@ -636,15 +619,15 @@ def main():
     switcher = get_switcher(
         args.switcher, verify_fn=lambda: (rig.read_loadout()[0] or ''))
 
-    print("\n>>> Switch to the game. Stand still, aim at something with "
-          "texture,\n    and keep the game focused for the whole run.")
-    for s in range(args.countdown, 0, -1):
-        print(f"    starting in {s} ...", flush=True)
-        time.sleep(1.0)
-    if not game_focused():
-        print("[!] ABORT: game not focused.")
+    print("\n>>> Taking the foreground. Stand still and aim at something with "
+          "texture — the recoil is measured off it.")
+    if not ensure_focus(countdown_s=args.countdown, label='the sweep'):
+        print("[!] ABORT: game not focused, and could not take the "
+              "foreground. Is PUBG running?")
         rig.close()
         return 1
+    time.sleep(0.6)              # the game ignores the first frames after a
+    keeper = focus_keeper()      # foreground change
 
     log = open(out, 'a')
     log.write(json.dumps({
@@ -668,8 +651,7 @@ def main():
                 continue
 
             for posture in todo:
-                if not game_focused():
-                    print("[!] lost focus — stopping sweep.")
+                if not keeper.ok(f'{weapon}/{posture}'):
                     raise KeyboardInterrupt
                 print(f"    posture: {posture}")
                 s = calibrate_combo(rig, weapon, posture, args.mags, log)

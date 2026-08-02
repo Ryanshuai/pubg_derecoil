@@ -51,7 +51,8 @@ from detector.spawner_detector import SpawnerDetector
 from detector.weapon import Weapon, WEAPON_RPM
 from press.pico_mouse import HID_KEY_COMMA
 
-from sweep import Rig, analyse, game_focused, POSTURES
+from sweep import (Rig, analyse, game_focused, ensure_focus, focus_keeper,
+                   POSTURES)
 import spawner_control as spawner_mod
 from spawner_control import SpawnerControl, ROSTER
 from attach_control import AttachControl
@@ -293,8 +294,7 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
 
     rows = []
     for i in range(mags):
-        if not game_focused():
-            print("      [!] lost focus — abandoning this cell")
+        if not focus_keeper().ok(f'mag {i}'):
             break
         if i > 0:
             if not rig.ensure_ads():
@@ -565,12 +565,38 @@ def main():
     # onto, and a patch of empty sky reads zero displacement no matter how hard
     # the gun kicks.
     print("\n>>> Face something with texture — the recoil is measured off it.")
-    for s in range(args.countdown, 0, -1):
-        print(f"    starting in {s} ...", flush=True)
-        time.sleep(1.0)
-    if not game_focused():
-        print("[!] ABORT: game not focused.")
+    if not ensure_focus(countdown_s=args.countdown, label='the harvest'):
+        print("[!] ABORT: game not focused, and could not take the "
+              "foreground. Is PUBG running?")
         rig.close()
+        panel.close_grabber()
+        return 1
+    time.sleep(0.6)     # the game ignores input for a few frames after a
+                        # foreground change; the first comma would be eaten
+
+    # "Are we in the training range?" has exactly one honest answer here: the
+    # item spawner opens. Nothing else tells the range apart from any other
+    # match, and the spawner is what the run needs anyway — so the in-range
+    # test and the at-a-spawner test are the same press.
+    def at_spawner():
+        ok = panel.ensure_open()
+        panel.ensure_closed()
+        return ok
+
+    session = get_session(args.session, in_range_fn=at_spawner,
+                          budget_s=args.budget, verbose=False)
+
+    ok, _ = session.ensure()
+    if ok and not at_spawner():
+        print("[!] in a match, but the item spawner will not open. Either the "
+              "lobby was on a different mode, or this is not a spawn point "
+              "next to a spawner — walking there is not automated.")
+        ok = False
+    if not ok:
+        print("[!] ABORT: not in the training range at an item spawner.")
+        rig.close()
+        kit.close()
+        session.close()
         panel.close_grabber()
         return 1
 
@@ -597,9 +623,19 @@ def main():
             print("[!] could not stock the parts — continuing anyway; "
                   "kitting will fail loudly if one is missing")
         for i, weapon in enumerate(weapons):
-            if not game_focused():
-                print("[!] lost focus — stopping.")
+            if not focus_keeper().ok(f'weapon {weapon}'):
                 break
+            # Between weapons, never mid-magazine: re-entry is a restart, not a
+            # pause. The rack and the backpack come back empty, so whatever was
+            # stocked has to be stocked again.
+            ok, re_entered = session.ensure()
+            if not ok:
+                print("[!] could not get back into the range — stopping.")
+                break
+            if re_entered:
+                print("re-entered the range — re-stocking parts")
+                if not stock_parts(panel, sc, sorted(parts)):
+                    print("[!] could not re-stock after re-entry")
             print(f"\n[{i+1}/{len(weapons)}] {weapon}")
             rows.extend(harvest_weapon(rig, panel, kit, sc, weapon, configs,
                                        postures, args.mags, args.slot, log,

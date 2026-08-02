@@ -425,6 +425,114 @@ SPAWNER_ICON_SEARCH = 24       # +- px searched around each anchor
 SPAWNER_MIN_SCORE = 0.55       # positives 0.989..1.000, negatives 0.000
 
 # ════════════════════════════════════════════════════════════
+# Lobby screen — am I in the menus or in a match?
+#
+# The lobby renders 16:9 centred on the 21:9 screen and ALWAYS does; it has no
+# widescreen mode. That makes the side bars the cheapest possible discriminator
+# — pure black (max=0) in the lobby, and a match cannot produce a 140x1000
+# block of exact zeros. Measured over lobby / in-game / in-game-with-Tab:
+# bar max = 0 / 255 / 78.
+#
+# Use the RIGHT bar. The left one is not clean: an overlay (the friends-list
+# badge) paints over it from x=61, so a left-bar probe measures whether that
+# overlay happens to be showing.
+#
+# These are NOT in HUD_REGIONS. Per detector/CLAUDE.md the per-frame capture
+# box must not be stretched for an event-driven check, and these ROIs sit far
+# outside it (x 937..3014) — adding them would grow every frame's copy by 59%
+# for a check that only needs 1-2 Hz. LobbyDetector owns its own grabber.
+# ════════════════════════════════════════════════════════════
+
+LOBBY_IMAGE_X0, LOBBY_IMAGE_X1 = 440, 2999   # the 16:9 image inside the bars
+
+# (y, x, h, w). Right letterbox bar, clear of the lobby image.
+LOBBY_BAR_ROI = (200, 3060, 1000, 140)
+LOBBY_BAR_MAX = 8              # lobby measures exactly 0; in-game 78..255
+
+# Net-debug overlay ("Ping: 43ms ..."), the one signal independent of the
+# bars. Restricted to x >= LOBBY_IMAGE_X0 so it reads the lobby's own image
+# rather than the black bar, which would make it a second letterbox probe.
+# Bright-pixel fraction: lobby 0.021, in-game 0.099..0.112.
+LOBBY_PING_ROI = (0, 460, 26, 240)
+LOBBY_PING_THRESH = 180        # grey level counted as overlay text
+LOBBY_PING_MIN_FRAC = 0.05
+
+# PLAY button, measured off the lobby screenshot by its purple fill:
+# x 520..978, y 1247..1327. The button draws an "F" hint, which this used to
+# take at face value and press F instead of clicking — no cursor needed, no
+# pointer backend involved. It does not work: three F presses with the game
+# verified frontmost left the lobby exactly where it was. The lobby takes the
+# click, so the cursor does have to be driven here.
+LOBBY_PLAY_XY = (749, 1287)
+
+# ── Results screen ───────────────────────────────────────────────────────
+# The match-end screen is full-bleed with the ping overlay covered, so it
+# reads as FULLBLEED exactly like a loading screen — but the two want opposite
+# handling: click EXIT TO LOBBY on one, only wait on the other.
+#
+# Colour cannot tell them apart. The button's tan is the same tan as the
+# training range's dirt: measured over the button's box, the results screen
+# scores 0.297 and the training range 0.655. The glyphs are structure, so a
+# binary text mask is the separable signal — 1.000 on the results screen and
+# 0.000 on all three other captured states.
+#
+# Button box: x 80..347, y 1339..1387. Text band inside it:
+LOBBY_EXIT_TEXT_ROI = (1350, 100, 26, 210)   # (y, x, h, w)
+LOBBY_EXIT_THRESH = 170
+LOBBY_EXIT_SEARCH = 20
+LOBBY_EXIT_MIN_SCORE = 0.55    # positive 1.000, negatives 0.000
+LOBBY_EXIT_XY = (213, 1363)    # button centre
+
+# Clicking EXIT is only an accelerator: the results screen returns to the
+# lobby on its own after ~18 s ("You will exit to lobby in 18 seconds"). So a
+# failed template match costs time, never correctness — the poll for LOBBY
+# gets there either way.
+
+# ── System (ESC) menu ────────────────────────────────────────────────────
+# The pause menu leaves everything the two probes look at intact: the scene is
+# still full-bleed and the ping overlay still draws, so the bar/ping pair
+# reads IN_GAME and would report playable=True. It is NOT playable — keys go
+# to the menu, not the character, so anything driving the game here throws its
+# whole run away silently.
+#
+# Title row measured by projection: y 150..215, x 571..972. The five entries
+# below it are left-aligned at x=570 with a pitch of 85.25 px:
+#   RESUME 293 / SETTINGS 378 / KEY GUIDE 464 / LEAVE TRAINING 549 /
+#   EXIT TO DESKTOP 634
+# Template scores: system menu 1.000, every other captured state <= 0.111.
+LOBBY_MENU_TITLE_ROI = (150, 571, 66, 402)   # (y, x, h, w)
+LOBBY_MENU_THRESH = 190
+LOBBY_MENU_SEARCH = 24
+LOBBY_MENU_MIN_SCORE = 0.55
+
+# Only the training range's menu has been captured. A real match almost
+# certainly renders a different fourth entry ("LEAVE MATCH" or similar), so
+# the entry coordinates below are training-range-only until one is measured.
+LOBBY_MENU_LEAVE_XY = (727, 549)     # LEAVE TRAINING
+LOBBY_MENU_RESUME_XY = (648, 293)
+
+# LEAVE TRAINING must be confirmed by its glyphs before it is ever clicked.
+# EXIT TO DESKTOP sits ONE PITCH BELOW IT at y=634 — on a reordered menu, a
+# blind click at y=549 would quit the game outright. Confusion measured
+# against every entry in the captured menu: LEAVE TRAINING 1.000, and the
+# worst impostor is EXIT TO DESKTOP at 0.152.
+LOBBY_LEAVE_TEXT_ROI = (527, 570, 46, 316)   # (y, x, h, w)
+LOBBY_LEAVE_MIN_SCORE = 0.55
+
+# Clicking LEAVE TRAINING does not leave. It raises a centred CONFIRM / CANCEL
+# dialog ("Do you want to exit training?") and the game sits there until it is
+# answered — which looked, from the outside, exactly like the exit working and
+# then the process losing focus one step short of the lobby.
+#
+# Gated on the dialog's own title rather than on the CONFIRM glyphs: every
+# confirmation dialog in this game has a CONFIRM button, and only this one says
+# LEAVE TRAINING across the middle of the screen. Distinct from the menu ENTRY
+# of the same name at LOBBY_LEAVE_TEXT_ROI — different position, different size.
+LOBBY_LEAVE_CONFIRM_TEXT_ROI = (558, 1495, 65, 450)   # (y, x, h, w)
+LOBBY_LEAVE_CONFIRM_MIN_SCORE = 0.55
+LOBBY_LEAVE_CONFIRM_XY = (1576, 878)   # CONFIRM; CANCEL is at x=1863
+
+# ════════════════════════════════════════════════════════════
 # Alpha blending (for highlight hypothesis test)
 # ════════════════════════════════════════════════════════════
 

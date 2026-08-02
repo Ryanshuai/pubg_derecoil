@@ -44,6 +44,7 @@ import numpy as np
 from detector import tab_layout
 from detector.cropper import RegionGrabber
 from press.pico_mouse import get_mouse
+from press.pointer import ensure_focus
 
 import spawner_control as spawner_mod
 from spawner_control import SpawnerControl
@@ -220,9 +221,11 @@ def main():
     col = Collector(rig, panel, sc)
 
     print(">>> Stand at an item spawner with room to turn around.")
-    for s in range(args.countdown, 0, -1):
-        print(f"    starting in {s} ...", flush=True)
-        time.sleep(1.0)
+    if not ensure_focus(countdown_s=args.countdown, label='icon collection'):
+        print("[!] ABORT: game not focused, and could not take the "
+              "foreground. Is PUBG running?")
+        return 1
+    time.sleep(0.6)
 
     try:
         rows0, view0 = col.read_inventory()
