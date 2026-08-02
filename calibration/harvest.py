@@ -325,6 +325,14 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
     time.sleep(0.4)
     rig.wait_reload()
 
+    # The measurable band is where the character can see texture, and that
+    # moves with the posture — prone looks lower, so the band that was mapped
+    # standing puts the aim somewhere else entirely. Re-mapped whenever the
+    # posture changes, cached otherwise.
+    if getattr(rig, 'band_posture', None) != posture:
+        rig.pitch_centre = 0
+        rig.band_posture = posture
+
     rig.flush(6)
     rig.goto_pitch_centre()
     rig.set_reference()

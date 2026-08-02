@@ -40,9 +40,9 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import (LOBBY_ERROR_OK_XY, LOBBY_EXIT_XY, LOBBY_LEAVE_CONFIRM_XY,
-                    LOBBY_MENU_LEAVE_XY, LOBBY_PLAY_XY)
+                    LOBBY_MENU_LEAVE_XY, LOBBY_PLAY_XY, LOBBY_RECONNECT_XY)
 from detector.lobby_detector import (LobbyDetector, LobbyState,
-                                     error_dialog_visible,
+                                     error_dialog_visible, reconnect_visible,
                                      leave_confirm_visible,
                                      leave_entry_confirmed, is_results_screen)
 from press.pointer import Pointer, game_focused, ensure_focus, focus_keeper
@@ -138,6 +138,19 @@ class LobbyControl:
         self.pointer.click_at(*LOBBY_MENU_LEAVE_XY)
         return f'click LEAVE TRAINING {LOBBY_MENU_LEAVE_XY}'
 
+    def click_reconnect(self):
+        """Rejoin after the server drops the session.
+
+        Not the same screen as the inactivity dialog, and not the same click.
+        This one is black with a RECONNECT button; that one is a dialog over
+        the lobby with OK. Pressing PLAY at this screen does nothing, which is
+        how it cost three retries and thirty seconds before it had a state.
+        """
+        if not reconnect_visible():
+            return None
+        self.pointer.click_at(*LOBBY_RECONNECT_XY)
+        return f'click RECONNECT {LOBBY_RECONNECT_XY}'
+
     def dismiss_error(self):
         """Clear a modal ERROR dialog. Most often the inactivity logout, which
         drops the session and then blocks every recovery behind itself — an
@@ -232,7 +245,8 @@ class LobbyControl:
             # dims the ping overlay enough to classify as FULLBLEED, which is
             # also what a loading screen looks like — and the two want
             # opposite treatment (click it vs. touch nothing).
-            done = self.dismiss_error() or self.click_leave_confirm()
+            done = (self.click_reconnect() or self.dismiss_error()
+                    or self.click_leave_confirm())
             if done:
                 return done
             if state is LobbyState.FULLBLEED and is_results_screen():
@@ -268,9 +282,9 @@ class LobbyControl:
         be *in* a match, and the round behind the menu already is one.
         """
         def act(state):
-            # An ERROR dialog sits over the lobby and swallows the PLAY click,
-            # so it is cleared before anything else is tried.
-            done = self.dismiss_error()
+            # A dropped session and an ERROR dialog both sit over the lobby
+            # and swallow the PLAY click, so both are cleared first.
+            done = self.click_reconnect() or self.dismiss_error()
             if done:
                 return done
             if state is LobbyState.LOBBY:

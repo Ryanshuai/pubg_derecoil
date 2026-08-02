@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import cv2
 
 from config import (LOBBY_BAR_ROI, LOBBY_ERROR_TEXT_ROI,
+                    LOBBY_RECONNECT_TEXT_ROI,
                     LOBBY_LEAVE_CONFIRM_TEXT_ROI,
                     LOBBY_LEAVE_TEXT_ROI, LOBBY_MENU_SEARCH, LOBBY_PING_ROI)
 from detector.lobby_detector import (LobbyState, _search_roi, bar_max,
@@ -21,7 +22,8 @@ from detector.lobby_detector import (LobbyState, _search_roi, bar_max,
                                      error_dialog_visible, is_results_screen,
                                      leave_confirm_score, leave_confirm_visible,
                                      leave_entry_confirmed, leave_entry_score,
-                                     ping_fraction)
+                                     ping_fraction, reconnect_score,
+                                     reconnect_visible)
 
 ASSETS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                       'docs', 'lobby')
@@ -48,6 +50,12 @@ CASES = [
     # below.
     ('error_inactivity.png', LobbyState.FULLBLEED, False,
      '"You have been logged off due to inactivity" OK'),
+    # Dropped by the server. Almost entirely black, so the letterbox probe
+    # reads 0 and calls it the lobby -- which is why DISCONNECTED had to
+    # become a state rather than another gate: PLAY does nothing here, and
+    # three retries went into finding that out.
+    ('error_disconnected.png', LobbyState.DISCONNECTED, False,
+     '"The service is not available" RECONNECT'),
     # Results screen: full-bleed, and its top gradient covers the ping overlay
     # completely (ping_frac 0.000, lower than the lobby's 0.021). FULLBLEED is
     # the right answer -- nothing is drivable here -- but it lands there by
@@ -87,7 +95,9 @@ def confusion():
              ('leave_entry', leave_entry_confirmed, leave_entry_score,
               LOBBY_LEAVE_TEXT_ROI, 'system_menu.png'),
              ('error_dialog', error_dialog_visible, error_dialog_score,
-              LOBBY_ERROR_TEXT_ROI, 'error_inactivity.png')]
+              LOBBY_ERROR_TEXT_ROI, 'error_inactivity.png'),
+             ('reconnect', reconnect_visible, reconnect_score,
+              LOBBY_RECONNECT_TEXT_ROI, 'error_disconnected.png')]
     bad = 0
     print(f'\n{"gate":<16}{"screen":<22}{"score":>7}  fires')
     for gate, visible, score, roi, expect_on in gates:

@@ -86,6 +86,53 @@ def log_sem(mean, sem):
     return sem / mean if mean else float('inf')
 
 
+def posture_check(cells, base_posture):
+    """Is the posture factor the same whatever is bolted to the gun?
+
+    The compensation model multiplies a posture factor by an attachment factor
+    and never asked whether it may. If crouching costs a fixed fraction of the
+    recoil, the crouch/stand ratio is the same on a bare gun as on a kitted
+    one; if the two interact, it is not, and every kitted crouching shot is
+    compensated with a number nobody measured.
+
+    Same weapon, same config, two postures — so the weapon's curve and the
+    attachments both cancel and what is left is the posture alone.
+    """
+    postures = sorted({k[2] for k in cells})
+    others = [p for p in postures if p != base_posture]
+    if not others:
+        return
+    print('\n' + '=' * 74)
+    print(f'IS POSTURE ORTHOGONAL TO THE ATTACHMENTS?   ratio against '
+          f'{base_posture}')
+    print('=' * 74)
+    for p in others:
+        rows = []
+        for (w, c, pp), cell in cells.items():
+            if pp != p:
+                continue
+            base = cells.get((w, c, base_posture))
+            if not base:
+                continue
+            m, _, sem = stats(cell['samples'])
+            bm, _, bsem = stats(base['samples'])
+            rel = math.hypot(log_sem(m, sem), log_sem(bm, bsem))
+            rows.append((w, c, m / bm, rel))
+        if len(rows) < 2:
+            continue
+        print(f'\n  {p}:')
+        for w, c, r, rel in sorted(rows):
+            print(f'    {w:<9}{c:<20}{r:>8.4f}  +-{r*rel:.4f}')
+        # Pooled in log space, then the worst deviation from it.
+        ws = [(math.log(r), 1 / rel ** 2) for _, _, r, rel in rows if rel]
+        mu = sum(l * wt for l, wt in ws) / sum(wt for _, wt in ws)
+        worst = max(abs((math.log(r) - mu) / rel) for _, _, r, rel in rows
+                    if rel)
+        print(f'    -> pooled {math.exp(mu):.4f}; worst config deviates '
+              f'{worst:.1f} sigma  '
+              f'({"one factor fits every config" if worst < 2 else "POSTURE AND ATTACHMENTS INTERACT"})')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -96,6 +143,7 @@ def main():
     cells = {}
     for p in args.jsonl:
         cells.update(load(p))
+    all_cells = dict(cells)
     cells = {k: v for k, v in cells.items() if k[2] == args.posture}
     if not cells:
         print('[!] no cells')
@@ -227,6 +275,8 @@ def main():
                   f'{nsig:>+8.1f}   {verdict}')
     if not any_combo:
         print('  no combination cells with all their single-slot cells present')
+
+    posture_check(all_cells, args.posture)
 
     print('\nReading this: a gap is only real if sigma says so. At three')
     print('magazines a cell the game\'s own randomness alone produces gaps of')

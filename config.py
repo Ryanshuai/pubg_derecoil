@@ -545,6 +545,19 @@ LOBBY_ERROR_TEXT_ROI = (500, 1628, 65, 186)   # (y, x, h, w)
 LOBBY_ERROR_MIN_SCORE = 0.55
 LOBBY_ERROR_OK_XY = (1709, 904)
 
+# "ERROR / The service is not available at the moment." with a RECONNECT
+# button — the session has been dropped by the server, usually following the
+# inactivity logout above. A STATE, not a dialog: nothing works here, and
+# pressing PLAY at it wastes three retries and thirty seconds.
+#
+# Nothing else distinguishes it. The screen is almost entirely black, so the
+# letterbox probe reads 0 and classify() calls it LOBBY. Its ERROR title sits
+# 38 px below the inactivity dialog's, close enough to be a coincidence worth
+# not relying on, so the gate is the RECONNECT glyph, which is unique.
+LOBBY_RECONNECT_TEXT_ROI = (881, 1689, 23, 119)   # (y, x, h, w)
+LOBBY_RECONNECT_MIN_SCORE = 0.55
+LOBBY_RECONNECT_XY = (1730, 906)
+
 # ════════════════════════════════════════════════════════════
 # Alpha blending (for highlight hypothesis test)
 # ════════════════════════════════════════════════════════════

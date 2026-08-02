@@ -29,6 +29,7 @@ import cv2
 import numpy as np
 
 from config import (LOBBY_BAR_MAX, LOBBY_BAR_ROI, LOBBY_ERROR_MIN_SCORE,
+                    LOBBY_RECONNECT_MIN_SCORE, LOBBY_RECONNECT_TEXT_ROI,
                     LOBBY_ERROR_TEXT_ROI, LOBBY_EXIT_MIN_SCORE,
                     LOBBY_EXIT_SEARCH, LOBBY_EXIT_TEXT_ROI, LOBBY_EXIT_THRESH,
                     LOBBY_LEAVE_CONFIRM_MIN_SCORE,
@@ -46,6 +47,7 @@ MENU_TMPL_PATH = os.path.join(_TMPL_DIR, 'system_menu_mask.png')
 LEAVE_TMPL_PATH = os.path.join(_TMPL_DIR, 'leave_training_mask.png')
 LEAVE_CONFIRM_TMPL_PATH = os.path.join(_TMPL_DIR, 'leave_confirm_mask.png')
 ERROR_TMPL_PATH = os.path.join(_TMPL_DIR, 'error_title_mask.png')
+RECONNECT_TMPL_PATH = os.path.join(_TMPL_DIR, 'reconnect_mask.png')
 
 BAR = 'lobby_bar'
 PING = 'lobby_ping'
@@ -57,6 +59,7 @@ class LobbyState(enum.Enum):
     IN_GAME = 'in_game'      # full-bleed, net overlay drawing, no pause menu
     MENU = 'menu'            # in a round but the ESC menu is up
     FULLBLEED = 'fullbleed'  # full-bleed, no overlay — loading, or ping is off
+    DISCONNECTED = 'disconnected'   # dropped by the server; RECONNECT is up
 
     @property
     def playable(self):
@@ -69,6 +72,8 @@ class LobbyState(enum.Enum):
         MENU is a live round with the ESC menu over it — the scene is still
         drawing and the ping overlay is still up, so every pixel probe says
         "in a match", but keys go to the menu instead of the character.
+        DISCONNECTED is a black screen with a RECONNECT button, which the
+        letterbox probe cannot tell from the lobby.
         """
         return self is LobbyState.IN_GAME
 
@@ -85,13 +90,18 @@ def ping_fraction(crop):
     return float((g > LOBBY_PING_THRESH).sum()) / g.size
 
 
-def classify(bar_crop, ping_crop, menu_open=False):
+def classify(bar_crop, ping_crop, menu_open=False, disconnected=False):
     """State from the two probes. Pure function — takes crops, no capture.
 
-    `menu_open` is passed in rather than measured here: the ESC-menu probe
-    lives in a different part of the screen and is only worth grabbing once
-    the cheap probes have already said "in a match".
+    `menu_open` and `disconnected` are passed in rather than measured here:
+    both probes live in different parts of the screen and are only worth
+    grabbing once the cheap probes have narrowed things down.
     """
+    # Checked first because it is invisible to everything below: the drop
+    # screen is almost entirely black, so the letterbox probe reads 0 and
+    # calls it the lobby. Three PLAY clicks and thirty seconds went into that.
+    if disconnected:
+        return LobbyState.DISCONNECTED
     if bar_max(bar_crop) <= LOBBY_BAR_MAX:
         return LobbyState.LOBBY
     if ping_fraction(ping_crop) >= LOBBY_PING_MIN_FRAC:
@@ -106,7 +116,7 @@ def classify_frame(frame):
         y, x, h, w = roi
         return frame[y:y + h, x:x + w]
     return classify(cut(LOBBY_BAR_ROI), cut(LOBBY_PING_ROI),
-                    is_system_menu(frame))
+                    is_system_menu(frame), reconnect_visible(frame))
 
 
 # ── Results screen ───────────────────────────────────────────────────────
@@ -136,6 +146,7 @@ _MENU_TMPL = _load_template(MENU_TMPL_PATH)
 _LEAVE_TMPL = _load_template(LEAVE_TMPL_PATH)
 _LEAVE_CONFIRM_TMPL = _load_template(LEAVE_CONFIRM_TMPL_PATH)
 _ERROR_TMPL = _load_template(ERROR_TMPL_PATH)
+_RECONNECT_TMPL = _load_template(RECONNECT_TMPL_PATH)
 
 
 def _score(crop, tmpl, thresh):
@@ -217,6 +228,24 @@ def leave_entry_confirmed(frame=None):
     return leave_entry_score(_grab(roi, frame)) >= LOBBY_LEAVE_MIN_SCORE
 
 
+def reconnect_score(crop):
+    """Match the RECONNECT button's glyphs in a crop of the search window."""
+    return _score(crop, _RECONNECT_TMPL, LOBBY_MENU_THRESH)
+
+
+def reconnect_visible(frame=None):
+    """True when the server has dropped the session and offers RECONNECT.
+
+    Gated on the button rather than on the ERROR title. There are two error
+    screens: this one and the inactivity logout, whose titles sit 38 px apart
+    — close enough that telling them apart by position is a coincidence
+    waiting to break. Only this one has a RECONNECT button, and the two want
+    different clicks in different places.
+    """
+    roi = _search_roi(LOBBY_RECONNECT_TEXT_ROI, LOBBY_MENU_SEARCH)
+    return reconnect_score(_grab(roi, frame)) >= LOBBY_RECONNECT_MIN_SCORE
+
+
 def error_dialog_score(crop):
     """Match the ERROR title in a crop of the search window."""
     return _score(crop, _ERROR_TMPL, LOBBY_MENU_THRESH)
@@ -276,6 +305,11 @@ class LobbyDetector:
         # so it is only paid for once the cheap pair has said "in a match".
         if base is LobbyState.IN_GAME and is_system_menu():
             return LobbyState.MENU
+        # A dropped session is a black screen, so it arrives here disguised as
+        # the lobby — and only here, since nothing else makes the letterbox
+        # read zero. Paid for only in that branch.
+        if base is LobbyState.LOBBY and reconnect_visible():
+            return LobbyState.DISCONNECTED
         return base
 
     def selftest(self):
