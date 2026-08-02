@@ -27,10 +27,12 @@ Two things this deliberately does not do:
     lands in the frames after the magazine ends -- it flatters the endpoint
     while doing nothing for the rounds already downrange. Bullets past the end
     of fire are dropped rather than modelled.
-  * It does not guess at rounds it never saw. If the magazine holds more than
-    the curve covers, the next measurement shows a positive tail and the next
-    fit extends it. Guessing here would bake in over-compensation that fires
-    after the magazine is empty.
+  * It does not guess at rounds it never saw -- but it does keep the ones it
+    did see. A magazine longer than the curve fires rounds with no
+    compensation at all, and their residual is their entire recoil, measured.
+    Those extend the curve. Rounds past the end of FIRE are still dropped:
+    inventing compensation that plays after the magazine empties would pull
+    the view down while the player is reloading.
 """
 import argparse
 import json
@@ -139,9 +141,16 @@ def rebuild(rec, verbose=True):
         comp_dy[b] += dy
         comp_dx[b] += dx
 
+    # Zero-pad rather than truncate to the curve's length. A magazine longer
+    # than the curve fires rounds that got no compensation at all, and their
+    # residual IS their whole recoil -- measured, not guessed, which is what
+    # the original refusal to extrapolate was guarding against. Truncating
+    # here is how a curve stays permanently two rounds short of the magazine.
     resid = np.array([m['per_bullet_counts'] for m in rec['mags']]).mean(0)
-    n = min(nb, len(resid))
-    true_dy = comp_dy[:n] + resid[:n]
+    n = len(resid)
+    comp_dy = np.pad(comp_dy, (0, max(0, n - nb)))[:n]
+    comp_dx = np.pad(comp_dx, (0, max(0, n - nb)))[:n]
+    true_dy = comp_dy + resid[:n]
 
     plateau = float(np.median(true_dy[PLATEAU_FROM:])) if n > PLATEAU_FROM \
         else float(np.max(true_dy))
@@ -151,6 +160,7 @@ def rebuild(rec, verbose=True):
     last = int(fired[-1])
     true_dy = smooth(true_dy[:last + 1])
     comp_dx = comp_dx[:last + 1]
+    grew = max(0, (last + 1) - nb)
 
     # counts = shot_dy * COUNTS_PER_RECOIL_UNIT * factor. Rather than rebuild
     # that factor chain, recover the product from the curve we just loaded --
@@ -177,6 +187,7 @@ def rebuild(rec, verbose=True):
         'curve_total_after': float(true_dy.sum()),
         'max_wander_before': float(np.abs(cum_before).max()),
         'plateau_counts': plateau,
+        'bullets_added': grew,
         'k_unit': k_unit,
     }
     if verbose:
@@ -187,6 +198,9 @@ def rebuild(rec, verbose=True):
               f"({100*(report['curve_total_after']/report['curve_total_before']-1):+.1f}%)")
         print(f"    impact-point wander during the magazine was "
               f"{report['max_wander_before']:.1f} counts")
+        if grew:
+            print(f"    curve grew by {grew} bullet(s) — the magazine outlasts "
+                  f"it, and those rounds were firing uncompensated")
         dropped = n - len(shots)
         if dropped:
             print(f"    dropped {dropped} post-fire bin(s) — camera recovery, "

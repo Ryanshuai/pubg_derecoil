@@ -12,6 +12,7 @@ Protocol (PC → Pico):
   [0x12][0/1]                             enable/disable recoil
 """
 
+import os
 import threading
 import time
 import struct
@@ -116,8 +117,21 @@ class PicoMouse:
             except Exception:
                 pass
         port = self._port or _find_pico_port()
-        self._ser = serial.Serial(port, baudrate=115200, timeout=0.1,
-                                  write_timeout=0.1)
+        try:
+            self._ser = serial.Serial(port, baudrate=115200, timeout=0.1,
+                                      write_timeout=0.1)
+        except serial.SerialException as e:
+            # One Pico, several tools, no lock. The raw error is a Windows
+            # access-denied deep in pyserial, which reads like a driver fault;
+            # naming the process actually holding the port is the difference
+            # between "retry in a minute" and a debugging session.
+            raise serial.SerialException(
+                f"{e}\n"
+                f"    The Pico is a single shared device and something else "
+                f"already has it.\n"
+                f"    Holding it now: {_other_python() or 'unknown'}\n"
+                f"    Wait for it to finish rather than killing it — it is "
+                f"probably another agent mid-run.") from None
         self._port = port
         print(f"[pico] connected on {port}", flush=True)
 
@@ -229,6 +243,27 @@ class PicoMouse:
     def close(self):
         if self._ser:
             self._ser.close()
+
+
+def _other_python():
+    """Other python processes in this project, as 'pid cmdline' lines."""
+    try:
+        import psutil
+    except ImportError:
+        return ''
+    me = os.getpid()
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__))).lower()
+    out = []
+    for p in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            if p.info['pid'] == me or 'python' not in (p.info['name'] or ''):
+                continue
+            cmd = ' '.join(p.info['cmdline'] or [])
+            if root in cmd.lower().replace('/', os.sep):
+                out.append(f"pid {p.info['pid']}: {cmd[:100]}")
+        except Exception:
+            continue
+    return '; '.join(out)
 
 
 def _find_pico_port():

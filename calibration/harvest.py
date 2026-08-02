@@ -74,6 +74,15 @@ GRIP_FOR_CLASS = {'AR': 'half_grip', 'DMR': 'half_grip', 'SMG': 'half_grip'}
 
 SCOPE_PART = 'red_dot'
 
+# Every slot is named in every config, including the ones under test in
+# neither. PUBG auto-fits whatever the backpack holds onto a gun the moment it
+# arrives, so a slot left unmentioned is not empty, it is whatever happened to
+# be lying around: the first bare run came back wearing an extended magazine
+# and a cheek pad it was never asked for, and a cheek pad reduces recoil. An
+# uncontrolled variable in a factorial design is not noise, it is a wrong
+# answer.
+NEUTRAL_SLOTS = ('magazine', 'stock')
+
 # (name, wants_muzzle, wants_grip)
 CONFIGS = {
     'bare':   (False, False),
@@ -290,6 +299,23 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
     if not rows:
         return None
     cc = np.array([r['cum_counts'] for r in rows])
+
+    # The gun's own recoil is compensation + residual, but only over the
+    # rounds that actually fired. pattern_counts covers the whole curve, and
+    # the two are not the same window: a magazine shorter than the curve never
+    # fires its tail, and adding compensation that was never applied inflates
+    # the answer. analyse() already trims to the burst, so the bin count IS the
+    # round count.
+    bi = w.bullet_interval_s
+    nb = int(w.t_s[-1] / bi) + 1
+    comp = np.zeros(nb)
+    for dy, t in zip(w.dy_s, w.t_s):
+        comp[min(nb - 1, int(t / bi))] += dy
+    fired = int(np.median([len(r['per_bullet_counts']) for r in rows]))
+    comp_fired = float(comp[:fired].sum())
+    # Rounds past the end of the curve get no compensation at all, which shows
+    # up as a spike in the last bins rather than as noise. Worth naming.
+    uncovered = max(0, fired - nb)
     rec = {
         'type': 'cell', 'weapon': weapon, 'config': cfg_name, 'want': want,
         'posture': posture, 'sight': rig.sight, 'K': rig.K,
@@ -299,16 +325,21 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
         'residual_counts_mean': float(cc.mean()),
         'residual_counts_std': float(cc.std()),
         'residual_pct': float(100 * cc.mean() / pattern_counts),
-        # pattern + residual is the gun's own recoil, which is the quantity
-        # every downstream comparison is actually about.
-        'true_counts': float(pattern_counts + cc.mean()),
+        # The quantity every downstream comparison is actually about.
+        'true_counts': float(comp_fired + cc.mean()),
+        'comp_over_fired': comp_fired,
+        'bullets_fired': fired,
+        'bullets_in_curve': nb,
+        'bullets_uncompensated': uncovered,
         'mags': rows,
         'ts': datetime.now().isoformat(timespec='seconds'),
     }
     log.write(json.dumps(rec) + '\n')
     log.flush()
-    print(f"      => true recoil {rec['true_counts']:.1f} counts "
-          f"(residual {cc.mean():+.1f} +- {cc.std():.1f})")
+    note = (f"  [{uncovered} rounds past the end of the curve — no "
+            f"compensation, expect a tail spike]" if uncovered else '')
+    print(f"      => true recoil {rec['true_counts']:.1f} counts over {fired} "
+          f"rounds (residual {cc.mean():+.1f} +- {cc.std():.1f}){note}")
     return rec
 
 
@@ -351,6 +382,7 @@ def harvest_weapon(rig, panel, kit, sc, weapon, configs, postures, mags,
         want = {'scope': SCOPE_PART,
                 'muzzle': muzzle_key if want_m else None,
                 'grip': grip_key if want_g else None}
+        want.update({s: None for s in NEUTRAL_SLOTS})
         print(f"    config {cfg}: {want}")
         if kit.apply(want) is None:
             print(f"    [!] could not reach config {cfg} — skipping")
