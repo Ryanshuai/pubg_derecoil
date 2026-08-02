@@ -274,6 +274,7 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
     if not rig.ensure_posture(posture):
         print(f"      [!] could not reach posture {posture}")
         return None
+    rig.recenter()          # in ADS by now; see Rig.recenter
     rig.flush(6)
 
     rows = []
@@ -281,9 +282,13 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
         if not game_focused():
             print("      [!] lost focus — abandoning this cell")
             break
-        if i > 0 and not rig.ensure_ads():
-            print("      [!] could not re-enter ADS after reload")
-            break
+        if i > 0:
+            if not rig.ensure_ads():
+                print("      [!] could not re-enter ADS after reload")
+                break
+            back = rig.recenter()
+            if back:
+                print(f"        recentred {back:+d} counts")
         rec, fire_s, steps, fire_end = rig.fire_magazine()
         if steps == 0:
             print("        no rounds fired (still reloading?) — skipped")
@@ -295,6 +300,7 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
         a.update(mag=i, fire_s=round(fire_s, 2), ammo_steps=steps,
                  fps=round(rec.effective_fps(), 1))
         rows.append(a)
+        rig.pending_pitch += a['view_drift_counts']
         print(f"        mag {i}: {fire_s:.2f}s  residual "
               f"{a['cum_counts']:+8.1f} ({100*a['cum_counts']/pattern_counts:+6.1f}%)"
               f"  oor={a['n_out_of_range']} hand={a['human_counts']:+.0f}"

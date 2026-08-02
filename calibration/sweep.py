@@ -78,6 +78,7 @@ POSTURE_WATCH_S = 1.5     # same, for the C/Z animation
 TAB_OPEN_S = 0.55
 TAB_CLOSE_S = 0.35
 POSTURE_SETTLE_S = 0.6
+RECENTER_SETTLE_S = 0.25   # let the view stop before the next burst
 GAME_HINTS = ('battlegrounds', 'pubg', 'tslgame')
 POSTURES = ('standing', 'crouching', 'prone')
 
@@ -118,6 +119,8 @@ class Rig:
             if k.startswith('att_'):
                 regions[k] = v
         self.grabber, self.paced = make_grabber(regions)
+        # Pitch owed back to the view, in ADS mouse counts. See recenter().
+        self.pending_pitch = 0.0
 
     def close(self):
         try:
@@ -291,6 +294,31 @@ class Rig:
             self.dump('posture')
         return cur == target
 
+    def recenter(self):
+        """Undo the pitch drift left behind by previous magazines.
+
+        A magazine never ends where it started: the compensation is wrong by
+        exactly the residual being measured, so every burst walks the view a
+        few hundred counts and the walk accumulates. PUBG clamps pitch — at
+        straight up or straight down the view simply stops moving, and a
+        magazine fired there measures near-zero recoil while reporting nothing
+        wrong. That is a silently corrupted cell, which is worse than a failed
+        one.
+
+        Must run in ADS. The drift was measured in ADS counts and a mouse
+        count buys a third as much rotation from the hip (K 0.50 against
+        1.55), so recentring from the hip under-corrects by 3x — and the
+        auto-reload drops out of ADS, which is exactly when it is tempting to
+        do this.
+        """
+        d = int(round(self.pending_pitch))
+        self.pending_pitch = 0.0
+        if abs(d) < 2:
+            return 0
+        self.mouse.move(0, d)
+        time.sleep(RECENTER_SETTLE_S)
+        return d
+
     def enter_ads(self):
         self.mouse.click(buttons=0x02, duration_ms=60)
         time.sleep(ADS_SETTLE_S)
@@ -380,6 +408,11 @@ def analyse(res, K, bullet_interval_s, fire_end_ts=None):
     if len(oor) != len(dy):                     # replayed or truncated result
         oor = np.zeros(len(dy), dtype=bool)
 
+    # Where the view actually ended up, over the WHOLE recording rather than
+    # the burst — post-fire recovery moves it too, and recentring has to undo
+    # the real position, not the analytically interesting part of it.
+    drift = float(np.nansum(np.where(oor, np.nan, dy)) / K)
+
     # Cut at the last round fired, plus the one bullet interval its own recoil
     # needs to play out. Every per-frame array is sliced together — slicing
     # some and not others misaligns the out-of-range mask, and a misaligned
@@ -412,6 +445,7 @@ def analyse(res, K, bullet_interval_s, fire_end_ts=None):
         'n_rejected': int(np.sum(res.n_rejected)),
         'n_out_of_range': int(np.sum(res.out_of_range)),
         'n_dropped_oor': int(np.sum(oor)),
+        'view_drift_counts': drift,
         'n_low_gate': int(np.sum(res.gates)),
         # Net is what was removed from the residual; abs is how much hand
         # motion happened at all. A small net with a large abs means the hand
@@ -454,6 +488,7 @@ def calibrate_combo(rig, weapon, posture, mags, log):
     if not rig.ensure_posture(posture):
         print(f"    [!] could not reach posture {posture}")
         return None
+    rig.recenter()
     rig.flush(6)
 
     rows = []
@@ -461,9 +496,11 @@ def calibrate_combo(rig, weapon, posture, mags, log):
         if not game_focused():
             print("    [!] lost focus — aborting this combo")
             break
-        if i > 0 and not rig.ensure_ads():   # auto-reload drops us to the hip
-            print("      [!] could not re-enter ADS after reload")
-            break
+        if i > 0:                    # auto-reload drops us to the hip
+            if not rig.ensure_ads():
+                print("      [!] could not re-enter ADS after reload")
+                break
+            rig.recenter()
 
         rec, fire_s, steps, fire_end = rig.fire_magazine()
         if steps == 0:
@@ -477,6 +514,7 @@ def calibrate_combo(rig, weapon, posture, mags, log):
         a.update(mag=i, fire_s=round(fire_s, 2), ammo_steps=steps,
                  fps=round(rec.effective_fps(), 1))
         rows.append(a)
+        rig.pending_pitch += a['view_drift_counts']
         print(f"      mag {i}: {fire_s:.2f}s {steps:3d} steps  "
               f"residual {a['cum_counts']:+8.1f} counts "
               f"({100*a['cum_counts']/pattern_counts:+6.1f}% of pattern)  "
