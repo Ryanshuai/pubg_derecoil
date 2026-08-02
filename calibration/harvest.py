@@ -48,7 +48,7 @@ from config import (SCREEN_W, SCREEN_H, SPAWNER_ICON_ANCHORS, SPAWNER_ICON_W,
                     SPAWNER_ICON_H, SPAWNER_ICON_SEARCH)
 from detector.cropper import RegionGrabber
 from detector.spawner_detector import SpawnerDetector
-from detector.weapon import Weapon, WEAPON_RPM
+from detector.weapon import Weapon, WEAPON_RPM, can_full_guns
 from press.pico_mouse import HID_KEY_COMMA
 
 from sweep import (Rig, analyse, game_focused, ensure_focus, focus_keeper,
@@ -64,54 +64,68 @@ PANEL_WATCH_S = 3.0       # comma -> panel drawn; generous, it is a full screen
 PANEL_SETTLE_S = 0.5
 KIT_SETTLE_S = 0.6
 
-# A compensator exists per weapon class and nowhere else; LMGs have none, so
-# their muzzle cells are skipped rather than silently measured bare twice.
-MUZZLE_FOR_CLASS = {'AR': 'comp_ar', 'DMR': 'comp_ar', 'SMG': 'comp_smg'}
-
-# Which grip the factorial tests, overridable with --grip. Three worth knowing
-# about:
+# Which part fills each slot under test, per weapon class. A class that has no
+# part for a slot skips every config naming it, rather than silently measuring
+# bare twice under two different labels.
 #
-#   vert_grip   the model's 0.85, and the grip every existing curve was
-#               calibrated under — so measuring it grades the data we already
-#               have.
-#   half_grip   spawnable, model says 0.92. Its template has DRIFTED: it reads
-#               as <occupied, no template> and find() returns nothing, which
-#               surfaces as "not on screen" rather than as a detection failure.
-#               Needs re-extracting before it can be used.
-#   angled_grip spawnable, and the most falsifiable line in the whole table —
-#               the model predicts exactly 1.000, no effect at all.
-#
-# thumb_grip is off the list: detector/CLAUDE.md already records its template
-# as drifted.
-DEFAULT_GRIP = 'vert_grip'
-GRIP_FOR_CLASS = {'AR': DEFAULT_GRIP, 'DMR': DEFAULT_GRIP, 'SMG': DEFAULT_GRIP}
+# Overridable per slot with --parts muzzle=brake_ar,grip=angled_grip, which is
+# how a second part in the same slot gets measured against the first.
+PART_FOR_CLASS = {
+    'AR':  {'muzzle': 'comp_ar',  'grip': 'vert_grip', 'stock': 'tactical_stock'},
+    'DMR': {'muzzle': 'comp_ar',  'grip': 'vert_grip', 'stock': 'tactical_stock'},
+    'SMG': {'muzzle': 'comp_smg', 'grip': 'vert_grip', 'stock': 'tactical_stock'},
+    # The M249 takes the AR magazine and a stock, but no compensator — the
+    # AR comp lists 突击步枪/精确射手步枪/O12/S12K and not the M249.
+    'LMG': {'muzzle': None,       'grip': 'vert_grip', 'stock': 'tactical_stock'},
+}
 
+# Every slot this tool controls. A config names the ones to FILL; the rest are
+# forced empty, never left alone. PUBG auto-fits whatever the backpack holds
+# onto a gun the moment it arrives, so an unmentioned slot is not empty — it is
+# whatever the last strip left lying around. The first "bare" run came back
+# wearing a cheek pad it was never asked for, and a cheek pad reduces recoil.
+TEST_SLOTS = ('muzzle', 'grip', 'stock')
 
+# The sight is pinned, not tested. Magnification is a different axis from
+# recoil reduction: a scope does not damp the gun, it magnifies the view, so
+# the compensation has to scale with it and the measurement's own K changes
+# with it too (RECOIL_SIGHT_PROFILES). Mixing that into an attachment factorial
+# would confound the two. Red dot is 1x, where counts and pixels agree.
 SCOPE_PART = 'red_dot'
 
-# Slots that are under test in no config still have to be pinned down. PUBG
-# auto-fits whatever the backpack is holding onto a gun the moment it arrives,
-# so a slot left unmentioned is not empty — it is whatever the last strip left
-# lying around. The first bare run came back wearing a cheek pad it was never
-# asked for, and a cheek pad reduces recoil; an uncontrolled variable in a
-# factorial design is a wrong answer, not noise.
-NEUTRAL_SLOTS = ('stock',)
-
-# The magazine is pinned the other way: always extended, never stripped. It
+# The magazine is pinned the other way: always fitted, never stripped. It
 # changes capacity, not recoil, and capacity is free measurement — 39 rounds
 # against 29 on the AUG. A curve measured long is trivially truncated for a
 # player carrying the base magazine, whereas one measured short can never be
-# extended. Quickdraw for the reload speed, which is dead time every magazine.
-MAG_FOR_CLASS = {'AR': 'quickext_ar', 'DMR': 'quickext_ar',
-                 'SMG': 'quickext_smg'}
+# extended.
+#
+# 扩容弹匣 (ext), not 加长快速弹匣 (quickext): the plain extended magazine is
+# the one that holds the most. The quickdraw variant's faster reload is dead
+# time between magazines, which is worth nothing next to a longer curve.
+MAG_FOR_CLASS = {'AR': 'ext_ar', 'DMR': 'ext_ar', 'LMG': 'ext_ar',
+                 'SMG': 'ext_smg'}
 
-# (name, wants_muzzle, wants_grip)
-CONFIGS = {
-    'bare':   (False, False),
-    'muzzle': (True, False),
-    'grip':   (False, True),
-    'both':   (True, True),
-}
+
+def parse_config(name):
+    """A config name is the set of slots to FILL, joined by '+'.
+
+    'bare' fills nothing; 'muzzle+grip+stock' fills all three. Any subset is
+    legal, so one --configs spells out a full 2^N factorial or any fraction of
+    one, and adding a slot to TEST_SLOTS needs no change here.
+
+    Returns None for a name that mentions a slot this tool does not control.
+    """
+    if name == 'bare':
+        return frozenset()
+    if name == 'both':          # kept: the 2x2 runs already logged say 'both'
+        return frozenset(('muzzle', 'grip'))
+    slots = frozenset(p.strip() for p in name.split('+') if p.strip())
+    return slots if slots <= frozenset(TEST_SLOTS) else None
+
+
+def config_name(slots):
+    """Canonical name for a slot set, so --resume matches across runs."""
+    return '+'.join(s for s in TEST_SLOTS if s in slots) or 'bare'
 
 
 class Panel:
@@ -373,14 +387,17 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
 def harvest_weapon(rig, panel, kit, sc, weapon, configs, postures, mags,
                    slot, log, done):
     cls = ROSTER.get(weapon, (None,))[0]
-    muzzle_key = MUZZLE_FOR_CLASS.get(cls)
-    grip_key = GRIP_FOR_CLASS.get(cls)
-    mag_key = MAG_FOR_CLASS.get(cls)
+    parts = PART_FOR_CLASS.get(cls, {})
 
     todo = [c for c in configs if (weapon, c) not in done]
-    todo = [c for c in todo
-            if not (CONFIGS[c][0] and not muzzle_key)
-            and not (CONFIGS[c][1] and not grip_key)]
+    # A config asking for a slot this class has no part for measures the same
+    # thing as one that does not ask, under a different name. Drop it.
+    skipped = [c for c in todo
+               if any(not parts.get(s) for s in parse_config(c))]
+    for c in skipped:
+        need = [s for s in parse_config(c) if not parts.get(s)]
+        print(f"    skipping {c}: no {'/'.join(need)} part for class {cls}")
+    todo = [c for c in todo if c not in skipped]
     if not todo:
         print(f"  nothing to do for {weapon}")
         return []
@@ -406,12 +423,11 @@ def harvest_weapon(rig, panel, kit, sc, weapon, configs, postures, mags,
 
     out = []
     for cfg in todo:
-        want_m, want_g = CONFIGS[cfg]
-        want = {'scope': SCOPE_PART,
-                'muzzle': muzzle_key if want_m else None,
-                'grip': grip_key if want_g else None}
-        want.update({s: None for s in NEUTRAL_SLOTS})
-        want['magazine'] = MAG_FOR_CLASS.get(cls)
+        fill = parse_config(cfg)
+        want = {'scope': SCOPE_PART, 'magazine': MAG_FOR_CLASS.get(cls)}
+        # Every controlled slot is named, filled or emptied — see TEST_SLOTS.
+        want.update({s: (parts.get(s) if s in fill else None)
+                     for s in TEST_SLOTS})
         print(f"    config {cfg}: {want}")
         if kit.apply(want) is None:
             print(f"    [!] could not reach config {cfg} — skipping")
@@ -452,21 +468,41 @@ def load_done(path):
     return done
 
 
-def expand(spec):
+def expand(spec, semi=False):
+    """Weapon names from 'ar', 'smg', 'all', or explicit names.
+
+    Full-auto only unless semi=True. A recoil *curve* is a per-bullet sequence
+    fired at a fixed cadence; a weapon that cannot hold the trigger down has no
+    such sequence to measure, so a semi-auto cell records how fast the harness
+    happened to click. Named weapons are honoured either way — asking for one
+    by name is a deliberate act.
+    """
     groups = {}
     for key, (cls, _) in ROSTER.items():
         groups.setdefault(cls.lower(), []).append(key)
     groups['all'] = sorted(ROSTER)
-    out = []
+    out, named = [], set()
     for tok in spec.split(','):
         tok = tok.strip()
-        if tok:
-            out.extend(sorted(groups.get(tok, [tok])))
-    seen, uniq = set(), []
+        if not tok:
+            continue
+        if tok in groups:
+            out.extend(sorted(groups[tok]))
+        else:
+            out.append(tok)
+            named.add(tok)
+    seen, uniq, dropped = set(), [], []
     for x in out:
-        if x in WEAPON_RPM and x in ROSTER and x not in seen:
-            seen.add(x)
-            uniq.append(x)
+        if x not in WEAPON_RPM or x not in ROSTER or x in seen:
+            continue
+        seen.add(x)
+        if not semi and x not in can_full_guns and x not in named:
+            dropped.append(x)
+            continue
+        uniq.append(x)
+    if dropped:
+        print(f"skipping {len(dropped)} semi-auto/burst weapon(s), no "
+              f"full-auto curve to measure: {', '.join(dropped)}")
     return uniq
 
 
@@ -477,27 +513,65 @@ def report(rows):
     by = {}
     for r in rows:
         by.setdefault(r['weapon'], {})[r['config']] = r['true_counts']
-    print("\n" + "=" * 78)
+    names = sorted({c for cells in by.values() for c in cells},
+                   key=lambda n: (len(parse_config(n) or ()), n))
+    w0 = max(8, max(len(n) for n in names) + 1)
+    rule = 9 + w0 * len(names)
+
+    print("\n" + "=" * rule)
     print("TRUE RECOIL PER CONFIG (counts over one magazine)")
-    print("=" * 78)
-    print(f"{'weapon':<9}{'bare':>9}{'muzzle':>9}{'grip':>9}{'both':>9}"
-          f"{'m x g':>9}{'measured':>10}  orthogonal?")
-    print("-" * 78)
+    print("=" * rule)
+    print(f"{'weapon':<9}" + ''.join(f'{n:>{w0}}' for n in names))
+    print("-" * rule)
     for w in sorted(by):
         c = by[w]
-        b = c.get('bare')
-        cells = [c.get(k) for k in ('bare', 'muzzle', 'grip', 'both')]
-        line = f"{w:<9}" + ''.join(
-            f"{v:>9.0f}" if v else f"{'-':>9}" for v in cells)
-        if b and c.get('muzzle') and c.get('grip') and c.get('both'):
-            pred = (c['muzzle'] / b) * (c['grip'] / b)
-            meas = c['both'] / b
-            gap = 100 * (meas / pred - 1)
-            verdict = 'yes' if abs(gap) < 3 else f'NO ({gap:+.1f}%)'
-            line += f"{pred:>9.3f}{meas:>10.3f}  {verdict}"
-        print(line)
-    print("\n  ratios are against that weapon's own bare measurement, so a")
-    print("  weapon-independent model shows the same column everywhere.")
+        print(f"{w:<9}" + ''.join(
+            f"{c[n]:>{w0}.0f}" if c.get(n) else f"{'-':>{w0}}" for n in names))
+
+    print("\nRATIO TO BARE — a weapon-independent factor shows the same "
+          "column everywhere")
+    print("-" * rule)
+    print(f"{'weapon':<9}" + ''.join(f'{n:>{w0}}' for n in names))
+    for w in sorted(by):
+        c, b = by[w], by[w].get('bare')
+        if not b:
+            continue
+        print(f"{w:<9}" + ''.join(
+            f"{c[n]/b:>{w0}.3f}" if c.get(n) else f"{'-':>{w0}}"
+            for n in names))
+
+    # Multiplicativity: does a combination equal the product of its parts?
+    # This is the whole reason to prefer factors over a curve per combination —
+    # if it holds, N slots cost N measurements instead of 2^N.
+    combos = [n for n in names if len(parse_config(n) or ()) > 1]
+    if combos:
+        print("\nIS IT MULTIPLICATIVE?  predicted = product of the single-slot "
+              "ratios")
+        print("-" * 58)
+        print(f"{'weapon':<9}{'config':<20}{'predicted':>11}{'measured':>10}"
+              f"{'gap':>8}   verdict")
+        for w in sorted(by):
+            c, b = by[w], by[w].get('bare')
+            if not b:
+                continue
+            for n in combos:
+                if not c.get(n):
+                    continue
+                singles = [config_name(frozenset((s,)))
+                           for s in parse_config(n)]
+                if any(not c.get(s) for s in singles):
+                    continue
+                pred = 1.0
+                for s in singles:
+                    pred *= c[s] / b
+                meas = c[n] / b
+                gap = 100 * (meas / pred - 1)
+                verdict = 'yes' if abs(gap) < 3 else f'NO'
+                print(f"{w:<9}{n:<20}{pred:>11.3f}{meas:>10.3f}"
+                      f"{gap:>7.1f}%   {verdict}")
+        print("\n  gap is what a multiplicative model would get wrong. Under "
+              "3% is\n  inside the game's own per-shot randomness at 3 "
+              "magazines a cell.")
 
 
 def main():
@@ -507,8 +581,14 @@ def main():
     ap.add_argument('--configs', default='bare,both')
     ap.add_argument('--postures', default='standing')
     ap.add_argument('--sight', default='red_dot')
-    ap.add_argument('--grip', default=DEFAULT_GRIP,
-                    help='which grip the factorial tests (see GRIP_FOR_CLASS)')
+    ap.add_argument('--parts', default='',
+                    help='swap which part fills a slot, e.g. '
+                         'muzzle=brake_ar,grip=angled_grip. This is how a '
+                         'second part in the same slot gets measured against '
+                         'the first.')
+    ap.add_argument('--semi', action='store_true',
+                    help='include semi-auto and burst weapons, which have no '
+                         'full-auto curve to measure')
     ap.add_argument('--mags', type=int, default=3)
     ap.add_argument('--slot', type=int, default=2,
                     help='the spawner always fills slot 2')
@@ -522,15 +602,36 @@ def main():
                     help='seconds before re-entering pre-emptively')
     args = ap.parse_args()
 
-    for k in GRIP_FOR_CLASS:
-        GRIP_FOR_CLASS[k] = args.grip
-    weapons = expand(args.weapons)
-    configs = [c.strip() for c in args.configs.split(',') if c.strip()]
+    for pair in args.parts.split(','):
+        if not pair.strip():
+            continue
+        slot, _, key = pair.partition('=')
+        slot, key = slot.strip(), key.strip()
+        if slot not in TEST_SLOTS or key not in spawner_mod.ATTACHMENTS:
+            print(f"[!] --parts {pair!r}: slot must be one of {TEST_SLOTS} "
+                  f"and the part must be spawnable")
+            return 1
+        for cls, table in PART_FOR_CLASS.items():
+            if table.get(slot):        # leave classes that have no such slot
+                table[slot] = key
+        print(f"parts    : {slot} = {key} (overridden)")
+
+    weapons = expand(args.weapons, semi=args.semi)
+    # Canonicalised so 'grip+muzzle' and 'muzzle+grip' are one cell, and so
+    # --resume matches cells logged by an earlier run.
+    configs, bad = [], []
+    for c in (c.strip() for c in args.configs.split(',')):
+        if not c:
+            continue
+        slots = parse_config(c)
+        if slots is None:
+            bad.append(c)
+        elif config_name(slots) not in configs:
+            configs.append(config_name(slots))
     postures = [p.strip() for p in args.postures.split(',') if p.strip()]
-    bad = [c for c in configs if c not in CONFIGS] + \
-          [p for p in postures if p not in POSTURES]
+    bad += [p for p in postures if p not in POSTURES]
     if bad:
-        print(f"[!] unknown: {bad}")
+        print(f"[!] unknown: {bad}  (slots are {TEST_SLOTS}, joined by '+')")
         return 1
     if not weapons:
         print("[!] no weapons selected")
@@ -609,12 +710,17 @@ def main():
         'ts': datetime.now().isoformat(timespec='seconds'),
     }) + '\n')
 
+    # Only the slots some config actually fills get stocked: every spare in
+    # 库存 is one more thing find() can pick instead of the one meant.
+    wanted_slots = frozenset().union(*(parse_config(c) for c in configs)) \
+        if configs else frozenset()
     parts = {SCOPE_PART}
     for w in weapons:
         cls = ROSTER.get(w, (None,))[0]
-        parts.update(x for x in (MUZZLE_FOR_CLASS.get(cls),
-                                 GRIP_FOR_CLASS.get(cls),
-                                 MAG_FOR_CLASS.get(cls)) if x)
+        table = PART_FOR_CLASS.get(cls, {})
+        parts.update(x for x in
+                     [table.get(s) for s in wanted_slots] +
+                     [MAG_FOR_CLASS.get(cls)] if x)
 
     rows = []
     try:
