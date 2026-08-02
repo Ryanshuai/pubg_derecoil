@@ -65,6 +65,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 AMMO_THRESH = 200
 AMMO_CHANGED = 0.02
 EMPTY_STATIC_S = 0.55     # ammo frozen this long while firing => magazine out
+TAIL_RECORD_S = 0.25      # keep recording past the counter reaching zero, so the
+                          # last round's recoil is inside the recording
 MIN_FIRE_S = 0.8
 MAX_FIRE_S = 9.0
 RELOAD_TIMEOUT_S = 9.0
@@ -126,6 +128,13 @@ class Rig:
         self.att_det = AttachmentDetector()
         self.gun_det = TabWeaponDetector()
         self.posture_det = PostureDetector()
+        try:
+            from detector.ammo_detector import AmmoDetector
+            self.ammo_det = AmmoDetector()
+        except Exception as e:
+            print(f"  [!] no ammo counter ({e}); falling back to watching the "
+                  f"ammo region flicker, which cannot count rounds")
+            self.ammo_det = None
 
         regions = dict(self.tracker.regions())
         for k in ('ammo', 'type', 'posture', 'gun_name_1', 'gun_name_2'):
@@ -168,6 +177,39 @@ class Rig:
     def ammo_sig(self, frame):
         g = cv2.cvtColor(frame['ammo'], cv2.COLOR_BGR2GRAY)
         return cv2.threshold(g, AMMO_THRESH, 255, cv2.THRESH_BINARY)[1] > 0
+
+    def read_ammo(self, frame=None):
+        """Rounds left in the magazine, or None if the number is not drawn.
+
+        None is NOT zero. An empty magazine still draws `0`; None means the
+        counter could not be read at all — mid-reload, inventory open, weapon
+        holstered — and treating it as zero reads as "just fired everything".
+        """
+        if self.ammo_det is None:
+            return None
+        try:
+            return self.ammo_det.classify(frame if frame is not None
+                                          else self.grab())
+        except Exception:
+            return None
+
+    def magazine_size(self, timeout_s=2.0):
+        """How many rounds are actually loaded, read off the HUD.
+
+        Worth reading rather than assuming: fitting an extended magazine
+        changes the capacity, the base magazine and the extended one differ by
+        ten rounds, and a cell that fires a different number of rounds than its
+        siblings is not a noisy repeat of them but a different measurement.
+        Before this the count came from watching the ammo region flicker, which
+        over-counted by about 2.4x and could not be compared against anything.
+        """
+        t0 = time.perf_counter()
+        while time.perf_counter() - t0 < timeout_s:
+            n = self.read_ammo()
+            if n:
+                return n
+            time.sleep(0.05)
+        return None
 
     def tab_open(self, frame):
         g = cv2.cvtColor(frame['type'], cv2.COLOR_BGR2GRAY)
@@ -659,6 +701,7 @@ class Rig:
         self.mouse.click(buttons=0x01, duration_ms=int(MAX_FIRE_S * 1000))
         t0 = time.perf_counter()
         prev, last_change, steps = None, t0, 0
+        empty_at = None
         while True:
             now = time.perf_counter()
             if now - t0 > MAX_FIRE_S:
@@ -670,6 +713,25 @@ class Rig:
                 last_change = now
                 steps += 1
             prev = sig
+            # The counter reaching zero is the magazine ending, stated by the
+            # game rather than inferred from pixels that stopped moving. The
+            # flicker heuristic below still runs as the fallback -- it is what
+            # covers a weapon whose counter cannot be read -- but on its own it
+            # cannot say how many rounds went out, only that something stopped
+            # changing, and it over-counted them by about 2.4x.
+            n = self.read_ammo(frame)
+            if n == 0:
+                # The counter reads zero the instant the last round leaves,
+                # and that round's recoil has not played out yet. Breaking
+                # here throws away the biggest kick in the magazine — the tail
+                # rounds are the steepest part of every curve. Keep recording
+                # for a couple of bullet intervals so the last shot lands
+                # inside the recording it belongs to.
+                if empty_at is None:
+                    empty_at = now
+                    last_change = now
+                elif now - empty_at >= TAIL_RECORD_S:
+                    break
             if (now - t0) > MIN_FIRE_S and (now - last_change) > EMPTY_STATIC_S:
                 break
         self.mouse.click(buttons=0x00, duration_ms=0)
@@ -718,7 +780,7 @@ class Rig:
         return None
 
 
-def analyse(res, K, bullet_interval_s, fire_end_ts=None):
+def analyse(res, K, bullet_interval_s, fire_end_ts=None, n_bullets=None):
     dy = np.asarray(res.dy, dtype=float)
     ts = np.asarray(res.ts, dtype=float)
     if len(ts) < 2:
@@ -758,7 +820,17 @@ def analyse(res, K, bullet_interval_s, fire_end_ts=None):
     # residual it carried; keeping it cost 266 counts on a magazine where the
     # hand moved fast enough to hit the limit three times.
     counts = np.where(oor, np.nan, counts)
-    nb = int(ts[-1] / bullet_interval_s) + 1
+
+    # How many rounds went out is the magazine's business, not the burst
+    # duration's. Deriving it from the recording's span comes back one or two
+    # short every time — the last round's kick is still playing when the
+    # counter hits zero — and a curve rebuilt from that can never catch up to
+    # the magazine: it grows by a round or two per pass and still reports rounds
+    # firing uncompensated, forever. n_bullets is what the HUD counter said the
+    # magazine held before the first round left it.
+    span_bins = int(ts[-1] / bullet_interval_s) + 1
+    nb = int(n_bullets) if n_bullets else span_bins
+    short = max(0, nb - span_bins)
     per_bullet = []
     for b in range(nb):
         m = (ts >= b * bullet_interval_s) & (ts < (b + 1) * bullet_interval_s)
@@ -772,6 +844,11 @@ def analyse(res, K, bullet_interval_s, fire_end_ts=None):
         'n_rejected': int(np.sum(res.n_rejected)),
         'n_out_of_range': int(np.sum(res.out_of_range)),
         'n_dropped_oor': int(np.sum(oor)),
+        # Bins the magazine says exist that the recording did not reach. Zero
+        # when healthy. Non-zero means the tail of per_bullet_counts is padding
+        # rather than measurement, and a curve fitted to it would be flat where
+        # the recoil is steepest.
+        'bullets_missing': short,
         'view_drift_counts': drift,
         'n_low_gate': int(np.sum(res.gates)),
         # Net is what was removed from the residual; abs is how much hand

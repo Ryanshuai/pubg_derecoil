@@ -146,8 +146,36 @@ def rebuild(rec, verbose=True):
     # residual IS their whole recoil -- measured, not guessed, which is what
     # the original refusal to extrapolate was guarding against. Truncating
     # here is how a curve stays permanently two rounds short of the magazine.
-    resid = np.array([m['per_bullet_counts'] for m in rec['mags']]).mean(0)
-    n = len(resid)
+    # Magazines do not all fire the same number of rounds -- an extended
+    # magazine comes back 40, 41, 41 -- so this cannot be a rectangular mean.
+    # Averaging each bullet over the magazines that actually reached it uses
+    # every round measured without inventing any; the alternative, truncating
+    # to the shortest, throws away exactly the tail rounds that matter most.
+    # measure_cell has already dropped magazines more than ROUNDS_TOL off the
+    # median, so what is left differs by a round or two at the end.
+    per_mag = [m['per_bullet_counts'] for m in rec['mags']]
+    # The magazine's own count decides the length, not the longest recording.
+    # Sizing off the recordings comes back a round or two short every time --
+    # the last shot's kick is still playing when the counter hits zero -- and a
+    # curve fitted to that can never reach the end of the magazine: it grows a
+    # little each pass and still reports rounds firing uncompensated. Measured
+    # on the AUG: the counter says 42, three passes produced curves of 38, 40
+    # and 41.
+    n = rec.get('magazine_size') or max(len(p) for p in per_mag)
+    resid = np.array([np.mean([p[b] for p in per_mag if b < len(p)])
+                      if any(b < len(p) for p in per_mag) else 0.0
+                      for b in range(n)])
+    depth = np.array([sum(1 for p in per_mag if b < len(p)) for b in range(n)])
+    thin = int((depth < len(per_mag)).sum())
+    if thin:
+        print(f"  last {thin} bullet(s) averaged over fewer magazines than the "
+              f"rest (magazine lengths {[len(p) for p in per_mag]}, "
+              f"magazine holds {rec.get('magazine_size')})")
+    blind = int((depth == 0).sum())
+    if blind:
+        print(f"  [!] {blind} bullet(s) of the magazine were never recorded at "
+              f"all — the curve would be FLAT where the recoil is steepest. "
+              f"Fix the recording before trusting this fit.")
     comp_dy = np.pad(comp_dy, (0, max(0, n - nb)))[:n]
     comp_dx = np.pad(comp_dx, (0, max(0, n - nb)))[:n]
     true_dy = comp_dy + resid[:n]

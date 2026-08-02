@@ -340,6 +340,13 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
     time.sleep(0.4)
     rig.wait_reload()
 
+    # Now that it is full, read how full. This is the cell's expected round
+    # count, stated by the game, and every magazine below is checked against
+    # it — before, the count came from watching the ammo region flicker, which
+    # over-counted by about 2.4x and could not be compared with anything.
+    mag_size = rig.magazine_size()
+    print(f"      magazine holds {mag_size if mag_size else '?'} rounds")
+
     if not rig.ensure_posture(posture):
         print(f"      [!] could not reach posture {posture}")
         return None
@@ -382,7 +389,8 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
             print("        no rounds fired (still reloading?) — skipped")
             time.sleep(1.5)
             continue
-        a = analyse(rec.finish(), rig.K, w.bullet_interval_s, fire_end)
+        a = analyse(rec.finish(), rig.K, w.bullet_interval_s, fire_end,
+                    n_bullets=mag_size)
         if a is None:
             continue
         a.update(mag=i, fire_s=round(fire_s, 2), ammo_steps=steps,
@@ -407,7 +415,10 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
     # in the bare m416 cell moved the mean 85 counts and took the cell from
     # 2% spread to 10%, which propagated into every ratio taken against it.
     lens = [len(r['per_bullet_counts']) for r in rows]
-    keep = int(np.median(lens))
+    # The counter's reading outranks the median: with three magazines and one
+    # of them short, the median can BE the short one. What the game said the
+    # magazine holds cannot.
+    keep = mag_size if mag_size else int(np.median(lens))
     odd = [n for n in lens if abs(n - keep) > ROUNDS_TOL]
     if odd and len(lens) - len(odd) >= 1:
         print(f"        dropping {len(odd)} magazine(s) that fired {odd} "
@@ -423,15 +434,21 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
     # the answer. analyse() already trims to the burst, so the bin count IS the
     # round count.
     bi = w.bullet_interval_s
-    nb = int(w.t_s[-1] / bi) + 1
+    # Same length as the residual, and for the same reason: the magazine says
+    # how many rounds there are. The curve may be shorter -- those rounds fire
+    # uncompensated, which is a real and measurable thing -- but the bins have
+    # to line up or comp and residual describe different shots.
+    curve_bins = int(w.t_s[-1] / bi) + 1
+    nb = max(curve_bins, mag_size or 0)
     comp = np.zeros(nb)
     for dy, t in zip(w.dy_s, w.t_s):
         comp[min(nb - 1, int(t / bi))] += dy
-    fired = int(np.median([len(r['per_bullet_counts']) for r in rows]))
+    fired = mag_size or int(np.median([len(r['per_bullet_counts'])
+                                       for r in rows]))
     comp_fired = float(comp[:fired].sum())
     # Rounds past the end of the curve get no compensation at all, which shows
     # up as a spike in the last bins rather than as noise. Worth naming.
-    uncovered = max(0, fired - nb)
+    uncovered = max(0, fired - curve_bins)
     rec = {
         'type': 'cell', 'weapon': weapon, 'config': cfg_name, 'want': want,
         'posture': posture, 'sight': rig.sight, 'K': rig.K,
@@ -445,7 +462,11 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
         'true_counts': float(comp_fired + cc.mean()),
         'comp_over_fired': comp_fired,
         'bullets_fired': fired,
-        'bullets_in_curve': nb,
+        # What the HUD counter said the magazine held, before a round left it.
+        # None means the counter could not be read, which is worth telling
+        # apart from "the magazine was empty".
+        'magazine_size': mag_size,
+        'bullets_in_curve': curve_bins,
         'bullets_uncompensated': uncovered,
         'mags': rows,
         'ts': datetime.now().isoformat(timespec='seconds'),
