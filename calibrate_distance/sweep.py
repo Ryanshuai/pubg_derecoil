@@ -70,6 +70,9 @@ MAX_FIRE_S = 9.0
 RELOAD_TIMEOUT_S = 9.0
 SETTLE_AFTER_RELOAD_S = 1.8   # counter refills mid-animation; gun is not ready
 ADS_SETTLE_S = 0.5
+ADS_WATCH_S = 2.5         # how long to watch for the icon after a right-click;
+                          # measured ~0.85 s idle and slower right after firing
+POSTURE_WATCH_S = 1.5     # same, for the C/Z animation
 TAB_OPEN_S = 0.55
 TAB_CLOSE_S = 0.35
 POSTURE_SETTLE_S = 0.6
@@ -140,14 +143,57 @@ class Rig:
         n = int((g > TAB_PIXEL_THRESH).sum())
         return TAB_COUNT_MIN <= n <= TAB_COUNT_MAX
 
-    def read_posture(self):
-        return self.posture_det.classify({'posture': self.grab()['posture']})
+    def read_posture(self, timeout_s=0.8, gap_s=0.08):
+        """Watch the posture icon until it reads, or time out.
+
+        Deadline rather than a sample count: the icon is absent during the ADS
+        animation, the inventory fade and mid-posture-change, and how long that
+        lasts is not a constant — measured ~0.85 s to appear after a click, and
+        slower right after firing. A fixed handful of quick samples reads None
+        while the animation is still running, and the caller then toggles ADS
+        back off, which never converges.
+
+        A None must never be treated as a posture: toggling on an unknown state
+        is how an unattended run walks itself into a posture nobody asked for.
+        """
+        t0 = time.perf_counter()
+        while True:
+            self.flush(2)
+            p = self.posture_det.classify({'posture': self.grab()['posture']})
+            if p:
+                return p
+            if time.perf_counter() - t0 >= timeout_s:
+                return None
+            time.sleep(gap_s)
+
+    def dump(self, tag):
+        """Save the crops behind a failed decision, so a human can see what
+        the detector saw instead of guessing from a one-line error."""
+        try:
+            frame = self.grab()
+            for k in ('posture', 'type', 'ammo'):
+                if k in frame:
+                    cv2.imwrite(os.path.join(HERE, f'fail_{tag}_{k}.png'),
+                                frame[k])
+            print(f"      [dbg] wrote fail_{tag}_*.png")
+        except Exception as e:
+            print(f"      [dbg] dump failed: {e}")
+
+    def ensure_inventory_closed(self, tries=3):
+        """An inventory left open hides the posture icon AND swallows C/Z,
+        which looks exactly like a broken detector."""
+        for _ in range(tries):
+            self.flush(2)
+            if not self.tab_open(self.grab()):
+                return True
+            self.mouse.key(HID_KEY_TAB, 60)
+            time.sleep(TAB_CLOSE_S)
+        self.flush(2)
+        return not self.tab_open(self.grab())
 
     def read_loadout(self, slot=1):
         """One Tab cycle returns both the weapon name and its attachments."""
-        if self.tab_open(self.grab()):
-            self.mouse.key(HID_KEY_TAB, 60)
-            time.sleep(TAB_CLOSE_S)
+        self.ensure_inventory_closed()
         self.mouse.key(HID_KEY_TAB, 60)
         time.sleep(TAB_OPEN_S)
         frame = self.grab()
@@ -157,19 +203,66 @@ class Rig:
             names = self.gun_det.classify(frame)
             gun = names[slot - 1] or ''
             att = self.att_det.classify(frame).get(slot)
-        self.mouse.key(HID_KEY_TAB, 60)
-        time.sleep(TAB_CLOSE_S)
+        if not self.ensure_inventory_closed():
+            print("      [!] inventory would not close")
         return (gun, att) if ok else (None, None)
 
     # ── state control ──
 
+    def ensure_ads(self, tries=3):
+        """Get into ADS, using the posture icon as the ADS indicator.
+
+        The icon only renders while aiming, so "icon visible" == "in ADS".
+        That matters because right-click is a TOGGLE here: clicking it without
+        knowing the current state lands in the wrong one half the time, and
+        there is no other reliable read of ADS from the HUD.
+
+        Each click is then WATCHED to completion rather than sampled once.
+        Clicking again while the previous ADS animation is still playing just
+        toggles back out, so an impatient version of this oscillates forever —
+        which is exactly what it did before."""
+        if self.read_posture(timeout_s=ADS_SETTLE_S) is not None:
+            return True
+        for _ in range(tries):
+            self.mouse.click(buttons=0x02, duration_ms=60)
+            t0 = time.perf_counter()
+            if self.read_posture(timeout_s=ADS_WATCH_S) is not None:
+                dt = time.perf_counter() - t0
+                if dt > ADS_SETTLE_S:
+                    print(f"      [ads] icon appeared {dt:.2f}s after click")
+                return True
+        return False
+
     def ensure_posture(self, target, tries=4):
         """Toggle until the icon detector agrees. Keypresses alone are not
-        trusted: one dropped toggle would mislabel an entire run."""
+        trusted: one dropped toggle would mislabel an entire run.
+
+        Requires ADS (the icon does not render from the hip) and a closed
+        inventory (which hides the icon and swallows C/Z)."""
+        if not self.ensure_inventory_closed():
+            print("      [!] inventory stuck open — C/Z would be swallowed")
+            self.dump('inventory')
+            return False
+        if not self.ensure_ads():
+            print("      [!] no posture icon — not in ADS? cannot verify")
+            self.dump('ads')
+            return False
         for _ in range(tries):
-            cur = self.read_posture()
+            cur = self.read_posture(timeout_s=POSTURE_WATCH_S)
+            if cur is None and self.ensure_ads(tries=2):
+                # Going prone can drop ADS, and the icon goes with it — that
+                # reads identically to "detector broken", so re-aim and re-read
+                # before believing it.
+                cur = self.read_posture(timeout_s=POSTURE_WATCH_S)
             if cur == target:
                 return True
+            if cur is None:
+                # Never toggle on an unknown state — a blind C/Z here is how an
+                # unattended run ends up measuring a posture nobody asked for.
+                print(f"      [!] posture unreadable (want {target})")
+                self.dump('posture')
+                return False
+            print(f"      posture {cur} -> {target}")
             if target == 'prone':
                 self.mouse.key(HID_KEY_Z, 60)
             elif target == 'crouching':
@@ -178,7 +271,11 @@ class Rig:
             else:  # standing
                 self.mouse.key(HID_KEY_Z if cur == 'prone' else HID_KEY_C, 60)
             time.sleep(POSTURE_SETTLE_S)
-        return self.read_posture() == target
+        cur = self.read_posture(timeout_s=POSTURE_WATCH_S)
+        if cur != target:
+            print(f"      [!] gave up at {cur!r}, wanted {target}")
+            self.dump('posture')
+        return cur == target
 
     def enter_ads(self):
         self.mouse.click(buttons=0x02, duration_ms=60)
@@ -245,10 +342,8 @@ def analyse(res, K, bullet_interval_s):
 
 def calibrate_combo(rig, weapon, posture, mags, log):
     """Measure one (weapon, posture) cell. Returns a summary dict or None."""
-    if not rig.ensure_posture(posture):
-        print(f"    [!] could not reach posture {posture}")
-        return None
-
+    # Loadout first: opening Tab drops ADS, and posture can only be verified
+    # from ADS (the icon does not render from the hip).
     gun_seen, att = rig.read_loadout()
     if gun_seen is None:
         print("    [!] inventory would not open — cannot read attachments")
@@ -272,7 +367,10 @@ def calibrate_combo(rig, weapon, posture, mags, log):
     rig.mouse.set_recoil_enabled(True)
     time.sleep(0.3)
 
-    rig.enter_ads()
+    # Enters ADS as a side effect — the posture icon is the ADS indicator.
+    if not rig.ensure_posture(posture):
+        print(f"    [!] could not reach posture {posture}")
+        return None
     rig.flush(6)
     full_sig = rig.ammo_sig(rig.grab())
 
@@ -281,8 +379,9 @@ def calibrate_combo(rig, weapon, posture, mags, log):
         if not game_focused():
             print("    [!] lost focus — aborting this combo")
             break
-        if i > 0:
-            rig.enter_ads()          # auto-reload dropped us to hip fire
+        if i > 0 and not rig.ensure_ads():   # auto-reload drops us to the hip
+            print("      [!] could not re-enter ADS after reload")
+            break
 
         rec, fire_s, steps = rig.fire_magazine()
         if steps == 0:
