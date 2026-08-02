@@ -13,10 +13,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import cv2
 
-from config import (LOBBY_BAR_ROI, LOBBY_LEAVE_CONFIRM_TEXT_ROI,
+from config import (LOBBY_BAR_ROI, LOBBY_ERROR_TEXT_ROI,
+                    LOBBY_LEAVE_CONFIRM_TEXT_ROI,
                     LOBBY_LEAVE_TEXT_ROI, LOBBY_MENU_SEARCH, LOBBY_PING_ROI)
 from detector.lobby_detector import (LobbyState, _search_roi, bar_max,
-                                     classify_frame, is_results_screen,
+                                     classify_frame, error_dialog_score,
+                                     error_dialog_visible, is_results_screen,
                                      leave_confirm_score, leave_confirm_visible,
                                      leave_entry_confirmed, leave_entry_score,
                                      ping_fraction)
@@ -38,6 +40,14 @@ CASES = [
     # leave_confirm_visible() is for.
     ('leave_confirm.png', LobbyState.FULLBLEED, False,
      '"Do you want to exit training?" CONFIRM / CANCEL'),
+    # Idling gets the session dropped, and the dialog then blocks re-entry
+    # behind itself. It is drawn OVER the lobby, but its dimming overlay lifts
+    # the letterbox bar from 0 to 60 -- past LOBBY_BAR_MAX -- so it reads
+    # FULLBLEED. That makes three unrelated screens sharing that state, all
+    # wanting different treatment, which is the whole argument for the gates
+    # below.
+    ('error_inactivity.png', LobbyState.FULLBLEED, False,
+     '"You have been logged off due to inactivity" OK'),
     # Results screen: full-bleed, and its top gradient covers the ping overlay
     # completely (ping_frac 0.000, lower than the lobby's 0.021). FULLBLEED is
     # the right answer -- nothing is drivable here -- but it lands there by
@@ -75,7 +85,9 @@ def confusion():
     gates = [('leave_confirm', leave_confirm_visible, leave_confirm_score,
               LOBBY_LEAVE_CONFIRM_TEXT_ROI, 'leave_confirm.png'),
              ('leave_entry', leave_entry_confirmed, leave_entry_score,
-              LOBBY_LEAVE_TEXT_ROI, 'system_menu.png')]
+              LOBBY_LEAVE_TEXT_ROI, 'system_menu.png'),
+             ('error_dialog', error_dialog_visible, error_dialog_score,
+              LOBBY_ERROR_TEXT_ROI, 'error_inactivity.png')]
     bad = 0
     print(f'\n{"gate":<16}{"screen":<22}{"score":>7}  fires')
     for gate, visible, score, roi, expect_on in gates:

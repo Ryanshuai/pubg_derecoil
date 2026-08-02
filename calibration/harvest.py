@@ -86,6 +86,11 @@ PART_FOR_CLASS = {
 # wearing a cheek pad it was never asked for, and a cheek pad reduces recoil.
 TEST_SLOTS = ('muzzle', 'grip', 'stock')
 
+# Level 3, the largest. Capacity is the whole reason it is here — the parts
+# for a full factorial plus the spares shuttling on and off the gun have to fit
+# at once, and the panel's own 物品 N/200 counter is the backpack's.
+BACKPACK = 'backpack3'
+
 # The sight is pinned, not tested. Magnification is a different axis from
 # recoil reduction: a scope does not damp the gun, it magnifies the view, so
 # the compensation has to scale with it and the measurement's own K changes
@@ -409,7 +414,7 @@ def harvest_weapon(rig, panel, kit, sc, weapon, configs, postures, mags,
     if not panel.ensure_open():
         print("  [!] spawner panel would not open")
         return []
-    if not sc.sync():
+    if not sc.sync(need_cols=(1,)):    # the weapon column
         print("  [!] spawner layout would not read")
         panel.ensure_closed()
         return []
@@ -442,11 +447,26 @@ def harvest_weapon(rig, panel, kit, sc, weapon, configs, postures, mags,
 
 
 def stock_parts(panel, sc, keys):
-    """Spawn one of each part, once, before anything else runs."""
+    """A backpack, then one of each part, in that order.
+
+    The order is the point. An attachment spawns INTO the backpack, so with no
+    backpack there is nowhere for one to go — and it does not fail cleanly. The
+    parts land somewhere else, the inventory rows shift under the drag targets,
+    and kitting reads back a part nobody asked for: a run was told to fit a
+    compensator, fitted a suppressor, and skipped seven configs in a row.
+
+    Re-run after every range re-entry, which empties the backpack along with
+    everything in it.
+    """
     if not panel.ensure_open():
         return False
-    ok = sc.sync()
+    ok = sc.sync(need_cols=(2, 3))     # 3 is the gear column, drawn last
     if ok:
+        if not sc.give_gear(BACKPACK):
+            print(f"[!] spawner would not produce {BACKPACK} — parts have "
+                  f"nowhere to go; stopping rather than kitting blind")
+            panel.ensure_closed()
+            return False
         for k in keys:
             if not sc.give_attachment(k):
                 print(f"[!] spawner would not produce {k}")

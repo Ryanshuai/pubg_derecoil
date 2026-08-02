@@ -39,9 +39,10 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import (LOBBY_EXIT_XY, LOBBY_LEAVE_CONFIRM_XY,
+from config import (LOBBY_ERROR_OK_XY, LOBBY_EXIT_XY, LOBBY_LEAVE_CONFIRM_XY,
                     LOBBY_MENU_LEAVE_XY, LOBBY_PLAY_XY)
 from detector.lobby_detector import (LobbyDetector, LobbyState,
+                                     error_dialog_visible,
                                      leave_confirm_visible,
                                      leave_entry_confirmed, is_results_screen)
 from press.pointer import Pointer, game_focused, ensure_focus, focus_keeper
@@ -137,6 +138,15 @@ class LobbyControl:
         self.pointer.click_at(*LOBBY_MENU_LEAVE_XY)
         return f'click LEAVE TRAINING {LOBBY_MENU_LEAVE_XY}'
 
+    def dismiss_error(self):
+        """Clear a modal ERROR dialog. Most often the inactivity logout, which
+        drops the session and then blocks every recovery behind itself — an
+        unattended campaign that idles once never gets going again."""
+        if not error_dialog_visible():
+            return None
+        self.pointer.click_at(*LOBBY_ERROR_OK_XY)
+        return f'click OK on an ERROR dialog {LOBBY_ERROR_OK_XY}'
+
     def click_leave_confirm(self):
         """Answer the "Do you want to exit training?" dialog.
 
@@ -222,7 +232,7 @@ class LobbyControl:
             # dims the ping overlay enough to classify as FULLBLEED, which is
             # also what a loading screen looks like — and the two want
             # opposite treatment (click it vs. touch nothing).
-            done = self.click_leave_confirm()
+            done = self.dismiss_error() or self.click_leave_confirm()
             if done:
                 return done
             if state is LobbyState.FULLBLEED and is_results_screen():
@@ -258,6 +268,11 @@ class LobbyControl:
         be *in* a match, and the round behind the menu already is one.
         """
         def act(state):
+            # An ERROR dialog sits over the lobby and swallows the PLAY click,
+            # so it is cleared before anything else is tried.
+            done = self.dismiss_error()
+            if done:
+                return done
             if state is LobbyState.LOBBY:
                 return self.press_play()
             if state is LobbyState.MENU:

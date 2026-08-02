@@ -532,6 +532,19 @@ LOBBY_LEAVE_CONFIRM_TEXT_ROI = (558, 1495, 65, 450)   # (y, x, h, w)
 LOBBY_LEAVE_CONFIRM_MIN_SCORE = 0.55
 LOBBY_LEAVE_CONFIRM_XY = (1576, 878)   # CONFIRM; CANCEL is at x=1863
 
+# "ERROR / You have been logged off due to inactivity." Sitting still in the
+# lobby gets the session dropped, and the dialog then blocks everything —
+# including re-entry, so an unattended campaign that idles once never recovers
+# on its own. OK is its only button.
+#
+# Gated on the title, which is just the word ERROR, so this fires for any error
+# dialog. That is deliberate: whatever the message, OK is the only thing to
+# click, and being stuck is worse than dismissing something unexpected. It is
+# logged loudly either way.
+LOBBY_ERROR_TEXT_ROI = (500, 1628, 65, 186)   # (y, x, h, w)
+LOBBY_ERROR_MIN_SCORE = 0.55
+LOBBY_ERROR_OK_XY = (1709, 904)
+
 # ════════════════════════════════════════════════════════════
 # Alpha blending (for highlight hypothesis test)
 # ════════════════════════════════════════════════════════════

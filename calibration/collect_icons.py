@@ -102,7 +102,7 @@ class Collector:
         if not self.panel.ensure_open():
             print("[!] spawner panel would not open")
             return False
-        ok = self.sc.sync()
+        ok = self.sc.sync(need_cols=(2,))
         if ok:
             for k in keys:
                 if not self.sc.give_attachment(k):

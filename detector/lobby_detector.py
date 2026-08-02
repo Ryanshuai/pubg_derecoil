@@ -28,7 +28,8 @@ import os
 import cv2
 import numpy as np
 
-from config import (LOBBY_BAR_MAX, LOBBY_BAR_ROI, LOBBY_EXIT_MIN_SCORE,
+from config import (LOBBY_BAR_MAX, LOBBY_BAR_ROI, LOBBY_ERROR_MIN_SCORE,
+                    LOBBY_ERROR_TEXT_ROI, LOBBY_EXIT_MIN_SCORE,
                     LOBBY_EXIT_SEARCH, LOBBY_EXIT_TEXT_ROI, LOBBY_EXIT_THRESH,
                     LOBBY_LEAVE_CONFIRM_MIN_SCORE,
                     LOBBY_LEAVE_CONFIRM_TEXT_ROI,
@@ -44,6 +45,7 @@ EXIT_TMPL_PATH = os.path.join(_TMPL_DIR, 'exit_to_lobby_mask.png')
 MENU_TMPL_PATH = os.path.join(_TMPL_DIR, 'system_menu_mask.png')
 LEAVE_TMPL_PATH = os.path.join(_TMPL_DIR, 'leave_training_mask.png')
 LEAVE_CONFIRM_TMPL_PATH = os.path.join(_TMPL_DIR, 'leave_confirm_mask.png')
+ERROR_TMPL_PATH = os.path.join(_TMPL_DIR, 'error_title_mask.png')
 
 BAR = 'lobby_bar'
 PING = 'lobby_ping'
@@ -133,6 +135,7 @@ _EXIT_TMPL = _load_template(EXIT_TMPL_PATH)
 _MENU_TMPL = _load_template(MENU_TMPL_PATH)
 _LEAVE_TMPL = _load_template(LEAVE_TMPL_PATH)
 _LEAVE_CONFIRM_TMPL = _load_template(LEAVE_CONFIRM_TMPL_PATH)
+_ERROR_TMPL = _load_template(ERROR_TMPL_PATH)
 
 
 def _score(crop, tmpl, thresh):
@@ -212,6 +215,23 @@ def leave_entry_confirmed(frame=None):
     """
     roi = _search_roi(LOBBY_LEAVE_TEXT_ROI, LOBBY_MENU_SEARCH)
     return leave_entry_score(_grab(roi, frame)) >= LOBBY_LEAVE_MIN_SCORE
+
+
+def error_dialog_score(crop):
+    """Match the ERROR title in a crop of the search window."""
+    return _score(crop, _ERROR_TMPL, LOBBY_MENU_THRESH)
+
+
+def error_dialog_visible(frame=None):
+    """True while a modal ERROR dialog is up — most often the inactivity
+    logout, which drops the session and then blocks re-entry behind itself.
+
+    Deliberately not specific to one message: OK is the only button on any of
+    them, and a campaign stuck behind an undismissed dialog is worse than one
+    that clicked OK on something unexpected. Callers log it.
+    """
+    roi = _search_roi(LOBBY_ERROR_TEXT_ROI, LOBBY_MENU_SEARCH)
+    return error_dialog_score(_grab(roi, frame)) >= LOBBY_ERROR_MIN_SCORE
 
 
 def leave_confirm_score(crop):

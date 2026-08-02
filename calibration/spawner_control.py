@@ -89,6 +89,32 @@ SPAWNER_EXTRAS = {
 SPAWN_WAIT = 0.30     # after clicking an entry, before the next click
 SWITCH_WAIT = 0.35    # after pressing 2
 
+# ── Gear (column 3) ──────────────────────────────────────────────────────
+# Column 3 is 汽油桶 / 能量物品 / 治疗物品 / 头盔 / 防弹衣 / 背包. Only the
+# backpack is modelled, because only the backpack is a PREREQUISITE: an
+# attachment spawns into the backpack, so with no backpack there is nowhere
+# for one to go.
+#
+# That failure is not clean. The parts do not refuse to spawn; they go
+# somewhere else, the inventory rows shift under the drag targets, and every
+# kitting step afterwards reads back a part nobody asked for -- a harvest run
+# fitted a suppressor while being told to fit a compensator, then skipped
+# seven configs in a row. Spawn a level 3 backpack before anything else and
+# none of it happens.
+GEAR = {
+    'backpack1': {'zh': '背包 (1级)', 'category': (3, 6), 'index': 1},
+    'backpack2': {'zh': '背包 (2级)', 'category': (3, 6), 'index': 2},
+    'backpack3': {'zh': '背包 (3级)', 'category': (3, 6), 'index': 3},
+}
+GEAR_COUNTS = {(3, 6): 3}      # entries per gear category, for spawn()'s check
+
+
+def gear_position(key):
+    g = GEAR.get(key)
+    if g is None:
+        raise KeyError(f'unknown gear {key!r}')
+    return g['category'], g['index'], GEAR_COUNTS[g['category']]
+
 
 def weapon_position(key):
     """(category (col,row), 1-based index inside that category) for a weapon.
@@ -133,7 +159,9 @@ def position_of(key):
         return weapon_position(key)
     if key in ATTACHMENTS:
         return attachment_position(key)
-    raise KeyError(f'{key!r} is in neither ROSTER nor ATTACHMENTS')
+    if key in GEAR:
+        return gear_position(key)
+    raise KeyError(f'{key!r} is in ROSTER, ATTACHMENTS nor GEAR')
 
 
 def check_against_run(run_dir):
@@ -195,8 +223,38 @@ class SpawnerControl:
 
     # ── Layout ──
 
-    def sync(self):
-        """Read the collapsed panel and cache its layout. False if not up."""
+    # col1 weapons, col2 attachments, col3 gear. Not enforced — a game update
+    # that adds a category should be loud, not fatal — but a column that comes
+    # back SHORT of this is worth another look before believing it.
+    EXPECTED_ROWS = {1: 10, 2: 5, 3: 6}
+
+    def sync(self, need_cols=(), retries=3):
+        """Read the collapsed panel and cache its layout. False if not up.
+
+        need_cols: the columns the caller is about to use. The panel draws its
+        columns progressively, and the three button glyphs that prove it is
+        open finish before the last column does — so a sync taken the moment
+        the panel reports open comes back with two columns out of three about
+        as often as not. That surfaced as "category col3_row06 does not exist
+        (0 rows in column 3)" for a backpack plainly on screen.
+
+        So the layout is re-read until the columns actually wanted are there,
+        rather than trusted on the first look.
+        """
+        for attempt in range(retries + 1):
+            if not self._sync_once():
+                return False
+            missing = [c for c in need_cols
+                       if len(self.menu.get(c, [])) < self.EXPECTED_ROWS.get(c, 1)]
+            if not missing:
+                return True
+            if attempt < retries:
+                self._log(f'column(s) {missing} not drawn yet — re-reading')
+                time.sleep(0.4)
+        self._log(f'gave up waiting for column(s) {missing}')
+        return False
+
+    def _sync_once(self):
         if not game_focused():
             self._log('game is not the foreground window')
             return False
@@ -336,13 +394,26 @@ class SpawnerControl:
         rec.update(attachment=key, category=(col, row), index=index)
         return rec
 
+    def give_gear(self, key):
+        """Spawn a piece of column-3 gear. One click: gear auto-equips when
+        the corresponding slot is empty, which after a range re-entry it
+        always is."""
+        (col, row), index, expect = gear_position(key)
+        self._log(f'{key} -> col{col}_row{row:02d} entry {index}/{expect} '
+                  f'({GEAR[key]["zh"]})')
+        rec = self.spawn(col, row, index, times=1, expect=expect)
+        rec.update(gear=key, category=(col, row), index=index)
+        return rec
+
     def give(self, key, **kw):
-        """Whichever of the two applies to `key`."""
+        """Whichever of the three applies to `key`."""
         if key in ROSTER:
             return self.give_weapon(key, **kw)
         if key in ATTACHMENTS:
             return self.give_attachment(key, **kw)
-        raise KeyError(f'{key!r} is in neither ROSTER nor ATTACHMENTS')
+        if key in GEAR:
+            return self.give_gear(key, **kw)
+        raise KeyError(f'{key!r} is in ROSTER, ATTACHMENTS nor GEAR')
 
 
 def main():
