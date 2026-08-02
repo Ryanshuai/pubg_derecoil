@@ -16,7 +16,12 @@ temp_debug
 training_data/pubg_assets/Item
 InGameScreenshot
 training_data/Manual
-calibrate_distance
+# calibration DATA is generated and large; the tools next to it are source
+calibrate_distance/*.json
+calibrate_distance/*.png
+calibrate_distance/*.jsonl
+calibrate_distance/weapon_curve/
+calibrate_distance/weapon_curve_kava4/
 
 .claude/settings.local.json
 training_data/human_detection

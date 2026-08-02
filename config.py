@@ -15,6 +15,13 @@ HUD_REGIONS = {
     'weapon_2':   (1262, 2808, 53, 206),   # slot2 (top, key 2)
     'fire_mode':  (1317, 1626, 43, 56),
     'posture':    (1301, 1373, 66, 66),
+    # Rounds left in the magazine. Automated training-range calibration uses
+    # it for both ends of the cycle: the count going static means the mag is
+    # empty, and it jumping back up means the reload finished — far more
+    # robust than timing the fire/reload durations by weapon. Sized to fit
+    # three digits (100-round drums) with the count right-aligned; stops
+    # short of the spare-ammo symbol at x=1760.
+    'ammo':       (1318, 1670, 48, 90),
 
     # Tab inventory
     'type':       (129, 937, 18, 41),      # "Type" text, Tab open indicator
@@ -35,6 +42,111 @@ HUD_REGIONS = {
 }
 
 # ════════════════════════════════════════════════════════════
+# Recoil observation ROI — patches for measuring view rotation
+#
+# The patches sit on the screen's vertical centre line. A pitch rotation maps
+# to a pure translation only at y = 0 (relative to the principal point): off
+# the centre line the vertical gain grows as 1+(y/f)^2 and pitch leaks into
+# the horizontal reading as x*y/f — 20%+ crosstalk at y=200, x=1300. On the
+# centre line both vanish *independently of focal length*, so no FOV
+# calibration is needed and phaseCorrelate's pure-translation assumption holds.
+#
+# x positions avoid the centre +-330 px (crosshair / iron sights) and all sit
+# inside the existing DXGI bounding box (x 937..3014), so adding them to
+# HUD_REGIONS does not enlarge the captured area.
+#
+# See docs/recoil_observer_design.md for the measurements behind each value.
+# ════════════════════════════════════════════════════════════
+
+RECOIL_PATCH = 128             # 3P/8 = 48 px usable range; >=192 adds
+                               # intra-patch gain error at wide FOV
+RECOIL_BAND_Y = SCREEN_H // 2 - RECOIL_PATCH // 2
+RECOIL_KEEPOUT = 330           # half-width of the crosshair exclusion
+RECOIL_PATCH_XS = (980, 1120, 1260, 2050, 2240, 2430, 2620)  # odd count: an
+                               # even count lets 2 bad patches drag the median
+RECOIL_CHANNEL = 1             # green; skips cvtColor, cuts the copy 3x
+
+# Gradient-energy floor. Only rejects degenerate frames (loading screen,
+# flashbang whiteout, full-screen UI) — measured accuracy is uncorrelated
+# with this score all the way down to 0.5, so it is NOT a texture filter.
+# Never gate on phaseCorrelate's response instead: it reads 0.95 on a flat
+# patch whose displacement is completely wrong.
+RECOIL_GATE_MIN = 0.1
+
+# Outlier rejection across patches. The floor is required because MAD
+# collapses to ~0 when patches agree, which would reject everything.
+RECOIL_MAD_K = 3.0
+RECOIL_MAD_FLOOR = 0.5
+
+# ════════════════════════════════════════════════════════════
+# Per-sight calibration — measured 2026-08-01 with
+# calibrate_distance/calibrate_k.py, at general 30 / aim 50 / scope 50 and
+# every per-scope slider at its default 50.
+# RE-RUN AFTER CHANGING ANY SENSITIVITY SLIDER OR THE MOUSE DPI.
+#
+#   sight     K        R^2       CV     patches
+#   hipfire   ~0.50    -         -      7     (TPP, no weapon; needs redo armed)
+#   red_dot   1.5474   0.99999   0.3%   7
+#   2x        1.8254   0.99948   2.0%   3
+#   3x        1.8802   0.99977   1.4%   3
+#   4x        1.88+-0.03         3 runs  5    (1.8827 / 1.8725 / 1.9000)
+#
+# 2x/3x/4x agree to within their own CV, so magnified scopes share one K.
+#
+# Measured inside the 4x scope, K is the same to 0.13% whether a patch sits
+# 136 px or 406 px from the scope centre — the scope is a flat window, not a
+# distorting lens, so patches may go anywhere inside the circle. The residual
+# ~2.7% scatter is trial-to-trial (injection timing, frame pacing), identical
+# across all five patches, and does not improve by moving them.
+# 1x sits 18% lower because red-dot/holo/iron run off the "aim sensitivity"
+# slider while 2x+ run off "scope sensitivity" times a per-scope multiplier.
+#
+# patch_xs is per-sight because the scope body blacks out most of the band.
+# Those patches are fixed to the screen rather than the world, so they read
+# zero and — being several of them — drag the median with them while MAD stays
+# small. The blurred ring OUTSIDE the scope body is worse still: it renders at
+# hip-fire FOV, so it moves at ~1/4 the in-scope rate.
+#
+# keepout is per-sight too: iron sights and red dots put the gun body across
+# the centre, magnified scopes only a thin reticle.
+# ════════════════════════════════════════════════════════════
+
+RECOIL_SIGHT_PROFILES = {
+    'hipfire': {'K': 0.50,   'keepout': 330,
+                'patch_xs': (980, 1120, 1260, 2050, 2240, 2430, 2620)},
+    'red_dot': {'K': 1.5474, 'keepout': 330,
+                'patch_xs': (980, 1120, 1260, 2050, 2240, 2430, 2620)},
+    '2x':      {'K': 1.8254, 'keepout': 60,
+                'patch_xs': (1390, 1530, 1850)},
+    '3x':      {'K': 1.8802, 'keepout': 70,
+                'patch_xs': (1380, 1520, 1820)},
+    '4x':      {'K': 1.885,  'keepout': 70,
+                'patch_xs': (1250, 1390, 1520, 1800, 1930)},
+    # VSS's fixed PSO-1 measures the same as a standard 4x (1.8855 / 1.8636 on
+    # the two clean patches). Its patch set is different though: the PSO-1
+    # reticle puts a full-width horizontal line plus a range ladder across the
+    # observation band, and any patch overlapping those markings goes unstable
+    # (measured std 0.67 vs 0.012 typical) because the screen-locked overlay
+    # competes with real texture for the correlation peak.
+    # The PSO-1 horizontal line spans x=1460..1990 and MUST be avoided
+    # entirely. A patch overlapping it is a *conditional* failure: x=1900
+    # measured clean against sand+grass (gate 3886, std 0.026) and then blew
+    # up against rock (gate 1123, std 0.777) — strong texture outvotes the
+    # line, weak texture lets the line win. So "tested clean once" is not
+    # evidence; these three were verified on the weak-texture aim.
+    # Only 1260..1460 and 1990..2150 are usable, which fits just two
+    # non-overlapping 128 patches — hence the overlap below. Dropping to
+    # patch=96 would give three clean non-overlapping ones at 1262/1362/1995
+    # (range 3P/8=36px vs 5.6px/frame needed), but ViewTracker takes one
+    # global patch size, so that needs a per-profile override first.
+    'vss_pso1': {'K': 1.875, 'keepout': 200,
+                 'patch_xs': (1265, 1330, 2010)},
+}
+
+# Untested sights fall back to the magnified-scope group.
+RECOIL_K_DEFAULT_SCOPED = 1.86
+
+# ════════════════════════════════════════════════════════════
 # Key polling — VK codes for GetAsyncKeyState
 # ════════════════════════════════════════════════════════════
 
@@ -47,7 +159,7 @@ POLL_VK_MAP = {
     0x28: 'down',       # VK_DOWN
     0x5B: 'win',        # VK_LWIN
     0x78: 'f9',         # VK_F9
-    0x7C: 'f13',        # VK_F13
+    0x13: 'pause',      # VK_PAUSE
     ord('1'): '1', ord('2'): '2', ord('5'): '5',
     ord('B'): 'b', ord('C'): 'c', ord('F'): 'f',
     ord('G'): 'g', ord('X'): 'x', ord('Z'): 'z',
@@ -142,7 +254,7 @@ KEY_ACTION_TABLE = [
      'state': [('toggle_aim',)]},
 
     # ── Shutdown ──
-    {'key': 'f13', 'event': 'press',
+    {'key': 'pause', 'event': 'press',
      'hw': ['shutdown']},
 ]
 
