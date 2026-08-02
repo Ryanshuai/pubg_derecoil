@@ -15,7 +15,10 @@ extern "C" {
 #define CFG_TUD_ENDPOINT0_SIZE 64
 
 #define CFG_TUD_CDC     1
-#define CFG_TUD_HID     1
+/* Two HID instances: 0 = mouse (passthrough + recoil), 1 = keyboard.
+ * The keyboard exists so the PC can drive reload (R) during automated
+ * training-range calibration, which a mouse-only device cannot do. */
+#define CFG_TUD_HID     2
 #define CFG_TUD_MSC     0
 #define CFG_TUD_MIDI    0
 #define CFG_TUD_VENDOR  0

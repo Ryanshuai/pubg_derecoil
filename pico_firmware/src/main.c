@@ -33,7 +33,13 @@ static inline uint32_t board_millis(void) {
 #define CMD_MOVE_CLICK     0x15
 #define CMD_AIM_MODE       0x16
 #define CMD_SET_DELTA      0x17  /* PC sends latest aim delta each frame */
+#define CMD_KEY            0x18  /* [0x18][hid_keycode][duration_ms_u16] */
 #define CMD_REBOOT_BOOTSEL 0xFF
+
+/* HID instance indices — must match the descriptor order in
+ * usb_descriptors.c (TinyUSB numbers instances by descriptor order). */
+#define HID_ITF_MOUSE 0
+#define HID_ITF_KBD   1
 
 /* ── Recoil pattern storage ────────────────────────────── */
 #define MAX_PATTERN_POINTS 300
@@ -322,6 +328,10 @@ static volatile uint8_t  inject_buttons = 0;
 static volatile uint32_t inject_start_ms = 0;  /* when to start pressing */
 static volatile uint32_t inject_end_ms = 0;    /* when to release */
 
+/* Injected keypress from CDC (keycode 0 = inactive) */
+static volatile uint8_t  key_code = 0;
+static volatile uint32_t key_end_ms = 0;
+
 /* Aim assist: latest delta from PC (updated every frame) */
 static volatile int16_t aim_dx = 0;
 static volatile int16_t aim_dy = 0;
@@ -531,6 +541,13 @@ static void process_cdc(void) {
             aim_dx = (int16_t)(cdc_buf[pos+1] | (cdc_buf[pos+2] << 8));
             aim_dy = (int16_t)(cdc_buf[pos+3] | (cdc_buf[pos+4] << 8));
             pos += 5;
+        } else if (cmd == CMD_KEY) {
+            /* [0x18][hid_keycode][duration_ms_u16_le] = 4 bytes */
+            if (pos + 4 > cdc_len) break;
+            key_code = cdc_buf[pos+1];
+            uint16_t dur = (uint16_t)(cdc_buf[pos+2] | (cdc_buf[pos+3] << 8));
+            key_end_ms = board_millis() + dur;
+            pos += 4;
         } else if (cmd == CMD_REBOOT_BOOTSEL) {
             reset_usb_boot(0, 0);
         } else {
@@ -553,9 +570,34 @@ void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts) {
         aim_dy = 0;
         aim_delay_until = 0;
         inject_buttons = 0;
+        key_code = 0;          /* else a held key stays stuck in the game */
+        key_end_ms = 0;
         recoil_enabled = true;
         pattern_len = 0;
         firing = false;
+    }
+}
+
+/* ── Keyboard output ──────────────────────────────────────
+ * Only emits on a state change (press / release) rather than every poll:
+ * a keyboard that keeps re-reporting the same keycode looks like auto-repeat
+ * to the host, which would fire multiple reloads from one command.
+ */
+static void send_kbd_output(void) {
+    static bool down = false;
+    if (!tud_hid_n_ready(HID_ITF_KBD)) return;
+
+    bool want = (key_code != 0) && (board_millis() < key_end_ms);
+    if (want == down) return;
+
+    if (want) {
+        uint8_t kc[6] = { key_code, 0, 0, 0, 0, 0 };
+        if (tud_hid_n_keyboard_report(HID_ITF_KBD, 0, 0, kc)) down = true;
+    } else {
+        if (tud_hid_n_keyboard_report(HID_ITF_KBD, 0, 0, NULL)) {
+            down = false;
+            key_code = 0;
+        }
     }
 }
 
@@ -587,6 +629,7 @@ int main(void) {
         tud_task();
         read_mouse_input();   /* drain FIFO → accumulator (125Hz input) */
         send_hid_output();    /* send HID every 1ms (1000Hz output, smooth recoil) */
+        send_kbd_output();    /* reload keypresses for automated calibration */
         process_cdc();
     }
     return 0;

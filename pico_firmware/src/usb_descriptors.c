@@ -25,6 +25,15 @@ const uint8_t *tud_descriptor_device_cb(void) {
     return (const uint8_t *)&desc_device;
 }
 
+/* HID instance indices — must match the order of the HID interface
+ * descriptors in desc_configuration below, since TinyUSB numbers its HID
+ * instances by descriptor order. */
+enum {
+    ITF_HID_MOUSE = 0,
+    ITF_HID_KEYBOARD,
+    ITF_HID_COUNT,
+};
+
 /* ================================================================
  *  HID Report Descriptor — Mouse with 16-bit X/Y
  * ================================================================ */
@@ -67,9 +76,19 @@ static const uint8_t desc_hid_report[] = {
     0xC0,              // End Collection
 };
 
+/* ================================================================
+ *  HID Report Descriptor — boot keyboard (instance 1)
+ *
+ *  Needed only so the PC can send R (reload) during automated
+ *  calibration; a mouse-only HID device cannot do that.
+ * ================================================================ */
+static const uint8_t desc_hid_kbd_report[] = {
+    TUD_HID_REPORT_DESC_KEYBOARD()
+};
+
 const uint8_t *tud_hid_descriptor_report_cb(uint8_t instance) {
-    (void)instance;
-    return desc_hid_report;
+    return (instance == ITF_HID_KEYBOARD) ? desc_hid_kbd_report
+                                          : desc_hid_report;
 }
 
 /* ================================================================
@@ -78,7 +97,8 @@ const uint8_t *tud_hid_descriptor_report_cb(uint8_t instance) {
 enum {
     ITF_NUM_CDC = 0,
     ITF_NUM_CDC_DATA,
-    ITF_NUM_HID,
+    ITF_NUM_HID,        /* mouse    -> HID instance 0 */
+    ITF_NUM_HID_KBD,    /* keyboard -> HID instance 1 */
     ITF_NUM_TOTAL,
 };
 
@@ -86,8 +106,10 @@ enum {
 #define EPNUM_CDC_OUT   0x02
 #define EPNUM_CDC_IN    0x82
 #define EPNUM_HID       0x83
+#define EPNUM_HID_KBD   0x84
 
-#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_HID_DESC_LEN)
+#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN \
+                          + TUD_HID_DESC_LEN + TUD_HID_DESC_LEN)
 
 static const uint8_t desc_configuration[] = {
     TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CONFIG_TOTAL_LEN, 0x00, 100),
@@ -95,6 +117,10 @@ static const uint8_t desc_configuration[] = {
                        EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),
     TUD_HID_DESCRIPTOR(ITF_NUM_HID, 5, HID_ITF_PROTOCOL_MOUSE,
                        sizeof(desc_hid_report), EPNUM_HID, 16, 1),
+    /* 10 ms interval: reload keypresses need nothing like the mouse's 1 kHz,
+     * and a slower interval costs the host less bandwidth. */
+    TUD_HID_DESCRIPTOR(ITF_NUM_HID_KBD, 6, HID_ITF_PROTOCOL_KEYBOARD,
+                       sizeof(desc_hid_kbd_report), EPNUM_HID_KBD, 8, 10),
 };
 
 const uint8_t *tud_descriptor_configuration_cb(uint8_t index) {
@@ -112,6 +138,7 @@ static const char *string_desc_arr[] = {
     "000001",
     "Serial Port",
     "Mouse",
+    "Keyboard",
 };
 
 static uint16_t _desc_str[32 + 1];

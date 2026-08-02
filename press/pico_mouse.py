@@ -25,6 +25,18 @@ CMD_CLICK          = 0x14
 CMD_MOVE_CLICK     = 0x15
 CMD_AIM_MODE       = 0x16
 CMD_SET_DELTA      = 0x17
+CMD_KEY            = 0x18
+
+# HID usage IDs for the keys this project drives. The Pico exposes a second
+# HID interface (keyboard) purely so automated calibration can reload.
+HID_KEY_R   = 0x15
+HID_KEY_TAB = 0x2B
+HID_KEY_C   = 0x06   # crouch toggle
+HID_KEY_Z   = 0x1D   # prone toggle
+HID_KEY_F   = 0x09   # pick up
+HID_KEY_1   = 0x1E
+HID_KEY_2   = 0x1F
+HID_KEY_3   = 0x20
 
 _instance = None
 
@@ -131,6 +143,20 @@ class PicoMouse:
 
     def set_delta(self, dx, dy):
         self._write(struct.pack('<Bhh', CMD_SET_DELTA, int(dx), int(dy)))
+
+    def key(self, keycode, duration_ms=60):
+        """Hold a key on the Pico's keyboard interface for duration_ms.
+
+        The firmware emits a report only on press and on release, so one call
+        is one keystroke — re-reporting the same keycode would look like
+        auto-repeat to the host and fire the action several times.
+        """
+        self._write(struct.pack('<BBH', CMD_KEY, int(keycode),
+                                int(duration_ms)))
+
+    def reload(self, duration_ms=60):
+        """Press R. Used by automated training-range calibration."""
+        self.key(HID_KEY_R, duration_ms)
 
     def move_click(self, dx, dy, buttons=0x01, delay_ms=0, duration_ms=80):
         if delay_ms == 0:
