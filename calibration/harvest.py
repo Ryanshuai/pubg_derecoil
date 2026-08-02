@@ -308,8 +308,12 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
     if not rig.ensure_posture(posture):
         print(f"      [!] could not reach posture {posture}")
         return None
-    rig.recenter()          # in ADS by now; see Rig.recenter
+    # Home against the pitch stop and rise to the measurable middle, so every
+    # magazine in every cell starts from the same absolute aim. The reference
+    # is taken after that, in ADS, because it describes wherever homing landed.
     rig.flush(6)
+    rig.goto_pitch_centre()
+    rig.set_reference()
 
     rows = []
     for i in range(mags):
@@ -319,9 +323,18 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
             if not rig.ensure_ads():
                 print("      [!] could not re-enter ADS after reload")
                 break
-            back = rig.recenter()
+            back = rig.goto_pitch_centre()
+            rig.set_reference()
             if back:
-                print(f"        recentred {back:+d} counts")
+                print(f"        re-homed, {back:+d} counts above the stop")
+            # A magazine fired from an unknown position is not noisy data, it
+            # is wrong data that looks fine — at the pitch clamp the view
+            # barely moves and the weapon measures unusually mild. Stop the
+            # cell instead of recording it.
+            if rig.tracking_lost:
+                print("        [!] view position is no longer known — "
+                      "abandoning the rest of this cell")
+                break
         rec, fire_s, steps, fire_end = rig.fire_magazine()
         if steps == 0:
             print("        no rounds fired (still reloading?) — skipped")
@@ -763,6 +776,10 @@ def main():
                 break
             if re_entered:
                 print("re-entered the range — re-stocking parts")
+                # The measurable band is a property of where the character is
+                # standing and facing, and re-entry moves both. Measured again
+                # on the first cell rather than carried over.
+                rig.pitch_centre = 0
                 if not stock_parts(panel, sc, sorted(parts)):
                     print("[!] could not re-stock after re-entry")
             print(f"\n[{i+1}/{len(weapons)}] {weapon}")

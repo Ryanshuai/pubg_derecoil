@@ -79,6 +79,32 @@ TAB_OPEN_S = 0.55
 TAB_CLOSE_S = 0.35
 POSTURE_SETTLE_S = 0.6
 RECENTER_SETTLE_S = 0.25   # let the view stop before the next burst
+
+# Closed-loop recentring. See Rig.recenter.
+RECENTER_TOL = 8        # counts; below this the next burst does not care
+RECENTER_TRIES = 4
+RECENTER_STEP = 60      # counts per move, so no single frame pair wraps
+TRACK_TIMEOUT_S = 2.0   # post-fire recovery has always finished well inside
+TRACK_STILL_S = 0.20    # this long under tol_px counts as stopped
+TRACK_STILL_PX = 1.0
+TRACK_MIN_S = 0.12      # USB command -> rendered frame; before this, "not
+                        # started" and "finished" look identical
+# Fraction of the correlator's half-patch range an absolute reading may use
+# before it is refused as possibly wrapped. See Rig.absolute_offset.
+ABS_TRUST_FRAC = 0.6
+# How far the absolute reading may disagree with the running total before the
+# reading is treated as wrapped rather than the total as drifted.
+ABS_AGREE_COUNTS = 45
+PROBE_COUNTS = 30       # for tracking_confirmed()
+
+# Homing against the pitch clamp. The clamp is the only absolute position the
+# game offers: a running total drifts and a correlation wraps, but "the game
+# refuses to rotate further" is the same place every time.
+CLAMP_PUSH = 4000       # one open-loop shove, comfortably past the travel
+CLAMP_SETTLE_S = 0.35
+BAND_STEP = 100         # rise per probe while mapping the measurable band
+BAND_MAX = 3000         # stop rising; the travel is well inside this
+BAND_TRACK_FRAC = 0.5   # observed/commanded above this counts as measurable
 POSTURES = ('standing', 'crouching', 'prone')
 
 # One implementation, in press/pointer.py, because it guards the mouse calls
@@ -110,6 +136,14 @@ class Rig:
         self.grabber, self.paced = make_grabber(regions)
         # Pitch owed back to the view, in ADS mouse counts. See recenter().
         self.pending_pitch = 0.0
+        # Where this cell is aiming, for the absolute check. See set_reference.
+        self.ref_patches = None
+        # Set when the view's position stops being knowable. A cell measured
+        # after this is not wrong-looking, it is wrong — see recenter().
+        self.tracking_lost = False
+        # Counts above the bottom clamp where the view can be measured,
+        # found once. See calibrate_pitch.
+        self.pitch_centre = 0
 
     def close(self):
         try:
@@ -283,30 +317,303 @@ class Rig:
             self.dump('posture')
         return cur == target
 
+    def set_reference(self):
+        """Remember where the cell is aiming, for absolute_offset()."""
+        self.ref_patches = self.tracker.slice_frame(self.grab())
+        self.pending_pitch = 0.0
+        self.tracking_lost = False
+
+    def absolute_offset(self):
+        """Counts between the view now and the cell's reference, or None.
+
+        The incremental integral cannot catch an error in its own starting
+        belief — drive pending_pitch to zero and the view stays wherever that
+        belief was wrong by. This can, because it compares against the
+        reference itself rather than against a running total.
+
+        It only works CLOSE to the reference: past half a patch the
+        correlation wraps and answers confidently in the wrong direction. That
+        is exactly why it runs after the incremental loop and not instead of
+        it — by then the view is supposed to be within a few counts, so if the
+        comparison is out of range that is itself the finding.
+        """
+        if getattr(self, 'ref_patches', None) is None:
+            return None
+        cur = self.tracker.slice_frame(self.grab())
+        m = self.tracker.measure_pair(self.ref_patches, cur)
+        if m is None or m.out_of_range:
+            return None
+        off = m.dy / self.K
+        # A wrapped reading is not noisy, it is confident and wrong — the peak
+        # comes back a whole patch out, and every patch wraps together so the
+        # cross-patch agreement still looks healthy. There is no way to tell
+        # from the reading itself, so anything not comfortably inside the
+        # range is refused rather than believed. Measured: half a patch is
+        # 128 px, which at K=1.55 is 82 counts.
+        if abs(m.dy) > ABS_TRUST_FRAC * self.tracker.patch_h / 2:
+            return None
+        return off
+
+    def home_to_clamp(self, direction=+1):
+        """Push the view into a pitch stop. Open loop, deliberately.
+
+        +1 is down, -1 is up: a positive mouse dy pulls the view down.
+
+        Nothing is measured here, and nothing can be. The clamps are where the
+        view stares at bare ground or empty sky, which is exactly where phase
+        correlation has nothing to lock onto — the first version of this tried
+        to detect the stop by watching the view halt and reported the game's
+        entire pitch travel as 13 counts while the character was looking
+        straight down.
+
+        It does not need measuring. A stop is a stop: push further than the
+        travel could possibly be and the view is against it, wherever it
+        started. That is the one absolutely repeatable position this game
+        offers.
+        """
+        self.mouse.move(0, direction * CLAMP_PUSH)
+        time.sleep(CLAMP_SETTLE_S)
+
+    def calibrate_pitch(self, step=BAND_STEP):
+        """Find the band of pitch where the view can actually be measured.
+
+        From the bottom clamp, rise in steps and compare what the view did
+        against what it was told to do. Near either clamp the answer is
+        nothing — bare ground below, blank sky above, no texture for the
+        correlator either way. In between the two agree.
+
+        The middle of THAT band is where every magazine should start. Not the
+        geometric middle of the travel: the useful quantity is not "far from
+        both stops", it is "far from both stops AND measurable", and only one
+        of those can be observed.
+        """
+        self.home_to_clamp(+1)                       # bottom stop
+        rises, usable = 0, []
+        while rises < BAND_MAX:
+            prev = self.tracker.slice_frame(self.grab())
+            self.mouse.move(0, -step)
+            got = self.track_still(timeout_s=0.7, still_s=0.10, prev=prev)
+            rises += step
+            if abs(got) > step * BAND_TRACK_FRAC:
+                usable.append(rises)
+        if not usable:
+            print("  [!] no part of the pitch range tracks — is the view "
+                  "somewhere featureless, or the game not taking input?")
+            self.tracking_lost = True
+            return 0
+        lo, hi = usable[0], usable[-1]
+        self.pitch_centre = (lo + hi) // 2
+        print(f"  pitch: measurable from {lo} to {hi} counts above the bottom "
+              f"clamp; aiming at {self.pitch_centre}")
+        return self.pitch_centre
+
+    def goto_pitch_centre(self):
+        """Home against the bottom stop, then rise to the measurable middle.
+
+        Every magazine starts here. A burst walks the view a few hundred
+        counts and the walk accumulates, so starting from wherever the last
+        one finished eventually means firing into the clamp — where the view
+        stops moving, the weapon measures unusually mild, and nothing reports
+        a problem.
+
+        Homing is what makes this immune to the drift it is correcting. Going
+        back to a remembered picture depends on the running total that got you
+        there and on a correlation that wraps past half a patch; going back to
+        a hard stop depends on neither.
+        """
+        if not getattr(self, 'pitch_centre', 0):
+            self.calibrate_pitch()
+        self.home_to_clamp(+1)
+        self._move_tracked(-self.pitch_centre)
+        self.pending_pitch = 0.0
+        return int(self.pitch_centre)
+
+    def tracking_confirmed(self, probe=PROBE_COUNTS):
+        """Push the view a known amount and check the reading follows.
+
+        Guards the one failure the range check cannot: a WRAPPED correlation
+        that lands near zero. Knocked 300 counts off centre, absolute_offset()
+        came back -0.3 — not noisy, not flagged, just confidently claiming the
+        view was exactly where it started. A reading that is large and
+        suspicious can be refused on its magnitude; a reading that is small and
+        wrong looks identical to success.
+
+        So instead of asking whether the number is plausible, this makes the
+        view move by a known amount and asks whether the number moved with it.
+        Nothing else in the loop can tell "centred" from "lost".
+        """
+        before = self.absolute_offset()
+        if before is None:
+            return False
+        self._move_tracked(probe)
+        after = self.absolute_offset()
+        self._move_tracked(-probe)
+        if after is None:
+            return False
+        # A positive mouse dy pulls the view DOWN, so the offset moves by
+        # -probe. Generous tolerance: this is separating "tracking" from
+        # "not tracking at all", not calibrating anything.
+        return abs((after - before) + probe) < probe * 0.4
+
+    def track_still(self, timeout_s=TRACK_TIMEOUT_S, still_s=TRACK_STILL_S,
+                    tol_px=TRACK_STILL_PX, prev=None, min_s=TRACK_MIN_S):
+        """Integrate view motion until it stops. Returns counts moved.
+
+        Frame to frame, so it never wraps: the correlator's range is half a
+        patch per PAIR of frames, not per interval, and at ~150 fps nothing
+        the game or the mouse does covers that between two frames. An absolute
+        match against a reference taken a magazine ago would wrap long before
+        the drift got interesting.
+
+        Waiting for "still" matters as much as the integral. PUBG pulls the
+        view back for a while after the trigger releases, and a reading taken
+        before that finishes describes a position the view is already leaving.
+        """
+        # `prev` must be captured BEFORE the move that is being measured. A
+        # mouse command lands in the frame or two right after it is issued, so
+        # a tracker that grabs its own first frame afterwards starts counting
+        # from a view that has already arrived — it sees nothing move and
+        # says so. That mistake measured the game's entire pitch travel as 14
+        # counts.
+        if prev is None:
+            prev = self.tracker.slice_frame(self.grab())
+        t0 = time.perf_counter()
+        total_px, quiet_since = 0.0, None
+        while time.perf_counter() - t0 < timeout_s:
+            cur = self.tracker.slice_frame(self.grab())
+            m = self.tracker.measure_pair(prev, cur)
+            prev = cur
+            if m is None:
+                continue
+            if not m.out_of_range:
+                total_px += m.dy
+            now = time.perf_counter()
+            # min_s covers the gap between issuing a move over USB and the
+            # game rendering it; before then "not moving yet" and "finished
+            # moving" look the same.
+            if abs(m.dy) <= tol_px and now - t0 >= min_s:
+                if quiet_since is None:
+                    quiet_since = now
+                elif now - quiet_since >= still_s:
+                    break
+            elif abs(m.dy) > tol_px:
+                quiet_since = None
+        return total_px / self.K
+
+    def _move_tracked(self, d_counts):
+        """Move the view and measure what actually happened.
+
+        Split into steps: a single jump of a few hundred counts lands entirely
+        between two frames, which is exactly the case the correlator cannot
+        measure — it wraps and reports a small move in the wrong direction.
+        Stepping keeps every frame-to-frame displacement inside the range that
+        makes the measurement meaningful.
+        """
+        moved = 0.0
+        left = int(round(d_counts))
+        while left:
+            step = max(-RECENTER_STEP, min(RECENTER_STEP, left))
+            prev = self.tracker.slice_frame(self.grab())
+            self.mouse.move(0, step)
+            left -= step
+            got = self.track_still(timeout_s=0.8, still_s=0.10, prev=prev)
+            moved += got
+            # Commanded a move, the view did not move: that IS the pitch
+            # clamp. PUBG stops rotating at straight up and straight down, and
+            # a magazine fired there measures near-zero recoil while reporting
+            # nothing wrong. Shoving harder cannot help — the old open-loop
+            # code had no way to notice and would keep pushing into it.
+            if abs(step) >= RECENTER_STEP and abs(got) < abs(step) * 0.2:
+                self.tracking_lost = True
+                print(f"        [!] moved {step:+d} counts and the view did "
+                      f"not follow ({got:+.0f}) — at the pitch clamp, or the "
+                      f"game is not taking input")
+                break
+        return moved
+
     def recenter(self):
-        """Undo the pitch drift left behind by previous magazines.
+        """Put the view back where the cell started, and prove it did.
 
         A magazine never ends where it started: the compensation is wrong by
         exactly the residual being measured, so every burst walks the view a
-        few hundred counts and the walk accumulates. PUBG clamps pitch — at
-        straight up or straight down the view simply stops moving, and a
-        magazine fired there measures near-zero recoil while reporting nothing
-        wrong. That is a silently corrupted cell, which is worse than a failed
-        one.
+        few hundred counts. PUBG clamps pitch — at straight up or straight
+        down the view stops moving, and a magazine fired there measures
+        near-zero recoil while reporting nothing wrong. A silently corrupted
+        cell is worse than a failed one.
 
-        Must run in ADS. The drift was measured in ADS counts and a mouse
-        count buys a third as much rotation from the hip (K 0.50 against
-        1.55), so recentring from the hip under-corrects by 3x — and the
-        auto-reload drops out of ADS, which is exactly when it is tempting to
-        do this.
+        This used to compute an offset from the burst recording and move by
+        it, open loop, with nothing checking the result. It did not come back:
+        magazine after magazine the log read "residual +197, recentred +66",
+        and the leftover accumulated in one direction until the cell was
+        firing into the clamp. Two reasons, both invisible without a check —
+        the recording's drift figure does not subtract the player's own mouse
+        movement, and the recording stops while PUBG is still pulling the view
+        back, so whatever recovery happens afterwards is never seen.
+
+        So: move, measure, repeat until the screen agrees. self.pending_pitch
+        is the integrated offset from the cell's reference, updated by every
+        measurement including this function's own moves, which is what makes
+        the loop close.
+
+        Must run in ADS. The offset is in ADS counts and a mouse count buys a
+        third as much rotation from the hip (K 0.50 against 1.55), so
+        recentring from the hip under-corrects threefold — and the auto-reload
+        drops out of ADS, which is exactly when it is tempting to do this.
         """
-        d = int(round(self.pending_pitch))
-        self.pending_pitch = 0.0
-        if abs(d) < 2:
-            return 0
-        self.mouse.move(0, d)
-        time.sleep(RECENTER_SETTLE_S)
-        return d
+        # Let post-fire recovery finish before believing any number.
+        self.pending_pitch += self.track_still()
+        # Sign: dy > 0 means the view rotated UP (the recoil direction), and a
+        # positive mouse dy pulls it back DOWN — so the correction has the same
+        # sign as the drift, and what the screen then does comes back negative,
+        # which is what walks pending_pitch to zero.
+        total = 0
+        for _ in range(RECENTER_TRIES):
+            d = int(round(self.pending_pitch))
+            if abs(d) < RECENTER_TOL:
+                break
+            self.pending_pitch += self._move_tracked(d)
+            total += d
+
+        # Now that the view is supposed to be back, ask the reference rather
+        # than the running total. This is the only step that can catch the
+        # integral having started from a wrong belief.
+        for _ in range(RECENTER_TRIES):
+            off = self.absolute_offset()
+            if off is None:
+                print(f"        [!] cannot place the view against the cell's "
+                      f"reference — more than "
+                      f"{ABS_TRUST_FRAC * self.tracker.patch_h / 2 / self.K:.0f}"
+                      f" counts away, or the scene changed. Running total says "
+                      f"{self.pending_pitch:+.0f}; going with that")
+                break
+            # The reference outranks the running total only when the two
+            # roughly agree. They are independent — one integrates frame to
+            # frame and cannot wrap, the other compares against a picture from
+            # a magazine ago and can — so a disagreement means the wrapping
+            # one is lying, and it is not the integral.
+            if abs(off - self.pending_pitch) > ABS_AGREE_COUNTS:
+                print(f"        [!] reference says {off:+.0f} counts, running "
+                      f"total says {self.pending_pitch:+.0f} — the reference "
+                      f"reading has wrapped; going with the total")
+                break
+            self.pending_pitch = off
+            if abs(off) < RECENTER_TOL:
+                # "Already centred" is exactly what a wrapped reading looks
+                # like, so it is the one answer worth confirming.
+                if not self.tracking_confirmed():
+                    print("        [!] the view reads centred but does not "
+                          "respond to a test move — the reference match has "
+                          "wrapped and this cell's position is unknown")
+                    self.tracking_lost = True
+                self.pending_pitch = 0.0
+                break
+            self._move_tracked(off)
+            total += int(round(off))
+        else:
+            print(f"        [!] view will not come back ({off:+.0f} counts "
+                  f"off) — at the pitch clamp? the next magazine measures "
+                  f"short and looks fine doing it")
+        return total
 
     def enter_ads(self):
         self.mouse.click(buttons=0x02, duration_ms=60)
@@ -477,8 +784,10 @@ def calibrate_combo(rig, weapon, posture, mags, log):
     if not rig.ensure_posture(posture):
         print(f"    [!] could not reach posture {posture}")
         return None
-    rig.recenter()
+    # In ADS and before the first round: every recentre below is measured
+    # against this framing.
     rig.flush(6)
+    rig.set_reference()
 
     rows = []
     for i in range(mags):
