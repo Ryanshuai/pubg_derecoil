@@ -41,9 +41,9 @@ class Updater:
         self.detect_diff = detect_bullet(im)
 
     def determine(self):
-        with open(r"calibrate_distance\distance_dict.json", "r") as f:
+        with open(r"calibration\distance_dict.json", "r") as f:
             self.distance_dict = json.load(f)
-        with open(r"calibrate_distance\time_dict.json", "r") as f:
+        with open(r"calibration\time_dict.json", "r") as f:
             self.time_dict = json.load(f)
 
         original_distance = np.array(self.distance_dict[self.gun_name])
@@ -60,9 +60,9 @@ class Updater:
         self.distance_dict[self.gun_name] = distance.tolist()
         self.time_dict[self.gun_name] = min(t + 1, 3)
 
-        with open(r"calibrate_distance\distance_dict.json", "w") as f:
+        with open(r"calibration\distance_dict.json", "w") as f:
             f.write(json.dumps(self.distance_dict))
-        with open(r"calibrate_distance\time_dict.json", "w") as f:
+        with open(r"calibration\time_dict.json", "w") as f:
             f.write(json.dumps(self.time_dict))
 
         cv2.destroyAllWindows()

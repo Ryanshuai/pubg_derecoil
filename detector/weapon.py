@@ -2,7 +2,7 @@ import os
 import numpy as np
 import json
 
-CURVE_DIR = os.path.join(os.path.dirname(__file__), '..', 'calibrate_distance', 'weapon_curve_kava4')
+CURVE_DIR = os.path.join(os.path.dirname(__file__), '..', 'calibration', 'weapon_curve_kava4')
 
 
 # Weapon RPM (rounds per minute) from PUBG Wiki

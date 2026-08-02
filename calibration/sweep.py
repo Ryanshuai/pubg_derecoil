@@ -5,9 +5,9 @@ residual left over by the current curve. Everything the game needs — ADS,
 posture, reload recovery — is driven from the Pico; the only human step is
 swapping weapons, and even that goes away once SpawnerSwitcher lands.
 
-    python calibrate_distance/sweep.py --weapons ar --mags 3
-    python calibrate_distance/sweep.py --weapons aug,m416 --postures standing
-    python calibrate_distance/sweep.py --weapons smg --resume
+    python calibration/sweep.py --weapons ar --mags 3
+    python calibration/sweep.py --weapons aug,m416 --postures standing
+    python calibration/sweep.py --weapons smg --resume
 
 SHADOW MODE: results are written to JSONL and printed as suggested factors.
 Nothing is written back to weapon_scales.json / posture_scales.json — closed
@@ -68,6 +68,8 @@ EMPTY_STATIC_S = 0.55     # ammo frozen this long while firing => magazine out
 MIN_FIRE_S = 0.8
 MAX_FIRE_S = 9.0
 RELOAD_TIMEOUT_S = 9.0
+RELOAD_STATIC_S = 0.35    # counter must hold this long before the mag is ready
+RELOAD_MIN_S = 2.0        # ...and if it never visibly moved, wait at least this
 SETTLE_AFTER_RELOAD_S = 1.8   # counter refills mid-animation; gun is not ready
 ADS_SETTLE_S = 0.5
 ADS_WATCH_S = 2.5         # how long to watch for the icon after a right-click;
@@ -284,7 +286,9 @@ class Rig:
     # ── one magazine ──
 
     def fire_magazine(self):
-        rec = MagazineRecorder(self.tracker)
+        rec = MagazineRecorder(
+            self.tracker,
+            human_fn=getattr(self.mouse, 'human_totals', None))
         self.mouse.click(buttons=0x01, duration_ms=int(MAX_FIRE_S * 1000))
         t0 = time.perf_counter()
         prev, last_change, steps = None, t0, 0
@@ -302,26 +306,86 @@ class Rig:
             if (now - t0) > MIN_FIRE_S and (now - last_change) > EMPTY_STATIC_S:
                 break
         self.mouse.click(buttons=0x00, duration_ms=0)
-        return rec, time.perf_counter() - t0, steps
+        # last_change is the last round leaving the magazine. Everything after
+        # it is the camera drifting back toward the pre-fire aim, which is real
+        # but happens after the bullets are already gone -- folding it into the
+        # residual flatters the total while telling you nothing about where the
+        # rounds went.
+        return rec, time.perf_counter() - t0, steps, last_change
 
-    def wait_reload(self, full_sig):
-        """PUBG reloads by itself; we only wait it out (and it exits ADS)."""
+    def wait_reload(self):
+        """PUBG reloads by itself; we only wait it out (and it exits ADS).
+
+        Watches for the counter to leave its empty-magazine reading and then
+        hold still, rather than waiting for it to match a snapshot taken back
+        at the start of the cell. The snapshot goes stale — the standing cell
+        lost four of its five magazines twice running to a reference that
+        never came back — and "moved, then settled" needs no reference at all.
+        """
+        empty = self.ammo_sig(self.grab())
         t0 = time.perf_counter()
-        while time.perf_counter() - t0 < RELOAD_TIMEOUT_S:
-            if float(np.mean(self.ammo_sig(self.grab()) != full_sig)) \
-                    < AMMO_CHANGED:
+        prev, stable_since = None, None
+        while True:
+            now = time.perf_counter()
+            if now - t0 >= RELOAD_TIMEOUT_S:
+                break
+            sig = self.ammo_sig(self.grab())
+            if prev is not None and float(np.mean(sig != prev)) < AMMO_CHANGED:
+                if stable_since is None:
+                    stable_since = now
+            else:
+                stable_since = None
+            prev = sig
+            if stable_since is None or now - stable_since <= RELOAD_STATIC_S:
+                continue
+            # Normally the counter visibly climbs back and holds. But the
+            # magazine can refill inside the 0.55 s the fire loop spends
+            # confirming the gun is empty — a quickdraw magazine is that fast —
+            # and then `empty` is already the full reading and no change ever
+            # comes. Settled plus long enough is the same evidence.
+            if float(np.mean(sig != empty)) > AMMO_CHANGED or \
+                    now - t0 > RELOAD_MIN_S:
                 time.sleep(SETTLE_AFTER_RELOAD_S)
-                return time.perf_counter() - t0
+                return now - t0
+        self.dump('reload')
         return None
 
 
-def analyse(res, K, bullet_interval_s):
+def analyse(res, K, bullet_interval_s, fire_end_ts=None):
     dy = np.asarray(res.dy, dtype=float)
     ts = np.asarray(res.ts, dtype=float)
     if len(ts) < 2:
         return None
+
+    # Screen motion is recoil - compensation - hand, all in mouse counts. The
+    # compensation is what we set out to grade, so only the hand has to come
+    # back out; without the Pico reporting it this is a zero vector and the
+    # measurement silently assumes a still hand.
+    human = (np.asarray(res.human_dy, dtype=float) if res.human_dy
+             else np.zeros_like(dy))
+
+    oor = np.asarray(res.out_of_range, dtype=bool)
+    if len(oor) != len(dy):                     # replayed or truncated result
+        oor = np.zeros(len(dy), dtype=bool)
+
+    # Cut at the last round fired, plus the one bullet interval its own recoil
+    # needs to play out. Every per-frame array is sliced together — slicing
+    # some and not others misaligns the out-of-range mask, and a misaligned
+    # mask fails silently.
+    if fire_end_ts is not None:
+        keep = ts <= fire_end_ts + bullet_interval_s
+        if keep.sum() >= 2:
+            dy, human, ts, oor = dy[keep], human[keep], ts[keep], oor[keep]
+
     ts = ts - ts[0]
-    counts = dy / K
+    counts = dy / K + human
+
+    # Past half a patch the correlation peak wraps, so a frame flagged
+    # out-of-range is not merely imprecise, it is wrong by a whole patch —
+    # 83 counts at K=1.55. Dropping the frame costs only the ~1 count of
+    # residual it carried; keeping it cost 266 counts on a magazine where the
+    # hand moved fast enough to hit the limit three times.
+    counts = np.where(oor, np.nan, counts)
     nb = int(ts[-1] / bullet_interval_s) + 1
     per_bullet = []
     for b in range(nb):
@@ -335,7 +399,14 @@ def analyse(res, K, bullet_interval_s):
         'max_abs_frame_px': float(np.nanmax(np.abs(dy))),
         'n_rejected': int(np.sum(res.n_rejected)),
         'n_out_of_range': int(np.sum(res.out_of_range)),
+        'n_dropped_oor': int(np.sum(oor)),
         'n_low_gate': int(np.sum(res.gates)),
+        # Net is what was removed from the residual; abs is how much hand
+        # motion happened at all. A small net with a large abs means the hand
+        # wandered and came back — the correction still holds, but the run is
+        # noisier than a still one.
+        'human_counts': float(np.nansum(human)),
+        'human_abs_counts': float(np.nansum(np.abs(human))),
         'mean_mad': float(np.mean(res.mad)) if res.mad else float('nan'),
     }
 
@@ -372,7 +443,6 @@ def calibrate_combo(rig, weapon, posture, mags, log):
         print(f"    [!] could not reach posture {posture}")
         return None
     rig.flush(6)
-    full_sig = rig.ammo_sig(rig.grab())
 
     rows = []
     for i in range(mags):
@@ -383,13 +453,13 @@ def calibrate_combo(rig, weapon, posture, mags, log):
             print("      [!] could not re-enter ADS after reload")
             break
 
-        rec, fire_s, steps = rig.fire_magazine()
+        rec, fire_s, steps, fire_end = rig.fire_magazine()
         if steps == 0:
             print(f"      mag {i}: no rounds fired (reload still running?) "
                   f"— skipped")
             time.sleep(1.5)
             continue
-        a = analyse(rec.finish(), rig.K, w.bullet_interval_s)
+        a = analyse(rec.finish(), rig.K, w.bullet_interval_s, fire_end)
         if a is None:
             continue
         a.update(mag=i, fire_s=round(fire_s, 2), ammo_steps=steps,
@@ -398,8 +468,9 @@ def calibrate_combo(rig, weapon, posture, mags, log):
         print(f"      mag {i}: {fire_s:.2f}s {steps:3d} steps  "
               f"residual {a['cum_counts']:+8.1f} counts "
               f"({100*a['cum_counts']/pattern_counts:+6.1f}% of pattern)  "
-              f"rej={a['n_rejected']} oor={a['n_out_of_range']}")
-        if rig.wait_reload(full_sig) is None:
+              f"rej={a['n_rejected']} oor={a['n_out_of_range']} "
+              f"hand={a['human_counts']:+.0f}/{a['human_abs_counts']:.0f}")
+        if rig.wait_reload() is None:
             print("      [!] auto-reload did not finish — stopping combo")
             break
 

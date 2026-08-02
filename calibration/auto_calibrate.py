@@ -16,8 +16,8 @@ Empty and reload-complete are detected from the ammo counter rather than
 timed per weapon, so magazine size, extended mags, quickdraw mags and
 tactical reloads all work without a lookup table.
 
-    python calibrate_distance/auto_calibrate.py --weapon aug --sight red_dot
-    python calibrate_distance/auto_calibrate.py --weapon aug --mags 10
+    python calibration/auto_calibrate.py --weapon aug --sight red_dot
+    python calibration/auto_calibrate.py --weapon aug --mags 10
 """
 import argparse
 import json

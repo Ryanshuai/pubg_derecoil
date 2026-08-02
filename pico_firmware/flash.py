@@ -74,14 +74,25 @@ def main():
         print(f"state    : running firmware on {port}")
         print("           sending CMD_REBOOT_BOOTSEL (0xFF) ...")
         print("           >>> the mouse will stop responding now <<<")
+        # Opening and writing fail for opposite reasons and must not share a
+        # handler. A refused OPEN means something else owns the port and the
+        # reboot was never requested at all; a dropped WRITE is the device
+        # rebooting out from under us, which is the whole point.
         try:
             s = serial.Serial(port, 115200, timeout=0.5, write_timeout=1.0)
+        except Exception as e:
+            print(f"[!] cannot open {port}: {e}")
+            print("    Something else is holding the Pico — another "
+                  "calibration or capture script. Nothing was flashed and the "
+                  "mouse is untouched. Wait for it to finish, then re-run:")
+            print("      Get-CimInstance Win32_Process -Filter "
+                  "\"Name like '%python%'\" | Select ProcessId, CommandLine")
+            return 1
+        try:
             s.write(bytes([0xFF]))
             s.flush()
             s.close()
         except Exception as e:
-            # The device often drops the port mid-write; that is the reboot
-            # working, not a failure.
             print(f"           (port closed during reboot: {e})")
 
         t0 = time.time()
@@ -92,8 +103,19 @@ def main():
                       f"{time.time()-t0:.1f}s")
                 break
         else:
-            print("[!] device never appeared in BOOTSEL.")
-            print("    Unplug, hold BOOTSEL, replug, then re-run.")
+            # Distinguish "still running the old firmware" from "stuck in the
+            # bootloader with a dead mouse". The advice is opposite, and the
+            # scary one used to be printed for both.
+            if find_app_port():
+                print("[!] the reboot did not take — the device is still "
+                      "running its old firmware.")
+                print("    Nothing was flashed and the mouse is fine. This is "
+                      "usually another process grabbing the port mid-reboot; "
+                      "check for other python processes and re-run.")
+            else:
+                print("[!] device never appeared in BOOTSEL, and the firmware "
+                      "port is gone too.")
+                print("    Unplug, hold BOOTSEL, replug, then re-run.")
             return 1
 
     print("\nflashing ...")

@@ -15,8 +15,8 @@ Run it in the training range, standing still, aimed at something with
 structure (buildings, treeline, rocks) — NOT at open sky or a blank wall,
 and NOT while anything is moving through the patches.
 
-    python calibrate_distance/calibrate_k.py
-    python calibrate_distance/calibrate_k.py --amounts 50,100,200 --repeats 5
+    python calibration/calibrate_k.py
+    python calibration/calibrate_k.py --amounts 50,100,200 --repeats 5
 """
 import argparse
 import json

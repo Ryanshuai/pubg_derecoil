@@ -36,6 +36,11 @@ static inline uint32_t board_millis(void) {
 #define CMD_KEY            0x18  /* [0x18][hid_keycode][duration_ms_u16] */
 #define CMD_REBOOT_BOOTSEL 0xFF
 
+/* Human-movement reporting. 4 ms is well under one 144 Hz screen frame, so
+ * the PC can attribute the hand's motion to the right captured frame. */
+#define HUMAN_REPORT_MS    4
+#define HUMAN_HEARTBEAT_MS 250
+
 /* HID instance indices — must match the descriptor order in
  * usb_descriptors.c (TinyUSB numbers instances by descriptor order). */
 #define HID_ITF_MOUSE 0
@@ -332,6 +337,16 @@ static volatile uint32_t inject_end_ms = 0;    /* when to release */
 static volatile uint8_t  key_code = 0;
 static volatile uint32_t key_end_ms = 0;
 
+/* Running total of movement that came from the HUMAN's mouse, taken straight
+ * off the passthrough FIFO before anything is injected. Recoil calibration
+ * measures view motion on screen and subtracts the compensation it applied;
+ * whatever the hand did lands in the same number and is indistinguishable
+ * from recoil. Reporting it lets the PC subtract it exactly -- and without
+ * that the curve can only ever be learned while sitting perfectly still,
+ * which defeats the point of learning it from real play. */
+static volatile int32_t human_total_x = 0;
+static volatile int32_t human_total_y = 0;
+
 /* Aim assist: latest delta from PC (updated every frame) */
 static volatile int16_t aim_dx = 0;
 static volatile int16_t aim_dy = 0;
@@ -374,8 +389,16 @@ static void read_mouse_input(void) {
                 aim_delay_until = 0;
             }
         }
-        mouse_accum_x += (int16_t)(w1 >> 16);
-        mouse_accum_y += (int16_t)(w2 & 0xFFFF);
+        int16_t raw_dx = (int16_t)(w1 >> 16);
+        int16_t raw_dy = (int16_t)(w2 & 0xFFFF);
+        mouse_accum_x += raw_dx;
+        mouse_accum_y += raw_dy;
+        /* Only the raw passthrough counts as human. The aim-assist delta and
+         * CMD_MOVE also land in mouse_accum, and folding those in here would
+         * have the PC subtracting its own injections from its own
+         * measurement. */
+        human_total_x += raw_dx;
+        human_total_y += raw_dy;
         mouse_wheel_last = (int8_t)((w2 >> 16) & 0xFF);
 
         /* firing state is tracked in send_hid_output (includes injected clicks) */
@@ -461,6 +484,35 @@ static void send_hid_output(void) {
             last_reported_count = fifo_drop_count;
         }
     }
+}
+
+/* Publish the human-movement totals so the PC can subtract the hand from what
+ * it sees on screen.
+ *
+ * Cumulative, not per-interval: a dropped or coalesced packet then costs
+ * nothing, because the next one still carries the whole story. The PC only
+ * ever reads the newest value. */
+static void send_human_report(void) {
+    static uint32_t last_send = 0;
+    static int32_t last_x = 0, last_y = 0;
+    uint32_t now = board_millis();
+    if (now - last_send < HUMAN_REPORT_MS) return;
+
+    int32_t x = human_total_x, y = human_total_y;
+    /* Idle costs one line every HUMAN_HEARTBEAT_MS so the PC can tell a still
+     * hand from a dead link. */
+    bool moved = (x != last_x || y != last_y);
+    if (!moved && now - last_send < HUMAN_HEARTBEAT_MS) return;
+    if (!tud_cdc_connected()) return;
+
+    last_send = now;
+    last_x = x;
+    last_y = y;
+    char msg[48];
+    int len = snprintf(msg, sizeof(msg), "[hid] %ld %ld %lu\r\n",
+                       (long)x, (long)y, (unsigned long)now);
+    tud_cdc_write(msg, len);
+    tud_cdc_write_flush();
 }
 
 static void process_cdc(void) {
@@ -630,6 +682,7 @@ int main(void) {
         read_mouse_input();   /* drain FIFO → accumulator (125Hz input) */
         send_hid_output();    /* send HID every 1ms (1000Hz output, smooth recoil) */
         send_kbd_output();    /* reload keypresses for automated calibration */
+        send_human_report();  /* let the PC subtract the hand from the screen */
         process_cdc();
     }
     return 0;

@@ -12,6 +12,7 @@ Protocol (PC → Pico):
   [0x12][0/1]                             enable/disable recoil
 """
 
+import threading
 import time
 import struct
 import serial
@@ -45,7 +46,66 @@ class PicoMouse:
     def __init__(self, port=None):
         self._port = port
         self._ser = None
+        self._human = (0, 0)
+        self._human_seen = False
         self._connect()
+        self._reader = threading.Thread(target=self._read_loop, daemon=True)
+        self._reader.start()
+
+    # ── human movement feedback ──
+    #
+    # The Pico forwards the real mouse and adds recoil compensation on top, so
+    # what lands on screen is hand + compensation + recoil. Calibration knows
+    # the compensation it asked for and measures the screen; without knowing
+    # the hand it has to assume the hand was still, and any nudge during a
+    # burst is booked as recoil. The firmware publishes a running total of the
+    # passthrough movement so that term can be removed exactly — which is what
+    # makes it possible to learn the curve while actually playing.
+
+    def _read_loop(self):
+        """Consume the Pico's CDC chatter. Totals are cumulative, so a missed
+        or truncated line costs nothing: the next one carries the full story."""
+        buf = b''
+        while True:
+            ser = self._ser
+            if ser is None:
+                time.sleep(0.05)
+                continue
+            try:
+                chunk = ser.read(256)
+            except Exception:
+                time.sleep(0.05)
+                continue
+            if not chunk:
+                continue
+            buf += chunk
+            if len(buf) > 4096:              # only the newest lines matter
+                buf = buf[-1024:]
+            while b'\n' in buf:
+                line, buf = buf.split(b'\n', 1)
+                if not line.startswith(b'[hid]'):
+                    continue
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                try:
+                    self._human = (int(parts[1]), int(parts[2]))
+                    self._human_seen = True
+                except ValueError:
+                    pass
+
+    def human_totals(self):
+        """(dx, dy) mouse counts the human has moved since the Pico booted.
+
+        Cumulative and monotonic in the sense that callers should difference
+        two samples; the absolute value has no meaning on its own.
+        """
+        return self._human
+
+    def human_available(self):
+        """False against firmware that predates the reporting, so a caller can
+        say so rather than silently treating a still hand as ground truth."""
+        return self._human_seen
 
     def _connect(self):
         """Open serial connection. Auto-detects port if not specified."""

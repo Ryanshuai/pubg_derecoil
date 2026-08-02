@@ -60,6 +60,11 @@ class MagazineResult:
     n_rejected: list = field(default_factory=list)
     out_of_range: list = field(default_factory=list)
     gates: list = field(default_factory=list)
+    # Mouse counts the HAND contributed over the same frame pair, straight off
+    # the Pico's passthrough. Screen motion is hand + compensation + recoil, so
+    # without this term any nudge during a burst is booked as recoil.
+    human_dy: list = field(default_factory=list)
+    human_dx: list = field(default_factory=list)
 
     def cumulative_dy(self):
         return np.cumsum(np.nan_to_num(self.dy))
@@ -184,12 +189,18 @@ class ViewTracker:
 class MagazineRecorder:
     """Buffers patches during fire, runs the FFTs once fire stops."""
 
-    def __init__(self, tracker, max_frames=1500, drop_duplicates=True):
+    def __init__(self, tracker, max_frames=1500, drop_duplicates=True,
+                 human_fn=None):
+        """human_fn() -> (dx, dy) cumulative human mouse counts, or None to
+        assume a still hand. Sampled per frame and differenced later, so its
+        absolute value never matters and a dropped report costs nothing."""
         self.tracker = tracker
         self.max_frames = max_frames
         self.drop_duplicates = drop_duplicates
+        self.human_fn = human_fn
         self._ts = []
         self._patches = []
+        self._human = []
         self.n_duplicates = 0
 
     def _is_duplicate(self, p):
@@ -215,6 +226,7 @@ class MagazineRecorder:
             return False
         self._ts.append(ts)
         self._patches.append(p)
+        self._human.append(self.human_fn() if self.human_fn else (0, 0))
         return True
 
     def push_patches(self, ts, patches):
@@ -223,11 +235,13 @@ class MagazineRecorder:
             return False
         self._ts.append(ts)
         self._patches.append(patches)
+        self._human.append(self.human_fn() if self.human_fn else (0, 0))
         return True
 
     def clear(self):
         self._ts.clear()
         self._patches.clear()
+        self._human.clear()
         self.n_duplicates = 0
 
     def span_s(self):
@@ -266,6 +280,8 @@ class MagazineRecorder:
             res.n_rejected.append(len(m.rejected) - m.n_valid)
             res.out_of_range.append(m.out_of_range)
             res.gates.append(m.low_gate)
+            res.human_dx.append(self._human[i][0] - self._human[i - 1][0])
+            res.human_dy.append(self._human[i][1] - self._human[i - 1][1])
             if np.isfinite(m.dy) and not m.out_of_range:
                 prev_dy = m.dy
         return res
