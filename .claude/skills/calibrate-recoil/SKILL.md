@@ -108,7 +108,7 @@ limit the correlation peak *wraps* rather than failing — off by a whole patch,
 **Template drift is silent.** An attachment whose template no longer matches
 becomes `<occupied, no template>`: it has no key, `find()` cannot see it, and
 the symptom is "not on screen" for something plainly on screen. `half_grip` and
-`thumb_grip` are both drifted today. Use `calibrate-template` to re-extract.
+`thumb_grip` are both drifted today. See *when a thing cannot be seen* below.
 
 **The game dresses guns by itself.** PUBG auto-fits whatever the backpack holds
 onto a weapon the moment it arrives, so any slot a config does not name is not
@@ -133,6 +133,42 @@ spawner is not automated).
 
 **Focus is checked by executable.** This repository's own name contains "pubg",
 so a title match calls an editor window the game.
+
+## When a thing cannot be seen
+
+A part that will not detect stops the run, and squinting at one screenshot is
+the slow way to fix it. Collect instead:
+
+    pixi run python calibration/collect_icons.py --slot grip --angles 6
+
+It spawns one of every attachment in that slot, then photographs the inventory
+against several backgrounds, turning the view between captures. Two outputs:
+
+- **labelled crops** — `<item>__<background>__rowNN.png`, which is what
+  `calibrate-template` extracts from. The panel is translucent, so a template
+  built from a single background tracks that background; varying the scene is
+  the point, not a nicety.
+- **a coverage table** — for each item, how many backgrounds the current
+  templates read it in, and what it was mistaken for. An item that reads at
+  some angles and not others is worse than one that never reads, and only a
+  spread of backgrounds separates the two.
+
+The labels are trustworthy because the ground truth is self-specified: the
+spawner is told what to produce and in what order, and 库存 fills from the top
+with no gaps, so row N holds a known item **even when nothing on screen can
+name it**. That is the one situation where a broken template cannot hide, and
+it is why this is a collector and a self-check in the same pass. If the row
+count does not grow by exactly what was ordered, it stops rather than
+mislabelling every crop.
+
+`--check-only` skips spawning and grades whatever is already in the backpack.
+
+Turning is done with Tab shut. With the inventory open the mouse drives a
+cursor rather than the view, so a turn issued there moves nothing and every
+capture comes back identical.
+
+Then hand the crops to `calibrate-template`, and re-run with `--check-only` to
+confirm the coverage table went clean.
 
 ## What is measured, and what is still assumed
 
@@ -161,7 +197,7 @@ presets of 0.800 and 0.550.
 | symptom | first command |
 |---|---|
 | anything at all | `calibration/state.py` |
-| "not on screen" for a part that is | `state.py --tab`, look for `UNRECOGNISED` → `calibrate-template` |
+| "not on screen" for a part that is | `state.py --tab` → `UNRECOGNISED`? then `collect_icons.py --slot <slot>` |
 | "could not reach posture" | `state.py` — in ADS? inventory closed? |
 | "inventory would not open/close" | `state.py`, check the `type` pixel count against its window |
 | could not open the port | another tool has it; the error names the process. Wait, do not kill it |
@@ -176,6 +212,7 @@ presets of 0.800 and 0.550.
 | | |
 |---|---|
 | `calibration/state.py` | read-only state probe — start here |
+| `calibration/collect_icons.py` | spawn parts, photograph them, grade the templates |
 | `calibration/harvest.py` | spawn, dress, fire, measure; the unattended loop |
 | `calibration/sweep.py` | same measurement without the spawner, for a gun already in hand |
 | `calibration/fit_curve.py` | residual → new curve |
