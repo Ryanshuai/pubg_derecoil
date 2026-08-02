@@ -74,14 +74,21 @@ GRIP_FOR_CLASS = {'AR': 'half_grip', 'DMR': 'half_grip', 'SMG': 'half_grip'}
 
 SCOPE_PART = 'red_dot'
 
-# Every slot is named in every config, including the ones under test in
-# neither. PUBG auto-fits whatever the backpack holds onto a gun the moment it
-# arrives, so a slot left unmentioned is not empty, it is whatever happened to
-# be lying around: the first bare run came back wearing an extended magazine
-# and a cheek pad it was never asked for, and a cheek pad reduces recoil. An
-# uncontrolled variable in a factorial design is not noise, it is a wrong
-# answer.
-NEUTRAL_SLOTS = ('magazine', 'stock')
+# Slots that are under test in no config still have to be pinned down. PUBG
+# auto-fits whatever the backpack is holding onto a gun the moment it arrives,
+# so a slot left unmentioned is not empty — it is whatever the last strip left
+# lying around. The first bare run came back wearing a cheek pad it was never
+# asked for, and a cheek pad reduces recoil; an uncontrolled variable in a
+# factorial design is a wrong answer, not noise.
+NEUTRAL_SLOTS = ('stock',)
+
+# The magazine is pinned the other way: always extended, never stripped. It
+# changes capacity, not recoil, and capacity is free measurement — 39 rounds
+# against 29 on the AUG. A curve measured long is trivially truncated for a
+# player carrying the base magazine, whereas one measured short can never be
+# extended. Quickdraw for the reload speed, which is dead time every magazine.
+MAG_FOR_CLASS = {'AR': 'quickext_ar', 'DMR': 'quickext_ar',
+                 'SMG': 'quickext_smg'}
 
 # (name, wants_muzzle, wants_grip)
 CONFIGS = {
@@ -348,6 +355,7 @@ def harvest_weapon(rig, panel, kit, sc, weapon, configs, postures, mags,
     cls = ROSTER.get(weapon, (None,))[0]
     muzzle_key = MUZZLE_FOR_CLASS.get(cls)
     grip_key = GRIP_FOR_CLASS.get(cls)
+    mag_key = MAG_FOR_CLASS.get(cls)
 
     todo = [c for c in configs if (weapon, c) not in done]
     todo = [c for c in todo
@@ -383,6 +391,7 @@ def harvest_weapon(rig, panel, kit, sc, weapon, configs, postures, mags,
                 'muzzle': muzzle_key if want_m else None,
                 'grip': grip_key if want_g else None}
         want.update({s: None for s in NEUTRAL_SLOTS})
+        want['magazine'] = MAG_FOR_CLASS.get(cls)
         print(f"    config {cfg}: {want}")
         if kit.apply(want) is None:
             print(f"    [!] could not reach config {cfg} — skipping")
@@ -544,7 +553,8 @@ def main():
     for w in weapons:
         cls = ROSTER.get(w, (None,))[0]
         parts.update(x for x in (MUZZLE_FOR_CLASS.get(cls),
-                                 GRIP_FOR_CLASS.get(cls)) if x)
+                                 GRIP_FOR_CLASS.get(cls),
+                                 MAG_FOR_CLASS.get(cls)) if x)
 
     rows = []
     try:
