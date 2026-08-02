@@ -66,11 +66,24 @@ KIT_SETTLE_S = 0.6
 # their muzzle cells are skipped rather than silently measured bare twice.
 MUZZLE_FOR_CLASS = {'AR': 'comp_ar', 'DMR': 'comp_ar', 'SMG': 'comp_smg'}
 
-# half_grip, not thumb_grip: detector/CLAUDE.md records Lower_ThumbGrip_C as
-# drifted, so it reads back as something else and every verification fails.
-# angled_grip is the interesting control — the model predicts exactly 1.000
-# for it, which is the most falsifiable claim in the whole table.
-GRIP_FOR_CLASS = {'AR': 'half_grip', 'DMR': 'half_grip', 'SMG': 'half_grip'}
+# Which grip the factorial tests, overridable with --grip. Three worth knowing
+# about:
+#
+#   vert_grip   the model's 0.85, and the grip every existing curve was
+#               calibrated under — so measuring it grades the data we already
+#               have.
+#   half_grip   spawnable, model says 0.92. Its template has DRIFTED: it reads
+#               as <occupied, no template> and find() returns nothing, which
+#               surfaces as "not on screen" rather than as a detection failure.
+#               Needs re-extracting before it can be used.
+#   angled_grip spawnable, and the most falsifiable line in the whole table —
+#               the model predicts exactly 1.000, no effect at all.
+#
+# thumb_grip is off the list: detector/CLAUDE.md already records its template
+# as drifted.
+DEFAULT_GRIP = 'vert_grip'
+GRIP_FOR_CLASS = {'AR': DEFAULT_GRIP, 'DMR': DEFAULT_GRIP, 'SMG': DEFAULT_GRIP}
+
 
 SCOPE_PART = 'red_dot'
 
@@ -493,6 +506,8 @@ def main():
     ap.add_argument('--configs', default='bare,both')
     ap.add_argument('--postures', default='standing')
     ap.add_argument('--sight', default='red_dot')
+    ap.add_argument('--grip', default=DEFAULT_GRIP,
+                    help='which grip the factorial tests (see GRIP_FOR_CLASS)')
     ap.add_argument('--mags', type=int, default=3)
     ap.add_argument('--slot', type=int, default=2,
                     help='the spawner always fills slot 2')
@@ -501,6 +516,8 @@ def main():
     ap.add_argument('--countdown', type=int, default=6)
     args = ap.parse_args()
 
+    for k in GRIP_FOR_CLASS:
+        GRIP_FOR_CLASS[k] = args.grip
     weapons = expand(args.weapons)
     configs = [c.strip() for c in args.configs.split(',') if c.strip()]
     postures = [p.strip() for p in args.postures.split(',') if p.strip()]
