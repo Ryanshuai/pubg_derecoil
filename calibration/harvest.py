@@ -55,6 +55,7 @@ from sweep import Rig, analyse, game_focused, POSTURES
 import spawner_control as spawner_mod
 from spawner_control import SpawnerControl, ROSTER
 from attach_control import AttachControl
+from range_session import get_session, DEFAULT_BUDGET_S
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -514,6 +515,10 @@ def main():
     ap.add_argument('--out', default='')
     ap.add_argument('--resume', action='store_true')
     ap.add_argument('--countdown', type=int, default=6)
+    ap.add_argument('--session', default='manual', choices=('manual', 'auto'),
+                    help='how to get back in when the range evicts us')
+    ap.add_argument('--budget', type=float, default=DEFAULT_BUDGET_S,
+                    help='seconds before re-entering pre-emptively')
     args = ap.parse_args()
 
     for k in GRIP_FOR_CLASS:
@@ -553,7 +558,12 @@ def main():
         print("  [!] the Pico is not reporting hand movement — old firmware. "
               "Any aim correction during a burst will be booked as recoil.")
 
-    print("\n>>> Stand at an item spawner, facing something with texture.")
+    # Position does not matter for the spawner — comma opens the panel from
+    # anywhere in the training range (docs/game_quirks.md). What the aim has to
+    # satisfy is the recoil measurement: phaseCorrelate needs texture to lock
+    # onto, and a patch of empty sky reads zero displacement no matter how hard
+    # the gun kicks.
+    print("\n>>> Face something with texture — the recoil is measured off it.")
     for s in range(args.countdown, 0, -1):
         print(f"    starting in {s} ...", flush=True)
         time.sleep(1.0)
@@ -602,6 +612,7 @@ def main():
             pass
         rig.close()
         kit.close()
+        session.close()
         panel.close_grabber()
         log.close()
 
