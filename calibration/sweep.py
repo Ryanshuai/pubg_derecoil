@@ -424,7 +424,13 @@ class Rig:
         if not getattr(self, 'pitch_centre', 0):
             self.calibrate_pitch()
         self.home_to_clamp(+1)
-        self._move_tracked(-self.pitch_centre)
+        # One move, open loop. There is nothing to measure: the clamp says
+        # where the view is and pitch_centre says how far to go, so stepping
+        # and re-measuring the way home only buys the correlator's opinion of
+        # a distance already known — twenty-odd tracked steps per magazine for
+        # an answer that was in hand before the first one.
+        self.mouse.move(0, -int(self.pitch_centre))
+        time.sleep(RECENTER_SETTLE_S)
         self.pending_pitch = 0.0
         return int(self.pitch_centre)
 
@@ -784,9 +790,10 @@ def calibrate_combo(rig, weapon, posture, mags, log):
     if not rig.ensure_posture(posture):
         print(f"    [!] could not reach posture {posture}")
         return None
-    # In ADS and before the first round: every recentre below is measured
-    # against this framing.
+    # In ADS and before the first round: home to the measurable middle of the
+    # pitch travel, then take the reference there.
     rig.flush(6)
+    rig.goto_pitch_centre()
     rig.set_reference()
 
     rows = []
@@ -797,7 +804,8 @@ def calibrate_combo(rig, weapon, posture, mags, log):
             if not rig.ensure_ads():
                 print("      [!] could not re-enter ADS after reload")
                 break
-            rig.recenter()
+            rig.goto_pitch_centre()      # same absolute aim every magazine
+            rig.set_reference()
 
         rec, fire_s, steps, fire_end = rig.fire_magazine()
         if steps == 0:
