@@ -23,9 +23,9 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-from config import (RECOIL_BAND_Y, RECOIL_PATCH, RECOIL_PATCH_XS,
-                    RECOIL_GATE_MIN, RECOIL_MAD_FLOOR, RECOIL_MAD_K,
-                    RECOIL_CHANNEL)
+from config import (SCREEN_H, RECOIL_BAND_Y, RECOIL_PATCH, RECOIL_PATCH_H,
+                    RECOIL_PATCH_XS, RECOIL_GATE_MIN, RECOIL_MAD_FLOOR,
+                    RECOIL_MAD_K, RECOIL_CHANNEL)
 
 
 @dataclass
@@ -80,23 +80,29 @@ class ViewTracker:
     """Slices centre-band patches and turns frame pairs into a view shift."""
 
     def __init__(self, patch_xs=None, band_y=None, patch=None,
-                 gate_min=None, channel=None):
+                 gate_min=None, channel=None, patch_h=None):
         self.xs = tuple(patch_xs if patch_xs is not None else RECOIL_PATCH_XS)
-        self.band_y = band_y if band_y is not None else RECOIL_BAND_Y
-        self.patch = patch if patch is not None else RECOIL_PATCH
+        self.patch = patch if patch is not None else RECOIL_PATCH        # width
+        self.patch_h = patch_h if patch_h is not None else RECOIL_PATCH_H
+        # Height is what has to cover the motion, so the band recentres with it
+        # rather than staying wherever a square patch happened to put it.
+        self.band_y = (band_y if band_y is not None else
+                       RECOIL_BAND_Y if patch_h is None else
+                       (SCREEN_H // 2 - self.patch_h // 2))
         self.gate_min = gate_min if gate_min is not None else RECOIL_GATE_MIN
         self.channel = channel if channel is not None else RECOIL_CHANNEL
         # Pre-built so it is never rebuilt inside the measurement loop.
-        self._win = cv2.createHanningWindow((self.patch, self.patch),
+        self._win = cv2.createHanningWindow((self.patch, self.patch_h),
                                             cv2.CV_32F)
-        # Over-range shows up as an FFT wraparound of exactly one patch width.
-        self._wrap = float(self.patch)
+        # Over-range shows up as an FFT wraparound of exactly one patch height:
+        # the measurement is vertical, so width has nothing to do with it.
+        self._wrap = float(self.patch_h)
 
     # ── capture-side ──
 
     def regions(self):
         """{name: (y, x, h, w)} for make_grabber / HUD_REGIONS."""
-        return {f'recoil_{i}': (self.band_y, x, self.patch, self.patch)
+        return {f'recoil_{i}': (self.band_y, x, self.patch_h, self.patch)
                 for i, x in enumerate(self.xs)}
 
     def names(self):

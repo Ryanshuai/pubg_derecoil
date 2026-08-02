@@ -193,6 +193,18 @@ class Rig:
         self.flush(2)
         return not self.tab_open(self.grab())
 
+    def ensure_inventory_open(self, tries=3):
+        """Tab is a toggle, so pressing it blind lands in the wrong state half
+        the time. Watch instead."""
+        for _ in range(tries):
+            self.flush(2)
+            if self.tab_open(self.grab()):
+                return True
+            self.mouse.key(HID_KEY_TAB, 60)
+            time.sleep(TAB_OPEN_S)
+        self.flush(2)
+        return self.tab_open(self.grab())
+
     def read_loadout(self, slot=1):
         """One Tab cycle returns both the weapon name and its attachments."""
         self.ensure_inventory_closed()

@@ -32,6 +32,7 @@ CMD_KEY            = 0x18
 # HID interface (keyboard) purely so automated calibration can reload.
 HID_KEY_R   = 0x15
 HID_KEY_TAB = 0x2B
+HID_KEY_COMMA = 0x36  # toggles the training-range item spawner
 HID_KEY_C   = 0x06   # crouch toggle
 HID_KEY_Z   = 0x1D   # prone toggle
 HID_KEY_F   = 0x09   # pick up

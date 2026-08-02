@@ -83,13 +83,30 @@ def smooth(y, w=SMOOTH_W):
     return out * (y.sum() / s) if s else out
 
 
-def load_combo(path, weapon, posture):
+def load_combo(path, weapon, posture, config=None):
+    """One measured cell. sweep.py writes 'combo', harvest.py writes 'cell'
+    with an attachment config attached; both carry the same fields."""
+    hits = []
     for line in open(path, encoding='utf-8'):
-        r = json.loads(line)
-        if (r.get('type') == 'combo' and r['weapon'] == weapon
-                and r['posture'] == posture):
-            return r
-    return None
+        try:
+            r = json.loads(line)
+        except Exception:
+            continue
+        if r.get('type') not in ('combo', 'cell'):
+            continue
+        if r['weapon'] != weapon or r['posture'] != posture:
+            continue
+        if config is not None and r.get('config') != config:
+            continue
+        hits.append(r)
+    if not hits:
+        return None
+    if len(hits) > 1:
+        cfgs = sorted({h.get('config', '-') for h in hits})
+        if len(cfgs) > 1:
+            print(f"  [!] {len(hits)} cells match ({', '.join(cfgs)}); using "
+                  f"the last. Pass --config to choose.")
+    return hits[-1]
 
 
 def rebuild(rec, verbose=True):
@@ -217,11 +234,18 @@ def main():
                     help="which cell to fit; the curve is the standing one, so "
                          "fitting a crouching cell folds that posture's factor "
                          "into it -- almost never what you want")
+    ap.add_argument('--config', default=None,
+                    help="harvest.py runs only: which attachment cell to fit "
+                         "('bare', 'both', ...). The curve is normalised by "
+                         "the attachment factor either way, so every config "
+                         "should rebuild the SAME base curve -- fitting two "
+                         "and comparing is a free check on the model.")
     ap.add_argument('--apply', action='store_true',
                     help='write the curve (default: dry run)')
     args = ap.parse_args()
 
-    rec = load_combo(args.jsonl, args.weapon, args.posture)
+    rec = load_combo(args.jsonl, args.weapon, args.posture,
+                     args.config)
     if rec is None:
         print(f"[!] no {args.weapon}/{args.posture} cell in {args.jsonl}")
         return 1

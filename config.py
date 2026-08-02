@@ -58,9 +58,26 @@ HUD_REGIONS = {
 # See docs/recoil_observer_design.md for the measurements behind each value.
 # ════════════════════════════════════════════════════════════
 
-RECOIL_PATCH = 128             # 3P/8 = 48 px usable range; >=192 adds
-                               # intra-patch gain error at wide FOV
-RECOIL_BAND_Y = SCREEN_H // 2 - RECOIL_PATCH // 2
+RECOIL_PATCH = 128             # width. Sets nothing about range: recoil is
+                               # vertical, so only the height has to cover it.
+                               # Widening costs FFT time for nothing.
+# Height sets the wrap limit (H/2), and the wrap limit is what decides which
+# guns can be measured at all. One shot's recoil lands in a single frame, so
+# the peak frame carries the whole per-bullet kick: a kitted AUG measured
+# 21-54 px, but a BARE m762 is 80 px and a bare AKM 69 px — past the 64 px a
+# 128 px patch allows, and the correlation peak wraps rather than failing.
+# Guns come off the training-range spawner bare, so 128 could not measure them.
+#
+# 256 buys a 128 px limit for 3.6x the FFT time (0.16 -> 0.58 ms/pair, 2.0 s
+# per magazine) — paid on a worker while the game reloads, so free in practice.
+# Squaring it instead would cost 7.6x for the same limit.
+#
+# The cost of height is intra-patch gain error: pitch is a pure translation
+# only on the centre line, growing as (y/f)^2 away from it. At f~1720 the
+# patch edge at y=+-128 is off by 0.55%, ~0.2% averaged over the patch —
+# negligible against the 5% effects being measured.
+RECOIL_PATCH_H = 256
+RECOIL_BAND_Y = SCREEN_H // 2 - RECOIL_PATCH_H // 2
 RECOIL_KEEPOUT = 330           # half-width of the crosshair exclusion
 RECOIL_PATCH_XS = (980, 1120, 1260, 2050, 2240, 2430, 2620)  # odd count: an
                                # even count lets 2 bad patches drag the median
@@ -80,7 +97,7 @@ RECOIL_MAD_FLOOR = 0.5
 
 # ════════════════════════════════════════════════════════════
 # Per-sight calibration — measured 2026-08-01 with
-# calibrate_distance/calibrate_k.py, at general 30 / aim 50 / scope 50 and
+# calibration/calibrate_k.py, at general 30 / aim 50 / scope 50 and
 # every per-scope slider at its default 50.
 # RE-RUN AFTER CHANGING ANY SENSITIVITY SLIDER OR THE MOUSE DPI.
 #
@@ -382,6 +399,30 @@ TAB_COUNT_MAX = 400
 # Mismatch polling (ms)
 MISMATCH_POLL_INTERVAL = 500   # ms between mismatch polls
 GT_SETTLE_TIME = 500           # ms wait after GT change before polling (HUD animation)
+
+# ════════════════════════════════════════════════════════════
+# Spawner screen — the training range's item-spawner panel
+#
+# Identified by the three save-loadout / load-loadout / equip-lv3 button
+# glyphs at the bottom right, which appear on no other screen. Measured over
+# three captures with different scenes behind the panel (tools/
+# probe_button_icons.py): the glyphs are achromatic (|max-min| over B,G,R <= 2
+# on bright px), a flat ~221 grey rather than pure white, and their bright
+# pixels are fully opaque — they shift by <= 6 grey levels across scenes,
+# while the glyphs' dark parts are alpha-blended and shift by up to 86. Hence
+# a binary mask of the bright pixels only; a grey-level template of the whole
+# tile would track the scene.
+#
+# These are not in HUD_REGIONS: the check is for tools that drive the spawner,
+# not something the per-frame capture loop needs.
+# ════════════════════════════════════════════════════════════
+
+SPAWNER_ICON_ANCHORS = ((2514, 988), (2514, 1081), (2514, 1174))  # x, y
+SPAWNER_ICON_W = 70
+SPAWNER_ICON_H = 77
+SPAWNER_ICON_THRESH = 200      # cuts the opaque glyph out of the dim tile
+SPAWNER_ICON_SEARCH = 24       # +- px searched around each anchor
+SPAWNER_MIN_SCORE = 0.55       # positives 0.989..1.000, negatives 0.000
 
 # ════════════════════════════════════════════════════════════
 # Alpha blending (for highlight hypothesis test)
