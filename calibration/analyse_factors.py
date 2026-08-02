@@ -133,7 +133,7 @@ def main():
     print('SINGLE-SLOT FACTORS   ratio to that weapon\'s own bare')
     print('=' * 74)
     fac = {}
-    print(f'{"weapon":<9}{"slot":<10}{"factor":>9}{"+-":>8}   ')
+    print(f'{"weapon":<9}{"slot":<10}{"part":<16}{"factor":>9}{"+-":>8}')
     for w in weapons:
         bare = cells.get((w, 'bare', args.posture))
         if not bare:
@@ -148,19 +148,28 @@ def main():
             m, _, sem = stats(cell['samples'])
             r = m / bm
             rel = math.hypot(log_sem(m, sem), log_sem(bm, bsem))
-            fac[(w, s)] = (r, rel)
-            print(f'{w:<9}{s:<10}{r:>9.4f}{r*rel:>8.4f}')
+            part = (cell.get('want') or {}).get(s) or s
+            fac[(w, s)] = (r, rel, part)
+            print(f'{w:<9}{s:<10}{part:<16}{r:>9.4f}{r*rel:>8.4f}')
 
     # ── is a factor the same on every weapon? ──
+    # Grouped by PART, not by slot. The classes fit different hardware in the
+    # same slot — comp_ar on a rifle, comp_smg on an SMG — so a "muzzle"
+    # column pooled across them compares two different objects and calls the
+    # difference a weapon effect.
     per_slot = defaultdict(list)
-    for (w, s), (r, rel) in fac.items():
-        per_slot[s].append((w, r, rel))
+    for (w, s), (r, rel, part) in fac.items():
+        per_slot[part].append((w, r, rel))
     if any(len(v) > 1 for v in per_slot.values()):
         print('\n' + '=' * 74)
-        print('IS THE FACTOR WEAPON-INDEPENDENT?   pairwise, in sigma')
+        print('IS THE FACTOR WEAPON-INDEPENDENT?   same part, different '
+              'weapons, in sigma')
         print('=' * 74)
         for s, entries in sorted(per_slot.items()):
             if len(entries) < 2:
+                print(f'\n  {s}: only measured on '
+                      f'{entries[0][0]} ({entries[0][1]:.4f}) — one weapon '
+                      f'cannot answer this')
                 continue
             # Inverse-variance weighted mean in log space.
             ws = [(math.log(r), 1 / rel ** 2) for _, r, rel in entries if rel]
