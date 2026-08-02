@@ -36,6 +36,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import cv2
+import numpy as np
 
 from detector.attachment_catalog import ROSTER, ATTACHMENTS, is_live
 from detector.spawner_detector import SpawnerDetector
@@ -101,19 +102,28 @@ SWITCH_WAIT = 0.35    # after pressing 2
 # fitted a suppressor while being told to fit a compensator, then skipped
 # seven configs in a row. Spawn a level 3 backpack before anything else and
 # none of it happens.
+# Fixed coordinates, deliberately, NOT found by looking for the column.
+#
+# find_menu() locates columns by clustering bright pixels, and the panel is
+# translucent — so what it can see depends on what the player happens to be
+# standing in front of. Facing a red banner, ITEMS and SENSITIVITY merged into
+# one x band whose rows are not evenly pitched, the band was rejected as "not a
+# list", and the backpack column simply did not exist as far as the tool was
+# concerned. Four re-reads in a row, same answer.
+#
+# The panel geometry is fixed. Measured off docs/spawner/runs/20260801_210656:
+# category rows start at y=306 with a 43 px pitch, columns are 500 px apart
+# with the chevron 65 px in, and a submenu opens directly under its category
+# with a 50 px entry pitch.
+GEAR_COL_BOX = (1529, 280, 2004, 720)      # ITEMS column, for the change check
 GEAR = {
-    'backpack1': {'zh': '背包 (1级)', 'category': (3, 6), 'index': 1},
-    'backpack2': {'zh': '背包 (2级)', 'category': (3, 6), 'index': 2},
-    'backpack3': {'zh': '背包 (3级)', 'category': (3, 6), 'index': 3},
+    'backpack1': {'zh': '背包 (1级)', 'category_xy': (1594, 518),
+                  'entry_xy': (1766, 563)},
+    'backpack2': {'zh': '背包 (2级)', 'category_xy': (1594, 518),
+                  'entry_xy': (1766, 613)},
+    'backpack3': {'zh': '背包 (3级)', 'category_xy': (1594, 518),
+                  'entry_xy': (1766, 664)},
 }
-GEAR_COUNTS = {(3, 6): 3}      # entries per gear category, for spawn()'s check
-
-
-def gear_position(key):
-    g = GEAR.get(key)
-    if g is None:
-        raise KeyError(f'unknown gear {key!r}')
-    return g['category'], g['index'], GEAR_COUNTS[g['category']]
 
 
 def weapon_position(key):
@@ -160,7 +170,8 @@ def position_of(key):
     if key in ATTACHMENTS:
         return attachment_position(key)
     if key in GEAR:
-        return gear_position(key)
+        raise ValueError(f'{key!r} is gear — it has no menu position, it has '
+                         f'fixed coordinates. See GEAR and give_gear().')
     raise KeyError(f'{key!r} is in ROSTER, ATTACHMENTS nor GEAR')
 
 
@@ -395,15 +406,41 @@ class SpawnerControl:
         return rec
 
     def give_gear(self, key):
-        """Spawn a piece of column-3 gear. One click: gear auto-equips when
-        the corresponding slot is empty, which after a range re-entry it
-        always is."""
-        (col, row), index, expect = gear_position(key)
-        self._log(f'{key} -> col{col}_row{row:02d} entry {index}/{expect} '
-                  f'({GEAR[key]["zh"]})')
-        rec = self.spawn(col, row, index, times=1, expect=expect)
-        rec.update(gear=key, category=(col, row), index=index)
-        return rec
+        """Spawn a piece of column-3 gear from fixed coordinates.
+
+        No layout search: see GEAR. The one thing still checked is that the
+        category actually opened, and that is done by diffing the column box
+        against itself a moment earlier rather than by recognising anything —
+        the background behind a translucent panel defeats recognition, but it
+        does not move between two frames half a second apart.
+
+        Call this with the panel freshly open, before any other category has
+        been expanded: every category here is a toggle, and this one is driven
+        blind.
+        """
+        g = GEAR.get(key)
+        if g is None:
+            raise KeyError(f'unknown gear {key!r}')
+        self._log(f'{key} ({g["zh"]}) at {g["category_xy"]} -> '
+                  f'{g["entry_xy"]}, fixed coordinates')
+
+        before = bright_mask(shoot_parked(settle=0.15))
+        self.pointer.click_at(*g['category_xy'])
+        time.sleep(OPEN_WAIT)
+        after = bright_mask(shoot_parked(settle=0.15))
+        x0, y0, x1, y1 = GEAR_COL_BOX
+        changed = int(np.count_nonzero(
+            before[y0:y1, x0:x1] != after[y0:y1, x0:x1]))
+        if changed < CHANGE_MIN:
+            self._log(f'category did not open ({changed} px changed, need '
+                      f'{CHANGE_MIN}) — is the panel up and collapsed?')
+            return {'ok': False, 'gear': key, 'changed_px': changed}
+
+        self.pointer.click_at(*g['entry_xy'])
+        time.sleep(SPAWN_WAIT)
+        self.pointer.click_at(*g['category_xy'])   # collapse, leave it as found
+        time.sleep(OPEN_WAIT)
+        return {'ok': True, 'gear': key, 'changed_px': changed}
 
     def give(self, key, **kw):
         """Whichever of the three applies to `key`."""

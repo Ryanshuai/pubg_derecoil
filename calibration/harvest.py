@@ -460,7 +460,10 @@ def stock_parts(panel, sc, keys):
     """
     if not panel.ensure_open():
         return False
-    ok = sc.sync(need_cols=(2, 3))     # 3 is the gear column, drawn last
+    # Only column 2 needs finding: the backpack is driven from fixed
+    # coordinates, because the translucent panel makes finding column 3
+    # depend on what the player is standing in front of.
+    ok = sc.sync(need_cols=(2,))
     if ok:
         if not sc.give_gear(BACKPACK):
             print(f"[!] spawner would not produce {BACKPACK} — parts have "
