@@ -119,8 +119,17 @@ wearing a cheek pad, which reduces recoil.
 evicts the old one onto the floor, wearing everything it had on.
 
 **The range evicts after 20 minutes** and re-entry empties the backpack and the
-rack. `RangeSession` re-enters on a budget; `--resume` picks up completed cells
-from the JSONL.
+rack — it is a restart, not a pause. `RangeSession` re-enters on a 17-minute
+budget so it happens between weapons rather than mid-magazine, and re-stocks
+afterwards; `--resume` picks up completed cells from the JSONL.
+
+Re-entry is automated (`--session auto`, the default): `lobby_control` drives
+the results screen, the lobby, an open ESC menu or a loading screen back to a
+running round, polling state rather than sleeping. Two things it cannot know,
+both caught immediately afterwards by trying to open the spawner — **which**
+mode it entered (F starts whatever the lobby had selected, so leave the lobby
+on the training range) and **where** in the range it landed (walking to a
+spawner is not automated).
 
 **Focus is checked by executable.** This repository's own name contains "pubg",
 so a title match calls an editor window the game.
@@ -159,6 +168,8 @@ presets of 0.800 and 0.550.
 | residual fine, gun still sprays | you optimised the endpoint — look at wander |
 | a weapon measures implausibly mild | check `oor`, and whether the view hit the pitch limit |
 | spawner would not sync | `state.py` — is the panel actually up? are we still in the range? |
+| "in a match, but the item spawner will not open" | lobby was on the wrong mode, or the spawn point is not next to a spawner — walk there and re-run |
+| re-entry never completes | `detector/lobby_detector.py` `selftest()` — the ping overlay is a user setting, and without it the detector degrades to lobby/not-lobby |
 
 ## Files
 
@@ -168,7 +179,9 @@ presets of 0.800 and 0.550.
 | `calibration/harvest.py` | spawn, dress, fire, measure; the unattended loop |
 | `calibration/sweep.py` | same measurement without the spawner, for a gun already in hand |
 | `calibration/fit_curve.py` | residual → new curve |
-| `calibration/range_session.py` | 20-minute eviction; `AutoSession` is a stub |
+| `calibration/range_session.py` | 20-minute eviction, budget and re-stock |
+| `detector/lobby_detector.py` | lobby vs match, by letterbox bars and the ping overlay |
+| `detector/lobby_control.py` | drives the lobby back into a match |
 | `calibration/weapon_switcher.py` | weapon supply interface |
 | `detector/view_tracker.py` | the measurement itself |
 | `docs/game_quirks.md` | mechanics found by hitting them |

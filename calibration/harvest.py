@@ -515,8 +515,9 @@ def main():
     ap.add_argument('--out', default='')
     ap.add_argument('--resume', action='store_true')
     ap.add_argument('--countdown', type=int, default=6)
-    ap.add_argument('--session', default='manual', choices=('manual', 'auto'),
-                    help='how to get back in when the range evicts us')
+    ap.add_argument('--session', default='auto', choices=('manual', 'auto'),
+                    help="how to get back in when the range evicts us; 'auto' "
+                         "drives the lobby via detector/lobby_control.py")
     ap.add_argument('--budget', type=float, default=DEFAULT_BUDGET_S,
                     help='seconds before re-entering pre-emptively')
     args = ap.parse_args()

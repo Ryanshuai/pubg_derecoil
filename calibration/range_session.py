@@ -110,28 +110,72 @@ class ManualSession(RangeSession):
 
 
 class AutoSession(RangeSession):
-    """Drives the lobby UI to re-enter without a human.
+    """Drives the lobby back into a match, with no human involved.
 
-    NOT IMPLEMENTED — owned by the module that handles range entry. Stubbed
-    here so harvest can be wired against the real interface today and swap the
-    implementation in without touching calibration code.
+    detector/lobby_control.py does the driving: from the results screen, the
+    lobby, an open ESC menu or a loading screen, ensure_in_match() gets to a
+    running round, polling the state rather than sleeping fixed durations.
+
+    Two things it does NOT know, and both matter here:
+
+      * WHICH mode it re-enters. press_play() is F on whatever the lobby has
+        selected, so the lobby must be left on the training range. Nothing can
+        verify that from the lobby screen — but the spawner check below
+        catches it a moment later, because no other mode has an item spawner.
+      * WHERE in the range it lands. Re-entry drops the character at the
+        range's spawn point, and the caller needs it standing at an item
+        spawner. at_spawner_fn is how that gets verified; without it this
+        reports success while parked somewhere with nothing to spawn from.
     """
 
+    def __init__(self, budget_s=DEFAULT_BUDGET_S, at_spawner_fn=None,
+                 verbose=False):
+        super().__init__(budget_s)
+        from detector.lobby_detector import LobbyDetector
+        from detector.lobby_control import LobbyControl
+        self._det = LobbyDetector()
+        self._lc = LobbyControl(verbose=verbose)
+        self._at_spawner = at_spawner_fn
+
     def in_range(self):
-        raise NotImplementedError(
-            "AutoSession is not implemented yet. Use --session manual, or "
-            "point it at the range-entry module once it lands.")
+        """Playable, not merely IN_GAME. The loading screen and the ESC menu
+        both look like a match to anything coarser, and input goes nowhere in
+        either."""
+        return bool(self._det.state().playable)      # a property, not a call
 
     def enter(self, timeout_s=300.0):
-        raise NotImplementedError(
-            "AutoSession is not implemented yet.")
+        r = self._lc.ensure_in_match(timeout=timeout_s)
+        if not r.get('ok'):
+            print(f"    [!] could not get back into a match: {r}")
+            return False
+        print(f"    back in a match after {r.get('elapsed', 0):.0f}s")
+        if self._at_spawner is None:
+            return True
+        if self._at_spawner():
+            return True
+        print("    [!] in a match, but the item spawner will not open. Either "
+              "the lobby was set to a different mode, or the spawn point is "
+              "not next to a spawner — walking there is not automated.")
+        return False
+
+    def close(self):
+        for x in (self._det, self._lc):
+            try:
+                x.close()
+            except Exception:
+                pass
 
 
-def get_session(kind, in_range_fn=None, budget_s=DEFAULT_BUDGET_S):
+def get_session(kind, in_range_fn=None, budget_s=DEFAULT_BUDGET_S,
+                verbose=False):
+    """in_range_fn proves we are somewhere useful — for harvest that means
+    "comma produces the item spawner", which is both the range test and the
+    at-a-spawner test in one."""
     if kind == 'manual':
         if in_range_fn is None:
             raise ValueError("ManualSession needs in_range_fn")
         return ManualSession(in_range_fn, budget_s)
     if kind == 'auto':
-        return AutoSession(budget_s)
+        return AutoSession(budget_s, at_spawner_fn=in_range_fn,
+                           verbose=verbose)
     raise ValueError(f"unknown session kind {kind!r}")
