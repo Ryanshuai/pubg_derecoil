@@ -211,7 +211,18 @@ class Kitter:
         if not self.rig.ensure_inventory_open():
             print("      [!] inventory would not open")
             return False
-        return bool(self.ac.sync())
+        if not self.ac.sync():
+            # sync() knows exactly why it refused, but Kitter builds
+            # AttachControl with verbose=False, so the reason went nowhere and
+            # the cell died as an unexplained "could not reach config". Two
+            # independent Tab detectors are involved -- Rig counts bright
+            # pixels in the HUD 'type' region, AttachControl has its own -- so
+            # "opened but would not sync" is a real state and worth naming.
+            print(f"      [!] the Tab screen would not sync: "
+                  f"focused={game_focused()}, "
+                  f"attach_control sees tab_open={self.ac.tab_open()}")
+            return False
+        return True
 
     def strip(self):
         """Everything off, back into 库存. Must happen BEFORE the next weapon
@@ -309,21 +320,29 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
     rig.mouse.set_recoil_enabled(True)
     time.sleep(0.3)
 
-    if not rig.ensure_posture(posture):
-        print(f"      [!] could not reach posture {posture}")
-        return None
-    # Home against the pitch stop and rise to the measurable middle, so every
-    # magazine in every cell starts from the same absolute aim. The reference
-    # is taken after that, in ADS, because it describes wherever homing landed.
-    # Top up before the first round. Fitting a magazine does not fill it — the
-    # gun keeps whatever the last configuration left in it, so the opening
-    # burst of a cell runs short. In the bare m416 cell that one short
-    # magazine pulled the mean 85 counts off and took the cell's spread from
-    # ~2% to 10%, which then propagated into every ratio measured against it
-    # and made three multiplicative combinations look 6% wrong.
+    # Top up FIRST, then take the aim — never the other way round.
+    #
+    # Fitting an extended magazine does not fill it: capacity grows, the rounds
+    # in it do not, so the opening burst of a cell runs short. One short
+    # magazine in the bare m416 cell pulled the mean 85 counts off and took the
+    # cell's spread from ~2% to 10%, which propagated into every ratio measured
+    # against it.
+    #
+    # But reloading DROPS OUT OF ADS (docs/game_quirks.md), so topping up after
+    # ensure_posture put ADS back exactly where it could not survive: the first
+    # magazine then fired from the hip and was analysed with the scoped K of
+    # 1.55 against the hip's 0.50. It reported +498 counts of residual on a gun
+    # that had measured -31 an hour earlier, with the same compensation.
+    #
+    # It only bites when a reload actually happens, which is why it hid: a
+    # freshly spawned gun is already full and R does nothing at all.
     rig.mouse.key(HID_KEY_R, 60)
     time.sleep(0.4)
     rig.wait_reload()
+
+    if not rig.ensure_posture(posture):
+        print(f"      [!] could not reach posture {posture}")
+        return None
 
     # The measurable band is where the character can see texture, and that
     # moves with the posture — prone looks lower, so the band that was mapped
