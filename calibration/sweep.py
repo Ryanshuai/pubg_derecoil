@@ -144,6 +144,9 @@ class Rig:
         # Counts above the bottom clamp where the view can be measured,
         # found once. See calibrate_pitch.
         self.pitch_centre = 0
+        # Off: the band scan sweeps the view ground-to-sky at the start of
+        # every posture, which is slow and unpleasant to watch. See reaim().
+        self.use_homing = False
 
     def close(self):
         try:
@@ -406,6 +409,28 @@ class Rig:
         print(f"  pitch: measurable from {lo} to {hi} counts above the bottom "
               f"clamp; aiming at {self.pitch_centre}")
         return self.pitch_centre
+
+    def reaim(self):
+        """Put the view back where the magazine should start.
+
+        Two ways, and the switch is Rig.use_homing (off by default).
+
+        OFF — measure the way back to the cell's own reference. Cheap and
+        invisible: the view barely moves and nothing sweeps the screen.
+
+        ON — home against the pitch clamp and rise to the middle of the
+        measurable band. Immune to drift in a way the other cannot be, since
+        it returns to a hard stop rather than to a running total. It is also
+        obtrusive: mapping the band whips the view from the ground to the sky
+        and back at the start of every posture, which is unpleasant to sit
+        behind and slow. Worth it for a long unattended sweep; not worth it
+        for a few magazines with someone watching.
+        """
+        if self.use_homing:
+            back = self.goto_pitch_centre()
+            self.set_reference()
+            return back
+        return self.recenter()
 
     def goto_pitch_centre(self):
         """Home against the bottom stop, then rise to the measurable middle.
@@ -790,10 +815,11 @@ def calibrate_combo(rig, weapon, posture, mags, log):
     if not rig.ensure_posture(posture):
         print(f"    [!] could not reach posture {posture}")
         return None
-    # In ADS and before the first round: home to the measurable middle of the
-    # pitch travel, then take the reference there.
+    # In ADS and before the first round. With homing on this lands at the
+    # middle of the measurable pitch band; with it off it stays where it is.
     rig.flush(6)
-    rig.goto_pitch_centre()
+    if rig.use_homing:
+        rig.goto_pitch_centre()
     rig.set_reference()
 
     rows = []
@@ -804,8 +830,7 @@ def calibrate_combo(rig, weapon, posture, mags, log):
             if not rig.ensure_ads():
                 print("      [!] could not re-enter ADS after reload")
                 break
-            rig.goto_pitch_centre()      # same absolute aim every magazine
-            rig.set_reference()
+            rig.reaim()
 
         rec, fire_s, steps, fire_end = rig.fire_magazine()
         if steps == 0:

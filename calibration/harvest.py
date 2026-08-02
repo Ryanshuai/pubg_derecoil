@@ -328,13 +328,14 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
     # The measurable band is where the character can see texture, and that
     # moves with the posture — prone looks lower, so the band that was mapped
     # standing puts the aim somewhere else entirely. Re-mapped whenever the
-    # posture changes, cached otherwise.
+    # posture changes, cached otherwise. Only used when homing is on.
     if getattr(rig, 'band_posture', None) != posture:
         rig.pitch_centre = 0
         rig.band_posture = posture
 
     rig.flush(6)
-    rig.goto_pitch_centre()
+    if rig.use_homing:
+        rig.goto_pitch_centre()
     rig.set_reference()
 
     rows = []
@@ -345,10 +346,10 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
             if not rig.ensure_ads():
                 print("      [!] could not re-enter ADS after reload")
                 break
-            back = rig.goto_pitch_centre()
-            rig.set_reference()
+            back = rig.reaim()
             if back:
-                print(f"        re-homed, {back:+d} counts above the stop")
+                print(f"        re-aimed {back:+d} counts"
+                      f"{' above the stop' if rig.use_homing else ''}")
             # A magazine fired from an unknown position is not noisy data, it
             # is wrong data that looks fine — at the pitch clamp the view
             # barely moves and the weapon measures unusually mild. Stop the
@@ -659,6 +660,11 @@ def main():
                          'muzzle=brake_ar,grip=angled_grip. This is how a '
                          'second part in the same slot gets measured against '
                          'the first.')
+    ap.add_argument('--home', action='store_true',
+                    help='re-home against the pitch clamp before every '
+                         'magazine instead of returning to the cell reference. '
+                         'Drift-proof but obtrusive: mapping the measurable '
+                         'band sweeps the view ground-to-sky per posture.')
     ap.add_argument('--semi', action='store_true',
                     help='include semi-auto and burst weapons, which have no '
                          'full-auto curve to measure')
@@ -723,6 +729,7 @@ def main():
     print("\n[SHADOW MODE] nothing is written back to any curve or scale.\n")
 
     rig = Rig(args.sight)
+    rig.use_homing = args.home
     panel = Panel(rig.mouse)
     sc = SpawnerControl()
     kit = Kitter(rig, slot=args.slot)
