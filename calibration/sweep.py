@@ -79,24 +79,29 @@ TAB_OPEN_S = 0.55
 TAB_CLOSE_S = 0.35
 POSTURE_SETTLE_S = 0.6
 RECENTER_SETTLE_S = 0.25   # let the view stop before the next burst
-GAME_HINTS = ('battlegrounds', 'pubg', 'tslgame')
+GAME_EXES = ('tslgame',)     # PUBG ships as TslGame.exe
 POSTURES = ('standing', 'crouching', 'prone')
 
 
 def game_focused():
-    hwnd = win32gui.GetForegroundWindow()
+    """Is PUBG the foreground window?
+
+    Matched on the EXECUTABLE, never the title. The title-based version
+    accepted any window whose caption contained "pubg" — which includes this
+    repository open in an editor, so every focus guard in every calibration
+    tool silently passed while the game was in the background. That is the
+    exact failure the guards exist to catch.
+    """
     try:
-        title = win32gui.GetWindowText(hwnd)
-    except Exception:
-        title = ''
-    exe = ''
-    try:
+        import win32gui
+        import win32process
         import psutil
+        hwnd = win32gui.GetForegroundWindow()
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        exe = psutil.Process(pid).name()
+        exe = psutil.Process(pid).name().lower()
     except Exception:
-        pass
-    return any(k in (title + exe).lower() for k in GAME_HINTS)
+        return False
+    return any(exe.startswith(k) for k in GAME_EXES)
 
 
 class Rig:
