@@ -49,7 +49,7 @@ from config import (SCREEN_W, SCREEN_H, SPAWNER_ICON_ANCHORS, SPAWNER_ICON_W,
 from detector.cropper import RegionGrabber
 from detector.spawner_detector import SpawnerDetector
 from detector.weapon import Weapon, WEAPON_RPM, can_full_guns
-from press.pico_mouse import HID_KEY_COMMA
+from press.pico_mouse import HID_KEY_COMMA, HID_KEY_R
 
 from sweep import (Rig, analyse, game_focused, ensure_focus, focus_keeper,
                    POSTURES)
@@ -90,6 +90,10 @@ TEST_SLOTS = ('muzzle', 'grip', 'stock')
 # for a full factorial plus the spares shuttling on and off the gun have to fit
 # at once, and the panel's own 物品 N/200 counter is the backpack's.
 BACKPACK = 'backpack3'
+
+# How far a magazine's round count may sit from the cell's median before it is
+# treated as a different measurement rather than a repeat. See measure_cell.
+ROUNDS_TOL = 2
 
 # The sight is pinned, not tested. Magnification is a different axis from
 # recoil reduction: a scope does not damp the gun, it magnifies the view, so
@@ -311,6 +315,16 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
     # Home against the pitch stop and rise to the measurable middle, so every
     # magazine in every cell starts from the same absolute aim. The reference
     # is taken after that, in ADS, because it describes wherever homing landed.
+    # Top up before the first round. Fitting a magazine does not fill it — the
+    # gun keeps whatever the last configuration left in it, so the opening
+    # burst of a cell runs short. In the bare m416 cell that one short
+    # magazine pulled the mean 85 counts off and took the cell's spread from
+    # ~2% to 10%, which then propagated into every ratio measured against it
+    # and made three multiplicative combinations look 6% wrong.
+    rig.mouse.key(HID_KEY_R, 60)
+    time.sleep(0.4)
+    rig.wait_reload()
+
     rig.flush(6)
     rig.goto_pitch_centre()
     rig.set_reference()
@@ -357,6 +371,21 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
 
     if not rows:
         return None
+
+    # Magazines that fired a different number of rounds are not repeats of the
+    # same measurement and averaging them is not noise reduction, it is a
+    # wrong answer with a big error bar. A short magazine carries less recoil
+    # AND less compensation, so its residual is not comparable — one of them
+    # in the bare m416 cell moved the mean 85 counts and took the cell from
+    # 2% spread to 10%, which propagated into every ratio taken against it.
+    lens = [len(r['per_bullet_counts']) for r in rows]
+    keep = int(np.median(lens))
+    odd = [n for n in lens if abs(n - keep) > ROUNDS_TOL]
+    if odd and len(lens) - len(odd) >= 1:
+        print(f"        dropping {len(odd)} magazine(s) that fired {odd} "
+              f"rounds against a median of {keep}")
+        rows = [r for r, n in zip(rows, lens) if abs(n - keep) <= ROUNDS_TOL]
+
     cc = np.array([r['cum_counts'] for r in rows])
 
     # The gun's own recoil is compensation + residual, but only over the
