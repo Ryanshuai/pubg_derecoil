@@ -41,6 +41,31 @@ MIN_ROUNDS = 12
 # rewriting. Under this the two are the same number seen twice.
 REWRITE_FRAC = 0.005
 
+# How far magazines of the SAME cell may disagree about the interval before
+# their average is not worth storing.
+#
+# This is the check analysis.interval_from_span asks its callers for in so many
+# words -- "a missed LAST change shortens the span and reads as a faster gun
+# ... it shows up as a rate that disagrees between magazines of the same cell,
+# so the caller should require agreement before storing one" -- and which no
+# caller performed. The cost of not performing it, measured: the AUG stored
+# 737.9 rpm from a single magazine reading 81.32 ms, while the four magazines
+# either side of it read 82.73-83.39. A 2% interval error puts the last round
+# of a 42-shot magazine most of a bullet out of place, and the fit then absorbs
+# that phase as if it were recoil.
+#
+# 1.0 ms is derived: an interval error d compounds, so round k lands k*d/T
+# bullets late, and 41 * 1.0/83 = 0.49 bullets over a full magazine -- matching
+# the half-round the impulse check allows, deliberately, so the two timing
+# gates permit the same error. Real spread for scale: 0.24 ms over those four
+# AUG magazines.
+#
+# harness/verdict.py holds the same number for the same reason and does NOT
+# import it (only harness/adapter.py may reach into calibration). They are
+# asserted equal by tools/test_harness.py, so a change to one is a failing
+# test rather than a silent divergence.
+AGREE_MS = 1.0
+
 
 def load(path=PATH):
     try:

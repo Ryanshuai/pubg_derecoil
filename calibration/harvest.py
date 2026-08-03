@@ -95,6 +95,15 @@ TEST_SLOTS = ('muzzle', 'grip', 'stock')
 # at once, and the panel's own 物品 N/200 counter is the backpack's.
 BACKPACK = 'backpack3'
 
+# How many times to look for a freshly spawned gun's NAME PLATE, and how long
+# to wait between looks. The plate is drawn by the same UI that is still
+# animating the pickup, so one look samples a screen in motion: the m249 cell
+# read {1: None, 2: None} twice while both rack slots plainly held a gun
+# wearing a sight, a magazine and a stock. Cheap — a successful read breaks out
+# on the first pass and the retries cost nothing.
+FIND_TRIES = 3
+FIND_SETTLE_S = 0.4
+
 # Which magazines are admissible is decided by analysis.magazine_fault, and
 # its gates (ADS_FRAC_MIN, HAND_COUNTS_MAX, OOR_FRAC_MAX, ROUNDS_TOL, Z_MAX)
 # live there with it — they are properties of the measurement, not of this
@@ -275,14 +284,25 @@ class Kitter:
         """
         if not self._open():
             return None
+        racked, worn = {}, {}
         try:
-            if not self.ac.sync():
-                print("      [!] the Tab screen would not sync — cannot "
-                      "locate the gun")
-                return None
-            racked = dict(self.ac.guns)
+            # Read up to FIND_TRIES times. The gun was spawned seconds ago and
+            # the name plate is drawn by the same UI that is still animating
+            # the pickup; a single look is a sample of a screen in motion.
+            for attempt in range(FIND_TRIES):
+                if not self.ac.sync():
+                    print("      [!] the Tab screen would not sync — cannot "
+                          "locate the gun")
+                    return None
+                racked = dict(self.ac.guns)
+                worn = self.ac.read_slots()
+                if any(k == weapon for k in racked.values()):
+                    break
+                if attempt + 1 < FIND_TRIES:
+                    time.sleep(FIND_SETTLE_S)
         finally:
             self.rig.ensure_inventory_closed()
+
         for slot, key in sorted(racked.items()):
             if key == weapon:
                 if slot != self.slot:
@@ -290,8 +310,29 @@ class Kitter:
                           f"{self.slot} — kitting slot {slot}")
                 self.slot = slot
                 return slot
-        print(f"      [!] {weapon} is not in the rack: {racked} — the spawn "
-              f"did not land, or it was evicted")
+
+        # Not found, and there are TWO reasons for that which look identical
+        # from `racked` alone. Saying the wrong one sends the morning to the
+        # wrong module, so it is worked out rather than guessed.
+        #
+        # This message used to read "the spawn did not land, or it was
+        # evicted", asserting two causes it had not checked. The m249 cell
+        # proved it wrong twice in a row: `guns` came back {1: None, 2: None}
+        # while `slots` showed BOTH rack slots wearing a sight, a magazine and
+        # a stock -- and a slot cannot hold a magazine with no gun in it. The
+        # spawn had landed, both times; the NAME PLATE would not read. The
+        # second attempt then spawned a second m249 on top of the first.
+        occupied = sorted(g for g, s in (worn or {}).items()
+                          if any((s or {}).values()))
+        if occupied:
+            print(f"      [!] rack slot(s) {occupied} hold a gun wearing "
+                  f"parts, but no name plate would read ({racked}). The spawn "
+                  f"landed; the WEAPON NAME detector did not. Refusing rather "
+                  f"than assuming it is the {weapon} — measuring the wrong gun "
+                  f"under this label is worse than losing the cell.")
+        else:
+            print(f"      [!] {weapon} is not in the rack, and both slots are "
+                  f"empty ({racked}) — the spawn did not land.")
         return None
 
     def strip(self):
@@ -308,6 +349,48 @@ class Kitter:
         finally:
             self.rig.ensure_inventory_closed()
         return True
+
+    def clear_rack(self):
+        """Both rack slots empty, their parts back in the backpack. -> bool
+
+        STRIP THEN DROP, in that order. InventoryControl.drop_weapon throws the
+        gun wearing everything it had on, which is the right default everywhere
+        else and wrong here: the parts this run uses are spawned once and
+        shuttled between guns, so a gun that leaves wearing the only plain
+        extended magazine takes it to the floor, where nothing goes to fetch it.
+
+        MEASURED, over the first full-roster night. The rack was never cleared
+        at all -- strip() took the parts off ONE slot and the other gun kept
+        sitting there holding the plain ext_ar. Meanwhile every freshly spawned
+        weapon arrives wearing the QUICKDRAW extended magazine, which the game
+        fits by itself and nobody asks for. So each cell leaked one ext_ar to
+        the floor and gained one quickext_ar: the backpack went from `ext_ar,
+        quickext_arx3` to no ext_ar at all and `quickext_arx4`, and the g36c
+        cell failed twice with `magazine reads Magazine_ExtendedQuickDraw_
+        Large_C` -- not a compatibility problem, a supply one.
+
+        Cheap when there is nothing to do: an empty slot is skipped, and a bare
+        gun strips in zero drags.
+        """
+        if not self._open():
+            return False
+        try:
+            racked = self.ac._read_guns(self.ac._frame())
+            for g in (1, 2):
+                if racked.get(g) is None:
+                    continue
+                self.ac.strip(g)
+            rec = self.ac.clear_rack()
+            ok = bool(rec.get('ok', True))
+            if rec.get('dropped'):
+                print(f"      [rack] cleared {len(rec['dropped'])} gun(s), "
+                      f"parts kept")
+        except Exception as e:
+            print(f"      [!] could not clear the rack: {e}")
+            return False
+        finally:
+            self.rig.ensure_inventory_closed()
+        return ok
 
     def apply(self, want, weapon=None):
         """want = {'scope': key or None, 'muzzle': ..., 'grip': ...}.
@@ -346,8 +429,24 @@ class Kitter:
         # Two ways a slot can end up wrong, and measure_cell treats them the
         # same: drop that slot and measure the rest. `missing` is a part that
         # is nowhere on screen, `bad` is a slot whose readback disagrees.
-        for slot_name, key in (rec.get('missing') or []):
-            print(f"      [!] {key} not on screen — cannot fit")
+        # ensure_kit reports missing PARTS -- a list of catalogue keys, not
+        # (slot, key) pairs. This unpacked each one into two names and threw
+        # `ValueError: too many values to unpack (expected 2)` on any string
+        # longer or shorter than two characters, i.e. always.
+        #
+        # It never fired until a part became genuinely unobtainable, because
+        # `missing` is empty whenever the restock hook can produce what was
+        # asked for. The night that emptied the backpack of ext_smg found it
+        # twice in a row, on mp5k and mp9, as a crash rather than as the
+        # "cannot fit" message written here.
+        #
+        # The slot is recovered from `want`, which is the mapping that was
+        # asked for in the first place.
+        for key in (rec.get('missing') or []):
+            slot_name = next((s for s, k in (want or {}).items() if k == key),
+                             None)
+            print(f"      [!] {key} not on screen — cannot fit"
+                  + (f" ({slot_name})" if slot_name else ""))
             self.last_bad.append((slot_name, key, 'not on screen'))
         for b in rec['bad']:
             print(f"      [!] {b['slot']} should be "
@@ -866,9 +965,12 @@ def harvest_weapon(rig, kit, sc, weapon, configs, postures, mags,
     # brings its own — see SIGHT_FOR.
     rig.set_sight(SIGHT_FOR.get(weapon, base_sight))
 
-    # Strip first: the incoming gun evicts whatever is in the rack, and an
-    # evicted gun leaves wearing everything it had on.
-    kit.strip()
+    # Clear the whole rack, not just this run's slot. Leaving the other gun in
+    # place and letting the next spawn evict it loses that gun's parts to the
+    # floor -- eviction only fires when the rack is FULL, and an evicted gun
+    # leaves wearing everything it had on. See Kitter.clear_rack for the
+    # measured cost of not doing this.
+    kit.clear_rack()
 
     # Then take stock, with everything loose and nothing hidden on a gun. This
     # is the cheapest place in the run to notice a duplicate — the strip has
