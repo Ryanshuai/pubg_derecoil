@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import win32gui
 import win32process
 
-from press.pointer import game_focused, raise_game, game_hwnd, GAME_EXES
+from control.focus import game_focused, raise_game, game_hwnd, GAME_EXES
 
 
 def _describe(hwnd):

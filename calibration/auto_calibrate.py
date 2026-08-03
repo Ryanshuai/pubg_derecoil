@@ -18,6 +18,15 @@ tactical reloads all work without a lookup table.
 
     python calibration/auto_calibrate.py --weapon aug --sight red_dot
     python calibration/auto_calibrate.py --weapon aug --mags 10
+
+WHAT THIS IS, next to sweep.py: one cell. One weapon, one posture, no weapon
+switcher and no factorial — a human puts the gun in their hands and this
+measures it. That is the only difference worth having, so the game is driven
+through the same sweep.Rig the sweep uses. This file used to carry its own
+firing loop, its own reload wait, its own Tab toggle and its own ADS click,
+all of them parallel to control/fire.py and control/gun.py, and all of them
+drifting away from the versions that had the fixes. See the note above the
+analyse import for what the convergence did to the numbers.
 """
 import argparse
 import json
@@ -30,173 +39,92 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import cv2
 import numpy as np
-import win32gui
-import win32process
 
-from config import (HUD_REGIONS, RECOIL_SIGHT_PROFILES,
-                    RECOIL_K_DEFAULT_SCOPED, TAB_PIXEL_THRESH,
-                    TAB_COUNT_MIN, TAB_COUNT_MAX)
-from detector.attachment_detector import AttachmentDetector
-from detector.cropper import make_grabber
-from detector.view_tracker import ViewTracker, MagazineRecorder
+from config import RECOIL_SIGHT_PROFILES
+from detector.cropper import FocusLost
 from detector.weapon import Weapon, WEAPON_RPM
-from press.pico_mouse import get_mouse, HID_KEY_TAB
+from control.focus import game_focused
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# This file used to carry its own analyse(), a strictly worse one: it booked
+# the player's own mouse motion as recoil, kept frames the correlator had
+# flagged as wrapped, started the bins at the first frame captured rather than
+# the first round fired, and rounded each frame pair into whichever bullet its
+# timestamp landed in. Numbers from before 2026-08-02 were produced by that
+# version and are not comparable with anything printed after it.
+#
+# 2026-08-03 moves them AGAIN, and for the same kind of reason. The burst is
+# now fired by control/fire.py, which reports when the first round left the gun
+# and when the last one did; both go to analyse(). So the bins now start at the
+# first SHOT rather than at the first frame captured — between the click going
+# out over USB and that round's recoil reaching a grabbed frame there are 20 to
+# 50 ms against an 88 ms bullet interval — and the recording is cut at the last
+# round instead of running on through the camera drifting back toward the aim.
+# The fire loop also takes three baseline frames BEFORE the trigger, so bullet
+# 0 has somewhere to be measured from. Every one of those is a fix, and every
+# one of them shifts the residual: do not put a run from before 2026-08-03 in
+# the same table as one from after it.
+from analysis import analyse, ADS_FRAC_MIN
+# The rig: capture, Pico, detectors, and the three closed loops assembled over
+# them. Building that object graph by hand here is exactly how the parallel
+# drivers this file used to carry came to be written, so it is imported rather
+# than re-made. harvest.py reaches for it the same way.
+from sweep import Rig
 
 cv2.setNumThreads(1)
 HERE = os.path.dirname(os.path.abspath(__file__))
+# Runs are measurements, not source: they land under docs/ with the rest of
+# what this repo has measured, never next to the script that wrote them.
+RUNS = os.path.join(os.path.dirname(HERE), 'docs', 'recoil', 'runs')
 
-AMMO_THRESH = 200        # binarisation level for the ammo digits. 180 was low
-                         # enough that muzzle flash lighting the translucent
-                         # HUD backing registered as a count change.
-AMMO_CHANGED = 0.02      # fraction of pixels; above this the count moved
-EMPTY_STATIC_S = 0.55    # ammo unchanged this long while firing => empty
-MIN_FIRE_S = 0.8         # never call it empty before this
-MAX_FIRE_S = 8.0
-RELOAD_TIMEOUT_S = 8.0
-# The ammo counter jumps back to full partway through the reload animation,
-# while the weapon still cannot fire. Waiting only 0.5 s produced a magazine
-# that fired zero rounds. The AUG animation runs ~3.4 s total.
-SETTLE_AFTER_RELOAD_S = 1.8
-ADS_SETTLE_S = 0.5       # scope-in animation after re-entering ADS
-TAB_OPEN_S = 0.55        # inventory animation
-TAB_CLOSE_S = 0.35
-
-GAME_HINTS = ('battlegrounds', 'pubg', 'tslgame')
+# game_focused comes from control/focus.py. The copy that used to live here
+# matched the window TITLE against ('battlegrounds', 'pubg', 'tslgame') -- and
+# this repository is called pubg_derecoil, so an editor or terminal showing the
+# path matched 'pubg' and the run believed the game had focus while every
+# keypress went into the editor. control.focus matches the EXE and nothing else.
 
 
-def game_focused():
-    hwnd = win32gui.GetForegroundWindow()
-    try:
-        title = win32gui.GetWindowText(hwnd)
-    except Exception:
-        title = ''
-    exe = ''
-    try:
-        import psutil
-        _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        exe = psutil.Process(pid).name()
-    except Exception:
-        pass
-    return any(k in (title + exe).lower() for k in GAME_HINTS)
+def read_attachments(rig, weapon, slot):
+    """What is on the gun, and whether it is the gun that was asked for.
 
-
-def tab_is_open(frame):
-    """The 'Type' header only renders while the inventory is up."""
-    crop = frame.get('type')
-    if crop is None:
-        return False
-    g = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    n = int((g > TAB_PIXEL_THRESH).sum())
-    return TAB_COUNT_MIN <= n <= TAB_COUNT_MAX
-
-
-def detect_attachments(grabber, mouse, slot):
-    """Read the equipped attachments by driving Tab from the Pico.
+    -> ({slot: template name}, error string). Exactly one of the two is None.
 
     Skipping this is what produced a 30% over-compensation on the first run:
     weapon_scales.json is calibrated WITH compensator+grip, so a Weapon left
     at default attachments gets its scale divided back out to bare-gun level
     and then never multiplied down again.
+
+    The Tab cycle itself is GunDriver.read_loadout — the same one the sweep and
+    the harvest read their loadouts through. This file used to own that loop:
+    press Tab, poll the 'Type' header, read, press Tab again. The judgement had
+    already converged on TabTypeDetector; the LOOP had not, and a toggle driven
+    from two places fails silently, because a swallowed keypress reads exactly
+    like a bare gun.
+
+    KNOWN COST OF THE SWAP, so nobody rediscovers it as a bug: read_loadout
+    forces a close/open cycle and sleeps TAB_CLOSE_S + TAB_OPEN_S through it,
+    where the loop here polled (measured 2026-08-02: the screen is up 28-38 ms
+    after the key and gone 77-128 ms after it, tools/probe_toggle_latency.py).
+    So this is roughly a second slower and presses Tab once more than it needs
+    to. It happens ONCE per run, before anything is fired, and buying it back
+    means fixing GunDriver — where every caller gets the fix — rather than
+    keeping a faster copy here.
+
+    The name plate comes back from the same frame as the slots, at no extra
+    cost, so the weapon named on the command line is checked rather than
+    trusted. --weapon is what picks the curve, and measuring an M416's residual
+    against the AUG's curve is not a noisy measurement, it is a wrong one.
     """
-    det = AttachmentDetector()
-    if tab_is_open(grabber.grab()):
-        mouse.key(HID_KEY_TAB, 60)
-        time.sleep(TAB_CLOSE_S)
-    mouse.key(HID_KEY_TAB, 60)
-    time.sleep(TAB_OPEN_S)
-    frame = grabber.grab()
-    ok = tab_is_open(frame)
-    res = det.classify(frame) if ok else None
-    mouse.key(HID_KEY_TAB, 60)
-    time.sleep(TAB_CLOSE_S)
-    if not ok:
-        return None
-    return res.get(slot)
-
-
-def ammo_sig(frame):
-    """Binarised ammo digits — bright glyphs survive, translucent HUD
-    background does not, so recoil moving the scenery does not register."""
-    bgr = frame['ammo']
-    g = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-    _, b = cv2.threshold(g, AMMO_THRESH, 255, cv2.THRESH_BINARY)
-    return b > 0
-
-
-def sig_diff(a, b):
-    return float(np.mean(a != b))
-
-
-def fire_one_magazine(grabber, tracker, mouse):
-    """Hold fire until the ammo counter stops moving, capturing throughout."""
-    rec = MagazineRecorder(tracker)
-    mouse.click(buttons=0x01, duration_ms=int(MAX_FIRE_S * 1000))
-
-    t0 = time.perf_counter()
-    prev = None
-    last_change = t0
-    n_ammo_steps = 0
-    while True:
-        now = time.perf_counter()
-        el = now - t0
-        if el > MAX_FIRE_S:
-            break
-        frame = grabber.grab()
-        rec.push(now, frame)
-        sig = ammo_sig(frame)
-        if prev is not None and sig_diff(sig, prev) > AMMO_CHANGED:
-            last_change = now
-            n_ammo_steps += 1
-        prev = sig
-        if el > MIN_FIRE_S and (now - last_change) > EMPTY_STATIC_S:
-            break
-
-    mouse.click(buttons=0x00, duration_ms=0)     # release immediately
-    return rec, time.perf_counter() - t0, n_ammo_steps
-
-
-def wait_auto_reload(grabber, full_sig):
-    """Wait out PUBG's automatic reload — no keypress needed.
-
-    The game reloads by itself once the magazine empties, so R is never sent.
-    It also drops out of ADS while doing so, which the caller has to undo:
-    firing the next magazine from the hip would measure at the hip-fire K
-    (0.50) while the analysis assumes the scoped one (1.55).
-    """
-    t0 = time.perf_counter()
-    while time.perf_counter() - t0 < RELOAD_TIMEOUT_S:
-        frame = grabber.grab()
-        if sig_diff(ammo_sig(frame), full_sig) < AMMO_CHANGED:
-            time.sleep(SETTLE_AFTER_RELOAD_S)
-            return time.perf_counter() - t0
-    return None
-
-
-def analyse(res, K, bullet_interval_s):
-    """Frame-wise screen shift -> per-bullet residual in mouse counts."""
-    dy = np.asarray(res.dy, dtype=float)
-    ts = np.asarray(res.ts, dtype=float)
-    if len(ts) == 0:
-        return None
-    ts = ts - ts[0]
-    counts = dy / K                      # px -> counts
-    n_bullets = int(ts[-1] / bullet_interval_s) + 1
-    per_bullet = []
-    for b in range(n_bullets):
-        m = (ts >= b * bullet_interval_s) & (ts < (b + 1) * bullet_interval_s)
-        per_bullet.append(float(np.nansum(counts[m])) if m.any() else 0.0)
-    return {
-        'n_frames': len(dy),
-        'span_s': float(ts[-1]),
-        'cum_px': float(np.nansum(dy)),
-        'cum_counts': float(np.nansum(counts)),
-        'per_bullet_counts': [round(v, 3) for v in per_bullet],
-        'max_abs_frame_px': float(np.nanmax(np.abs(dy))) if len(dy) else 0.0,
-        'n_rejected': int(np.sum(res.n_rejected)),
-        'n_out_of_range': int(np.sum(res.out_of_range)),
-        'n_low_gate': int(np.sum(res.gates)),
-        'mean_mad': float(np.mean(res.mad)) if res.mad else float('nan'),
-    }
+    gun_seen, att = rig.read_loadout(slot=slot)
+    if gun_seen is None:
+        return None, ('the inventory would not open, so the attachments are '
+                      'unknown')
+    if gun_seen and gun_seen != weapon:
+        return None, (f'slot {slot} holds {gun_seen!r}, not {weapon!r} — the '
+                      f'curve under test belongs to a different gun')
+    if att is None:
+        return None, f'the inventory opened but slot {slot} read as nothing'
+    return att, None
 
 
 def main():
@@ -214,10 +142,6 @@ def main():
                          'a bare gun, which over-compensates ~30%%)')
     args = ap.parse_args()
 
-    prof = RECOIL_SIGHT_PROFILES.get(args.sight, {})
-    K = prof.get('K', RECOIL_K_DEFAULT_SCOPED)
-    tracker = ViewTracker(patch_xs=prof.get('patch_xs'))
-
     w = Weapon()
     w.set('name', args.weapon)
     w.set_seq()
@@ -226,22 +150,15 @@ def main():
         return 1
     rpm = WEAPON_RPM.get(args.weapon, 600)
 
+    # Opens the capture and the Pico, so it comes after the cheap checks.
+    rig = Rig(args.sight)
+
     print(f"weapon   : {args.weapon}  rpm={rpm}  "
           f"interval={w.bullet_interval_s*1000:.1f}ms  scale={w.scale}")
-    print(f"sight    : {args.sight}  K={K:.4f}  "
-          f"{len(tracker.xs)} patches at {tracker.xs}")
+    print(f"sight    : {args.sight}  K={rig.K:.4f}  "
+          f"{len(rig.tracker.xs)} patches at {rig.tracker.xs}")
     print(f"mags     : {args.mags}   [SHADOW MODE — the curve is not updated]")
-
-    mouse = get_mouse()
-    regions = dict(tracker.regions())
-    regions['ammo'] = HUD_REGIONS['ammo']
-    if not args.no_detect:
-        regions['type'] = HUD_REGIONS['type']
-        for k, v in HUD_REGIONS.items():
-            if k.startswith('att_'):
-                regions[k] = v
-    grabber, paced = make_grabber(regions)
-    print(f"grabber  : {type(grabber).__name__} (paced={paced})")
+    print(f"grabber  : {type(rig.grabber).__name__} (paced={rig.paced})")
 
     print("\n>>> Switch to the game NOW. Stand still, aim at texture, "
           "keep focus.")
@@ -252,19 +169,23 @@ def main():
 
     if not game_focused():
         print("[!] ABORT: game is not focused.")
-        grabber.close()
+        rig.close()
         return 1
 
     att = None
     if not args.no_detect:
-        for _ in range(8):
-            grabber.grab()
-        att = detect_attachments(grabber, mouse, args.slot)
-        if att is None:
-            print("[!] could not read attachments (inventory did not open) — "
-                  "aborting rather than\n    measuring against a bare-gun "
-                  "pattern.")
-            grabber.close()
+        try:
+            rig.flush(8)
+            att, err = read_attachments(rig, args.weapon, args.slot)
+        except FocusLost:
+            # grab() raises rather than handing back the frozen picture PUBG
+            # leaves behind, so this is reachable between the check above and
+            # the Tab cycle below.
+            att, err = None, 'the game left the foreground during the Tab read'
+        if err:
+            print(f"[!] ABORT: {err}.\n    Refusing to measure — the pattern "
+                  f"would be the wrong one.")
+            rig.close()
             return 1
         print(f"\nattachments (slot {args.slot}):")
         for k, v in att.items():
@@ -277,40 +198,71 @@ def main():
           f"({np.sum(w.dy_s):.0f} counts total)")
 
     # Compensation must be running, or the view climbs off the textured world.
-    mouse.upload_pattern(w.dx_s, w.dy_s, w.t_s, w.bullet_interval_s)
-    mouse.set_recoil_enabled(True)
-    time.sleep(0.3)
-
-    for _ in range(10):
-        grabber.grab()
-    full_sig = ammo_sig(grabber.grab())
-
+    # Everything from here to the finally is inside the try, because the Pico
+    # is now injecting: an exception escaping between these two lines and
+    # rig.close() would leave the firmware pulling the mouse down after this
+    # process is gone, on a machine two other agents share.
     tag = args.label or f"{args.weapon}_{args.sight}_" \
                         f"{datetime.now().strftime('%m%d_%H%M')}"
-    jl_path = os.path.join(HERE, f'autocal_{tag}.jsonl')
-    jl = open(jl_path, 'w')
-    jl.write(json.dumps({
-        'type': 'header', 'weapon': args.weapon, 'sight': args.sight, 'K': K,
-        'rpm': rpm, 'bullet_interval_s': w.bullet_interval_s,
-        'scale': w.scale, 'patch_xs': list(tracker.xs),
-        'patch': tracker.patch, 'band_y': tracker.band_y,
-        'pattern_counts': float(np.sum(w.dy_s)),
-    }) + '\n')
-
+    jl_path = os.path.join(RUNS, f'autocal_{tag}.jsonl')
+    jl = None
     mags = []
+    n_hip = 0
     try:
+        rig.mouse.upload_pattern(w.dx_s, w.dy_s, w.t_s, w.bullet_interval_s)
+        rig.mouse.set_recoil_enabled(True)
+        time.sleep(0.3)
+
+        # In ADS before the FIRST magazine, not only after a reload. This used
+        # to be asked of the human ("aim at texture") and never checked, and
+        # reading the Tab screen just above drops out of ADS anyway — so the
+        # opening magazine of an attachment-detecting run was fired from the
+        # hip by construction, then analysed with the scoped K of 1.55 against
+        # the hip's 0.50 and reported about three times high.
+        if not rig.ensure_ads():
+            print("[!] ABORT: could not confirm ADS (the crosshair is still "
+                  "drawn). Nothing fired.")
+            return 1
+        rig.flush(10)
+
+        os.makedirs(RUNS, exist_ok=True)
+        jl = open(jl_path, 'w')
+        jl.write(json.dumps({
+            'type': 'header', 'weapon': args.weapon, 'sight': args.sight,
+            'K': rig.K, 'rpm': rpm, 'bullet_interval_s': w.bullet_interval_s,
+            'scale': w.scale, 'patch_xs': list(rig.tracker.xs),
+            'patch': rig.tracker.patch, 'band_y': rig.tracker.band_y,
+            'pattern_counts': float(np.sum(w.dy_s)), 'attachments': att,
+        }) + '\n')
+
         for i in range(args.mags):
             if not game_focused():
                 print(f"[!] lost focus before mag {i} — stopping.")
                 break
 
             # The auto-reload from the previous magazine left us in hip fire.
-            # Toggle ADS back on (the user's binding is toggle, not hold).
-            if i > 0:
-                mouse.click(buttons=0x02, duration_ms=60)
-                time.sleep(ADS_SETTLE_S)
+            # ensure_ads WATCHES the toggle to completion instead of clicking
+            # and sleeping: right click is a toggle, so a blind click lands in
+            # the wrong state half the time, and clicking again while the
+            # scope-in animation is still playing just toggles back out.
+            if i > 0 and not rig.ensure_ads():
+                print("  [!] could not re-enter ADS after the reload — "
+                      "stopping rather than measuring hip fire.")
+                break
 
-            rec, fire_s, steps = fire_one_magazine(grabber, tracker, mouse)
+            try:
+                (rec, fire_s, steps, fire_end, first_shot,
+                 ads_frac) = rig.fire_magazine()
+            except FocusLost:
+                # ScreenBuffer raises the moment the game leaves the
+                # foreground, because the frames after that are the frozen
+                # picture PUBG leaves on screen — which measures as a
+                # suspiciously clean residual rather than as a failure. This
+                # tool is human-supervised and its whole contract is "keep
+                # focus", so it stops rather than trying to take it back.
+                print("  [!] lost the foreground mid-magazine — stopping.")
+                break
+
             # Zero ammo steps means the gun never fired — almost always the
             # reload animation still running. Recording it would feed a
             # magazine of pure noise into the residual statistics.
@@ -320,7 +272,8 @@ def main():
                 time.sleep(1.5)
                 continue
             res = rec.finish()
-            a = analyse(res, K, w.bullet_interval_s)
+            a = analyse(res, rig.K, w.bullet_interval_s, fire_end,
+                        first_shot_ts=first_shot)
             if a is None:
                 print(f"  mag {i}: no frames captured")
                 continue
@@ -329,8 +282,27 @@ def main():
             a['ammo_steps'] = steps
             a['n_dup'] = rec.n_duplicates
             a['fps'] = round(rec.effective_fps(), 1)
-            mags.append(a)
-            jl.write(json.dumps({'type': 'mag', **a,
+            # Whether the shots were AIMED, polled all the way through the
+            # burst rather than assumed from the click that preceded it. PUBG
+            # drops ADS on a reload, on a posture change and on being shot at,
+            # and a magazine analysed at the scoped K when it was fired at the
+            # hip's reads about three times high — a confident wrong number,
+            # not a noisy one. The two signals are logged apart because they
+            # fail for opposite reasons; see GunDriver.in_ads.
+            a['ads_frac'] = ads_frac
+            a['ads_icon_frac'] = round(getattr(rec, 'ads_icon_frac',
+                                               float('nan')), 3)
+            a['ads_cross_frac'] = round(getattr(rec, 'ads_cross_frac',
+                                                float('nan')), 3)
+            # NaN-safe: an unpolled magazine (no ADS reads at all) is not
+            # evidence of hip fire, so it is not treated as such.
+            aimed = not (ads_frac == ads_frac and ads_frac < ADS_FRAC_MIN)
+            # Written either way — the point of a diagnostic run is that the
+            # bad magazines are inspectable — but under a type that readers
+            # filtering on 'mag' will not average in. temp_debug/plot_autocal.py
+            # is one of those readers.
+            jl.write(json.dumps({'type': 'mag' if aimed else 'mag_discarded',
+                                 **a,
                                  'dy_px': [None if not np.isfinite(v)
                                            else round(v, 3) for v in res.dy],
                                  'ts': [round(t - res.ts[0], 5)
@@ -338,22 +310,45 @@ def main():
             jl.flush()
 
             print(f"  mag {i}: fire {fire_s:.2f}s  {steps} ammo steps  "
-                  f"{a['n_frames']} frames @{a['fps']:.0f}fps  |  "
+                  f"{a['n_frames']} frames @{a['fps']:.0f}fps  "
+                  f"ads {100*ads_frac:.0f}%  |  "
                   f"residual {a['cum_counts']:+8.1f} counts "
                   f"({a['cum_px']:+7.1f} px)  max {a['max_abs_frame_px']:.1f}px"
                   f"  rej={a['n_rejected']} oor={a['n_out_of_range']}")
+            if aimed:
+                mags.append(a)
+            else:
+                n_hip += 1
+                print(f"       [!] DISCARDED — only {100*ads_frac:.0f}% of the "
+                      f"polled frames were aimed (gate {100*ADS_FRAC_MIN:.0f}%)"
+                      f"; crosshair {a['ads_cross_frac']:.0%} decided, posture "
+                      f"icon said {a['ads_icon_frac']:.0%}")
 
-            rl = wait_auto_reload(grabber, full_sig)
-            if rl is None:
+            # Watches the counter move and then hold still, rather than waiting
+            # for it to match a snapshot taken at the start of the run. The
+            # snapshot went stale: one standing cell lost four of its five
+            # magazines twice running to a reference that never came back.
+            if rig.wait_reload() is None:
                 print("  [!] auto-reload did not complete — stopping.")
                 break
     except KeyboardInterrupt:
         print("\ninterrupted")
+    except FocusLost:
+        # Everything that reads the screen raises this now, not just the fire
+        # loop: the reload wait and ensure_ads grab too. Caught rather than
+        # allowed to escape, so the finally below still turns the compensation
+        # off — a traceback out of here used to be survivable and no longer is.
+        print("\n[!] the game left the foreground — stopping.")
     finally:
-        mouse.click(buttons=0x00, duration_ms=0)
-        grabber.close()
-        jl.close()
+        # Releases the trigger and stops the compensation as well as closing
+        # the capture.
+        rig.close()
+        if jl is not None:
+            jl.close()
 
+    if n_hip:
+        print(f"\n[!] {n_hip} magazine(s) were not aimed and are excluded from "
+              f"the summary. They are in the JSONL as 'mag_discarded'.")
     if not mags:
         print("no magazines recorded")
         return 1
@@ -376,7 +371,7 @@ def main():
     print(f"\n  raw -> {jl_path}")
 
     try:
-        plot(mags, w, K, tag)
+        plot(mags, w, rig.K, tag)
     except Exception as e:
         print(f"  (plot skipped: {e})")
     return 0
@@ -436,7 +431,7 @@ def plot(mags, w, K, tag):
     ax.grid(alpha=0.3)
 
     plt.tight_layout()
-    p = os.path.join(HERE, f'autocal_{tag}.png')
+    p = os.path.join(RUNS, f'autocal_{tag}.png')
     plt.savefig(p, dpi=100)
     print(f"  plot -> {p}")
 

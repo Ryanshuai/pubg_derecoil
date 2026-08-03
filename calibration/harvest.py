@@ -22,8 +22,10 @@ configs exist at all:
      bare / muzzle-only / grip-only / both is a 2x2 factorial: the model holds
      only if R(both)/R(bare) equals R(muzzle)/R(bare) x R(grip)/R(bare).
 
-SHADOW MODE. Results go to JSONL. Nothing is written back to any curve or
-scale file — see fit_curve.py for that, deliberately a separate step.
+Results go to JSONL. By default nothing is written back to any curve — the fit
+is a separate step, see fit_curve.py. With --apply each cell EMA-updates its
+own curve the moment it is measured, so the next pass measures a FRESH
+residual against what this one wrote and repeated passes converge.
 
 State is never assumed, only verified. Every toggle in this game is a toggle:
 comma opens AND closes the spawner, Tab opens AND closes the inventory, right
@@ -41,24 +43,30 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import cv2
 import numpy as np
 
-from config import (SCREEN_W, SCREEN_H, SPAWNER_ICON_ANCHORS, SPAWNER_ICON_W,
-                    SPAWNER_ICON_H, SPAWNER_ICON_SEARCH)
-from detector.cropper import RegionGrabber
-from detector.spawner_detector import SpawnerDetector
+from detector.attachment_catalog import fits, has_slot
+import detector.weapon as weapon_mod
 from detector.weapon import Weapon, WEAPON_RPM, can_full_guns
-from press.pico_mouse import HID_KEY_COMMA, HID_KEY_R
 
-from sweep import (Rig, analyse, game_focused, ensure_focus, focus_keeper,
-                   POSTURES)
-import spawner_control as spawner_mod
-from spawner_control import SpawnerControl, ROSTER
-from attach_control import AttachControl
+import rpm_store
+from analysis import (analyse, interval_from_span, magazine_fault,  # offline
+                      ROUNDS_TOL)
+from sweep import (Rig, ensure_focus, focus_keeper,
+                   POSTURES, HEADROOM_WARN_FRAC)
+from control import spawner as spawner_mod
+from control.spawner import SpawnerControl, ROSTER
+from control.inventory import InventoryControl, slot_matches
+from detector.cropper import FocusLost
 from range_session import get_session, DEFAULT_BUDGET_S
+from control.stock import open_tab, restock
+from kit_facts import KitFacts
+from fit_curve import ema_update
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# Runs are measurements, not source: they land under docs/ with the rest of
+# what this repo has measured, never next to the script that wrote them.
+RUNS = os.path.join(os.path.dirname(HERE), 'docs', 'recoil', 'runs')
 
 PANEL_WATCH_S = 3.0       # comma -> panel drawn; generous, it is a full screen
 PANEL_SETTLE_S = 0.5
@@ -91,9 +99,17 @@ TEST_SLOTS = ('muzzle', 'grip', 'stock')
 # at once, and the panel's own 物品 N/200 counter is the backpack's.
 BACKPACK = 'backpack3'
 
-# How far a magazine's round count may sit from the cell's median before it is
-# treated as a different measurement rather than a repeat. See measure_cell.
-ROUNDS_TOL = 2
+# Which magazines are admissible is decided by analysis.magazine_fault, and
+# its gates (ADS_FRAC_MIN, HAND_COUNTS_MAX, OOR_FRAC_MAX, ROUNDS_TOL, Z_MAX)
+# live there with it — they are properties of the measurement, not of this
+# run's schedule.
+
+# How far the fitted fire rate may sit from the one the curve is timed to
+# before the cell re-times and refires. Deliberately tight: the error is a
+# phase that grows with the bullet number, so 2% is nothing at bullet 5 and
+# most of a bullet by round 40. Stays here: re-timing is a thing this run
+# DOES, not a verdict on a magazine already fired.
+RPM_TOL = 0.02
 
 # The sight is pinned, not tested. Magnification is a different axis from
 # recoil reduction: a scope does not damp the gun, it magnifies the view, so
@@ -101,6 +117,13 @@ ROUNDS_TOL = 2
 # with it too (RECOIL_SIGHT_PROFILES). Mixing that into an attachment factorial
 # would confound the two. Red dot is 1x, where counts and pixels agree.
 SCOPE_PART = 'red_dot'
+
+# Weapons that cannot wear the pinned sight because they carry their own.
+# The VSS has a fixed PSO-1 at 4x and no sight slot at all, so measuring it
+# with the red dot's K reported a recoil of MINUS 482 counts over a magazine.
+# config.RECOIL_SIGHT_PROFILES already had the right profile; nothing was
+# choosing it.
+SIGHT_FOR = {'vss': 'vss_pso1'}
 
 # The magazine is pinned the other way: always fitted, never stripped. It
 # changes capacity, not recoil, and capacity is free measurement — 39 rounds
@@ -137,55 +160,39 @@ def config_name(slots):
     return '+'.join(s for s in TEST_SLOTS if s in slots) or 'bare'
 
 
-class Panel:
-    """The item-spawner screen: comma toggles it, three button glyphs prove it.
+def effective_config(weapon, cfg, parts):
+    """The part of `cfg` this weapon can physically wear.
 
-    Uses its own grabber. The glyph windows are deliberately absent from
-    HUD_REGIONS — the per-frame capture loop has no use for a panel that only
-    exists while a tool is driving it, and pulling them in would drag the DXGI
-    bounding box wider for every frame of every run.
+    PART_FOR_CLASS answers "does this CLASS have a part for the slot". It
+    cannot answer "does this WEAPON have the slot", and the two are not the
+    same question: 11 of the 23 full-auto guns have no lower rail at all --
+    AKM, Groza, FAMAS, K2, UZI, Mk14, VSS, MP9, P90 and both LMGs -- while
+    their classes obviously do.
+
+    Asking for a grip on one of those is not a harder measurement, it is an
+    impossible one. The old code spawned the gun, failed to kit it, and moved
+    on without firing a shot: half the roster silently produced no data.
+    Degrading the config instead still yields a curve, correctly labelled with
+    what was actually on the gun.
     """
+    keep = {s for s in parse_config(cfg)
+            if parts.get(s) and has_slot(weapon, s)
+            and fits(weapon, parts[s])}
+    return config_name(frozenset(keep))
 
-    def __init__(self, mouse):
-        self.mouse = mouse
-        self.det = SpawnerDetector()
-        xs = [a[0] for a in SPAWNER_ICON_ANCHORS]
-        ys = [a[1] for a in SPAWNER_ICON_ANCHORS]
-        s = SPAWNER_ICON_SEARCH
-        self._box = (max(0, min(ys) - s), max(0, min(xs) - s),
-                     max(ys) + SPAWNER_ICON_H + 2 * s - min(ys),
-                     max(xs) + SPAWNER_ICON_W + 2 * s - min(xs))
-        self._grab = RegionGrabber({'panel': self._box})
-        # classify() indexes screen coordinates, so the crop is blitted back
-        # to where it came from rather than handed over on its own.
-        self._buf = np.zeros((SCREEN_H, SCREEN_W, 3), np.uint8)
 
-    def close_grabber(self):
-        self._grab.close()
+def fixed_kit(weapon, cls):
+    """Sight and magazine, filtered by what this weapon takes.
 
-    def is_open(self):
-        y, x, h, w = self._box
-        self._buf[y:y + h, x:x + w] = self._grab.grab()['panel']
-        return self.det.classify(self._buf)
-
-    def _toggle_until(self, want, tries=3):
-        for _ in range(tries):
-            if self.is_open() == want:
-                return True
-            self.mouse.key(HID_KEY_COMMA, 60)
-            t0 = time.perf_counter()
-            while time.perf_counter() - t0 < PANEL_WATCH_S:
-                if self.is_open() == want:
-                    time.sleep(PANEL_SETTLE_S)
-                    return True
-                time.sleep(0.08)
-        return self.is_open() == want
-
-    def ensure_open(self):
-        return self._toggle_until(True)
-
-    def ensure_closed(self):
-        return self._toggle_until(False)
+    Both are pinned rather than tested (see SCOPE_PART, MAG_FOR_CLASS), but
+    pinned is not the same as universal -- the VSS carries its own scope and
+    takes neither.
+    """
+    out = {}
+    for slot, key in (('scope', SCOPE_PART), ('magazine', MAG_FOR_CLASS.get(cls))):
+        if key and has_slot(weapon, slot) and fits(weapon, key):
+            out[slot] = key
+    return out
 
 
 class Kitter:
@@ -194,12 +201,22 @@ class Kitter:
     Parts are spawned once and then shuttled between the gun and the backpack.
     Spawning fresh ones per weapon would work too, but every spare in 库存 is
     one more thing find() can pick instead of the one meant.
+
+    `restock` is called with the keys a config needs but cannot see, and is
+    expected to put them in the backpack. Without one, a missing part is still
+    a hard failure — the point of asking first is that it almost never is.
     """
 
-    def __init__(self, rig, slot=2, verbose=False):
+    def __init__(self, rig, slot=2, verbose=False, restock=None):
         self.rig = rig
         self.slot = slot
-        self.ac = AttachControl(verbose=verbose)
+        self.ac = InventoryControl(verbose=verbose)
+        self.restock_fn = restock
+        # Slots that would not take what they were asked for, from the last
+        # apply(). The caller uses it to drop those slots and measure anyway
+        # rather than losing the weapon's whole cell to one stale catalogue
+        # entry, and to log the failure for a human to check.
+        self.last_bad = []
 
     def close(self):
         try:
@@ -208,21 +225,7 @@ class Kitter:
             pass
 
     def _open(self):
-        if not self.rig.ensure_inventory_open():
-            print("      [!] inventory would not open")
-            return False
-        if not self.ac.sync():
-            # sync() knows exactly why it refused, but Kitter builds
-            # AttachControl with verbose=False, so the reason went nowhere and
-            # the cell died as an unexplained "could not reach config". Two
-            # independent Tab detectors are involved -- Rig counts bright
-            # pixels in the HUD 'type' region, AttachControl has its own -- so
-            # "opened but would not sync" is a real state and worth naming.
-            print(f"      [!] the Tab screen would not sync: "
-                  f"focused={game_focused()}, "
-                  f"attach_control sees tab_open={self.ac.tab_open()}")
-            return False
-        return True
+        return open_tab(self.ac, label='kitting')
 
     def strip(self):
         """Everything off, back into 库存. Must happen BEFORE the next weapon
@@ -239,65 +242,92 @@ class Kitter:
             self.rig.ensure_inventory_closed()
         return True
 
-    def apply(self, want):
+    def apply(self, want, weapon=None):
         """want = {'scope': key or None, 'muzzle': ..., 'grip': ...}.
 
         Returns the slot readback, or None if any slot disagrees with what was
         asked for. A drag that silently did nothing would otherwise be recorded
         as a measurement of a configuration that never existed.
+
+        The diffing, the drags and the readback are InventoryControl's
+        (`ensure_kit`); what is left here is this run's policy — open the Tab
+        screen through open_tab() so a lost foreground is named before any
+        drag, and flatten the result into the (slot, key, why) tuples
+        measure_cell's retry loop reads out of `last_bad`.
+
+        `weapon` is the catalogue gate and worth passing: without it a fit can
+        be planned onto a slot the gun does not have, and that part lands on
+        the floor rather than failing.
         """
+        self.last_bad = []
+        # open_tab first, and not just because ensure_kit would open it too:
+        # it also runs ac.sync(), which demands the foreground and parks the
+        # cursor. "Opened but would not sync" is a real state and naming it is
+        # the difference between a fixable failure and a cell that dies as an
+        # unexplained "could not reach config".
         if not self._open():
             return None
         try:
-            for slot_name, key in want.items():
-                cur = self.ac.read_slots(self.slot).get(slot_name, '')
-                if key is None:
-                    if cur:
-                        self.ac.unequip(self.slot, slot_name)
-                    continue
-                if cur and self._matches(cur, key):
-                    continue
-                if cur:
-                    self.ac.unequip(self.slot, slot_name)
-                view = self.ac.look()
-                item = view.find(key)
-                if item is None:
-                    print(f"      [!] {key} not on screen — cannot fit")
-                    return None
-                self.ac.equip(self.slot, slot_name, item)
-            time.sleep(KIT_SETTLE_S)
-            got = self.ac.read_slots(self.slot)
+            rec = self.ac.ensure_kit(self.slot, want, weapon=weapon,
+                                     restock=self.restock_fn)
         except Exception as e:
             print(f"      [!] kitting failed: {e}")
             return None
         finally:
             self.rig.ensure_inventory_closed()
 
-        for slot_name, key in want.items():
-            cur = got.get(slot_name, '')
-            if key is None and cur:
-                print(f"      [!] {slot_name} should be empty, reads {cur!r}")
-                return None
-            if key is not None and not self._matches(cur, key):
-                print(f"      [!] {slot_name} should be {key}, reads {cur!r}")
-                return None
-        return got
+        # Two ways a slot can end up wrong, and measure_cell treats them the
+        # same: drop that slot and measure the rest. `missing` is a part that
+        # is nowhere on screen, `bad` is a slot whose readback disagrees.
+        for slot_name, key in (rec.get('missing') or []):
+            print(f"      [!] {key} not on screen — cannot fit")
+            self.last_bad.append((slot_name, key, 'not on screen'))
+        for b in rec['bad']:
+            print(f"      [!] {b['slot']} should be "
+                  f"{b['key'] or 'empty'}, {b['why']}")
+            self.last_bad.append((b['slot'], b['key'], b['why']))
+        if rec.get('error') and not self.last_bad:
+            print(f"      [!] kitting failed: {rec['error']}")
+            return None
+        return rec['worn'] if rec['ok'] else None
 
-    @staticmethod
-    def _matches(readback, key):
-        """read_slots names and spawner keys are different vocabularies; the
-        asset name in the spawner table is the bridge."""
-        if not readback:
-            return False
-        asset = spawner_mod.ATTACHMENTS.get(key, {}).get('asset', '')
-        r = readback.lower()
-        return key.lower() in r or (asset and asset.lower() in r) or \
-            (asset and r in asset.lower())
+    # The two vocabularies -- read_slots' asset names and the spawner's keys --
+    # are bridged in control/inventory.py now, next to the catalogue that owns
+    # both. Kept as a name here because tools/verify_kit.py prints with it.
+    _matches = staticmethod(slot_matches)
 
 
-def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
-    """Fire `mags` magazines and record what the curve did not cancel."""
-    gun_seen, att = rig.read_loadout(slot=slot)
+def build_weapon(weapon, posture, att):
+    """A Weapon carrying the current curve, scale and bullet interval.
+
+    Re-reads the measured fire rates first. rpm_store writes them mid-cell, and
+    detector.weapon caches the table at import, so without this the re-timing
+    below rebuilds on exactly the rate it just replaced.
+    """
+    weapon_mod.WEAPON_RPM.update(weapon_mod.load_measured_rpm())
+    w = Weapon()
+    w.set('name', weapon)
+    w.set('posture', posture)
+    w.set('muzzle', (att or {}).get('muzzle', ''))
+    w.set('grip', (att or {}).get('grip', ''))
+    w.set_seq()
+    return w
+
+
+def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want,
+                 apply_ema=False, loadout=None):
+    """Fire `mags` magazines and record what the curve did not cancel.
+
+    `loadout` is (weapon_read, {slot: name}) from a Tab session the caller has
+    already had. Pass it when there is one: opening Tab costs a close, a
+    detection pass and a reopen, and the weapon axis reads exactly this for
+    both guns in one session immediately before calling here — so without it
+    the batch pays two extra Tab cycles to learn what it just measured.
+    """
+    if loadout is not None:
+        gun_seen, att = loadout
+    else:
+        gun_seen, att = rig.read_loadout(slot=slot)
     if gun_seen is None:
         print("      [!] inventory would not open — cannot read attachments")
         return None
@@ -305,50 +335,52 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
         print(f"      [!] expected {weapon}, inventory says {gun_seen!r}")
         return None
 
-    w = Weapon()
-    w.set('name', weapon)
-    w.set('posture', posture)
-    w.set('muzzle', (att or {}).get('muzzle', ''))
-    w.set('grip', (att or {}).get('grip', ''))
-    w.set_seq()
+    w = build_weapon(weapon, posture, att)
     if not len(w.t_s):
         print(f"      [!] no curve for {weapon}")
         return None
     pattern_counts = float(np.sum(w.dy_s))
+    if pattern_counts <= 0:
+        # A curve of the right length whose entries are all zero. It passes the
+        # len() check above and then every percentage below divides by it.
+        print(f"      [!] {weapon}'s curve sums to zero — there is nothing to "
+              f"measure a residual against. Needs a starting curve.")
+        return None
 
     rig.mouse.upload_pattern(w.dx_s, w.dy_s, w.t_s, w.bullet_interval_s)
     rig.mouse.set_recoil_enabled(True)
     time.sleep(0.3)
 
-    # Top up FIRST, then take the aim — never the other way round.
-    #
-    # Fitting an extended magazine does not fill it: capacity grows, the rounds
-    # in it do not, so the opening burst of a cell runs short. One short
-    # magazine in the bare m416 cell pulled the mean 85 counts off and took the
-    # cell's spread from ~2% to 10%, which propagated into every ratio measured
-    # against it.
-    #
-    # But reloading DROPS OUT OF ADS (docs/game_quirks.md), so topping up after
-    # ensure_posture put ADS back exactly where it could not survive: the first
-    # magazine then fired from the hip and was analysed with the scoped K of
-    # 1.55 against the hip's 0.50. It reported +498 counts of residual on a gun
-    # that had measured -31 an hour earlier, with the same compensation.
-    #
-    # It only bites when a reload actually happens, which is why it hid: a
-    # freshly spawned gun is already full and R does nothing at all.
-    rig.mouse.key(HID_KEY_R, 60)
-    time.sleep(0.4)
-    rig.wait_reload()
-
-    # Now that it is full, read how full. This is the cell's expected round
-    # count, stated by the game, and every magazine below is checked against
-    # it — before, the count came from watching the ammo region flicker, which
-    # over-counted by about 2.4x and could not be compared with anything.
-    mag_size = rig.magazine_size()
+    # Top up FIRST, then take the aim — never the other way round. Both halves
+    # of that ordering, and the reason a full magazine still needs the press,
+    # are in FireDriver.top_up().
+    mag_size, reload_s = rig.top_up()
+    if reload_s is None:
+        # Was thrown away here for as long as this line existed, so a stalled
+        # reload was measured as a full magazine and the cell reported nothing
+        # wrong. The other three wait_reload() calls in this file have always
+        # checked it.
+        print("      [!] top-up never finished — this cell's magazines may "
+              "run short")
     print(f"      magazine holds {mag_size if mag_size else '?'} rounds")
 
     if not rig.ensure_posture(posture):
         print(f"      [!] could not reach posture {posture}")
+        return None
+
+    # Full auto, verified. Several guns spawn in single fire — the Mk14 and
+    # the DMRs do — and holding the trigger in single mode fires exactly one
+    # round, which then gets analysed as a magazine. The MG3 is worse: both
+    # its modes are automatic, at 660 and 990 rounds a minute, and only one of
+    # them matches the interval the curve is timed to.
+    mode = rig.ensure_fire_mode(weapon)
+    want_mode = rig.FIRE_MODE_FOR.get(weapon, 'full')
+    if mode is None:
+        print(f"      [!] fire mode unreadable — firing anyway, but if this "
+              f"gun spawned in single fire the cell is worthless")
+    elif mode != want_mode:
+        print(f"      [!] {weapon} is in {mode!r} and would not cycle to "
+              f"{want_mode!r} — skipping rather than measuring single fire")
         return None
 
     # The measurable band is where the character can see texture, and that
@@ -361,10 +393,22 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
 
     rig.flush(6)
     if rig.use_homing:
-        rig.goto_pitch_centre()
+        # Level, from the bottom stop, using the stored per-posture offset.
+        # Falls back to the old ground-to-sky scan only where none is stored.
+        if not rig.goto_level(posture):
+            rig.goto_pitch_centre()
     rig.set_reference()
 
+    # Everything rebuild() reads except `mags` and `pattern_counts`, which
+    # change with every EMA step.
+    base_rec = {'type': 'cell', 'weapon': weapon, 'config': cfg_name,
+                'posture': posture, 'attachments': att, 'want': want,
+                'sight': rig.sight, 'K': rig.K, 'scale': w.scale,
+                'magazine_size': mag_size}
+
     rows = []
+    seen_resid = []      # accepted residuals, for the robust scale
+    retimed = False      # the fire rate is corrected at most once per cell
     for i in range(mags):
         if not focus_keeper().ok(f'mag {i}'):
             break
@@ -384,23 +428,162 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
                 print("        [!] view position is no longer known — "
                       "abandoning the rest of this cell")
                 break
-        rec, fire_s, steps, fire_end = rig.fire_magazine()
+        fire_start = time.perf_counter()
+        try:
+            (rec, fire_s, steps, fire_end, first_shot,
+             ads_frac) = rig.fire_magazine()
+        except FocusLost:
+            # See sweep.calibrate_combo: the frames after a lost foreground
+            # are a frozen picture, so the magazine is gone and the cell is
+            # not. A harvest run is 45-50 minutes and the terminal takes the
+            # focus back on its own, so this is the difference between losing
+            # one magazine and losing the run.
+            print("        [!] lost the foreground mid-magazine — discarded")
+            if not focus_keeper().ok(f'{weapon} mag {i}'):
+                break
+            rig.flush(6)
+            continue
         if steps == 0:
             print("        no rounds fired (still reloading?) — skipped")
             time.sleep(1.5)
             continue
+        # What the counter says this gun's fire rate actually is. Fitted before
+        # anything is analysed, because every bin edge below is laid out on
+        # this interval and a wrong one does not add noise, it adds a phase
+        # error that grows with the bullet number.
+        trace = getattr(rec, 'ammo_trace', [])
+        # Two endpoints and the magazine size, not a per-round fit. The counter
+        # reads 40/40 standing still and 37% while firing, so the fit had five
+        # values to work with; the endpoints need no OCR at all. See
+        # sweep.interval_from_span for the validation against published rates.
+        iv, iv_rounds = interval_from_span(first_shot, fire_end, mag_size)
+        iv_resid = 0.0
+        # Analysed BEFORE the re-timing decision, because a discarded magazine
+        # still moved the view and that has to be paid back. The first version
+        # skipped analyse() on the re-time path and left pending_pitch at zero,
+        # so the next reaim() looked for a reference a whole magazine's worth of
+        # climb away, declared the view's position unknown, and abandoned the
+        # cell -- one magazine after correctly discovering the AUG fires at 720
+        # rpm rather than the table's 680.
         a = analyse(rec.finish(), rig.K, w.bullet_interval_s, fire_end,
-                    n_bullets=mag_size)
+                    n_bullets=mag_size, first_shot_ts=first_shot)
         if a is None:
             continue
-        a.update(mag=i, fire_s=round(fire_s, 2), ammo_steps=steps,
-                 fps=round(rec.effective_fps(), 1))
-        rows.append(a)
         rig.pending_pitch += a['view_drift_counts']
+        # Once per cell. If the re-timed rate is itself wrong the next magazine
+        # exceeds the tolerance again, and a cell that re-times on every
+        # magazine burns the whole run without ever measuring anything.
+        if (iv and not retimed
+                and abs(iv - w.bullet_interval_s) / w.bullet_interval_s > RPM_TOL):
+            retimed = True
+            rpm, wrote, why = rpm_store.record(
+                weapon, iv, iv_rounds, iv_resid,
+                note=f'{cfg_name} {posture}, harvest mag {i}')
+            print(f"        [!] fire rate is {rpm:.0f} rpm, not the "
+                  f"{60.0 / w.bullet_interval_s:.0f} the curve is timed to "
+                  f"({iv_rounds} rounds, fit +-{iv_resid:.1f} ms)")
+            if not wrote:
+                print(f"            not stored: {why}")
+            else:
+                # Re-time and refire. This magazine was compensated on the
+                # wrong grid, so it is not a measurement of anything -- by its
+                # last round the pulses were whole bullets away from the shots
+                # they were meant to cancel. Correcting and dropping it costs
+                # one magazine; keeping it would write that phase error into
+                # the curve as if it were recoil.
+                print(f"            re-timed — this magazine is discarded, "
+                      f"the rest of the cell fires on {rpm:.0f} rpm")
+                w = build_weapon(weapon, posture, att)
+                pattern_counts = float(np.sum(w.dy_s))
+                rig.mouse.upload_pattern(w.dx_s, w.dy_s, w.t_s,
+                                         w.bullet_interval_s)
+                time.sleep(0.2)
+                if rig.wait_reload() is None:
+                    print("        [!] auto-reload never finished — stopping")
+                    break
+                continue
+        a.update(mag=i, fire_s=round(fire_s, 2), ammo_steps=steps,
+                 fps=round(rec.effective_fps(), 1), ads_frac=ads_frac,
+                 ads_icon_frac=round(getattr(rec, 'ads_icon_frac', float('nan')), 3),
+                 ads_cross_frac=round(getattr(rec, 'ads_cross_frac', float('nan')), 3),
+                 measured_interval_ms=(round(1000 * iv, 2) if iv else None),
+                 measured_rpm=(round(60.0 / iv, 1) if iv else None),
+                 interval_fit_rounds=iv_rounds,
+                 interval_fit_resid_ms=(round(iv_resid, 2)
+                                        if iv_resid == iv_resid else None),
+                 # Kept raw so a fit that comes back empty can be diagnosed
+                 # without another trip into the game.
+                 ammo_trace=[(round(t - fire_start, 4), n) for t, n in trace],
+                 shot_delay_ms=(round(1000 * (first_shot - fire_start), 1)
+                                if first_shot else None))
+
+        bad = magazine_fault(a, pattern_counts, mag_size, ads_frac, seen_resid)
+        if bad:
+            print(f"        mag {i}: DISCARDED — {bad}")
+            if 'ADS' in bad:
+                # The crosshair is what decided. The icon is printed alongside
+                # because a persistent gap between them is how a detector
+                # drifting after a patch would first show itself.
+                print(f"            crosshair {a['ads_cross_frac']:.0%} "
+                      f"(decides) / posture icon {a['ads_icon_frac']:.0%}")
+            if rig.wait_reload() is None:
+                print("        [!] auto-reload never finished — stopping cell")
+                break
+            continue
+        seen_resid.append(a['cum_counts'])
+
+        rows.append(a)
+
+        # EMA, one step per MAGAZINE — not one per cell. The residual just
+        # measured is truth minus the curve that fired it, so applying alpha
+        # of it now means the NEXT magazine is fired by a better curve and
+        # measures a genuinely fresh residual. Batching five magazines and
+        # applying once wastes four of them: they all measure the same stale
+        # curve, and the only thing the extra four buy is a smaller error bar
+        # on a correction that could have been converging all along.
+        if apply_ema and posture == 'standing':
+            one = dict(base_rec, mags=[a], n_mags=1,
+                       pattern_counts=pattern_counts)
+            rep = ema_update(one, f"harvest {cfg_name} mag {i}, "
+                                  f"{datetime.now():%Y-%m-%d}", verbose=False)
+            if rep:
+                # Re-read what was just written and fly it from here on.
+                w = build_weapon(weapon, posture, att)
+                pattern_counts = float(np.sum(w.dy_s))
+                rig.mouse.upload_pattern(w.dx_s, w.dy_s, w.t_s,
+                                         w.bullet_interval_s)
+                time.sleep(0.2)
+                print(f"          curve {rep['curve_total_before']:.0f} -> "
+                      f"{rep['curve_total_after']:.0f} counts, in effect for "
+                      f"mag {i+1}")
+        # How much of the trackable band above the aim this burst used up.
+        # Recoil only pushes up, so this is the number that decides whether
+        # the magazine was measured or merely watched: past the top of the
+        # band the tracker recovers a fraction of the real motion and the
+        # recoil reads low, with nothing else in the record to say so.
+        band = getattr(rig, 'pitch_band', None)
+        if rig.use_homing and band:
+            head = band[1] - rig.pitch_centre
+            peak = float(np.max(np.cumsum(a['per_bullet_counts'])))
+            if head > 0 and peak > head * HEADROOM_WARN_FRAC:
+                print(f"        [!] the view rose {peak:.0f} counts into "
+                      f"{head} of trackable headroom "
+                      f"({100*peak/head:.0f}%) — this magazine finished near "
+                      f"the edge of the band and reads low")
         print(f"        mag {i}: {fire_s:.2f}s  residual "
               f"{a['cum_counts']:+8.1f} ({100*a['cum_counts']/pattern_counts:+6.1f}%)"
               f"  oor={a['n_out_of_range']} hand={a['human_counts']:+.0f}"
-              f"/{a['human_abs_counts']:.0f}")
+              f"/{a['human_abs_counts']:.0f}"
+              f"  shot+{a['shot_delay_ms'] or float('nan'):.0f}ms")
+        # The canary. Both signals answer the same question, so a persistent
+        # gap means one of them has drifted -- which is how the posture icon's
+        # unreliability during fire was found in the first place, and how a
+        # patch moving the crosshair would show up before it corrupted a run.
+        gap = a['ads_cross_frac'] - a['ads_icon_frac']
+        if gap == gap and abs(gap) > 0.20:
+            print(f"            [ads] crosshair {a['ads_cross_frac']:.0%} vs "
+                  f"posture icon {a['ads_icon_frac']:.0%} — the crosshair was "
+                  f"believed")
         if rig.wait_reload() is None:
             print("        [!] auto-reload never finished — stopping cell")
             break
@@ -433,16 +616,13 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
     # fires its tail, and adding compensation that was never applied inflates
     # the answer. analyse() already trims to the burst, so the bin count IS the
     # round count.
-    bi = w.bullet_interval_s
     # Same length as the residual, and for the same reason: the magazine says
     # how many rounds there are. The curve may be shorter -- those rounds fire
     # uncompensated, which is a real and measurable thing -- but the bins have
     # to line up or comp and residual describe different shots.
-    curve_bins = int(w.t_s[-1] / bi) + 1
+    curve_bins = w.curve_bullets()
     nb = max(curve_bins, mag_size or 0)
-    comp = np.zeros(nb)
-    for dy, t in zip(w.dy_s, w.t_s):
-        comp[min(nb - 1, int(t / bi))] += dy
+    comp, _ = w.comp_bins(nb)
     fired = mag_size or int(np.median([len(r['per_bullet_counts'])
                                        for r in rows]))
     comp_fired = float(comp[:fired].sum())
@@ -452,6 +632,12 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
     rec = {
         'type': 'cell', 'weapon': weapon, 'config': cfg_name, 'want': want,
         'posture': posture, 'sight': rig.sight, 'K': rig.K,
+        'fire_mode': mode,
+        # Where the view was pointed, when homing established it. The
+        # measurable band moves with what the character faces and the reading
+        # moves with the band, so two cells are only comparable if both say.
+        'pitch_centre': getattr(rig, 'pitch_centre', 0) or None,
+        'pitch_band': list(getattr(rig, 'pitch_band', ()) or ()) or None,
         'attachments': att, 'scale': w.scale,
         'posture_factor': w.get_posture_factor(),
         'pattern_counts': pattern_counts, 'n_mags': len(rows),
@@ -480,96 +666,138 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want):
     return rec
 
 
-def harvest_weapon(rig, panel, kit, sc, weapon, configs, postures, mags,
-                   slot, log, done):
+def harvest_weapon(rig, kit, sc, weapon, configs, postures, mags,
+                   slot, log, done, want_parts=(), facts=None,
+                   apply_ema=False, base_sight='red_dot'):
     cls = ROSTER.get(weapon, (None,))[0]
     parts = PART_FOR_CLASS.get(cls, {})
 
-    todo = [c for c in configs if (weapon, c) not in done]
-    # A config asking for a slot this class has no part for measures the same
-    # thing as one that does not ask, under a different name. Drop it.
-    skipped = [c for c in todo
-               if any(not parts.get(s) for s in parse_config(c))]
-    for c in skipped:
-        need = [s for s in parse_config(c) if not parts.get(s)]
-        print(f"    skipping {c}: no {'/'.join(need)} part for class {cls}")
-    todo = [c for c in todo if c not in skipped]
+    # Ask for what this gun can wear, not what its class can. Two configs can
+    # collapse onto the same effective one -- on a grip-less gun bare and
+    # grip are the same measurement -- so they are deduped rather than fired
+    # twice under two names.
+    todo, seen = [], set()
+    for c in configs:
+        eff = effective_config(weapon, c, parts)
+        if eff != c:
+            missing = sorted(parse_config(c) - parse_config(eff))
+            why = '/'.join(f'{s} ({"no slot" if not has_slot(weapon, s) else "no part"})'
+                           for s in missing)
+            print(f"    {weapon} cannot take {why} — measuring {c} as {eff}")
+        if eff in seen:
+            continue
+        seen.add(eff)
+        if any((weapon, eff, p) not in done for p in postures):
+            todo.append(eff)
     if not todo:
         print(f"  nothing to do for {weapon}")
         return []
+
+    # The optic decides K and where the tracker may look, and one weapon
+    # brings its own — see SIGHT_FOR.
+    rig.set_sight(SIGHT_FOR.get(weapon, base_sight))
 
     # Strip first: the incoming gun evicts whatever is in the rack, and an
     # evicted gun leaves wearing everything it had on.
     kit.strip()
 
-    if not panel.ensure_open():
-        print("  [!] spawner panel would not open")
-        return []
-    if not sc.sync(need_cols=(1,)):    # the weapon column
-        print("  [!] spawner layout would not read")
-        panel.ensure_closed()
-        return []
-    if not sc.give_weapon(weapon):
-        print(f"  [!] spawner would not produce {weapon}")
-        panel.ensure_closed()
-        return []
-    if not panel.ensure_closed():
-        print("  [!] spawner panel would not close")
+    # Then take stock, with everything loose and nothing hidden on a gun. This
+    # is the cheapest place in the run to notice a duplicate — the strip has
+    # just put the last weapon's parts back, so the pack is at its fullest and
+    # every copy is visible as a row rather than as something worn.
+    #
+    # want_parts is catalogue KEYS; `parts` above is {slot: key} for this
+    # class. Handing the latter to a stocktake feeds it slot names, which
+    # match nothing, so every real part reads as surplus and goes on the
+    # floor — which is exactly what the first run of this did.
+    # ONE panel visit for the shortfall AND the gun. They used to be two: the
+    # parts went in through stock_parts, the panel closed, and then it reopened
+    # and re-synced for a single give_weapon. give_many orders the whole list
+    # by category and keeps the panel open across it, so a gun in column 1 and
+    # four parts in column 2 cost one open, one sync and one collapse.
+    if not stock_parts(sc, kit, want_parts, also=(weapon,),
+                       loose_only=True):
+        print(f"  [!] could not stock the parts or produce {weapon}")
         return []
 
     out = []
     for cfg in todo:
         fill = parse_config(cfg)
-        want = {'scope': SCOPE_PART, 'magazine': MAG_FOR_CLASS.get(cls)}
-        # Every controlled slot is named, filled or emptied — see TEST_SLOTS.
+        want = fixed_kit(weapon, cls)
+        # Every controlled slot the WEAPON HAS is named, filled or emptied —
+        # see TEST_SLOTS. A slot it does not have is left out entirely: naming
+        # it would ask the kitter to prove an absence it cannot see, since a
+        # slot that is not drawn reads exactly like one that is drawn empty.
         want.update({s: (parts.get(s) if s in fill else None)
-                     for s in TEST_SLOTS})
+                     for s in TEST_SLOTS if has_slot(weapon, s)})
         print(f"    config {cfg}: {want}")
-        if kit.apply(want) is None:
-            print(f"    [!] could not reach config {cfg} — skipping")
-            continue
+        if kit.apply(want, weapon=weapon) is None:
+            # Drop whatever refused and measure the rest. A stale catalogue
+            # entry should cost one slot, not this weapon's entire cell — the
+            # old code skipped here and half the roster produced no data at
+            # all. The failure is logged for a human to check; nothing is
+            # auto-corrected, see kit_facts.py.
+            bad = list(kit.last_bad)
+            for slot_name, key, why in bad:
+                if key:
+                    n = facts.note_failure(weapon, slot_name, key, note=why)
+                    print(f"    [!] {weapon}.{slot_name} would not take "
+                          f"{key} ({why}) — {n} failure(s) on record")
+            drop = {s for s, k, _ in bad if k}
+            fill2 = fill - drop
+            cfg2 = config_name(fill2)
+            if drop and cfg2 != cfg:
+                want = {k: v for k, v in want.items() if k not in drop}
+                print(f"    retrying {weapon} as {cfg2} without {'/'.join(sorted(drop))}")
+                if kit.apply(want, weapon=weapon) is None:
+                    print(f"    [!] {cfg2} failed too — skipping {weapon}")
+                    continue
+                cfg, fill = cfg2, fill2
+            else:
+                print(f"    [!] could not reach config {cfg} — skipping")
+                continue
         for posture in postures:
+            if (weapon, cfg, posture) in done:
+                print(f"      posture {posture}: already in the log, skipping")
+                continue
             print(f"      posture {posture}")
-            r = measure_cell(rig, weapon, posture, mags, slot, log, cfg, want)
+            r = measure_cell(rig, weapon, posture, mags, slot, log, cfg,
+                             want, apply_ema=apply_ema)
             if r:
                 out.append(r)
-                done.add((weapon, cfg))
+                done.add((weapon, cfg, posture))
+                # Close the loop here, not in a separate pass over the JSONL.
+                # The residual just measured is exactly truth-minus-curve, so
+                # applying alpha of it IS the EMA step; the next pass then
+                # measures a fresh residual against what this wrote.
+
     return out
 
 
-def stock_parts(panel, sc, keys):
-    """A backpack, then one of each part, in that order.
+def stock_parts(sc, kit, keys, also=(), loose_only=False):
+    """Get the backpack to hold exactly one of each of `keys`, and no junk.
 
-    The order is the point. An attachment spawns INTO the backpack, so with no
-    backpack there is nowhere for one to go — and it does not fail cleanly. The
-    parts land somewhere else, the inventory rows shift under the drag targets,
-    and kitting reads back a part nobody asked for: a run was told to fit a
-    compensator, fitted a suppressor, and skipped seven configs in a row.
+    Reads first, then spawns only the shortfall — see control/stock.py. The
+    spawner cannot be asked what you already own, so an unconditional spawn
+    per range entry (there is one at the start and one after every eviction)
+    stacks duplicates until the backpack is full and the next part has
+    nowhere to land.
 
-    Re-run after every range re-entry, which empties the backpack along with
-    everything in it.
+    Safe to call as often as it is useful. Once the pack is right it reads,
+    says so, and clicks nothing.
     """
-    if not panel.ensure_open():
-        return False
-    # Only column 2 needs finding: the backpack is driven from fixed
-    # coordinates, because the translucent panel makes finding column 3
-    # depend on what the player is standing in front of.
-    ok = sc.sync(need_cols=(2,))
-    if ok:
-        if not sc.give_gear(BACKPACK):
-            print(f"[!] spawner would not produce {BACKPACK} — parts have "
-                  f"nowhere to go; stopping rather than kitting blind")
-            panel.ensure_closed()
-            return False
-        for k in keys:
-            if not sc.give_attachment(k):
-                print(f"[!] spawner would not produce {k}")
-                ok = False
-    panel.ensure_closed()
-    return ok
+    return restock(kit.ac, sc, keys, backpack=BACKPACK, also=also,
+                   loose_only=loose_only)
 
 
 def load_done(path):
+    """Cells already in the log, as (weapon, config, posture).
+
+    The posture belongs in the key. Without it, one recorded posture marked
+    the whole config done and --resume skipped the other two silently -- a
+    stale two-magazine m416/bare/standing cell from an earlier day cost the
+    bare arm of a posture factorial, and nothing said so.
+    """
     done = set()
     if os.path.exists(path):
         for line in open(path, encoding='utf-8'):
@@ -578,7 +806,8 @@ def load_done(path):
             except Exception:
                 continue
             if r.get('type') == 'cell':
-                done.add((r['weapon'], r['config']))
+                done.add((r['weapon'], r['config'],
+                          r.get('posture', 'standing')))
     return done
 
 
@@ -689,6 +918,15 @@ def report(rows):
 
 
 def main():
+    # Item names are Chinese and the spawner logs them. Redirected to a file
+    # or a pipe, Windows hands Python cp1252 rather than the console's own
+    # code page, and the first 突击步枪 kills the run several minutes in --
+    # after the backpack has been spawned and the gun kitted.
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, OSError):
+        pass
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--weapons', default='ar')
@@ -705,6 +943,12 @@ def main():
                          'magazine instead of returning to the cell reference. '
                          'Drift-proof but obtrusive: mapping the measurable '
                          'band sweeps the view ground-to-sky per posture.')
+    ap.add_argument('--apply', action='store_true',
+                    help='EMA-update each curve right after its cell instead '
+                         'of leaving the JSONL for fit_curve.py. The next pass '
+                         'then measures a fresh residual against the curve '
+                         'this one wrote, which is what makes repeated runs '
+                         'converge. Backups are kept per write.')
     ap.add_argument('--semi', action='store_true',
                     help='include semi-auto and burst weapons, which have no '
                          'full-auto curve to measure')
@@ -716,7 +960,7 @@ def main():
     ap.add_argument('--countdown', type=int, default=6)
     ap.add_argument('--session', default='auto', choices=('manual', 'auto'),
                     help="how to get back in when the range evicts us; 'auto' "
-                         "drives the lobby via detector/lobby_control.py")
+                         "drives the lobby via control/lobby.py")
     ap.add_argument('--budget', type=float, default=DEFAULT_BUDGET_S,
                     help='seconds before re-entering pre-emptively')
     args = ap.parse_args()
@@ -757,22 +1001,65 @@ def main():
         return 1
 
     out = args.out or os.path.join(
-        HERE, f"harvest_{args.sight}_{datetime.now().strftime('%m%d_%H%M')}.jsonl")
+        RUNS, f"harvest_{args.sight}_{datetime.now().strftime('%m%d_%H%M')}.jsonl")
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     done = load_done(out) if args.resume else set()
+
+    # What each gun will actually be measured wearing. Printed before anything
+    # spawns, because the answer is not "what you asked for": half the roster
+    # has no lower rail, and a run that discovers that one gun at a time
+    # discovers it by failing to kit and firing nothing.
+    plan = {}
+    for w in weapons:
+        cls = ROSTER.get(w, (None,))[0]
+        table = PART_FOR_CLASS.get(cls, {})
+        got = []
+        for c in configs:
+            eff = effective_config(w, c, table)
+            if eff not in got:
+                got.append(eff)
+        plan[w] = got
+    groups = {}
+    for w, got in plan.items():
+        groups.setdefault(tuple(got), []).append(w)
 
     print(f"weapons  : {len(weapons)} — {', '.join(weapons)}")
     print(f"configs  : {', '.join(configs)}")
+    print("as built :")
+    for got, ws in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+        note = '' if list(got) == configs else '   <- degraded'
+        print(f"           {', '.join(got):<24} {len(ws):2d}  "
+              f"{', '.join(sorted(ws))}{note}")
     print(f"postures : {', '.join(postures)}")
     print(f"out      : {out}")
     print(f"est.     : ~{len(weapons)*len(configs)*len(postures)*args.mags*9/60:.0f}"
           f" min of firing, plus spawner and inventory work")
-    print("\n[SHADOW MODE] nothing is written back to any curve or scale.\n")
+    print("\n" + ("[EMA] each cell updates its own curve in place, "
+                  "backups kept.\n" if args.apply else
+                  "[SHADOW MODE] nothing is written back to any curve.\n"))
+
+    # What the run needs on hand, and — just as importantly — what it does
+    # not: anything else nameable in 库存 is surplus from an earlier run, and
+    # every spare is one more thing find() can pick instead of the one meant.
+    # Only the slots some config actually fills are stocked.
+    wanted_slots = frozenset().union(*(parse_config(c) for c in configs)) \
+        if configs else frozenset()
+    parts = {SCOPE_PART}
+    for w in weapons:
+        cls = ROSTER.get(w, (None,))[0]
+        table = PART_FOR_CLASS.get(cls, {})
+        parts.update(x for x in
+                     [table.get(s) for s in wanted_slots] +
+                     [MAG_FOR_CLASS.get(cls)] if x)
 
     rig = Rig(args.sight)
     rig.use_homing = args.home
-    panel = Panel(rig.mouse)
     sc = SpawnerControl()
     kit = Kitter(rig, slot=args.slot)
+    # A config that cannot see a part it needs asks for that part, rather than
+    # dying as "not on screen — cannot fit". The run-wide set goes along so the
+    # top-up still knows what counts as junk.
+    kit.restock_fn = lambda need: stock_parts(sc, kit, set(need) | parts)
     print(f"grabber  : {type(rig.grabber).__name__}  K={rig.K:.4f}  "
           f"{len(rig.tracker.xs)} patches {rig.tracker.patch}x"
           f"{rig.tracker.patch_h}  wrap {rig.tracker.patch_h/2:.0f} px")
@@ -790,7 +1077,6 @@ def main():
         print("[!] ABORT: game not focused, and could not take the "
               "foreground. Is PUBG running?")
         rig.close()
-        panel.close_grabber()
         return 1
     time.sleep(0.6)     # the game ignores input for a few frames after a
                         # foreground change; the first comma would be eaten
@@ -800,8 +1086,10 @@ def main():
     # match, and the spawner is what the run needs anyway — so the in-range
     # test and the at-a-spawner test are the same press.
     def at_spawner():
-        ok = panel.ensure_open()
-        panel.ensure_closed()
+        # The in-range test and the at-a-spawner test are one press: comma
+        # produces this panel only inside the training range.
+        ok = sc.ensure_panel(True)
+        sc.ensure_panel(False)
         return ok
 
     session = get_session(args.session, in_range_fn=at_spawner,
@@ -818,7 +1106,6 @@ def main():
         rig.close()
         kit.close()
         session.close()
-        panel.close_grabber()
         return 1
 
     log = open(out, 'a', encoding='utf-8')
@@ -830,22 +1117,13 @@ def main():
         'ts': datetime.now().isoformat(timespec='seconds'),
     }) + '\n')
 
-    # Only the slots some config actually fills get stocked: every spare in
-    # 库存 is one more thing find() can pick instead of the one meant.
-    wanted_slots = frozenset().union(*(parse_config(c) for c in configs)) \
-        if configs else frozenset()
-    parts = {SCOPE_PART}
-    for w in weapons:
-        cls = ROSTER.get(w, (None,))[0]
-        table = PART_FOR_CLASS.get(cls, {})
-        parts.update(x for x in
-                     [table.get(s) for s in wanted_slots] +
-                     [MAG_FOR_CLASS.get(cls)] if x)
+    # Evidence only — see kit_facts.py. Nothing here edits the catalogue.
+    facts = KitFacts()
 
     rows = []
     try:
-        print(f"stocking parts: {', '.join(sorted(parts))}")
-        if not stock_parts(panel, sc, sorted(parts)):
+        print(f"parts wanted: {', '.join(sorted(parts))}")
+        if not stock_parts(sc, kit, parts):
             print("[!] could not stock the parts — continuing anyway; "
                   "kitting will fail loudly if one is missing")
         for i, weapon in enumerate(weapons):
@@ -864,12 +1142,14 @@ def main():
                 # standing and facing, and re-entry moves both. Measured again
                 # on the first cell rather than carried over.
                 rig.pitch_centre = 0
-                if not stock_parts(panel, sc, sorted(parts)):
+                if not stock_parts(sc, kit, parts):
                     print("[!] could not re-stock after re-entry")
             print(f"\n[{i+1}/{len(weapons)}] {weapon}")
-            rows.extend(harvest_weapon(rig, panel, kit, sc, weapon, configs,
+            rows.extend(harvest_weapon(rig, kit, sc, weapon, configs,
                                        postures, args.mags, args.slot, log,
-                                       done))
+                                       done, want_parts=parts, facts=facts,
+                                       apply_ema=args.apply,
+                                       base_sight=args.sight))
     except KeyboardInterrupt:
         print("\ninterrupted")
     finally:
@@ -880,10 +1160,11 @@ def main():
         rig.close()
         kit.close()
         session.close()
-        panel.close_grabber()
         log.close()
+        facts.save()
 
     report(rows)
+    facts.report()
     print(f"\n  raw -> {out}")
     print("  rebuild a curve from it with:")
     print(f"    python calibration/fit_curve.py --jsonl {out} "

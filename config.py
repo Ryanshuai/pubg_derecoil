@@ -41,6 +41,42 @@ HUD_REGIONS = {
     'att_2_stock':    (617, 2785, 63, 63),
 }
 
+# Which of the above the capture thread grabs EVERY FRAME. The rest are the
+# Tab screen's, and they are read on demand — see control/tab_watch.py.
+#
+# This split is not tidiness, it is 87% of the capture cost. DXGI takes ONE
+# bounding box, the gameplay HUD sits at the bottom of the screen (y 1262..
+# 1398) and the Tab panel at the top (y 123..680), so having both in one set
+# stretches the box over everything between them:
+#
+#   gameplay only   5 regions   1641x136   0.22 Mpx   4.5% of screen  0.80 ms
+#   + Tab regions  18 regions  2077x1275   2.65 Mpx  53.5% of screen  6.27 ms
+#
+# Measured 2026-08-02. That 5.46 ms was being paid 144 times a second for a
+# panel that is not on screen, and it showed: the shipped loop measured 115
+# fps against its own target_fps=144, with a ceiling of 160.
+#
+# detector/CLAUDE.md has forbidden exactly this since before it was true here.
+FRAME_REGIONS = ('weapon_1', 'weapon_2', 'fire_mode', 'posture', 'ammo')
+TAB_REGIONS = tuple(k for k in HUD_REGIONS if k not in FRAME_REGIONS)
+
+# ── Tab screen watching (control/tab_watch.py) ──
+# A GDI grab costs ~5 ms almost regardless of size (41x18 measures 5.2 ms,
+# 629x557 measures 9.6 ms), so nothing here can run per tick: at the 10 ms
+# dispatcher tick a single 'type' check would be 52% of a core. Everything
+# below is therefore event-driven, with a slow check to catch drift.
+TAB_SETTLE_S = 0.40     # after a Tab key, how long to keep watching for the
+                        # screen to actually change. Measured: open lands in
+                        # 28-38 ms, close in 77-128 ms. Generous, and it stops
+                        # the moment it sees the change.
+TAB_REFRESH_S = 0.10    # while the panel is up, how often to re-read the guns
+                        # so that the last reading is never stale by more than
+                        # this when it closes
+TAB_DRIFT_S = 0.50      # re-check open/closed even with no key event: alt-tab,
+                        # a disconnect dialog or another agent can move the
+                        # screen out from under us, and a keypress-only scheme
+                        # would never notice
+
 # ════════════════════════════════════════════════════════════
 # Recoil observation ROI — patches for measuring view rotation
 #
@@ -128,16 +164,26 @@ RECOIL_MAD_FLOOR = 0.5
 # the centre, magnified scopes only a thin reticle.
 # ════════════════════════════════════════════════════════════
 
+# `mag` is the optic's magnification, and it is NOT redundant with K.
+#
+# K is pixels of screen motion per mouse count. Angle per count is K divided
+# by pixels-per-degree, and pixels-per-degree scales with magnification — so
+# `mag / K` is what says how many counts a given VIEW ROTATION costs. The two
+# differ by more than 3x between the red dot and a 4x, which is why anything
+# that drives the view by an absolute number of counts (homing into the pitch
+# stop, rising to level) has to scale by it. Pushing the red dot's 1770 counts
+# while looking through the VSS's fixed 4x lifts the view barely a third of
+# the way and leaves it pointed at the ground.
 RECOIL_SIGHT_PROFILES = {
-    'hipfire': {'K': 0.50,   'keepout': 330,
+    'hipfire': {'K': 0.50,   'mag': 1, 'keepout': 330,
                 'patch_xs': (980, 1120, 1260, 2050, 2240, 2430, 2620)},
-    'red_dot': {'K': 1.5474, 'keepout': 330,
+    'red_dot': {'K': 1.5474, 'mag': 1, 'keepout': 330,
                 'patch_xs': (980, 1120, 1260, 2050, 2240, 2430, 2620)},
-    '2x':      {'K': 1.8254, 'keepout': 60,
+    '2x':      {'K': 1.8254, 'mag': 2, 'keepout': 60,
                 'patch_xs': (1390, 1530, 1850)},
-    '3x':      {'K': 1.8802, 'keepout': 70,
+    '3x':      {'K': 1.8802, 'mag': 3, 'keepout': 70,
                 'patch_xs': (1380, 1520, 1820)},
-    '4x':      {'K': 1.885,  'keepout': 70,
+    '4x':      {'K': 1.885,  'mag': 4, 'keepout': 70,
                 'patch_xs': (1250, 1390, 1520, 1800, 1930)},
     # VSS's fixed PSO-1 measures the same as a standard 4x (1.8855 / 1.8636 on
     # the two clean patches). Its patch set is different though: the PSO-1
@@ -156,7 +202,7 @@ RECOIL_SIGHT_PROFILES = {
     # patch=96 would give three clean non-overlapping ones at 1262/1362/1995
     # (range 3P/8=36px vs 5.6px/frame needed), but ViewTracker takes one
     # global patch size, so that needs a per-profile override first.
-    'vss_pso1': {'K': 1.875, 'keepout': 200,
+    'vss_pso1': {'K': 1.875, 'mag': 4, 'keepout': 200,
                  'patch_xs': (1265, 1330, 2010)},
 }
 
@@ -231,9 +277,14 @@ KEY_ACTION_TABLE = [
      'hw': ['recoil_off']},
 
     # ── Tab ──
-    # Toggle tab_open immediately, tab_type calibrates after
+    # tab_open is NOT set here. It used to be toggled on this keypress and
+    # corrected by a detection 300 ms later, so for those 300 ms it was a
+    # guess -- and a guess gates every `cond: '!tab_open'` below, including
+    # whether recoil compensation runs. A swallowed Tab key (see
+    # docs/game_quirks.md) left it inverted with nothing to notice.
+    # control/tab_watch.py moves it only after looking at the screen.
     {'key': 'tab', 'event': 'press',
-     'state': [('stop_recoil', True), ('highlight_gt', 0), ('toggle_tab_open',)],
+     'state': [('stop_recoil', True), ('highlight_gt', 0)],
      'hw': ['recoil_off']},
 
     # ── Alt+Tab / Win ──
@@ -337,23 +388,23 @@ DETECT_TABLE = [
      'cond': '!tab_open', 'result': 'posture'},
 
     # ── Tab ──
-    # Tab: calibrate tab_open after UI settles (correct toggle if out of sync)
-    {'key': 'tab', 'event': 'press', 'detect': 'tab_type',
-     'regions': ['type'], 'delay': 300,
-     'result': '_tab_calibrate'},
-
-    # Tab closing: cond checked BEFORE toggle, so tab_open is still True
-    # Step 1: read weapons + attachments from pre-press frame
-    {'key': 'tab', 'event': 'press', 'detect': 'tab_weapon',
-     'regions': ['gun_name_1', 'gun_name_2'], 'delay': -50,
-     'cond': 'tab_open', 'result': 'weapon_gt'},
-
-    {'key': 'tab', 'event': 'press', 'detect': 'tab_attachment',
-     'regions': ['att_1_scope', 'att_1_muzzle', 'att_1_grip', 'att_1_magazine', 'att_1_stock',
-                 'att_2_scope', 'att_2_muzzle', 'att_2_grip', 'att_2_magazine', 'att_2_stock'],
-     'delay': -50,
-     'cond': 'tab_open', 'result': 'attachments'},
-
+    # Three entries used to live here and are now control/tab_watch.py:
+    #
+    #   tab_type      @ +300 ms  corrected the toggled tab_open
+    #   tab_weapon    @ -50 ms   read the gun names off a buffered past frame
+    #   tab_attachment@ -50 ms   ditto for the ten slots
+    #
+    # The negative delays worked, but they are why every captured frame had to
+    # include the Tab regions: DXGI takes one bounding box, and reaching back
+    # in time means always having been looking. That was 5.46 ms of every
+    # frame. TabWatch keeps the reading fresh while the panel is up instead,
+    # so the last one taken IS the final state when it closes.
+    #
+    # What stays here is what reads the GAMEPLAY HUD, which is captured every
+    # frame anyway. `cond: 'tab_open'` still means "this was the Tab CLOSING":
+    # the screen does not go away for another 77-128 ms, so a measured
+    # tab_open is still True at this instant, exactly as the toggled one was.
+    #
     # Step 2: after Tab UI closes, refresh HUD state
     {'key': 'tab', 'event': 'press', 'detect': 'fire_mode',
      'regions': ['fire_mode'], 'delay': 300,
@@ -388,6 +439,38 @@ MISMATCH_TABLE = [
      'cond': '!tab_open', 'gt_field': 'weapon_gt'},
 ]
 
+
+def _check_table_regions():
+    """Every scheduled detection must name a region that is actually captured.
+
+    ScreenCapture.get_crops() drops regions it does not have (`if r in frame`),
+    so an entry naming one of the TAB_REGIONS would not raise — the detector
+    would just be handed fewer crops and answer from them. AttachmentDetector
+    reads a missing crop as an EMPTY SLOT, which is a real answer, so the
+    result would be a confident "nothing equipped".
+
+    That is one import-time loop against a whole class of silent wrong answers,
+    so it runs on import rather than living in a test nobody runs.
+    """
+    bad = []
+    for name, table in (('DETECT_TABLE', DETECT_TABLE),
+                        ('MISMATCH_TABLE', MISMATCH_TABLE)):
+        for entry in table:
+            for r in entry.get('regions', []):
+                if r not in FRAME_REGIONS:
+                    bad.append(f'{name} {entry.get("key")!r}/'
+                               f'{entry.get("detect")!r} wants {r!r}')
+    if bad:
+        raise ValueError(
+            'these are not captured every frame, so they would arrive as '
+            'missing crops:\n  ' + '\n  '.join(bad)
+            + '\n\nEither add the region to FRAME_REGIONS (and pay for it on '
+              'every frame — see the note there), or read it on demand the '
+              'way control/tab_watch.py does.')
+
+
+_check_table_regions()
+
 # ════════════════════════════════════════════════════════════
 # Tab pixel fast-check thresholds
 # ════════════════════════════════════════════════════════════
@@ -395,6 +478,135 @@ MISMATCH_TABLE = [
 TAB_PIXEL_THRESH = 200
 TAB_COUNT_MIN = 150
 TAB_COUNT_MAX = 400
+
+# The count band alone is NOT enough, and the failure is not academic: the
+# 'type' region sits over the training range's sky, and ADS magnifies a patch
+# of near-threshold pale blue into it. On 868 stored ADS frames, 15 land inside
+# 150..400 purely from sky. Every one of those reads as "inventory is up", and
+# a dozen `cond: '!tab_open'` entries below gate on that — including whether
+# recoil compensation runs at all. Aiming at the sky silently disarmed it.
+#
+# What separates them is not how many bright pixels there are but whether any
+# DARK ones remain. 类型 / "Type" is near-white ink on the panel's dimmed
+# backdrop, so the crop always keeps a dark floor; sky is uniformly bright.
+# The 10th percentile of the per-pixel channel maximum, measured over
+# docs/ads/runs (Tab shut) + docs/compat/runs, docs/runs, docs/tab_inventory*
+# (Tab up), 960 shots at 3440x1440:
+#
+#   Tab up                       23 .. 91
+#   Tab shut, inside the band   190 .. 199   (the sky frames)
+#
+# 150 sits in the middle of that 99-wide gap. Note the gap only exists ONCE
+# the count band has passed — over all Tab-shut frames the floor runs 27..227,
+# because a dark crop with no ink is dark too. The two tests are a conjunction,
+# not alternatives. Scored by tools/test_tab_open.py (`pixi run tab-open`).
+TAB_DARK_FLOOR_MAX = 150
+
+# ── Tab anchor: is the inventory actually up? ─────────────────────────────
+# The ink window above is NOT a safe answer to that on its own. It looks
+# perfect on hand-picked negatives — lobby, results, ESC menu and plain
+# gameplay all measure exactly 0 — and fails on real frames: of 96 sampled
+# ADS captures, 13 carry ink and one lands inside 150..400. Nine measure
+# exactly 738, which is 41x18, the whole crop saturated. HUD_REGIONS['type']
+# sits over the training range's bright sky and ADS magnifies it into frame.
+#
+# A count cannot tell "the glyph is drawn" from "everything here is white".
+# Glyph IoU can, and bounds that failure by construction: a saturated crop
+# matches every template pixel but fills the union too, so it scores at most
+# |template|/|crop| = 0.28 (zh) or 0.32 (en) however bright it gets.
+#
+# TM_CCORR_NORMED was tried first and inverted the problem — negatives
+# 0.985..0.999 against positives 0.887..1.000. Do not go back to it.
+#
+# Measured, best-of-both-languages IoU:
+#   open       0.922 .. 1.000   (3 captures, zh and en)
+#   closed     0.000 .. 0.352   (5 screens + 96 ADS frames)
+# Threshold 0.60 sits in a 0.571-wide gap.
+TAB_ANCHOR_MIN_IOU = 0.60
+TAB_ANCHOR_SEARCH = 8          # +- px searched around the nominal position
+
+# THE HEADER IS NOT ALWAYS THE SAME GLYPHS: docs/tab_inventory*.png render
+# 类型, docs/lobby/in_game_tab.png renders "Type" — same screen, same place,
+# different client language. A single-language template scores the other at
+# 0.27, below the brightest negative, so the inventory would read as closed
+# forever after a language switch. One mask per language, score is the best
+# of them. Rebuild with tools/probe_tab_anchor.py --write.
+TAB_ANCHOR_LANGS = ('zh', 'en')
+
+# ── Attachment slot: absent / empty / filled ──────────────────────────────
+# Three states, and the two cheap judgements each separate a different pair.
+# Getting this wrong is what makes a drag land nothing: dragging onto a slot
+# the weapon does not have drops the item, and "the gun lacks that slot" is
+# indistinguishable from "the part was rejected" if you only watch the mouse.
+#
+# PRESENCE — gradient along the tile's BORDER RING, nothing else. A slot the
+# weapon has draws a pale tile whether or not anything is in it; a slot it
+# lacks draws nothing at all. So look at the border and only the border:
+#
+#   absent    5.0 .. 26.0    (5 slots: UZI grip, Mk12 stock, G36C stock,
+#                             VSS muzzle, VSS grip)
+#   present  46.0 .. 172.7   (19 slots across 6 captures)
+#   threshold 36, in a gap of 20
+#
+# MEASURE THE BORDER, NOT THE INTERIOR. The interior holds the icon, which is
+# "乱七八糟" — arbitrary content that says nothing about whether the tile is
+# there. Restricting to the ring makes the judgement almost independent of
+# what is fitted: a stripped M416 reads 260/260/278/260 and a fully fitted one
+# 260/260/318/260 on the same slots.
+#
+# GRADIENT, NOT CANNY. Canny with fixed hysteresis (40,120) returned exactly
+# 0 for the VSS magazine — a real slot whose tile sits on bright sand at
+# almost the same brightness. The border is there, just low-contrast, and
+# hysteresis quantises it away. Sobel magnitude at the 90th percentile keeps
+# it at 46.
+#
+# The earlier attempt measured inner-minus-ring contrast. It works for 4 slots
+# (absent -0.2..1.7 vs present 10.7..42.5) and is kept as slot_contrast() for
+# diagnosis, but it reads the fill rather than the border, so it inherits
+# whatever is behind the panel.
+TAB_SLOT_TILE = 66             # measured on a stripped M416's muzzle and grip
+TAB_SLOT_TILE_OFF = -1         # tile origin, relative to the interior's
+TAB_SLOT_RING_HALF = 3         # ring half-width about the border
+TAB_SLOT_RING_PAD = 10         # window margin around the tile
+TAB_SLOT_PRESENT_MIN = 36.0    # midpoint of 26.0 .. 46.0
+#
+# WHY THE PADDING, PRECISELY. The tile measures 66x66 and starts one pixel up
+# and left of HUD_REGIONS['att_*'] — measured on a stripped M416's muzzle and
+# grip, where an empty tile is a clean blob. (magazine and stock could not be
+# measured the same way: their connected component merges with a bright
+# neighbour, giving 69x94 and 94x95. Two agreeing slots, not five.)
+#
+# So HUD_REGIONS['att_*'] is 63x63 of tile INTERIOR, and the interior is flat.
+# Anything measuring texture inside it — edges, std — reads the same for a
+# tile that is empty and for no tile at all, because neither has any texture.
+# The padding is not there to catch a border 16px away; it is there to reach
+# the BACKGROUND OUTSIDE the tile, so the judgement becomes "is this patch
+# brighter than what surrounds it" instead of "what does this patch look
+# like". Presence is a contrast, and a contrast needs both sides.
+#
+# ⚠ SCOPE HAS NO TILE AT ALL, so none of this applies to it and it always
+# returns 'unknown'. Confirmed by eye across three captures: an empty scope
+# slot on an M416 draws nothing — just the backdrop and the weapon render —
+# and a VSS, which has no scope slot, draws its integral PSO-1 in the same
+# place because that optic is part of the weapon's own art. Empty-and-present
+# is pixel-identical to absent, so this is a property of the UI, not a
+# threshold to tune. It also breaks the occupancy test: the VSS reads 678
+# interior edges with an empty slot, well past the 120 that means "filled".
+# Scope presence has to come from a drag (see the calibrate-compat skill);
+# scope CONTENTS come from AttachmentDetector, which reads the VSS as ''
+# correctly. Nearly every weapon has one, so little is blocked — but never let
+# 'unknown' collapse into 'absent'.
+# Window for slot_contrast(), the superseded diagnostic. The presence
+# threshold it used to carry lived here too and silently shadowed the ring
+# one above — same name, defined later, so 36.0 became 6.0 and a G36C's
+# absent stock (ring 8.3) read as present. Keep one threshold per judgement.
+TAB_SLOT_PAD = 16
+TAB_SLOT_NO_TILE = ('scope',)
+
+# OCCUPANCY — Canny edges inside the interior. The tile is flat, an icon is
+# not.  empty 0 (muzzle/grip/stock), 17 (magazine), 71 (scope: weapon render
+# showing through); filled 202..885. Threshold 120 sits in that gap.
+TAB_SLOT_FILLED_EDGES = 120
 
 # Mismatch polling (ms)
 MISMATCH_POLL_INTERVAL = 500   # ms between mismatch polls
@@ -456,6 +668,56 @@ LOBBY_BAR_MAX = 8              # lobby measures exactly 0; in-game 78..255
 LOBBY_PING_ROI = (0, 460, 26, 240)
 LOBBY_PING_THRESH = 180        # grey level counted as overlay text
 LOBBY_PING_MIN_FRAC = 0.05
+
+# ── Mode navigation ──────────────────────────────────────────────────────
+# The lobby is two bars of tabs above the mode card:
+#
+#   top   PLAY  PASS  CAREER  CUSTOMIZE  HIDEOUT  WORKSHOP  STORE
+#   sub   NORMAL  RANKED  ARCADE  TRAINING  CUSTOM      (only under PLAY)
+#
+# LOBBY_PLAY_XY starts whatever the sub bar has selected, so the sub bar is
+# not a convenience — it is the guard that keeps an unattended run out of a
+# real match. Per detector/CLAUDE.md a real round cannot currently be left:
+# only the training range's ESC menu has been captured, so
+# leave_entry_confirmed() refuses to click LEAVE anywhere else.
+#
+# Tabs are found by projection, not hardcoded — see detector/lobby_nav.py.
+# The x windows below are the strips the projection runs over.
+
+# (y, x, h, w). Starts at y=38, BELOW the yellow "new content" dots that sit
+# at y 26..38 over PASS / CAREER / CUSTOMIZE / WORKSHOP. Including them puts
+# 52 ink into four unselected tabs and five tabs read as selected at once.
+LOBBY_TOP_BAR_ROI = (38, 1050, 30, 1100)
+
+# (y, x, h, w). Stops at x=2000 deliberately. Run it out to 2150 and a sixth
+# "tab" appears at (2128,146) with more ink than CUSTOM — that is the daily
+# BEGINNER TRAINING popup, whose left edge is x=1961.
+LOBBY_SUB_BAR_ROI = (125, 1300, 40, 700)
+
+# Two working points, and the gap between them IS the selected/unselected
+# signal. Selection is argmax of ink at SEL, not a threshold on it: the top
+# bar's unselected tabs carry stray ink from nearby decorations.
+LOBBY_TAB_FIND_THRESH = 95     # every tab shows up, selected or not
+LOBBY_TAB_SEL_THRESH = 170     # only the selected tab survives
+LOBBY_TAB_GAP = 14             # merges glyphs in a label, keeps labels apart
+LOBBY_TAB_MIN_W = 20           # a label is wider than this; specks are not
+
+# Measured on two live captures, cursor parked, at SEL_THRESH:
+#   TRAINING selected   NORMAL 0    RANKED 0  ARCADE 0  TRAINING 896  CUSTOM 0
+#   NORMAL selected     NORMAL 829  RANKED 0  ARCADE 0  TRAINING   0  CUSTOM 0
+#   after clicking TRAINING         NORMAL 0  ..        TRAINING 891
+# Unselected is exactly zero in every sample, so the margin is the selected
+# ink itself: 828..896x. A threshold of 5 is three orders of magnitude of
+# headroom, and exists to catch an ambiguous read, not to discriminate.
+LOBBY_TAB_MIN_MARGIN = 5.0
+
+# HOVER LOOKS EXACTLY LIKE SELECTION. A tab under the cursor lights to the
+# same brightness the selected one does, so every capture feeding the probes
+# above must park the cursor first — including the read-back that verifies a
+# click landed, where the cursor is by definition sitting on the tab just
+# clicked. Inside the left letterbox bar, which the lobby paints flat black.
+# Not the right bar: LOBBY_BAR_ROI reads that one for the letterbox probe.
+LOBBY_PARK_XY = (200, 700)
 
 # PLAY button, measured off the lobby screenshot by its purple fill:
 # x 520..978, y 1247..1327. The button draws an "F" hint, which this used to

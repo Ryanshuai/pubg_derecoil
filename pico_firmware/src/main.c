@@ -34,7 +34,36 @@ static inline uint32_t board_millis(void) {
 #define CMD_AIM_MODE       0x16
 #define CMD_SET_DELTA      0x17  /* PC sends latest aim delta each frame */
 #define CMD_KEY            0x18  /* [0x18][hid_keycode][duration_ms_u16] */
+#define CMD_PATTERN_READ   0x19  /* [0x19] -> [pat] lines: what is actually stored */
+#define CMD_RECOIL_SIM     0x1A  /* [0x1A][iters_u16] -> [sim] line: jitter totals */
 #define CMD_REBOOT_BOOTSEL 0xFF
+
+/* Why the two readbacks exist.
+ *
+ * Until now the only way to find out what this firmware does was to fire in
+ * the game and measure the screen. That is expensive, needs the window, and
+ * it is a CLOSED LOOP: the calibration fits a curve against what it observes,
+ * so a systematic error in here gets absorbed into the stored curve and the
+ * residual comes out clean. Two real bugs lived behind a clean residual:
+ *
+ *   rng_float() returned [0, +2) instead of [-1, +1), so "zero-mean jitter"
+ *   was a mean +2% and a mean +0.2 counts, always downward -- about +29
+ *   counts on an AUG magazine, 2.8% of the pattern
+ *
+ *   the last bullet's compensation was spread over a hardcoded 100 ms, which
+ *   is no weapon's interval -- on a Vector that smears the round with the most
+ *   recoil on it over nearly two rounds
+ *
+ * Both are fixed, and NOTHING GUARDS THEM. Whoever edits this file next can
+ * reintroduce either, and the symptom is "every curve is slightly off" in
+ * exactly the place a residual cannot see.
+ *
+ * So: PATTERN_READ reports what was stored and what duration each bullet will
+ * be spread over, and RECOIL_SIM runs the real per-bullet maths N times over
+ * the stored pattern and reports commanded-vs-emitted totals. Neither touches
+ * the HID output, so both run on a bench with no game -- which is what makes
+ * them cheap enough to run on every flash. tools/verify_pico.py is the caller.
+ */
 
 /* Human-movement reporting. 4 ms is well under one 144 Hz screen frame, so
  * the PC can attribute the hand's motion to the right captured frame. */
@@ -269,9 +298,69 @@ static uint32_t rng_next(void) {
     rng_state ^= rng_state << 5;
     return rng_state;
 }
-/* Returns random float in [-1.0, +1.0] */
+/* Returns random float in [-1.0, +1.0).
+ *
+ * It used to return [0.0, +2.0): `rng_next() & 0xFFFF` is 0..65535, and 65535
+ * / 32768 is 2.0, not 1.0 -- the cast to int32_t cannot make it negative
+ * because the mask already cleared the sign bit. The comment was right about
+ * the intent and the code did something else, which mattered because both
+ * users of this are supposed to be ZERO-MEAN:
+ *
+ *     dy *= (1.0f + 0.02f * rng_float());   was a mean +2% on every bullet
+ *     dy += 0.2f * rng_float();             was a mean +0.2 counts, always down
+ *
+ * On an AUG magazine that is about +29 counts of extra downward push, 2.8% of
+ * the whole pattern, and the calibration loop had been quietly absorbing it
+ * into the stored curve. On the first bullet, whose compensation is 0.68
+ * counts, the additive term alone was up to +0.4 -- a 60% perturbation that
+ * never changed sign.
+ */
 static float rng_float(void) {
-    return (float)(int32_t)(rng_next() & 0xFFFF) / 32768.0f;
+    return ((float)(rng_next() & 0xFFFF) - 32768.0f) / 32768.0f;
+}
+
+/* How long bullet `i`'s compensation is spread over, in ms.
+ *
+ * Pulled out of get_recoil_delta so CMD_PATTERN_READ reports the duration the
+ * live path will ACTUALLY use rather than the host's idea of it. A readback
+ * that recomputes the rule on the PC would agree with the PC by construction
+ * and prove nothing about the firmware.
+ *
+ * The last bullet has no next one, so its window is the one before it. It
+ * used to be a hardcoded 100 ms, which is not any weapon's bullet interval:
+ * on the Vector (54.5 ms) that smeared the final round's compensation over
+ * nearly two rounds' worth of time, and on the AKM (100 ms) it happened to be
+ * right. A magazine's last round is the one with the most recoil on it.
+ */
+static uint16_t bullet_duration(uint16_t i) {
+    if (i >= pattern_len) return 1;
+    uint16_t prev_dur = (i > 0)
+        ? (uint16_t)(pattern[i].t_ms - pattern[i - 1].t_ms)
+        : 100;
+    uint16_t next_t = (i + 1 < pattern_len)
+        ? pattern[i + 1].t_ms
+        : (uint16_t)(pattern[i].t_ms + prev_dur);
+    uint16_t dur = next_t - pattern[i].t_ms;
+    return dur < 1 ? 1 : dur;
+}
+
+/* Micro-jitter: ±2% magnitude + ±0.2 count random offset.
+ *
+ * Both terms are supposed to be ZERO-MEAN -- they exist to break up a
+ * perfectly repeatable pattern, not to add compensation. Pulled out so
+ * CMD_RECOIL_SIM exercises this exact function: a simulator with its own copy
+ * of the arithmetic would keep passing after someone changed this one.
+ */
+static void jitter_bullet(int16_t in_dx, int16_t in_dy,
+                          float *out_dx, float *out_dy) {
+    float dx = (float)in_dx;
+    float dy = (float)in_dy;
+    dx *= (1.0f + 0.02f * rng_float());
+    dy *= (1.0f + 0.02f * rng_float());
+    dx += 0.2f * rng_float();
+    dy += 0.2f * rng_float();
+    *out_dx = dx;
+    *out_dy = dy;
 }
 
 static void get_recoil_delta(int16_t *out_dx, int16_t *out_dy) {
@@ -283,25 +372,15 @@ static void get_recoil_delta(int16_t *out_dx, int16_t *out_dy) {
 
     /* Advance to newly reached bullet points, compute spread rate */
     while (fire_index < pattern_len && pattern[fire_index].t_ms <= elapsed) {
-        float dx = (float)pattern[fire_index].dx;
-        float dy = (float)pattern[fire_index].dy;
+        float dx, dy;
+        jitter_bullet(pattern[fire_index].dx, pattern[fire_index].dy, &dx, &dy);
 
-        /* Micro-jitter: ±2% magnitude + ±0.2 pixel random offset */
-        dx *= (1.0f + 0.02f * rng_float());
-        dy *= (1.0f + 0.02f * rng_float());
-        dx += 0.2f * rng_float();
-        dy += 0.2f * rng_float();
-
-        /* Spread this bullet's delta evenly until the next bullet */
-        uint16_t next_t = (fire_index + 1 < pattern_len)
-            ? pattern[fire_index + 1].t_ms
-            : pattern[fire_index].t_ms + 100;
-        uint16_t dur = next_t - pattern[fire_index].t_ms;
-        if (dur < 1) dur = 1;
+        /* Spread this bullet's delta evenly until the next bullet. */
+        uint16_t dur = bullet_duration(fire_index);
 
         spread_dx_per_ms = dx / (float)dur;
         spread_dy_per_ms = dy / (float)dur;
-        spread_until_ms  = next_t;
+        spread_until_ms  = pattern[fire_index].t_ms + dur;
 
         fire_index++;
     }
@@ -515,6 +594,73 @@ static void send_human_report(void) {
     tud_cdc_write_flush();
 }
 
+/* ── Readbacks (CMD_PATTERN_READ / CMD_RECOIL_SIM) ────────
+ *
+ * Emitted a line at a time from the main loop, never in a burst from inside
+ * process_cdc. A 40-round pattern is ~40 lines, which is more than the CDC
+ * FIFO holds; writing them all at once would either block the USB task or
+ * silently drop the tail, and a readback that drops its tail is worse than no
+ * readback -- the test would pass on a truncated answer.
+ */
+static uint16_t pat_dump_next = 0;      /* next bullet index to emit */
+static bool     pat_dump_active = false;
+
+static void service_reports(void) {
+    if (!pat_dump_active) return;
+    if (!tud_cdc_connected()) { pat_dump_active = false; return; }
+    /* One line per pass, and only when there is room for it. The main loop
+     * spins fast, so a 40-line dump still lands in a few milliseconds. */
+    if (tud_cdc_write_available() < 64) return;
+
+    char msg[64];
+    int len;
+    if (pat_dump_next < pattern_len) {
+        uint16_t i = pat_dump_next;
+        len = snprintf(msg, sizeof(msg), "[pat] i %u %u %d %d %u\r\n",
+                       (unsigned)i, (unsigned)pattern[i].t_ms,
+                       (int)pattern[i].dx, (int)pattern[i].dy,
+                       (unsigned)bullet_duration(i));
+        pat_dump_next++;
+    } else {
+        len = snprintf(msg, sizeof(msg), "[pat] end\r\n");
+        pat_dump_active = false;
+    }
+    tud_cdc_write(msg, len);
+    tud_cdc_write_flush();
+}
+
+/* Run the real per-bullet maths `iters` times over the stored pattern and
+ * report commanded vs emitted totals. Emits nothing to the HID interface: the
+ * cursor does not move, so this runs on a bench with the game closed.
+ *
+ * Totals are in milli-counts because the jitter is fractional and the whole
+ * point is to detect a bias far below one count -- the bug this guards
+ * against was +0.2 counts a bullet.
+ */
+static void run_recoil_sim(uint16_t iters) {
+    int64_t cmd_x = 0, cmd_y = 0;
+    double emit_x = 0.0, emit_y = 0.0;
+    for (uint16_t k = 0; k < iters; k++) {
+        for (uint16_t i = 0; i < pattern_len; i++) {
+            float dx, dy;
+            jitter_bullet(pattern[i].dx, pattern[i].dy, &dx, &dy);
+            cmd_x += pattern[i].dx;
+            cmd_y += pattern[i].dy;
+            emit_x += dx;
+            emit_y += dy;
+        }
+    }
+    char msg[128];
+    int len = snprintf(msg, sizeof(msg),
+                       "[sim] %u %u %lld %lld %lld %lld\r\n",
+                       (unsigned)iters, (unsigned)pattern_len,
+                       (long long)cmd_x, (long long)cmd_y,
+                       (long long)(emit_x * 1000.0),
+                       (long long)(emit_y * 1000.0));
+    tud_cdc_write(msg, len);
+    tud_cdc_write_flush();
+}
+
 static void process_cdc(void) {
     uint32_t avail = tud_cdc_available();
     if (avail == 0 && cdc_len == 0) return;  /* nothing pending */
@@ -600,6 +746,23 @@ static void process_cdc(void) {
             uint16_t dur = (uint16_t)(cdc_buf[pos+2] | (cdc_buf[pos+3] << 8));
             key_end_ms = board_millis() + dur;
             pos += 4;
+        } else if (cmd == CMD_PATTERN_READ) {
+            /* [0x19] -> "[pat] n <len>", then one line per bullet, "[pat] end" */
+            char hdr[32];
+            int hl = snprintf(hdr, sizeof(hdr), "[pat] n %u\r\n",
+                              (unsigned)pattern_len);
+            tud_cdc_write(hdr, hl);
+            tud_cdc_write_flush();
+            pat_dump_next = 0;
+            pat_dump_active = true;
+            pos += 1;
+        } else if (cmd == CMD_RECOIL_SIM) {
+            /* [0x1A][iters_u16_le] */
+            if (pos + 3 > cdc_len) break;
+            uint16_t iters = (uint16_t)(cdc_buf[pos+1] | (cdc_buf[pos+2] << 8));
+            if (iters > 2000) iters = 2000;   /* bounded: this runs inline */
+            run_recoil_sim(iters);
+            pos += 3;
         } else if (cmd == CMD_REBOOT_BOOTSEL) {
             reset_usb_boot(0, 0);
         } else {
@@ -683,6 +846,7 @@ int main(void) {
         send_hid_output();    /* send HID every 1ms (1000Hz output, smooth recoil) */
         send_kbd_output();    /* reload keypresses for automated calibration */
         send_human_report();  /* let the PC subtract the hand from the screen */
+        service_reports();    /* drain a pattern readback, one line per pass */
         process_cdc();
     }
     return 0;

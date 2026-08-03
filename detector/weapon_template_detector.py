@@ -1,6 +1,22 @@
 """Weapon template matching — reads weapon name text from Tab inventory.
 
 Matches white text in gun name region against OCR templates.
+
+A weapon may have more than one template, because the plate is whatever the
+game's language setting prints: 自动装填步枪 in Chinese, SLR in English. Every
+variant lives in training_data/ocr_white/ under the same weapon code with a
+tag after it, and the best-scoring one wins:
+
+    slr.png       either the sole variant, or the default one
+    slr.cn.png    the Chinese plate
+    slr.en.png    the English plate
+
+Nothing selects a language — all variants are matched every frame, and one
+language's plate simply does not resemble the other's. So a game switched
+between languages mid-session still reads, with no configuration.
+
+Cost is linear in variants: ~1 ms per extra template over the 250x45 plate,
+and only on Tab frames.
 """
 import os
 import re
@@ -24,9 +40,24 @@ def _white_text_mask(img_bgr):
 
 
 def _template_match(crop, templates):
+    """[(iou, code), ...] best first, over the white text in `crop`.
+
+    The IoU is taken inside the matched window, not over the whole crop. A
+    plate can hold more text than its template covers — the game prints
+    'Micro UZI 冲锋枪' where the template is only 'Micro UZI' — and dividing
+    by every white pixel on the plate charges the template for glyphs it was
+    never meant to explain. Measured on docs/tab_inventory*.png, that scored
+    the correct UZI at 0.575, under the 0.85 threshold, so the gun read as
+    unnamed; windowed it scores 0.995.
+
+    Dividing by the template alone (inter/template) would also fix that case,
+    but it gives any template that is a subset of the plate full marks: on the
+    SKS plate it lifts the wrong answer 'k2' to 0.877 against the right one's
+    0.959. Keeping the window's own pixels in the denominator still charges
+    for ink *under* the template, and holds that gap at 0.959 vs 0.728.
+    """
     binary = _white_text_mask(crop)
-    crop_px = np.count_nonzero(binary)
-    if crop_px == 0:
+    if np.count_nonzero(binary) == 0:
         return []
     results = []
     for code, tmpls in templates.items():
@@ -39,8 +70,10 @@ def _template_match(crop, templates):
                 continue
             _, _, _, (tx, ty) = cv2.minMaxLoc(res)
             th, tw = tmpl.shape[:2]
-            inter = np.count_nonzero(binary[ty:ty+th, tx:tx+tw] & tmpl)
-            iou = inter / max(crop_px + np.count_nonzero(tmpl) - inter, 1)
+            win = binary[ty:ty+th, tx:tx+tw]
+            inter = np.count_nonzero(win & tmpl)
+            union = np.count_nonzero(win) + np.count_nonzero(tmpl) - inter
+            iou = inter / max(union, 1)
             best = max(best, iou)
         if best > 0:
             results.append((best, code))
@@ -59,7 +92,9 @@ class TabWeaponDetector:
         if not os.path.isdir(TMPL_DIR):
             return
         for fname in os.listdir(TMPL_DIR):
-            m = re.match(r'^([a-z0-9]+)\.png$', fname)
+            # <code>.png, or <code>.<tag>.png for a per-language variant. The
+            # code cannot contain a dot, so the first field is unambiguous.
+            m = re.match(r'^([a-z0-9]+)(?:\.[a-z0-9]+)*\.png$', fname)
             if not m:
                 continue
             binary = cv2.imread(os.path.join(TMPL_DIR, fname), cv2.IMREAD_GRAYSCALE)

@@ -54,9 +54,11 @@ _SendInput = ctypes.windll.user32.SendInput
 VK_LBUTTON = 0x01
 _get_key = ctypes.windll.user32.GetAsyncKeyState
 
-# Match PicoMouse.RECOIL_LEAD_FRAC: shift pattern earlier by a fraction of one
-# bullet interval to compensate SendInput → game render latency.
-RECOIL_LEAD_FRAC = 0.30
+# Match PicoMouse.RECOIL_FIRE_DELAY_MS, and see the long comment there for why
+# there is no half-interval term: the game's recoil is spread over the bullet
+# interval too, so both centroids move together and cancel. Subtracting it from
+# our side alone put every bullet half an interval early.
+RECOIL_FIRE_DELAY_MS = 13
 
 
 def _send_move(dx, dy):
@@ -87,10 +89,10 @@ class SoftMouse:
 
     def upload_pattern(self, dx_s, dy_s, t_s, bullet_interval_s=0.1):
         """Save pattern. Takes effect on next left-button press."""
-        lead = bullet_interval_s * RECOIL_LEAD_FRAC
+        offset = RECOIL_FIRE_DELAY_MS / 1000.0
         self._dx_s = list(dx_s)
         self._dy_s = list(dy_s)
-        self._t_s = [max(0.0, float(t) - lead) for t in t_s]
+        self._t_s = [float(t) + offset for t in t_s]
         self._bullet_interval = bullet_interval_s
 
     def clear_pattern(self):

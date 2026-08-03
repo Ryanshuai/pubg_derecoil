@@ -60,13 +60,14 @@ class LobbyState(enum.Enum):
     MENU = 'menu'            # in a round but the ESC menu is up
     FULLBLEED = 'fullbleed'  # full-bleed, no overlay — loading, or ping is off
     DISCONNECTED = 'disconnected'   # dropped by the server; RECONNECT is up
+    ERROR = 'error'          # a modal ERROR dialog is up; OK must be clicked
 
     @property
     def playable(self):
         """True only when the round is running AND accepting input.
 
-        The two states that are deliberately NOT playable are the two a caller
-        is most likely to mistake for a running match:
+        The states that are deliberately NOT playable are the ones a caller is
+        most likely to mistake for a running match:
 
         FULLBLEED covers the loading screen, where clicks and keys go nowhere.
         MENU is a live round with the ESC menu over it — the scene is still
@@ -74,8 +75,17 @@ class LobbyState(enum.Enum):
         "in a match", but keys go to the menu instead of the character.
         DISCONNECTED is a black screen with a RECONNECT button, which the
         letterbox probe cannot tell from the lobby.
+        ERROR is a modal dialog over whatever was there.
         """
         return self is LobbyState.IN_GAME
+
+    @property
+    def needs_dismissing(self):
+        """A dialog is in the way and the run cannot proceed until it is
+        cleared. The distinction that matters against FULLBLEED: a loading
+        screen resolves itself and must NOT be clicked, while these two never
+        resolve and must be."""
+        return self in (LobbyState.ERROR, LobbyState.DISCONNECTED)
 
 
 def bar_max(crop):
@@ -310,6 +320,15 @@ class LobbyDetector:
         # read zero. Paid for only in that branch.
         if base is LobbyState.LOBBY and reconnect_visible():
             return LobbyState.DISCONNECTED
+        # The inactivity logout dialog spans the full 21:9, covering the
+        # letterbox bars and the ping overlay, so it lands in FULLBLEED —
+        # alongside the loading screen, which wants the opposite treatment.
+        # Loading resolves itself and must not be clicked; this never resolves
+        # and blocks every recovery behind itself until OK is clicked. An
+        # unattended run that idles once would otherwise sit in "loading"
+        # until its timeout, every time, forever.
+        if base is LobbyState.FULLBLEED and error_dialog_visible():
+            return LobbyState.ERROR
         return base
 
     def selftest(self):

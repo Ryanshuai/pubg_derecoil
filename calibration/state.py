@@ -23,16 +23,17 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import cv2
 import numpy as np
 
-from config import (HUD_REGIONS, SCREEN_W, SCREEN_H, RECOIL_SIGHT_PROFILES,
+from config import (HUD_REGIONS, RECOIL_SIGHT_PROFILES,
                     TAB_PIXEL_THRESH, TAB_COUNT_MIN, TAB_COUNT_MAX,
+                    TAB_DARK_FLOOR_MAX,
                     SPAWNER_ICON_ANCHORS, SPAWNER_ICON_W, SPAWNER_ICON_H,
                     SPAWNER_ICON_SEARCH)
-from detector.cropper import RegionGrabber
+from detector.cropper import ScreenBuffer, anchor_box
 from detector.posture_detector import PostureDetector
 from detector.spawner_detector import SpawnerDetector
+from detector.tab_detector import TabTypeDetector
 from detector.view_tracker import ViewTracker
 
 OK, NO, HUH = '  ok ', ' -- ', ' ?? '
@@ -53,40 +54,49 @@ class Probe:
         regions = {k: HUD_REGIONS[k] for k in
                    ('ammo', 'type', 'posture', 'weapon_1', 'weapon_2')}
         regions.update(self.tracker.regions())
-        xs = [a[0] for a in SPAWNER_ICON_ANCHORS]
-        ys = [a[1] for a in SPAWNER_ICON_ANCHORS]
-        s = SPAWNER_ICON_SEARCH
-        self._sp_box = (max(0, min(ys) - s), max(0, min(xs) - s),
-                        max(ys) + SPAWNER_ICON_H + 2 * s - min(ys),
-                        max(xs) + SPAWNER_ICON_W + 2 * s - min(xs))
+        self._sp_box = anchor_box(SPAWNER_ICON_ANCHORS, SPAWNER_ICON_W,
+                                  SPAWNER_ICON_H, SPAWNER_ICON_SEARCH)
         regions['spawner'] = self._sp_box
         self.regions = regions
-        self.grab = RegionGrabber(regions)
+        # NO focus_fn, deliberately. This tool's whole promise is that it is
+        # safe to run at any moment -- including while wondering whether some
+        # other agent has the game -- and it PRINTS focus as one of its
+        # readings. A guard here would make it refuse to work at exactly the
+        # moment it is most wanted.
+        self.frames = ScreenBuffer(regions)
         self.posture_det = PostureDetector()
         self.spawner_det = SpawnerDetector()
+        self.tab_det = TabTypeDetector()
         self.ads_det = _try(lambda: __import__(
             'detector.ads_detector', fromlist=['x']).AdsDetector())
         self.ammo_det = _try(lambda: __import__(
             'detector.ammo_detector', fromlist=['x']).AmmoDetector())
-        self._buf = np.zeros((SCREEN_H, SCREEN_W, 3), np.uint8)
 
     def close(self):
-        self.grab.close()
+        self.frames.close()
 
     def read(self):
-        for _ in range(3):
-            f = self.grab.grab()
-        y, x, h, w = self._sp_box
-        self._buf[y:y + h, x:x + w] = f['spawner']
+        f = self.frames.flush(3)
+        # One blit, shared by both detectors that index screen coordinates.
+        # This used to blit `spawner` on its own and then blit EVERY region a
+        # second time inside _full(), because the two calls did not know about
+        # each other.
+        buf = self.frames.full(f)
 
-        g = cv2.cvtColor(f['type'], cv2.COLOR_BGR2GRAY)
-        n_tab = int((g > TAB_PIXEL_THRESH).sum())
+        # The verdict comes from the detector, not from a copy of its maths.
+        # The two numbers beside it are re-derived here only so the printout
+        # can show WHY it said what it said -- this was a third fork of the
+        # predicate until 2026-08, and the one that had drifted furthest.
+        m = np.max(f['type'], axis=2)
+        n_tab = int((m > TAB_PIXEL_THRESH).sum())
+        floor = int(np.percentile(m, 10))
         posture = self.posture_det.classify({'posture': f['posture']})
 
-        out = {
-            'tab_open': TAB_COUNT_MIN <= n_tab <= TAB_COUNT_MAX,
+        return {
+            'tab_open': bool(self.tab_det.classify(f['type'])),
             'tab_px': n_tab,
-            'spawner_open': bool(self.spawner_det.classify(self._buf)),
+            'tab_floor': floor,
+            'spawner_open': bool(self.spawner_det.classify(buf)),
             'posture': posture,
             # The posture icon only renders in ADS, so its presence is an ADS
             # reading in its own right — and the only one available before
@@ -94,23 +104,11 @@ class Probe:
             # a useful way: the icon lags the transition, the crosshair does
             # not.
             'ads_by_icon': posture is not None,
-            'ads_by_crosshair': _try(
-                lambda: bool(self.ads_det.scoped(self._full(f)))),
+            'ads_by_crosshair': _try(lambda: bool(self.ads_det.scoped(buf))),
             'ammo': _try(lambda: self.ammo_det.classify(f)),
             'gates': [round(self.tracker.gate_score(p), 2)
                       for p in (self.tracker.slice_frame(f) or [])],
         }
-        return out
-
-    def _full(self, f):
-        """A screen-coordinate buffer, because AdsDetector crops relative to
-        the frame's own centre — hand it a crop and it reads the middle of the
-        crop, which is somewhere else entirely."""
-        for name, (y, x, h, w) in self.regions.items():
-            crop = f.get(name)
-            if crop is not None:
-                self._buf[y:y + h, x:x + w] = crop
-        return self._buf
 
 
 def game_focused():
@@ -127,12 +125,30 @@ def game_focused():
         exe = psutil.Process(pid).name()
     except Exception:
         return False, '?', '?'
-    from press.pointer import GAME_EXES
+    from control.focus import GAME_EXES
     return (any(exe.lower().startswith(k) for k in GAME_EXES), exe, title)
 
 
 def pico_state():
-    from press.pico_mouse import get_mouse
+    """Open the CDC link and see whether hand reporting is alive.
+
+    THE ONLY THING IN THIS FILE THAT TAKES SHARED HARDWARE, which is why it is
+    behind --pico and not in the default read. The module promises it is safe
+    to run at any moment, including while wondering whether some other agent is
+    mid-run — and the Pico is single-tenant, so opening its port is exactly the
+    kind of interference that promise is about.
+
+    So it asks first. `other_agents()` names the other python processes running
+    out of this project; the port is not locked, and a collision shows up as
+    symptoms rather than an error (a run whose next command silently goes
+    nowhere), so refusing here is worth more than a heartbeat reading.
+    """
+    from press.pico_mouse import get_mouse, other_agents
+    busy = other_agents()
+    if busy:
+        raise RuntimeError(
+            f'another agent is running ({busy}) — not taking the Pico out '
+            f'from under it. Re-run with the other process stopped.')
     m = get_mouse()
     time.sleep(0.6)                       # let a heartbeat arrive
     return m, m.human_available()
@@ -148,7 +164,9 @@ def show(p, args):
           f"  — also the in-range test: comma only works inside it")
     print(f"inventory   {OK if s['tab_open'] else NO}  "
           f"{s['tab_px']} bright px in 'type' "
-          f"(open window {TAB_COUNT_MIN}..{TAB_COUNT_MAX})")
+          f"(open window {TAB_COUNT_MIN}..{TAB_COUNT_MAX}), "
+          f"dark floor {s['tab_floor']} (needs < {TAB_DARK_FLOOR_MAX}: "
+          f"a bright floor is sky, not glyphs)")
     icon, cross = s['ads_by_icon'], s['ads_by_crosshair']
     agree = '' if cross is None else (
         '' if icon == cross else '   <-- DISAGREE, mid-transition?')
@@ -212,8 +230,8 @@ def read_tab(p):
     if not s['tab_open']:
         print("inventory   -- not open; open it yourself, then re-run --tab")
         return
-    from attach_control import AttachControl
-    ac = AttachControl(verbose=False)
+    from control.inventory import InventoryControl
+    ac = InventoryControl(verbose=False)
     try:
         if not ac.sync():
             print("inventory   ?? Tab reads open but the layout would not sync")

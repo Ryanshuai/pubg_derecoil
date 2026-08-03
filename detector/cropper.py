@@ -4,6 +4,13 @@
   RegionGrabber(regions)   GDI grabber for a fixed region set
   DXGIGrabber(regions)     DXGI Desktop Duplication grabber, same interface
   make_grabber(regions)    DXGI if available, else GDI
+  StillGrabber(regions, imgs)  the same interface over stored PNGs, offline
+
+  ScreenBuffer(regions)    a grabber plus the two things every caller of one
+                           was writing for itself: a reused screen-coordinate
+                           buffer the crops get blitted back into, and the
+                           flush-N-then-read idiom
+  anchor_box(...)          bounding box over a set of icon anchors
 
 Creating and destroying GDI objects costs ~6 ms regardless of how many
 pixels are copied, so grabbing N regions one-by-one costs N × 6 ms.
@@ -29,6 +36,21 @@ _cap_lock = threading.Lock()
 # Regions further apart than this vertically go into separate bounding
 # boxes rather than one box spanning the empty space between them.
 BAND_GAP = 200
+
+
+class CaptureLost(RuntimeError):
+    """The backend stopped producing frames and cannot be grabbed from again.
+
+    Raised instead of blocking so the caller can rebuild the grabber; see
+    DXGIGrabber.grab().
+    """
+
+
+def capture_screen():
+    """Whole primary screen as BGR. For the UI screens, where a one-shot grab
+    of everything beats naming regions up front."""
+    from config import SCREEN_H, SCREEN_W
+    return win32_cap((0, 0, SCREEN_H, SCREEN_W))
 
 
 def win32_cap(yxhw):
@@ -186,7 +208,17 @@ class DXGIGrabber:
         # BGRA, not BGR: asking bettercam for BGR makes it drop the alpha
         # channel across the whole captured box every frame (2.65 Mpx here),
         # which measured 3x the CPU of doing it per-crop below.
+        #
+        # The region goes to create(), not only to start(). bettercam sets
+        # `_region_set_by_user` from create()'s argument alone, and on a
+        # display-mode change (Access Lost — which is what a game entering
+        # exclusive fullscreen looks like) _on_output_change() resets a region
+        # it believes was never set back to the full screen and rebuilds the
+        # frame buffer at THAT size. The capture thread meanwhile keeps
+        # producing frames at the original region size, so the next write dies
+        # with a broadcast error and takes the capture thread down with it.
         self._cam = bettercam.create(output_idx=output_idx,
+                                     region=self._region,
                                      output_color="BGRA")
         # video_mode=True repeats the previous frame when the screen is idle,
         # so grab() cannot block indefinitely on a static screen.
@@ -195,8 +227,25 @@ class DXGIGrabber:
         self.target_fps = target_fps
         self._closed = False
 
+    def _alive(self):
+        """Is bettercam's capture thread still running?
+
+        `is_capturing` cannot answer this: when the capture thread hits an
+        error it calls stop() on itself, which raises on `join(self)` before
+        clearing the flag. The thread object can.
+        """
+        t = getattr(self._cam, '_BetterCam__thread', None)
+        return t is not None and t.is_alive()
+
     def grab(self):
         """Block until the next frame, then return {name: BGR array}."""
+        # Checked before waiting, not after: a dead capture thread leaves
+        # `__frame_available` set exactly once, so the first get_latest_frame()
+        # returns a stale frame and every later one blocks forever on an event
+        # nobody will set again. Silent, and everything downstream just keeps
+        # reading the same frame.
+        if not self._alive():
+            raise CaptureLost('bettercam capture thread is gone')
         img = self._cam.get_latest_frame()
         out = {}
         for name, dy, dx, h, w in self._members:
@@ -209,15 +258,38 @@ class DXGIGrabber:
         if self._closed:
             return
         self._closed = True
+        cam, self._cam = self._cam, None
         try:
-            self._cam.stop()
+            cam.stop()
         except Exception:
             pass
         try:
-            self._cam.release()
+            cam.release()
         except Exception:
             pass
-        self._cam = None
+
+        # bettercam's factory keeps one weak entry per (device, output) and
+        # hands the SAME camera back to the next create() for as long as that
+        # entry is alive. A camera whose capture thread has died is unusable,
+        # so rebuilding after a loss would get the broken one straight back —
+        # measured: three rebuild attempts in a row, all instantly dead, then
+        # a permanent fall back to GDI at a third of the frame rate.
+        #
+        # Dropping the entry needs the strong reference gone too, and the
+        # camera holds cycles that refcounting alone will not break, hence the
+        # collect. tab_items uses the GDI grabber, so no other live user can
+        # be evicted here.
+        try:
+            import gc
+
+            import bettercam
+            for key, inst in list(bettercam.DXFactory._camera_instances.items()):
+                if inst is cam:
+                    del bettercam.DXFactory._camera_instances[key]
+            del cam, inst
+            gc.collect()
+        except Exception:
+            pass
 
     def __del__(self):
         try:
@@ -242,3 +314,304 @@ def make_grabber(regions, prefer_dxgi=True, dxgi_fps=0):
             print(f'[capture] DXGI unavailable ({e}); falling back to GDI',
                   flush=True)
     return RegionGrabber(regions), False
+
+
+class StillGrabber:
+    """A grabber over stored screenshots. Same grab()/close() as the real ones.
+
+    `images` are FULL-SCREEN frames — the regions are sliced out of them by
+    screen coordinates, which is the whole point: a stored PNG and the live
+    desktop are then the same coordinate system, so anything built on a
+    ScreenBuffer can be exercised offline without a game.
+
+    One image is consumed per grab() and the last one repeats forever. That is
+    also what DXGI does on an idle screen (video_mode re-serves the previous
+    frame), so a flush count can be checked against a known sequence.
+    """
+
+    def __init__(self, regions, images):
+        if isinstance(images, np.ndarray):
+            images = [images]
+        self.regions = dict(regions)
+        self.images = list(images)
+        if not self.images:
+            raise ValueError('StillGrabber needs at least one image')
+        self.n = 0
+
+    def grab(self):
+        img = self.images[min(self.n, len(self.images) - 1)]
+        self.n += 1
+        # .copy() for the same reason the live grabbers do it: callers keep
+        # crops past the frame, and here the source array is shared with every
+        # other region and every later grab.
+        return {name: img[y:y + h, x:x + w].copy()
+                for name, (y, x, h, w) in self.regions.items()}
+
+    def close(self):
+        self.images = []
+
+
+class FocusLost(RuntimeError):
+    """The game stopped being the foreground window, so the pixels handed back
+    are not the game's.
+
+    Distinct from CaptureLost: the backend is fine and grabbing again would
+    succeed — it would just keep returning the desktop. A run that does not
+    stop here completes and labels a directory of identical screenshots as
+    data. See ScreenBuffer's `focus_fn`.
+    """
+
+
+# How many frames to drop before a read that has to reflect something that
+# just happened. Shared knowledge rather than a number each caller remembers:
+# DXGI in video_mode re-serves the PREVIOUS frame while the screen is idle, so
+# the first grab after an action can predate it. GDI reads the desktop as it is
+# now and strictly needs none, but the game's own render latency means a caller
+# wanting "after the click" wants a couple either way — the existing call sites
+# used 8 (sweep.Rig.flush), 3 (collect_templates.Collector.frame,
+# calibration/state.Probe.read) and 1/2/4/6 at various points in sweep.
+FLUSH_FRAMES = 3
+
+
+def anchor_box(anchors, icon_w, icon_h, search=0):
+    """One box covering every icon anchor, widened by the search margin.
+
+    `anchors` are (x, y) top-left points — the order the SPAWNER_ICON_ANCHORS
+    table in config.py uses — and the result is (y, x, h, w) like every other
+    region here.
+
+    Transcribed verbatim, quirk included, from the two copies it replaces
+    (calibration/harvest.py's Panel.__init__ and calibration/state.py's
+    Probe.__init__, which were character-for-character identical). The quirk:
+    the origin is clamped at 0 but the height and width are not reduced to
+    match, so an anchor set within `search` of the top or left edge yields a
+    box that reaches `search` px further than the margin asks for. Kept
+    deliberately — this function exists so the two call sites can migrate onto
+    it without their boxes moving by a pixel, and tools/test_frames.py asserts
+    exactly that against the live source of both files.
+    """
+    xs = [a[0] for a in anchors]
+    ys = [a[1] for a in anchors]
+    s = search
+    return (max(0, min(ys) - s), max(0, min(xs) - s),
+            max(ys) + icon_h + 2 * s - min(ys),
+            max(xs) + icon_w + 2 * s - min(xs))
+
+
+class ScreenBuffer:
+    """A grabber for a region set, plus a screen-coordinate view of it.
+
+        sb = ScreenBuffer({'ammo': (1318, 1670, 48, 90)})
+        f = sb.grab()               # {name: BGR crop}
+        img = sb.full(f)            # crops blitted back where they came from
+        f = sb.flush(3)             # drop stale frames, return the last
+
+    WHY full() EXISTS. Half the detectors in this package index SCREEN
+    coordinates, not crop coordinates — AdsDetector cuts a window out of the
+    frame's own centre, SpawnerDetector looks at fixed anchors. Hand one a
+    crop and it reads the middle of the crop, which is somewhere else on the
+    screen entirely, and it does not complain: it returns a confident answer
+    about the wrong pixels. So the crops go back into a full-size buffer at
+    their own coordinates and the detector is handed that.
+
+    The buffer is allocated ONCE and reused. It is 3440x1440x3 = 14.9 MB, and
+    the three places that hand-rolled this ran it inside a per-frame loop.
+    Everything outside the region set stays black forever, which is fine
+    precisely because these detectors only look inside their own windows.
+
+      *** The array full() returns is the buffer itself, valid only until the
+          next grab(). Pass copy=True to keep it. ***
+
+    FOCUS. `focus_fn` is an optional predicate — pass control.focus.game_focused
+    — and when it answers False, grab() raises FocusLost instead of handing
+    back a frame. This is not paranoia: when PUBG loses the foreground the
+    picture freezes, so a calibration run keeps grabbing happily and writes a
+    whole set of identical desktop screenshots under data filenames. Nothing
+    downstream can tell. calibration/capture_ads.py already guards its own
+    grab() this way and is the reason the option is here.
+
+    It is OFF by default, and the reason is layering, not cost: detector/ may
+    not import control/ (tools/check_layering.py enforces it), so this class
+    cannot reach game_focused() on its own — the caller who lives above the
+    line has to hand it down. Cost is not the argument; game_focused() measures
+    0.008 ms, which is 0.1% of a 144 Hz frame budget. So:
+
+        calibration / capture tools   pass focus_fn — a lost foreground
+                                      silently voids the entire run
+        the per-frame match loop      may leave it off — control/focus.py's
+                                      FocusKeeper is already watching, and the
+                                      loop's own detectors notice a frozen HUD
+
+    If registering it per construction turns out to be forgettable, the right
+    fix is a five-line factory in control/ that wires game_focused in, not a
+    default here that detector/ cannot express.
+    """
+
+    def __init__(self, regions=None, *, focus_fn=None, prefer_dxgi=False,
+                 dxgi_fps=0, gap=BAND_GAP, grabber=None):
+        """`regions` is {name: (y, x, h, w)}; None means the whole screen.
+
+        `grabber` injects a ready-made one (StillGrabber for offline work) and
+        skips the backend choice. Otherwise GDI unless `prefer_dxgi`, matching
+        what the callers being replaced each chose for themselves.
+        """
+        from config import SCREEN_H, SCREEN_W
+        self.screen_h, self.screen_w = SCREEN_H, SCREEN_W
+        if regions is None:
+            regions = {'screen': (0, 0, SCREEN_H, SCREEN_W)}
+        self.regions = dict(regions)
+        self.focus_fn = focus_fn
+        self._buf = None
+        self._closed = False
+        self._opts = dict(prefer_dxgi=prefer_dxgi, dxgi_fps=dxgi_fps, gap=gap)
+        if grabber is not None:
+            self.grabber, self.paced = grabber, False
+        else:
+            self.grabber, self.paced = self._open(self.regions)
+        self._whole = self._whole_name()
+
+    @classmethod
+    def over_stills(cls, regions, images, **kw):
+        """A ScreenBuffer reading stored full-screen frames. No game, no GDI."""
+        if regions is None:
+            from config import SCREEN_H, SCREEN_W
+            regions = {'screen': (0, 0, SCREEN_H, SCREEN_W)}
+        return cls(regions, grabber=StillGrabber(regions, images), **kw)
+
+    def _open(self, regions):
+        if self._opts['prefer_dxgi']:
+            return make_grabber(regions, dxgi_fps=self._opts['dxgi_fps'])
+        return RegionGrabber(regions, self._opts['gap']), False
+
+    def _whole_name(self):
+        """The region name that IS the whole screen, when there is only one.
+
+        full() then hands that crop straight back instead of blitting 14.9 MB
+        into a buffer to get the same picture. It also makes the array a fresh
+        one per frame, which callers that keep frames around (capture_ads holds
+        a hip frame to diff a later one against) depend on.
+        """
+        if len(self.regions) != 1:
+            return None
+        name, r = next(iter(self.regions.items()))
+        return name if tuple(r) == (0, 0, self.screen_h, self.screen_w) else None
+
+    # ── reads ──
+
+    def grab(self):
+        """{name: BGR crop}. Raises FocusLost when the guard says the game is
+        not frontmost, and CaptureLost when the backend has died."""
+        if self.focus_fn is not None and not self.focus_fn():
+            raise FocusLost('the game is no longer the foreground window; '
+                            'the screen is frozen and these pixels are stale')
+        return self.grabber.grab()
+
+    def flush(self, n=None):
+        """Drop `n` frames and return the last one (None when n <= 0).
+
+        `n` defaults to FLUSH_FRAMES. Note the return value: the old idiom was
+        `for _ in range(3): f = grabber.grab()`, so `f = sb.flush(3)` is one
+        line rather than a flush followed by a grab. A caller that wants the
+        old `rig.flush(2)` + `rig.grab()` shape wants flush(3).
+        """
+        out = None
+        for _ in range(FLUSH_FRAMES if n is None else n):
+            out = self.grab()
+        return out
+
+    def full(self, frame=None, only=None, copy=False):
+        """The frame's crops, blitted back to their screen coordinates.
+
+        `frame` defaults to a fresh grab(). `only` restricts the blit to a
+        subset of the region names, for a detector that reads one window and
+        does not care that the rest of the buffer is a frame or two old.
+
+        A region whose crop is MISSING from `frame` is zeroed rather than left
+        alone. The hand-rolled version in calibration/state.py skipped it, and
+        a skipped region keeps the previous frame's pixels — a detector then
+        reads a stale answer with nothing to say it did. Black is at least
+        wrong in a way that shows.
+
+        REGIONS MAY OVERLAP, and two of the standing ones do: HUD_REGIONS's
+        'ammo' (1318, 1670, 48, 90) and 'fire_mode' (1317, 1626, 43, 56) share
+        a 12x43 px corner. With every crop present that is harmless, since both
+        come from the same frame and write the same pixels. It only shows when
+        one of them is missing: the zeroing above blanks the region, and then
+        whichever overlapping region is blitted after it paints part of it
+        back. Iteration order is the region dict's, i.e. the caller's.
+        """
+        if frame is None:
+            frame = self.grab()
+        if self._whole is not None and only is None:
+            img = frame[self._whole]
+            return img.copy() if copy else img
+        buf = self._ensure_buf()
+        for name in (self.regions if only is None else only):
+            y, x, h, w = self.regions[name]
+            crop = frame.get(name)
+            buf[y:y + h, x:x + w] = 0 if crop is None else crop
+        return buf.copy() if copy else buf
+
+    def box(self, name):
+        return self.regions[name]
+
+    def _ensure_buf(self):
+        if self._buf is None:
+            for name, (y, x, h, w) in self.regions.items():
+                if y < 0 or x < 0 or y + h > self.screen_h \
+                        or x + w > self.screen_w:
+                    raise ValueError(
+                        f"region {name!r} = {(y, x, h, w)} does not fit the "
+                        f"{self.screen_w}x{self.screen_h} screen, so it cannot "
+                        f"be blitted back into one")
+            self._buf = np.zeros((self.screen_h, self.screen_w, 3), np.uint8)
+        return self._buf
+
+    # ── lifecycle ──
+
+    def set_regions(self, regions, grabber=None):
+        """Swap the region set, keeping the buffer.
+
+        calibration/sweep.py rebuilds its grabber whenever the sight changes,
+        because each optic hides a different part of the screen and the view
+        tracker's patch columns move with it. The buffer is wiped rather than
+        carried over: the old regions' pixels would otherwise sit there for the
+        rest of the run, in coordinates nothing writes to any more.
+        """
+        old = self.grabber
+        if grabber is not None:
+            self.grabber, self.paced = grabber, False
+        else:
+            self.grabber, self.paced = self._open(dict(regions))
+        try:
+            old.close()
+        except Exception:
+            pass
+        self.regions = dict(regions)
+        self._whole = self._whole_name()
+        if self._buf is not None:
+            self._buf[:] = 0
+        return self
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self.grabber.close()
+        except Exception:
+            pass
+        self._buf = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass

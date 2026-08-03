@@ -1,0 +1,165 @@
+"""Cold-start check — does the whole stack still come up?
+
+Compiles every module, builds every detector (which loads the weights and
+templates), runs the capture backend against whatever is on screen, and looks
+for the Pico on the serial bus. Injects no input and needs no game window, so
+it is safe to run any time.
+
+    pixi run smoke
+"""
+import os
+import sys
+import time
+import traceback
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+except (AttributeError, OSError):
+    pass
+
+_failures = []
+
+
+def _section(title):
+    print(f"\n=== {title} ===")
+
+
+def _check(name, fn):
+    """Run fn, print one aligned OK/FAIL line, remember failures."""
+    try:
+        result = fn()
+        detail = '' if result is None else f'  {result}'
+        print(f"  OK    {name}{detail}")
+        return True
+    except Exception as e:
+        print(f"  FAIL  {name}  {type(e).__name__}: {e}")
+        traceback.print_exc(limit=3)
+        _failures.append(name)
+        return False
+
+
+# ── 1. interpreter + third-party stack ──────────────────────
+_section("environment")
+print(f"  python   {sys.version.split()[0]}  {sys.executable}")
+
+import importlib.metadata as md
+
+for dist, mod in [('numpy', 'numpy'), ('opencv-python', 'cv2'), ('torch', 'torch'),
+                  ('torchvision', 'torchvision'), ('scikit-learn', 'sklearn'),
+                  ('scipy', 'scipy'), ('pyserial', 'serial'), ('pywin32', 'win32gui'),
+                  ('bettercam', 'bettercam'), ('hidapi', 'hid'), ('ultralytics', 'ultralytics')]:
+    try:
+        __import__(mod)
+        # The runtime version is what matters — a dist can be shadowed by another
+        # copy earlier on sys.path, which is exactly the bug this line catches.
+        runtime = getattr(sys.modules[mod], '__version__', '?')
+        print(f"  {dist:<15} {runtime:<12} (dist {md.version(dist)})")
+    except Exception as e:
+        print(f"  {dist:<15} MISSING  {type(e).__name__}: {e}")
+        _failures.append(dist)
+
+import torch
+
+print(f"  cuda     {torch.cuda.is_available()}"
+      + (f"  {torch.cuda.get_device_name(0)}" if torch.cuda.is_available() else ""))
+
+# ── 2. detectors + model weights ────────────────────────────
+_section("detectors")
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+from detector.ammo_detector import AmmoDetector
+from detector.game_state import GameState
+from detector.weapon_dl_detector import WeaponClassifier
+from detector.fire_mode_detector import FireModeDetector
+from detector.posture_detector import PostureDetector
+from detector.highlight_detector import HighlightDetector
+from detector.tab_detector import TabTypeDetector
+from detector.weapon_template_detector import TabWeaponDetector
+from detector.attachment_detector import AttachmentDetector
+from detector.spawner_detector import SpawnerDetector
+from detector.slot_detector import SlotDetector
+from detector.view_tracker import ViewTracker
+
+state = GameState()
+_check('GameState', lambda: None)
+_check('WeaponClassifier', lambda: WeaponClassifier(device) and None)
+_check('FireModeDetector', lambda: FireModeDetector(device) and None)
+_check('PostureDetector', lambda: PostureDetector() and None)
+_check('HighlightDetector', lambda: HighlightDetector(state) and None)
+_check('TabTypeDetector', lambda: TabTypeDetector(device) and None)
+_check('TabWeaponDetector', lambda: TabWeaponDetector() and None)
+_check('AttachmentDetector', lambda: AttachmentDetector() and None)
+_check('SpawnerDetector', lambda: SpawnerDetector() and None)
+_check('SlotDetector', lambda: SlotDetector() and None)
+_check('ViewTracker', lambda: ViewTracker() and None)
+
+
+def _ammo():
+    """An incomplete digit set is reported, not failed: a missing digit makes
+    those counts read None, which is honest — unlike a drifted template, which
+    would read a wrong number. tools/collect_ammo_digits.py fills the gaps."""
+    have = AmmoDetector().digits_known
+    missing = [d for d in range(10) if d not in have]
+    return f"digits {''.join(map(str, have)) or 'none'}" + (
+        f"  MISSING {''.join(map(str, missing))} "
+        f"-> tools/collect_ammo_digits.py" if missing else "  (full set)")
+
+
+_check('AmmoDetector', _ammo)
+
+# ── 3. recoil patterns ──────────────────────────────────────
+_section("recoil data")
+import json
+
+from detector.weapon import SCALES_PATH
+
+
+def _scales():
+    with open(SCALES_PATH, encoding='utf-8') as f:
+        return f"{len(json.load(f))} weapons"
+
+
+_check('weapon_scales.json', _scales)
+
+# ── 4. capture backend ──────────────────────────────────────
+_section("capture")
+
+
+def _capture():
+    from screen_capture import ScreenCapture
+    cap = ScreenCapture()
+    cap.start()
+    try:
+        time.sleep(1.5)
+        fps = cap.fps
+        if cap.latest() is None:
+            raise RuntimeError("no frame in the buffer after 1.5s")
+        return f"{cap.backend}  {fps:.0f} fps"
+    finally:
+        cap.stop()
+
+
+_check('ScreenCapture', _capture)
+
+# ── 5. Pico link ────────────────────────────────────────────
+_section("hardware")
+
+
+def _pico():
+    from serial.tools import list_ports
+    for p in list_ports.comports():
+        if p.vid == 0xCAFE and p.pid in (0x4001, 0x4005):
+            return f"{p.device}  vid=0x{p.vid:04X} pid=0x{p.pid:04X}"
+    raise RuntimeError("Pico not on the serial bus (check USB / PICO_PORT)")
+
+
+_check('pico mouse', _pico)
+
+# ── verdict ─────────────────────────────────────────────────
+print()
+if _failures:
+    print(f"FAILED: {', '.join(_failures)}")
+    sys.exit(1)
+print("all green")

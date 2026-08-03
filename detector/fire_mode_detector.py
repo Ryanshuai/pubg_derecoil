@@ -17,8 +17,21 @@ MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'dl_models', 'fire_mo
 HEAD_SIZES = {'fire_mode': len(FIRE_MODE_CLASSES) + 1}
 
 _RF_PATH = os.path.join(os.path.dirname(__file__), '..', 'dl_models', 'fire_mode_structural_rf.pkl')
-with open(_RF_PATH, 'rb') as _f:
-    _rf_model = pickle.load(_f)
+_rf_model = None
+
+
+def _rf():
+    """Load the structural forest on first use.
+
+    Unpickling at import time meant `import detector.fire_mode_detector` — or
+    anything that transitively imports it — died outright if the .pkl was
+    missing, which is a strange way for an unrelated module to fail.
+    """
+    global _rf_model
+    if _rf_model is None:
+        with open(_RF_PATH, 'rb') as f:
+            _rf_model = pickle.load(f)
+    return _rf_model
 
 
 def _extract_features(gray):
@@ -49,7 +62,7 @@ def _extract_features(gray):
 
 def _structural_classify(crop):
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.ndim == 3 else crop
-    return _rf_model.predict([_extract_features(gray)])[0]
+    return _rf().predict([_extract_features(gray)])[0]
 
 
 class FireModeDetector:
@@ -64,16 +77,17 @@ class FireModeDetector:
         if crop is None:
             return None
 
+        # RF first, and only fall through to the net when it abstains. The
+        # result was already "RF unless it says bg", so running the forward
+        # pass up front just paid for a tensor upload and a GPU sync whose
+        # answer was then thrown away on most frames.
+        rf_name = _structural_classify(crop)
+        if rf_name and rf_name != 'bg':
+            return rf_name
+
         t = crop_to_tensor_4ch(crop, self.device)
         with torch.no_grad():
             out = self.model(t)
-
-        logits = out['fire_mode'][0]
-        probs = F.softmax(logits, dim=0)
-        idx = probs.argmax().item()
+        idx = F.softmax(out['fire_mode'][0], dim=0).argmax().item()
         model_name = FIRE_MODE_CLASSES[idx - 1] if idx > 0 else 'bg'
-
-        rf_name = _structural_classify(crop)
-
-        result = rf_name if (rf_name and rf_name != 'bg') else model_name
-        return result if result != 'bg' else None
+        return model_name if model_name != 'bg' else None

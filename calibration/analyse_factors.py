@@ -123,14 +123,44 @@ def posture_check(cells, base_posture):
         print(f'\n  {p}:')
         for w, c, r, rel in sorted(rows):
             print(f'    {w:<9}{c:<20}{r:>8.4f}  +-{r*rel:.4f}')
-        # Pooled in log space, then the worst deviation from it.
-        ws = [(math.log(r), 1 / rel ** 2) for _, _, r, rel in rows if rel]
-        mu = sum(l * wt for l, wt in ws) / sum(wt for _, wt in ws)
-        worst = max(abs((math.log(r) - mu) / rel) for _, _, r, rel in rows
-                    if rel)
-        print(f'    -> pooled {math.exp(mu):.4f}; worst config deviates '
-              f'{worst:.1f} sigma  '
-              f'({"one factor fits every config" if worst < 2 else "POSTURE AND ATTACHMENTS INTERACT"})')
+
+        # Two different questions live in these rows and pooling them answers
+        # neither. Spread across CONFIGS within one weapon is the interaction
+        # being tested; spread across WEAPONS is whether the posture factor is
+        # weapon-independent, which is a separate claim entirely. Pooled
+        # together, an m416/ump45 difference reads as "posture and attachments
+        # interact" -- it once printed 3.5 sigma on exactly that.
+        by_w = defaultdict(list)
+        for w, c, r, rel in rows:
+            by_w[w].append((c, r, rel))
+        tested = False
+        for w in sorted(by_w):
+            group = by_w[w]
+            if len(group) < 2:
+                continue
+            tested = True
+            (c1, r1, e1), (c2, r2, e2) = sorted(group)[:2]
+            gap = r2 / r1 - 1
+            sig = abs(math.log(r2 / r1)) / math.hypot(e1, e2)
+            print(f'    -> {w}: {c2} is {100*gap:+.1f}% off {c1}  '
+                  f'({sig:.1f} sigma) '
+                  f'{"— consistent with one factor" if sig < 2 else "— INTERACTION"}')
+        if not tested:
+            print('    -> no weapon has two configs here; the interaction '
+                  'cannot be tested, only the weapon spread below')
+
+        # And the other question, kept apart.
+        by_c = defaultdict(list)
+        for w, c, r, rel in rows:
+            by_c[c].append((w, r, rel))
+        for c in sorted(by_c):
+            group = by_c[c]
+            if len(group) < 2:
+                continue
+            (w1, r1, e1), (w2, r2, e2) = sorted(group)[:2]
+            sig = abs(math.log(r2 / r1)) / math.hypot(e1, e2)
+            print(f'    -> weapon spread at {c}: {w1} {r1:.4f} vs {w2} '
+                  f'{r2:.4f} ({sig:.1f} sigma)')
 
 
 def main():

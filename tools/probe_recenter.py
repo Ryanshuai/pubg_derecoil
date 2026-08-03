@@ -27,11 +27,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__))), 'calibration'))
 
-from press.pointer import ensure_focus
+from control.focus import ensure_focus
 from detector.weapon import Weapon
-from sweep import Rig, analyse
-from harvest import Panel
-from spawner_control import SpawnerControl
+from analysis import analyse
+from sweep import Rig
+from control.spawner import SpawnerControl
 
 
 def main():
@@ -54,13 +54,12 @@ def main():
     time.sleep(0.6)
 
     rig = Rig(args.sight)
-    panel = Panel(rig.mouse)
     try:
         if args.spawn:
             sc = SpawnerControl(verbose=False)
-            if panel.ensure_open() and sc.sync(need_cols=(1,)):
+            if sc.ensure_panel(True) and sc.sync(need_cols=(1,)):
                 sc.give_weapon(args.weapon)
-            panel.ensure_closed()
+            sc.ensure_panel(False)
             time.sleep(0.6)
 
         w = Weapon()
@@ -101,7 +100,7 @@ def main():
                     rig.set_reference()
                 else:
                     back = rig.recenter()
-            rec, fire_s, steps, fire_end = rig.fire_magazine()
+            rec, fire_s, steps, fire_end, _, _ = rig.fire_magazine()
             if steps == 0:
                 print(f'{i:>4}{"-":>8}   no rounds fired (still reloading?)')
                 time.sleep(1.5)
@@ -127,7 +126,6 @@ def main():
     except KeyboardInterrupt:
         print('\ninterrupted')
     finally:
-        panel.close_grabber()
         rig.close()
     return 0
 

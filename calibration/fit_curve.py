@@ -1,6 +1,6 @@
 """Rebuild a weapon's recoil curve from measured residuals, bullet by bullet.
 
-    python calibration/fit_curve.py --jsonl calibration/sweep_....jsonl
+    python calibration/fit_curve.py --jsonl docs/recoil/runs/sweep_....jsonl
     python calibration/fit_curve.py --jsonl ... --apply
 
 The scalar knobs (weapon scale, posture factor) can only stretch a curve
@@ -55,6 +55,88 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 FIRE_FLOOR_FRAC = 0.40
 PLATEAU_FROM = 6          # first bullets ramp up; median the plateau only
 SMOOTH_W = 5              # bullets; see smooth() for why this is not cosmetic
+
+# The update is an exponential moving average towards the measured truth:
+#
+#     curve <- curve + alpha * (measured_truth - curve)
+#            = curve + alpha * residual
+#
+# because the residual IS truth minus curve — that is what measuring it means.
+# So alpha is simply the fraction of the residual applied, and running the
+# thing repeatedly is an EMA over every measurement ever taken, weighting
+# recent ones by (1-alpha)^k. No batch, no history to keep: each pass sees a
+# FRESH residual, measured against the curve the last pass wrote.
+#
+# Two alphas, because the two quantities are measured to wildly different
+# precision.
+#
+#   MAGNITUDE  how much recoil there is in total. Measured to about 1% at 5
+#              magazines (sem ~10 counts on 1080), so it takes gain 1 and
+#              converges in one pass: +31.1 measured, +31.1 applied, +2.7 left.
+#
+#   SHAPE      how that total is distributed over the magazine. This is where
+#              the game's own per-burst randomness lands: magazine-to-magazine
+#              deviation is CORRELATED within a burst, not per-shot white, so
+#              it does not average down the way noise should. Pooled over 20
+#              homed magazines the cumulative spread grows to +-27 counts by
+#              bullet 29 -- 2.7x what a random walk would give -- and then
+#              plateaus. At 5 magazines that leaves sem ~12 on a shape error
+#              of ~19: signal-to-noise about 1.
+#
+# Correcting a quantity you cannot measure, at gain 1, injects noise. Measured
+# directly: a pass that applied the full measured shape flipped the
+# mid-magazine profile from +19 to -22 and took wander from 19.2 to 31.7. That
+# is the loop oscillating, and it will not settle -- each pass writes in the
+# previous pass's sampling error with the sign reversed.
+#
+# So alpha is a precision-versus-speed knob, and the right setting is not a
+# constant at all.
+#
+# The gun's real recoil is STATIC — it does not move until a game patch moves
+# it — so the best estimator is not a fixed-alpha EMA at all, it is the running
+# mean: alpha_k = 1/(k+1) over the magazines seen so far. Simulated against the
+# measured per-magazine scatter of 27 counts, starting 100 counts out, 4000
+# runs each; rms error left after k magazines:
+#
+#     alpha      k=1    k=3    k=5   k=20
+#     1.0       26.8   26.8   27.4   26.0   <- never gets below the noise
+#     0.5       51.7   19.8   15.8   15.1
+#     0.3       70.4   36.0   20.0   11.1
+#     0.1       90.0   73.1   59.2   13.6   <- still converging
+#     1/(k+1)   26.8   15.5   11.9    5.9   <- wins at every horizon
+#
+# A fixed alpha has a floor: sigma*sqrt(a/(2-a)) of pure noise written into the
+# curve forever — 27 counts at alpha=1, 11 at 0.3. The running mean has no
+# floor, it decays as 1/sqrt(k).
+#
+# alpha=1.0 was right while this ran once per CELL, because five magazines had
+# already been averaged before it saw them. Per MAGAZINE it is the worst choice
+# on the table.
+#
+# The floor is the only reason not to let alpha reach zero: a patch does move
+# the target, and an estimator that has averaged 200 magazines would need
+# another 200 to notice. Flooring turns the tail into a fixed-alpha EMA with a
+# ~1/floor magazine memory — that is the tracking-versus-precision knob.
+#
+# Shape gets the lower floor because its signal-to-noise is worse: the game
+# re-rolls how a magazine's recoil is distributed on every burst, so per-bullet
+# structure averages down far more slowly than the total does.
+ALPHA_MAG_FLOOR = 0.10      # ~10 magazine memory once converged
+ALPHA_SHAPE_FLOOR = 0.05
+
+# A running mean starts at alpha=1 because the first observation is all it
+# knows. That is only true from nothing, and this never starts from nothing:
+# the curve on disk already embodies every magazine ever fitted into it. Told
+# otherwise, the first update throws all of that away and replaces it with one
+# magazine of noise — measured directly, six per-magazine updates that way made
+# the residual swing -0.6, -13.8, +59.4, -34.7, -73.3, +74.3, a spread of 51
+# counts where the same gun measured 12.5 with the loop switched off.
+#
+# So a fitted curve with no counter is credited with PRIOR_MAGS magazines of
+# history, and alpha is capped below 1 regardless. One magazine may refine the
+# curve; it may not rewrite it.
+PRIOR_MAGS = 5
+ALPHA_MAX = 0.5
 
 
 def smooth(y, w=SMOOTH_W):
@@ -133,13 +215,11 @@ def rebuild(rec, verbose=True):
                       f"the run used {rec['pattern_counts']:.1f}. Re-measure.")
 
     bi = w.bullet_interval_s
-    nb = int(w.t_s[-1] / bi) + 1
-    comp_dy = np.zeros(nb)
-    comp_dx = np.zeros(nb)
-    for dx, dy, t in zip(w.dx_s, w.dy_s, w.t_s):
-        b = min(nb - 1, int(t / bi))
-        comp_dy[b] += dy
-        comp_dx[b] += dx
+    # Bullet indices, not floored times — see Weapon.comp_bins. Flooring put
+    # every entry one bullet early, so the correction below landed on the
+    # wrong shot and the curve crept forward on every pass.
+    nb = w.curve_bullets()
+    comp_dy, comp_dx = w.comp_bins(nb)
 
     # Zero-pad rather than truncate to the curve's length. A magazine longer
     # than the curve fires rounds that got no compensation at all, and their
@@ -186,7 +266,40 @@ def rebuild(rec, verbose=True):
     if not len(fired):
         return None, "no bullet cleared the fire threshold"
     last = int(fired[-1])
-    true_dy = smooth(true_dy[:last + 1])
+    # One-way: a curve may grow, never shrink. FIRE_FLOOR_FRAC decides where
+    # the magazine stopped by looking for the last bullet still kicking at 40%
+    # of the plateau, which is sound on a clean measurement and catastrophic on
+    # a noisy one -- a tail that dips under the threshold gets amputated, the
+    # rounds past the cut then fire with no compensation at all, and the next
+    # magazine measures a huge residual that chops it again. Observed live: 41
+    # bullets to 30 in three magazines, residual +588, and the gun effectively
+    # uncompensated for its last quarter.
+    #
+    # Extending on evidence is fine. Retreating on noise is not: the rounds
+    # already in the curve were put there by measurements too.
+    last = max(last, nb - 1)
+    # Split the correction into magnitude and shape and apply them at their
+    # own gains -- see ALPHA_SHAPE. Smoothing acts on the RESIDUAL only: the
+    # old code smoothed comp + resid, which adds smooth(comp) - comp on every
+    # pass, a low-pass acting on the whole accumulated curve regardless of
+    # what was measured. That term walks +-8.9 counts across an AUG magazine
+    # and quietly damped the shape loop; the damping was doing real work, but
+    # by blurring the curve rather than by declining to trust a noisy
+    # measurement, which is not a knob anyone can reason about.
+    #
+    # The magnitude goes on as a rescale, not as a constant per bullet:
+    # recoil scales multiplicatively with attachments, posture and sight, so
+    # 3% more recoil is 3% more on every bullet, not 0.8 counts on each.
+    resid_s = smooth(resid[:n])
+    comp_sum = float(comp_dy.sum())
+    if comp_sum <= 0:
+        return None, "source curve sums to zero"
+    seen = curve_updates(weapon)
+    a_mag = min(ALPHA_MAX, max(ALPHA_MAG_FLOOR, 1.0 / (seen + 1)))
+    a_shape = min(ALPHA_MAX, max(ALPHA_SHAPE_FLOOR, 1.0 / (seen + 1)))
+    scale = 1.0 + a_mag * float(resid_s.sum()) / comp_sum
+    shape = resid_s - comp_dy * (float(resid_s.sum()) / comp_sum)
+    true_dy = (comp_dy * scale + a_shape * shape)[:last + 1]
     comp_dx = comp_dx[:last + 1]
     grew = max(0, (last + 1) - nb)
 
@@ -217,6 +330,9 @@ def rebuild(rec, verbose=True):
         'plateau_counts': plateau,
         'bullets_added': grew,
         'k_unit': k_unit,
+        'ema_updates': seen + 1,
+        'alpha_mag': round(a_mag, 4),
+        'alpha_shape': round(a_shape, 4),
     }
     if verbose:
         print(f"  {posture:<10} {len(rec['mags'])} mags, kept {len(shots)}/"
@@ -226,6 +342,8 @@ def rebuild(rec, verbose=True):
               f"({100*(report['curve_total_after']/report['curve_total_before']-1):+.1f}%)")
         print(f"    impact-point wander during the magazine was "
               f"{report['max_wander_before']:.1f} counts")
+        print(f"    EMA update #{report['ema_updates']}: alpha "
+              f"{a_mag:.3f} magnitude / {a_shape:.3f} shape")
         if grew:
             print(f"    curve grew by {grew} bullet(s) — the magazine outlasts "
                   f"it, and those rounds were firing uncompensated")
@@ -234,6 +352,49 @@ def rebuild(rec, verbose=True):
             print(f"    dropped {dropped} post-fire bin(s) — camera recovery, "
                   f"not recoil")
     return shots, report
+
+
+def ema_update(rec, src_note, verbose=True):
+    """One EMA step: measure -> correct -> write. Returns the report or None.
+
+    The whole loop in one call, so a harvest can close it per cell instead of
+    dumping JSONL for a human to feed back by hand. The next magazine of the
+    next pass then measures a FRESH residual against what this wrote, which is
+    what makes repeated passes an EMA rather than a re-fit of stale data.
+
+    Callers holding a live Weapon must reload it afterwards
+    (Weapon.bullet_calculator.reload()) or they keep firing the old pattern.
+    """
+    shots, report = rebuild(rec, verbose=verbose)
+    if shots is None:
+        if verbose:
+            print(f"    [!] no update: {report}")
+        return None
+    write_curve(rec['weapon'], shots, report, src_note)
+    return report
+
+
+def curve_updates(weapon):
+    """How many EMA updates this curve has already absorbed.
+
+    Persisted in the curve file so the schedule survives a restart. A run that
+    forgot would go back to alpha 1 and throw away every magazine averaged so
+    far. Reset it by deleting the field, which is what a game patch calls for:
+    a patch is the one event that makes the old magazines wrong rather than
+    merely old.
+    """
+    path = os.path.join(CURVE_DIR, f'{weapon}_att.json')
+    try:
+        m = json.load(open(path, encoding='utf-8')).get('measured') or {}
+    except Exception:
+        return 0
+    n = int(m.get('ema_updates') or 0)
+    if n:
+        return n
+    # No counter, but a `measured` block means this curve was fitted from real
+    # magazines — it is a prior, not a blank slate. Credit it rather than
+    # letting the next magazine overwrite it wholesale.
+    return PRIOR_MAGS if m else 0
 
 
 def _shots_of(w, weapon):
@@ -247,7 +408,7 @@ def _shots_of(w, weapon):
 def write_curve(weapon, shots, report, src_note):
     """Overwrite the _att standing curve, keeping a timestamped backup.
 
-    weapon_curve_kava4/ is not in git, so the backup is the only way back.
+    docs/recoil/curves/ is not in git, so the backup is the only way back.
     """
     path = os.path.join(CURVE_DIR, f'{weapon}_att.json')
     if os.path.exists(path):

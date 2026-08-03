@@ -96,7 +96,8 @@ class ManualSession(RangeSession):
 
     def enter(self, timeout_s=300.0):
         print("\n>>> The training range session is over.")
-        print("    Re-enter it, walk to an item spawner, and stand there.")
+        print("    Re-enter it. Anywhere in the range will do — the spawner is "
+              "the comma menu, not a thing to stand next to.")
         print(f"    Waiting up to {timeout_s:.0f}s, checking every "
               f"{self._poll_s:.0f}s ...", flush=True)
         t0 = time.time()
@@ -112,7 +113,7 @@ class ManualSession(RangeSession):
 class AutoSession(RangeSession):
     """Drives the lobby back into a match, with no human involved.
 
-    detector/lobby_control.py does the driving: from the results screen, the
+    control/lobby.py does the driving: from the results screen, the
     lobby, an open ESC menu or a loading screen, ensure_in_match() gets to a
     running round, polling the state rather than sleeping fixed durations.
 
@@ -132,7 +133,7 @@ class AutoSession(RangeSession):
                  verbose=False):
         super().__init__(budget_s)
         from detector.lobby_detector import LobbyDetector
-        from detector.lobby_control import LobbyControl
+        from control.lobby import LobbyControl
         self._det = LobbyDetector()
         self._lc = LobbyControl(verbose=verbose)
         self._at_spawner = at_spawner_fn

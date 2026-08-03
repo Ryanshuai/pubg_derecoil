@@ -136,8 +136,11 @@ class GameState:
     # Aim toggle
     # ════════════════════════════════════════════════════════════
 
-    def toggle_tab_open(self):
-        self.tab_open = not self.tab_open
+    # tab_open is written by control/tab_watch.py, from the screen. There used
+    # to be a toggle_tab_open() here that flipped it on the keypress; it is
+    # gone on purpose. Inferring a screen state from "I saw the key that asks
+    # for it" is the thing this codebase keeps getting bitten by -- the key
+    # can be swallowed, and the screen can change with no key at all.
 
     def toggle_aim(self):
         self.aim_enabled = not self.aim_enabled

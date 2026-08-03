@@ -31,11 +31,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(
 import cv2
 import numpy as np
 
-from press.pointer import ensure_focus
-import spawner_control as spawner_mod
-from spawner_control import SpawnerControl
+from control.focus import ensure_focus
+from control import spawner as spawner_mod
+from control.spawner import SpawnerControl
+from control.stock import restock
 from sweep import Rig
-from harvest import Panel, Kitter, BACKPACK, SCOPE_PART
+from harvest import Kitter, BACKPACK, SCOPE_PART
 
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                    'docs', 'kit_checks')
@@ -82,19 +83,20 @@ def main():
     time.sleep(0.6)
 
     rig = Rig('red_dot')
-    panel = Panel(rig.mouse)
     kit = Kitter(rig, slot=args.slot)
     sc = SpawnerControl(verbose=True)
     try:
         if not args.no_spawn:
-            if not panel.ensure_open() or not sc.sync(need_cols=(1, 2)):
+            # Look in the backpack before clicking anything: the spawner will
+            # happily hand out a fourth compensator, and every spare is one
+            # more thing find() can pick instead of the one meant.
+            restock(kit.ac, sc, {v for v in want.values() if v},
+                    backpack=BACKPACK)
+            if not sc.ensure_panel(True) or not sc.sync(need_cols=(1,)):
                 print('[!] the spawner would not come up')
                 return 1
-            sc.give_gear(BACKPACK)
-            for k in [v for v in want.values() if v]:
-                sc.give_attachment(k)
             sc.give_weapon(args.weapon)
-            panel.ensure_closed()
+            sc.ensure_panel(False)
             time.sleep(0.6)
 
         print(f'\nasked for: {want}')
@@ -128,7 +130,6 @@ def main():
         return 1
     finally:
         kit.close()
-        panel.close_grabber()
         rig.close()
 
 

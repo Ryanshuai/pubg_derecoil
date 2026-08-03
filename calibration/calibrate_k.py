@@ -287,7 +287,10 @@ def main():
 
 
 def report(rows, raw, args):
-    out_dir = os.path.dirname(os.path.abspath(__file__))
+    # docs/k/, not next to this script: the json and the plot are measurements.
+    out_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'docs', 'k')
+    os.makedirs(out_dir, exist_ok=True)
     tag = args.label or datetime.now().strftime('%m%d_%H%M')
 
     counts = np.array([r['counts'] for r in rows], float)

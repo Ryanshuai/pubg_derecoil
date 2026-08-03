@@ -2,10 +2,13 @@ import os
 import numpy as np
 import json
 
-CURVE_DIR = os.path.join(os.path.dirname(__file__), '..', 'calibration', 'weapon_curve_kava4')
+CURVE_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'recoil', 'curves')
 
 
-# Weapon RPM (rounds per minute) from PUBG Wiki
+# Weapon RPM (rounds per minute) from PUBG Wiki -- a STARTING GUESS, not a
+# measurement, and wrong on a third of the roster. docs/recoil/weapon_rpm.json
+# holds what the HUD ammo counter actually said and is merged over this table
+# below; see MEASURED_RPM_PATH.
 WEAPON_RPM = {
     'akm': 600, 'aug': 680, 'groza': 750, 'm416': 680, 'qbz': 680,
     'scar': 600, 'm762': 620, 'g36c': 680, 'm16': 750, 'mk47': 600,
@@ -17,6 +20,37 @@ WEAPON_RPM = {
     'sks': 600, 'slr': 600, 'dragunov': 600, 'mk12': 600,
     's12k': 250,
 }
+
+
+# Measured fire rates, fitted to the HUD ammo counter over a whole magazine by
+# calibration/sweep.fit_interval. These override the wiki table above.
+#
+# Why this file exists at all: a wrong bullet interval is not a small error, it
+# COMPOUNDS. The firmware lays each round's compensation on the nominal grid,
+# so an interval 5% long puts bullet n's pulse 0.05*n bullets late -- invisible
+# at bullet 2, two whole rounds out by bullet 40. It corrupts the measurement
+# in the same direction, because analyse() bins on the same grid, and the error
+# lands in the tail where the curve is steepest. The AUG's curve had grown a
+# 164-count final bullet against a 93-count plateau: that spike was four rounds
+# of accumulated phase, not recoil.
+MEASURED_RPM_PATH = os.path.join(os.path.dirname(__file__), '..',
+                                 'docs', 'recoil', 'weapon_rpm.json')
+
+
+def load_measured_rpm(path=MEASURED_RPM_PATH):
+    """{weapon: rpm} measured in game, or {} if none has been."""
+    try:
+        with open(path, encoding='utf-8') as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return {k: float(v['rpm']) if isinstance(v, dict) else float(v)
+            for k, v in data.items() if not k.startswith('_')}
+
+
+MEASURED_RPM = load_measured_rpm()
+WEAPON_RPM.update(MEASURED_RPM)
+
 
 sp = {'98k', 'm24', 'awm', 'mosin', 'win94', 'lynx'}
 dmr = {'mini14', 'mk14', 'qbu', 'sks', 'slr', 'vss', 'dragunov', 'mk12'}
@@ -54,6 +88,25 @@ _SCOPE_TO_MAG = {
 }
 
 
+def load_curves():
+    """{weapon: {stance: shots}} off every JSON in CURVE_DIR.
+
+    One definition. It used to be written out twice — once in
+    BulletCalculator.__init__ and once in Weapon._hot_reload — which is two
+    places to forget when the format moves.
+    """
+    out = {}
+    for fname in os.listdir(CURVE_DIR):
+        if not fname.endswith('.json'):
+            continue
+        with open(os.path.join(CURVE_DIR, fname), 'r') as f:
+            data = json.load(f)
+        weapon = data['weapon']          # e.g. 'akm' or 'akm_att'
+        out.setdefault(weapon, {})[data.get('stance', 'standing')] = \
+            data['shots']
+    return out
+
+
 class BulletCalculator:
     """Load per-shot recoil data from Kava4 JSON files.
 
@@ -65,21 +118,20 @@ class BulletCalculator:
     def __init__(self):
         from config import COUNTS_PER_RECOIL_UNIT
         self.counts_per_unit = COUNTS_PER_RECOIL_UNIT
-
         # recoil_data[gun_name][stance] = shots list
         # stance: 'standing', 'crouching'
         # gun_name may end with '_att' for attachment variant
-        self.recoil_data = {}
-        for fname in os.listdir(CURVE_DIR):
-            if not fname.endswith('.json'):
-                continue
-            with open(os.path.join(CURVE_DIR, fname), 'r') as f:
-                data = json.load(f)
-            weapon = data['weapon']  # e.g. 'akm' or 'akm_att'
-            stance = data.get('stance', 'standing')
-            if weapon not in self.recoil_data:
-                self.recoil_data[weapon] = {}
-            self.recoil_data[weapon][stance] = data['shots']
+        self.recoil_data = load_curves()
+
+    def reload(self):
+        """Re-read the curve files.
+
+        Needed by anything that measures a residual and writes the corrected
+        curve back in the same process: without it the next magazine would be
+        fired with the pattern this one just replaced, and the loop would
+        never close.
+        """
+        self.recoil_data = load_curves()
 
     def calculate_press_seq(self, gun_name, factor, stance='standing', has_att=False):
         """Return (dx_s, dy_s, t_s) arrays for press.py.
@@ -270,18 +322,7 @@ class Weapon():
 
     def _hot_reload(self):
         """Reload curves from disk so edits take effect immediately."""
-        # Reload curve files
-        self.bullet_calculator.recoil_data.clear()
-        for fname in os.listdir(CURVE_DIR):
-            if not fname.endswith('.json'):
-                continue
-            with open(os.path.join(CURVE_DIR, fname), 'r') as f:
-                data = json.load(f)
-            weapon = data['weapon']
-            stance = data.get('stance', 'standing')
-            if weapon not in self.bullet_calculator.recoil_data:
-                self.bullet_calculator.recoil_data[weapon] = {}
-            self.bullet_calculator.recoil_data[weapon][stance] = data['shots']
+        self.bullet_calculator.reload()
 
     def set_seq(self):
         import config as _cfg
@@ -303,3 +344,46 @@ class Weapon():
         else:
             # sp (bolt-action snipers) etc. — no recoil control
             self.dx_s, self.dy_s, self.t_s = [], [], []
+
+    # ── the curve, indexed by bullet ──
+    #
+    # A curve entry carries a TIME, not a bullet number, and the two use
+    # different units for the same thing. Delays are stored as whole
+    # milliseconds (88 for the AUG) while the firing interval is 60/RPM
+    # (88.235 ms), so entry i sits at i x 88 ms and asking which bullet that
+    # is by flooring i x 88 / 88.235 = 0.9973 i gives i-1 for every i >= 1.
+    #
+    # Flooring cost a whole calibration round. comp[] came out shifted one
+    # bullet early with the first two entries merged, so fit_curve corrected
+    # bullet k using bullet k's residual against entry k+1's compensation, and
+    # the rebuilt curve slid one bullet earlier on every pass. The AUG's
+    # applied curve then over-compensated by -40 counts a magazine, repeatably.
+    #
+    # Rounding is right for any curve whose entries are one per bullet at the
+    # nominal cadence: the error is 0.0027 per bullet, so it would take ~185
+    # rounds to reach half a bin.
+
+    def bullet_of(self, t):
+        """Which bullet a curve entry at time `t` belongs to."""
+        return int(round(t / self.bullet_interval_s))
+
+    def curve_bullets(self):
+        """How many bullets the curve covers. 0 when there is no curve."""
+        return self.bullet_of(self.t_s[-1]) + 1 if len(self.t_s) else 0
+
+    def comp_bins(self, nb=None):
+        """Compensation summed per bullet -> (dy, dx), each of length nb.
+
+        nb defaults to the curve's own length. Pass a longer one to line the
+        bins up with a magazine that outlasts the curve; those extra bullets
+        come back zero, which is exactly right — they fire uncompensated.
+        """
+        import numpy as np
+        nb = int(nb or self.curve_bullets())
+        dy, dx = np.zeros(nb), np.zeros(nb)
+        if nb:
+            for a, b, t in zip(self.dy_s, self.dx_s, self.t_s):
+                i = min(nb - 1, self.bullet_of(t))
+                dy[i] += a
+                dx[i] += b
+        return dy, dx

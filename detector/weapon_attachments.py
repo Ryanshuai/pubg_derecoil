@@ -1,6 +1,15 @@
-"""Per-weapon attachment compatibility and recoil factors.
+"""Per-weapon recoil factors from the muzzle and grip that are fitted.
 
-Each weapon defines which muzzle and grip it can equip.
+This table exists for one job: turning weapon_scales.json's calibrated numbers
+into a scale for whatever is actually on the gun. It only models the two slots
+that change vertical recoil. For the full picture — all five slots, every
+attachment, and which weapons are still in the game — see
+detector/attachment_catalog.py, which is the authority; anything here that
+disagrees with it is this file being out of date.
+
+Weapons removed from the game in the June 2026 update (42.1) are gone from
+WEAPON_SLOTS: qbu, pp19, dp28. Their measured recoil curves are preserved under
+"_vaulted" in press/weapon_scales.json rather than deleted.
 Recoil factors are from PUBG Wiki (pubg.wiki.gg):
   - Compensator: 0.85 vertical recoil
   - Vertical Foregrip: 0.85 vertical recoil
@@ -65,14 +74,12 @@ WEAPON_SLOTS = {
     'uzi':    {'muzzle': 'comp', 'grip': False},
     'ump45':  {'muzzle': 'comp', 'grip': True},
     'vector': {'muzzle': 'comp', 'grip': True},
-    'pp19':   {'muzzle': 'comp', 'grip': False},
     'mp5k':   {'muzzle': 'comp', 'grip': True},
     'p90':    {'muzzle': None, 'grip': False},          # built-in suppressor, no attachments
     'mp9':    {'muzzle': 'comp', 'grip': False},
     'js9':    {'muzzle': 'comp', 'grip': True},
 
     # ── MG ─────────────────────────────────────────
-    'dp28':   {'muzzle': None, 'grip': False},
     'm249':   {'muzzle': None, 'grip': False},
     'mg3':    {'muzzle': None, 'grip': False},
 
@@ -82,7 +89,8 @@ WEAPON_SLOTS = {
     'sks':    {'muzzle': 'comp', 'grip': True},
     'mini14': {'muzzle': 'comp', 'grip': False},
     'slr':    {'muzzle': 'comp', 'grip': False},
-    'qbu':    {'muzzle': 'comp', 'grip': False},
+    'mk12':   {'muzzle': 'comp', 'grip': True},         # lower rail, like the SKS
+    'dragunov': {'muzzle': 'comp', 'grip': False},
 }
 
 

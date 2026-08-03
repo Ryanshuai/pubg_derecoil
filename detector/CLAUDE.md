@@ -1,6 +1,6 @@
 # detector/ — 检测层
 
-从屏幕像素得到游戏状态。上游是 `screen_capture` / `cropper` 给的 crop，下游是 `robot`（压枪）和 `calibration/attach_control`（自动装配件）。
+从屏幕像素得到游戏状态。上游是 `screen_capture` / `cropper` 给的 crop，下游是 `robot`（压枪）和 `control/inventory`（驱动 Tab 界面）。
 
 三种节奏，混淆了会付出代价：
 
@@ -10,16 +10,27 @@
 | 事件触发 | Tab 界面、spawner 界面 | 按键时一次 | 几十毫秒可接受 |
 | 状态轮询 | 在不在局内（`lobby_detector`） | 1–2 Hz | 几十毫秒可接受 |
 
-**不要把事件触发的区域塞进 `config.HUD_REGIONS`。** 那套每帧都抓，而 DXGI 后端只能用**一个** bounding box。「附近」栏在 x=576，加进去会把 bbox 从 x=937 一路拉到 576，变成每帧多拷 46 万像素——只为一个按住 Tab 才存在的面板。事件触发的用自己的 grabber（见 `tab_items.TabGrabber`）。
+**不要把事件触发的区域塞进每帧抓的那一套。** DXGI 后端只能用**一个** bounding box，所以一个远处的区域不是只花它自己那点面积——它花的是**中间的一切**。事件触发的用自己的 grabber（见 `tab_items.TabGrabber`，`only=('right',)` 只要两把枪那块）。
+
+这条 2026-08-02 之前一直被 `HUD_REGIONS` 自己违反着，代价实测：
+
+| 每帧抓什么 | 区域数 | bbox | 拷贝耗时 | 占 8.3ms 预算 |
+|---|---|---|---|---|
+| 只要游戏 HUD | 5 | 1641×136（4.5%） | 0.80 ms | 9.5% |
+| 连 Tab 一起（旧） | 18 | 2077×1275（**53.5%**） | 7.12 ms | **85.4%** |
+
+游戏 HUD 在屏幕底部（y≈1262–1398）、Tab 面板在顶部（y≈123–680），两者放一起 bbox 高度从 136 撑到 1275。**p99 是 11.14 ms，超过 8.3 ms 的帧预算**——每百帧必掉一帧，实测跑出 115 fps（目标 144）。拆开后 124 fps。
+
+所以现在 `config.py` 分成两份：`FRAME_REGIONS` 是每帧抓的，`TAB_REGIONS` 按需抓（`control/tab_watch.py`）。`HUD_REGIONS` 仍然是**坐标总表**，谁都可以从里面查坐标——只是别再把它整个丢给 `ScreenCapture`。
 
 ---
 
 ## 干活之前先问：现在在局内吗
 
-`lobby_detector.py` + `lobby_control.py`（**已有，别重造**）。测量值全在 `docs/lobby/README.md`。
+`lobby_detector.py` + `control/lobby.py`（**已有，别重造**）。测量值全在 `docs/lobby/README.md`。
 
 ```python
-from detector.lobby_control import LobbyControl
+from control.lobby import LobbyControl
 with LobbyControl() as lc:
     if not lc.ensure_in_match()['ok']:
         return                      # 大厅/加载/结算/菜单，任意态都会自己走到局内
@@ -39,18 +50,18 @@ with LobbyControl() as lc:
 - **ESC 菜单的像素探针全都说「在局内」**。画面在渲染、ping 在、`TIME/JOINED` 也在，`bar_max=44` / `ping_frac=0.089` 跟正常局内没区别。不查 `SYSTEM MENU` 标题就会返回 `playable=True`，而按键全被菜单吃掉——`harvest.py` 撞上这个整轮静默作废。
 - **`LEAVE TRAINING` 正下方一个 pitch（85px）就是 `EXIT TO DESKTOP`**。所以 `click_leave()` 强制先跑 `leave_entry_confirmed()` 验字形，失配就拒绝点。正式局的菜单没采过，届时会失配、拒点——**这是故意的，不是 bug**，但意味着正式局现在退不出来。
 
-**别用固定 `sleep` 等游戏。** 结算页自己走 ~18 秒、大厅→局内要过匹配+加载，时长都不是常数。`lobby_control` 全程轮询，`EXIT_TIMEOUT`/`ENTER_TIMEOUT` 是放弃阈值不是预期耗时。`Pointer` 懒构造，只读状态不会去占 Pico 串口。
+**别用固定 `sleep` 等游戏。** 结算页自己走 ~18 秒、大厅→局内要过匹配+加载，时长都不是常数。`control/lobby.py` 全程轮询，`EXIT_TIMEOUT`/`ENTER_TIMEOUT` 是放弃阈值不是预期耗时。`Pointer` 懒构造，只读状态不会去占 Pico 串口。
 
 ---
 
 ## 还要问：焦点在游戏上吗
 
-`press/pointer.raise_game()`（**已有，别重造**）。
+`control/focus.py`（**已有，别重造**）。
 
 从终端拉起的工具，t=0 时焦点在终端不在游戏，第一次 `game_focused()` 必然 False。`harvest.py` 靠 `--countdown` 让人手动切窗口——那就是那些 run 至今不能真正无人值守的原因。
 
 ```python
-from press.pointer import ensure_focus, focus_keeper
+from control.focus import ensure_focus, focus_keeper
 if not ensure_focus(countdown_s=6):    # 抢→验→重试3次→倒计时兜底
     return 1
 time.sleep(0.6)                        # 切前台后头几帧游戏不收输入
@@ -59,8 +70,8 @@ if not focus_keeper().ok('mag 3'):     # 跑到一半掉了就抢回来，上限
     break
 ```
 
-**倒计时是退路，不是手段。** 全项目已接：harvest / sweep / collect_icons /
-spawner_control / attach_control / lobby_control。
+**倒计时是退路，不是手段。** 全项目已接：harvest / sweep / collect_templates /
+control/spawner.py / control/inventory.py / control/lobby.py。
 
 三个坑：
 
@@ -68,13 +79,13 @@ spawner_control / attach_control / lobby_control。
 - **调完必须再验一次 `game_focused()`。** 它可以不报错地失败。
 - **焦点不是拿到一次就固定的。** 终端会反复抢回去，期间发出的按键直接丢失，症状是「spawner 面板打不开」，而脚本第一行明明打印了 `focused=True`。关键操作要**每次重试前重新抢**，别只在开头抢一次。
 
-窗口有焦点 ≠ 游戏在收输入：标题匹配在大厅、加载页、结算页全都成立。焦点检查之外还要过上面那关 `lobby_control`。
+窗口有焦点 ≠ 游戏在收输入：标题匹配在大厅、加载页、结算页全都成立。焦点检查之外还要过上面那关 `control/lobby.py`。
 
 ## 第一铁律：模板漂移是静默的
 
 检测器**不会**因为模板过时而报错。它会给出一个看起来完全合理的错答案。
 
-实例：`Lower_ThumbGrip_C` 与当前游戏画的拇指握把已经对不上，于是 Mk12 的握把槽读成 `laser`——也是握把、也在候选里、margin 还不低。下游 `attach_control` 靠读回槽位确认装配成功，拿到这个结果会误判失败并重试。
+实例：`Lower_ThumbGrip_C` 与当前游戏画的拇指握把已经对不上，于是 Mk12 的握把槽读成 `laser`——也是握把、也在候选里、margin 还不低。下游 `control/inventory.py` 靠读回槽位确认装配成功，拿到这个结果会误判失败并重试。
 
 这条是 2026-08-01 端到端验证时偶然撞见的，不是任何机制报出来的。**游戏每次更新都会产生这类漂移**，所以：
 
@@ -157,6 +168,40 @@ ads.score(frame)      # 原始余量，日志里记下来能看出是不是勉�
 
 模板在 `training_data/pubg_assets/ads_crosshair.npz`，重新拟合和复现上表都是 `pixi run fit-ads`（`--eval-only` 只评测）。数据用 `pixi run capture-ads` 采（见下方资产表）。
 
+## 配件槽三态：用 `slot_detector`，别再自己造
+
+`detector/slot_detector.py` 回答「这把枪**有没有**这个槽、槽里**有没有**东西」——不回答装的是哪个（那是 `AttachmentDetector`）：
+
+```python
+from detector.slot_detector import SlotDetector
+slots = SlotDetector()
+slots.classify(frame, 2)     # {'grip': 'absent', 'muzzle': 'empty', ...}
+slots.present(frame, 2)      # 有槽位的集合（不含 unknown）
+```
+
+**为什么要它**：往枪没有的槽上拖配件，东西会掉地上，而「这枪没这个槽」和「这个槽不收这个配件」看鼠标是一模一样的。`attachment_catalog.SLOTS` 本该防住，但它 22 条抄 wiki、6 条纯猜、2 条读截图，**实测 0 条**。有了这个检测器，「哪些槽存在」是一次刷枪加一张截图，不是一整个拖拽矩阵。
+
+**三态两判据，看的是不同像素：**
+
+| 判据 | 看哪 | absent | empty | filled |
+|---|---|---|---|---|
+| 存在性 Sobel p90 | tile **边框环** | 5.0–26.0 | 46.0–172.7 | 同 empty |
+| 有无内容 Canny | tile **内部** | — | 0–71 | 202–885 |
+
+阈值 36（空档 20）/ 120。7 张已知真值的图上 **28/28 全对**。
+
+三个坑，改之前先读：
+
+- **只测边框，别测内部。** 内部是图标，跟「槽在不在」毫无关系，算进去会让判据随装了什么漂移。只取边框环之后，剥光的 M416 读 260/260/278/260，装满的读 260/260/318/260——几乎不动。
+- **用梯度，不用 Canny 判存在。** Canny 的滞后阈值在 VSS 的弹匣槽上读出**恰好 0**，而那是个真实存在的槽——tile 压在亮沙地上、跟背景几乎同亮度，边界被量化没了。Sobel 幅值读 46。**在真实存在的元素上读出硬 0 的判据不是保守，是坏了。**
+- **`scope` 恒返回 `unknown`，调参救不了。** 那个位置**根本不画 tile**：M416 的空 scope 只有背景和枪身，而没有 scope 槽的 VSS 在同一位置画着它自带的固定 PSO-1（那是**枪的美术资源**）。空槽和无槽逐像素相同，连「装没装」也一起坏（VSS 空槽读 678 内部边缘，远超判 filled 的 120）。scope 的存在性只能靠拖拽，内容交给 `AttachmentDetector`（它把 VSS 正确读成空）。**别让 `unknown` 塌成 `absent`。** 固定配件普遍如此，P90 / MP9 预计一样。
+
+几何在 `tab_layout.slot_tile_box` / `slot_window`（tile 66×66，起点比 `HUD_REGIONS['att_*']` 左上各偏 1px），判据在这里。`HUD_REGIONS['att_*']` 那个 63×63 是**故意**切在 tile 内侧的——它是给模板匹配用的，边框像素不属于任何图标——**不要为了这个检测器去加宽它**。
+
+活体跑单枪 `tools/probe_slot_boxes.py <weapon> --strip`，离线跑 `python detector/slot_detector.py <shot>`。**刷出来的枪不是裸枪**：PUBG 会把背包里能装的自动装上，所以要 `--strip`。
+
+补齐整张表见 `calibrate-compat` skill。
+
 ## 弹药计数：用 `ammo_detector`，别再自己造
 
 `detector/ammo_detector.py` 读弹匣里还剩几发，**单帧、0.18 ms、可以每帧跑**：
@@ -199,19 +244,22 @@ ammo.read(crop)['glyphs']     # 每个字形的 digit / iou / margin，排错用
 | `docs/training_epuipment.png` | spawner 面板 | `SpawnerDetector` 正例 |
 | `training_data/highlight_eval/` | 260 高亮 + 439 非高亮，带标签 | `temp_debug/eval_highlight_jitter.py` 配对评测。`errors_v4/` 是空的——**这个集里没有难例** |
 | `docs/spawner/runs/` | spawner 全部分类的菜单截图 | 游戏当前物品清单的事实来源 |
+| `docs/compat/runs/<stamp>/` | 30 把枪各一张全屏 + `summary.json` | 槽位几何回归（`scan_compat.py --report <stamp>`）。**不是模板真值集**：枪上装的是 PUBG 自动配的，没人指定过，只能靠被测检测器认——拿它标模板是循环论证 |
 | `docs/lobby/*.png` | 5 张：大厅 / 训练场 / 训练场+Tab / 正式局结算 / ESC 菜单 | 在不在局内的回归，`tools/verify_lobby_detector.py` 五条全过。每张的 `bar_max`/`ping_frac` 实测值见 `docs/lobby/README.md` |
 | `docs/ads/runs/**/*.jpg` | 610 张全屏帧（本为 ADS 采集） | 顺带是弹药数字的离线回归集：`tools/probe_ammo_ocr.py` 在 921 张里读出 869，其余 52 张确实没数字 |
-| `docs/ads/runs/*/index.jsonl` | 每帧标了 scope / state / t_ms / 槽位实读 asset | 开镜检测评测集，492 帧。**别照 `state` 当真值**：`20260801_222936` 的 `state=ads` 其实是按住右键的肩瞄、从未开镜；`20260802_015545` 整轮在错的槽位上。两个 run 的 `meta.json` 里都写了原因，`calibration/fit_ads_detector.py` 顶部的 `NOT_SCOPED` / `SCOPED` 是修正后的真值 |
+| `docs/ads/runs/*/index.jsonl` | 每帧标了 scope / state / t_ms / 槽位实读 asset | 开镜检测评测集，492 帧。**别照 `state` 当真值**：`20260801_222936` 的 `state=ads` 其实是按住右键的肩瞄、从未开镜；`20260802_015545` 整轮在错的槽位上。两个 run 的 `meta.json` 里都写了原因，`calibration/fit_ads_detector.py` 顶部的 `NOT_SCOPED` / `SCOPED` 是修正后的真值。**用 `CaptureRun.load_dir()` 读就不会踩**：旧 run 的标签一律降级为 `LABEL_DETECTED`，`labelled()` 对它们返回空，`state` 只作为「采集过程干了什么」的事实存在，不冒充「屏幕上是什么」 |
 
-槽位坐标固定：枪没有的槽只是**不画边框**，不会挪位（UZI 无 grip / Mk12 无 stock 实拍确认）。所以拖拽目标坐标是安全的。
+槽位坐标固定：枪没有的槽只是**不画**，不会挪位（UZI 无 grip / Mk12 无 stock 实拍确认）。所以拖拽目标坐标是安全的。
+
+⚠ 这句话原来写的是「不画边框」，误导性很强：**空槽同样不画边框**，它画的是一整块浅色 tile，而没有的槽是纯背景。所以「有没有边框」区分不了 absent 和 empty，得测 tile 边框环的梯度——见上面 `slot_detector` 一节。
 
 ## 坏了找谁
 
 | 现象 | skill |
 |---|---|
-| 图标认不出 / 认错 | `calibrate-icon`（位置、尺度、alpha、混合）或 `calibrate-template`（重提模板 + 全集混淆检查） |
-| 枪名、`类型` 之类 UI 文字读不出 | `calibrate-template` |
+| 图标、UI 文字（枪名、`类型`）、HUD 数字（弹药）认不出或认错 | `calibrate-template`（重提模板 + 全集混淆检查；也管图标的位置、尺度、alpha、混合） |
 | 行距、槽位、面板位置对不上 | `calibrate-screen` |
+| 某把枪能装什么配件（槽位存在性、某槽只收部分配件） | `calibrate-compat` |
 
 游戏机制类的坑（切枪退出开镜、姿势图标只在开镜时渲染等）记在 `docs/game_quirks.md`，不要在这里重复。
 
@@ -219,9 +267,12 @@ ammo.read(crop)['glyphs']     # 每个字形的 digit / iou / margin，排错用
 
 - `ammo_detector` 的十个字模全部采自**三位数**（150..121）。两位、一位实测逐个读对，但它们从没被单独重采过；哪天游戏改成按位数用不同字号，会先在这里翻车，重跑一次 `--verify` 就能看出来。
 - `ads_detector` 的 492 帧全部来自 **Kar98k、同一片场地、全程未开火**。没验过的：开火时后坐力抖动会不会糊掉准星（最可能翻车的一条，压枪场景恰恰全程在开火）、其他枪的腰射准星是否同形、载具/趴姿等会改准星的状态、以及 4 倍以下的其他红点变体。要上压枪主循环，先补一组**开火中**的帧
-- `lobby_detector` 的四态里，**加载页一张样本都没有**——`FULLBLEED` 现在被结算页和退出确认框覆盖，它对加载页的判定仍是照定义推的（活体转移里观测到了，没存图）。另外 **正式局的 ESC 菜单**没采过，`leave_entry_confirmed()` 届时会失配、拒绝点击，所以**正式局现在退不出来**（训练场可以）。补齐跑 `pixi run python tools/probe_lobby_transition.py`，全程截图落 `docs/lobby/runs/<n>/`。`lobby_control.py` 顶部的 `OBSERVED DURATIONS` 三项也还是空的
+- `lobby_detector` 的六态里，**加载页一张样本都没有**——`FULLBLEED` 现在被结算页和退出确认框覆盖，它对加载页的判定仍是照定义推的（活体转移里观测到了，没存图）。另外 **正式局的 ESC 菜单**没采过，`leave_entry_confirmed()` 届时会失配、拒绝点击，所以**正式局现在退不出来**（训练场可以）。补齐跑 `pixi run python tools/probe_lobby_transition.py`，全程截图落 `docs/lobby/runs/<n>/`。`control/lobby.py` 顶部的 `OBSERVED DURATIONS` 三项也还是空的
 - `Lower_ThumbGrip_C`、`Stock_UZI_C` 已漂移
 - 枪口制退器、重型枪托、多倍率混合瞄具**没有模板**（游戏后加的）
-- `attachment_catalog.unverified()` 列出的 6 把枪槽位仍是推断：dragunov / famas / js9 / k2 / mp9 / p90
+- `attachment_catalog.SLOTS` 的 **`scope` 那一项仍是推断**。2026-08-02 全量扫过 30 把枪（`calibration/scan_compat.py`，run 在 `docs/compat/runs/20260802_155222/`），另外四个槽全部实测，`unverified()` 已清空；但 scope 槽**不画 tile**，存在性读不出来，`SlotDetector` 在那里返回 `unknown`。要确认得靠装一个瞄具。
+- `EXCLUDE` / `ONLY` / `GRIP_ONLY` **一条都没实测**。「某个槽只收部分配件」（汤姆逊枪口只收消音）读不出来——收与不收留下的是同一个空 tile，只能逐个拖。
 
-后两类都能自动闭环解决：`spawner_control.give_*` 能刷出任意物品，`attach_control` 能装，`tab_items.detect` 能读回——**给什么就该读出什么，ground truth 是自己指定的**。这个自检还没人写。
+后两类都能自动闭环解决：`control/spawner.py` 的 `give_*` 能刷出任意物品，`control/inventory.py` 能装，`tab_items.detect` 能读回——**给什么就该读出什么，ground truth 是自己指定的**。
+
+槽位存在性这一半已经写了：`calibration/scan_compat.py`，30 把枪 268 秒，纠正了 2 条会让拖拽静默落空的错条目（`ump45` 的 stock、`js9` 的 grip，两个位置都根本不画 tile）。配件级的那一半（哪个槽收哪些件）还没写，见 `calibrate-compat` skill。

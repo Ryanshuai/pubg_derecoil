@@ -1,9 +1,17 @@
 import cv2
 import numpy as np
 import json
+import os
 from scipy.ndimage import gaussian_filter1d
 
 from detector.cropper import win32_cap
+
+# Absolute, because these used to be opened as "calibration\..." relative to the
+# cwd -- which only ever worked when the process happened to start at the repo
+# root.
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DISTANCE_PATH = os.path.join(_ROOT, 'docs', 'ballistics', 'distance_dict.json')
+TIME_PATH = os.path.join(_ROOT, 'docs', 'ballistics', 'time_dict.json')
 
 
 def detect_bullet(img_uint8):
@@ -41,9 +49,9 @@ class Updater:
         self.detect_diff = detect_bullet(im)
 
     def determine(self):
-        with open(r"calibration\distance_dict.json", "r") as f:
+        with open(DISTANCE_PATH, "r") as f:
             self.distance_dict = json.load(f)
-        with open(r"calibration\time_dict.json", "r") as f:
+        with open(TIME_PATH, "r") as f:
             self.time_dict = json.load(f)
 
         original_distance = np.array(self.distance_dict[self.gun_name])
@@ -60,9 +68,9 @@ class Updater:
         self.distance_dict[self.gun_name] = distance.tolist()
         self.time_dict[self.gun_name] = min(t + 1, 3)
 
-        with open(r"calibration\distance_dict.json", "w") as f:
+        with open(DISTANCE_PATH, "w") as f:
             f.write(json.dumps(self.distance_dict))
-        with open(r"calibration\time_dict.json", "w") as f:
+        with open(TIME_PATH, "w") as f:
             f.write(json.dumps(self.time_dict))
 
         cv2.destroyAllWindows()

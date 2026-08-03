@@ -27,7 +27,7 @@ from detector.weapon_template_detector import TabWeaponDetector
 from detector.attachment_detector import AttachmentDetector
 from screen_capture import ScreenCapture
 from key_poller import KeyPoller
-from dispatcher import Dispatcher
+from control.match import Dispatcher
 
 
 class Robot:

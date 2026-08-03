@@ -1,27 +1,26 @@
 """Dispatcher — reads config tables, matches key events to frames, runs detectors.
 
-Three responsibilities:
+Two responsibilities:
 1. Key actions:  KEY_ACTION_TABLE → state changes + hardware
 2. Detections:   DETECT_TABLE → find frame → run detector → write result
-3. Mismatches:   MISMATCH_TABLE → compare GT vs pred → save crops
+
+MISMATCH_TABLE is still scheduled here, but the comparing and the saving is
+calibration/mismatch.py's job — this loop has a firing window to hit and has
+no business writing PNGs.
+
+The Tab screen is NOT one of the tables. It is control/tab_watch.py, because
+its regions are not in the per-frame capture and its state has to come from
+looking rather than from having seen the key.
 """
-import os
 import time
 import threading
 from collections import deque
 
-from config import (
-    KEY_ACTION_TABLE, DETECT_TABLE, MISMATCH_TABLE,
-    MISMATCH_POLL_INTERVAL, GT_SETTLE_TIME,
-)
+from config import KEY_ACTION_TABLE, DETECT_TABLE, MISMATCH_TABLE
+from calibration.mismatch import MismatchCollector
+from control.tab_watch import TabWatch
 from detector.weapon import Weapon
 from press.pico_mouse import get_mouse
-from detector.utils import img_hash
-import cv2
-import numpy as np
-
-
-MISMATCH_DIR = os.path.join('InGameScreenshot', 'highlight_mismatch')
 
 
 class Dispatcher:
@@ -36,7 +35,12 @@ class Dispatcher:
         self._pending = deque()  # (target_ts, detect_entry)
         self._running = False
         self._thread = None
-        self._last_mismatch_poll = 0.0
+        # Both share the detector registry by reference: register() mutates
+        # the dict in place, so detectors added later are visible to them too.
+        self.mismatch = MismatchCollector(state, capture, self._detectors)
+        # The Tab screen is not in the per-frame capture, so it reads its own
+        # regions on demand. It owns state.tab_open and the guns' loadout.
+        self.tab = TabWatch(state, self._detectors)
 
     def register(self, name, detector):
         """Register a detector instance by name."""
@@ -68,8 +72,14 @@ class Dispatcher:
                 # 2. Process pending detections (target_ts reached)
                 self._process_pending()
 
-                # 3. Periodic mismatch collection — DISABLED for debugging
-                # self._poll_mismatch()
+                # 3. Tab screen: one grab at most, and only when there is a
+                #    reason. Keeps state.tab_open measured rather than guessed,
+                #    and keeps the loadout fresh while the panel is up so that
+                #    closing it needs no race and no buffered past frame.
+                self.tab.tick()
+
+                # 4. Periodic mismatch collection — DISABLED for debugging
+                # self.mismatch.poll(time.perf_counter())
 
             except Exception as e:
                 print(f"[dispatch] {e}", flush=True)
@@ -87,6 +97,15 @@ class Dispatcher:
             self._shutdown()
             self._running = False
             return
+
+        # Tab: take the final reading NOW, while the panel is still drawn, and
+        # start watching for the screen to actually change. This is what the
+        # 'delay': -50 entries used to do by reaching back into the ring
+        # buffer -- which is what forced the Tab regions into every captured
+        # frame. Deliberately before the tables: it does not touch tab_open,
+        # so every cond below still sees the screen as it is right now.
+        if ev.key == 'tab' and ev.event == 'press':
+            self.tab.on_key(ev.ts)
 
         # DETECT_TABLE: schedule detections using CURRENT state
         for entry in DETECT_TABLE:
@@ -114,7 +133,13 @@ class Dispatcher:
                 '_mismatch': True, '_gt_snapshot': gt_snapshot, **entry
             }))
 
-        # KEY_ACTION_TABLE: state changes + hardware (AFTER scheduling detections)
+        # KEY_ACTION_TABLE: state changes + hardware (AFTER scheduling above)
+        #
+        # The ordering is still load-bearing, but no longer for tab_open. The
+        # conds above read `tab_open` and `stop_recoil`; tab_open is now owned
+        # by TabWatch and never written here, but `stop_recoil` IS written
+        # below and two DETECT entries cond on it — so scheduling first is
+        # what makes them see the state as it was when the key was pressed.
         for entry in KEY_ACTION_TABLE:
             if not self._key_matches(entry, ev):
                 continue
@@ -214,7 +239,7 @@ class Dispatcher:
                 continue
             # Ready — find frame and run
             if entry.get('_mismatch'):
-                self._run_mismatch(target_ts, entry)
+                self.mismatch.run_scheduled(target_ts, entry)
             else:
                 self._run_detect(target_ts, entry)
                 ran = True
@@ -224,9 +249,15 @@ class Dispatcher:
 
     def _run_detect(self, target_ts, entry):
         """Find frame at target_ts, run detector, write result to state."""
-        # Re-check condition only for future frames (delay > 0)
-        # Past frames (delay < 0) were captured before state changed, don't re-check
-        if entry.get('delay', 0) > 0 and not self._cond_met(entry.get('cond')):
+        # The condition is checked twice: once when this was scheduled, and
+        # again now, because state may have moved in between.
+        #
+        # There used to be a `delay > 0` guard here, so that entries reading a
+        # PAST frame (delay < 0) skipped the second check — their frame
+        # predated the state change, so re-checking against current state would
+        # have been asking the wrong question. There are no negative delays
+        # left; control/tab_watch.py replaced the two that existed.
+        if not self._cond_met(entry.get('cond')):
             return
         regions = entry['regions']
         crops = self.capture.get_crops(target_ts, regions)
@@ -262,138 +293,9 @@ class Dispatcher:
                 self._apply_hw(['upload_pattern'])
             elif result_field == 'attachments':
                 for gun_id, att in result.items():
-                    self._check_attachment_mismatch(gun_id, att, crops)
+                    self.mismatch.check_attachment(gun_id, att, crops)
                     self.state.set_attachments(gun_id, att)
                 self._apply_hw(['upload_pattern'])
-            elif result_field == '_tab_calibrate':
-                # tab_type returns True = Type visible = tab is open
-                actual = bool(result)
-                if actual != self.state.tab_open:
-                    self.state.tab_open = actual
-
-    def _poll_mismatch(self):
-        """Periodic mismatch collection: while GT is valid, compare pred every 500ms."""
-        now = time.perf_counter()
-        if now - self._last_mismatch_poll < MISMATCH_POLL_INTERVAL / 1000.0:
-            return
-        if self.state.tab_open or self.state.stop_recoil:
-            return
-        if now - self.state.highlight_gt_ts < GT_SETTLE_TIME / 1000.0:
-            return
-        self._last_mismatch_poll = now
-
-        ts, frame = self.capture.latest()
-        if frame is None:
-            return
-
-        # Highlight mismatch
-        gt_hl = self.state.highlight_gt
-        if gt_hl and self._detectors.get('highlight'):
-            crops = {r: frame[r] for r in ['weapon_1', 'weapon_2'] if r in frame}
-            # Debug: check which crop is actually brighter
-            from dl_models.icon_merging import dewhite
-            import numpy as np
-            dw1 = float(np.percentile(dewhite(crops['weapon_1']), 95))
-            dw2 = float(np.percentile(dewhite(crops['weapon_2']), 95))
-            pred = self._detectors['highlight'].classify(crops)
-            if pred and pred != gt_hl:
-                print(f'[hl_mismatch] gt={gt_hl} pred={pred} w1_dw={dw1:.0f} w2_dw={dw2:.0f} '
-                      f'w1={self.state.weapon_1.name} w2={self.state.weapon_2.name}', flush=True)
-                self._save_mismatch('highlight', crops, gt_hl, pred)
-
-        # Weapon HUD mismatch
-        gt_w = self.state.weapon_gt
-        if any(gt_w) and self._detectors.get('weapon_hud'):
-            crops = {r: frame[r] for r in ['weapon_1', 'weapon_2'] if r in frame}
-            pred = self._detectors['weapon_hud'].classify(crops)
-            if pred and pred != gt_w:
-                self._save_mismatch('weapon_hud', crops, gt_w, pred)
-
-    def _run_mismatch(self, target_ts, entry):
-        """Run detector and save crops if GT != pred."""
-        if self.state.tab_open or self.state.stop_recoil:
-            return
-
-        gt = entry.get('_gt_snapshot')
-        if not gt:  # no GT at schedule time, skip
-            return
-
-        regions = entry['regions']
-        crops = self.capture.get_crops(target_ts, regions)
-        if crops is None:
-            return
-
-        detector = self._detectors.get(entry['detect'])
-        if detector is None:
-            return
-
-        pred = detector.classify(crops)
-        if pred is None or pred == gt:
-            return
-
-        detect_name = entry['detect']
-        self._save_mismatch(detect_name, crops, gt, pred)
-
-    def _save_mismatch(self, detect_name, crops, gt, pred):
-        """Save mismatched crops for review.
-
-        Filename: gt_{name}_{hl}_pred_{name}_{hl}_{hash6}.png
-        """
-        save_dir = os.path.join('InGameScreenshot', f'{detect_name}_mismatch')
-        os.makedirs(save_dir, exist_ok=True)
-
-        hl_gt = self.state.highlight_gt
-        for region_name, crop in crops.items():
-            if crop is None:
-                continue
-            slot = 1 if '1' in region_name else 2
-
-            # Weapon names for this slot
-            if isinstance(gt, int):
-                # highlight mismatch: gt/pred are slot numbers
-                w = self.state.weapon_1 if slot == 1 else self.state.weapon_2
-                gt_name = w.name or '?'
-                pred_name = gt_name  # weapon name doesn't change
-                gt_hl = 'h' if slot == gt else 'l'
-                pred_hl = 'h' if slot == pred else 'l'
-            else:
-                # weapon mismatch: gt/pred are name tuples
-                gt_name = gt[slot - 1] or '?'
-                pred_name = pred[slot - 1] or '?'
-                gt_hl = 'h' if slot == hl_gt else 'l'
-                pred_hl = gt_hl  # highlight doesn't change
-
-            # Skip if both name and hl are the same
-            if gt_name == pred_name and gt_hl == pred_hl:
-                continue
-
-            h = img_hash(crop)
-            fname = f's{slot}_gt_{gt_name}_{gt_hl}_pred_{pred_name}_{pred_hl}_{h}.png'
-            print(f'[mismatch] {fname} | gt_int={gt} pred_int={pred} slot={slot} hl_gt_state={self.state.highlight_gt}', flush=True)
-            path = os.path.join(save_dir, fname)
-            if not os.path.exists(path):
-                cv2.imwrite(path, crop)
-
-    def _check_attachment_mismatch(self, gun_id, detected, crops):
-        """Save crop when detected attachment is invalid for this weapon."""
-        from detector.weapon_attachments import validate_attachments
-        w = self.state.weapon_1 if gun_id == 1 else self.state.weapon_2
-        if not w.name:
-            return
-        filtered = validate_attachments(w.name, detected)
-        save_dir = os.path.join('InGameScreenshot', 'attachment_mismatch')
-        for slot_name in ('muzzle', 'grip'):
-            if detected.get(slot_name) and detected[slot_name] != filtered.get(slot_name, ''):
-                crop_key = f'att_{gun_id}_{slot_name}'
-                crop = crops.get(crop_key)
-                if crop is None:
-                    continue
-                os.makedirs(save_dir, exist_ok=True)
-                h = img_hash(crop)
-                fname = f'{w.name}_{slot_name}_det_{detected[slot_name][:8]}_{h}.png'
-                path = os.path.join(save_dir, fname)
-                if not os.path.exists(path):
-                    cv2.imwrite(path, crop)
 
     # ════════════════════════════════════════════════════════════
     # Shutdown
@@ -408,5 +310,6 @@ class Dispatcher:
             m.set_delta(0, 0)
         except Exception:
             pass
+        self.tab.close()          # releases the two on-demand GDI grabbers
         Weapon.save_scales()
         print("[shutdown] scales saved", flush=True)

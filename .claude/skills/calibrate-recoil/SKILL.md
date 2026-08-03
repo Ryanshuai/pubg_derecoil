@@ -45,8 +45,11 @@ taken. `state.py` without `--pico` does not touch it.
 Step 4 is not optional. Step 3 can improve the residual while making the gun
 spray worse — that has happened, see *the wrong objective* below.
 
-`weapon_curve_kava4/` is **not in git**. The backup fit_curve writes is the
+`docs/recoil/curves/` is **not in git**. The backup fit_curve writes is the
 only way back.
+
+Runs land in `docs/recoil/runs/`, not next to the script. Everything this repo
+has measured lives under `docs/`; `calibration/` is source only.
 
 ## Read the numbers in this order
 
@@ -118,12 +121,21 @@ wearing a cheek pad, which reduces recoil.
 **Strip before spawning the next weapon.** A full rack means the incoming gun
 evicts the old one onto the floor, wearing everything it had on.
 
+**Look in the backpack before spawning anything.** The spawner has no idea what
+you already own — clicking 垂直握把 always produces another one. Spawning the
+parts list unconditionally (once at the start, once per eviction) stacks
+duplicates until the pack is full and the next part has nowhere to land, and
+every spare is one more thing `find()` can pick instead of the one meant.
+`control/stock.py` does the whole read-tidy-top-up: it drops the
+surplus on the floor and spawns only the shortfall. A part already fitted to a
+gun counts as owned; a row with no template (ammo, meds) is never touched.
+
 **The range evicts after 20 minutes** and re-entry empties the backpack and the
 rack — it is a restart, not a pause. `RangeSession` re-enters on a 17-minute
 budget so it happens between weapons rather than mid-magazine, and re-stocks
 afterwards; `--resume` picks up completed cells from the JSONL.
 
-Re-entry is automated (`--session auto`, the default): `lobby_control` drives
+Re-entry is automated (`--session auto`, the default): `control/lobby.py` drives
 the results screen, the lobby, an open ESC menu or a loading screen back to a
 running round, polling state rather than sleeping. Measured round trip: in
 11.5 s, out 7.4 s.
@@ -149,7 +161,7 @@ the run aborts having done nothing. Do not ask a human to alt-tab; that human
 is exactly what an unattended harvest exists to remove. `ensure_focus()` raises
 the game window, verifies, retries, and only then falls back to the countdown.
 
-    from press.pointer import ensure_focus, focus_keeper
+    from control.focus import ensure_focus, focus_keeper
     if not ensure_focus(countdown_s=args.countdown, label='...'): return 1
     time.sleep(0.6)          # the game eats input for a few frames after this
 
@@ -171,12 +183,12 @@ of that process, since PUBG owns several and only one takes input.
 A part that will not detect stops the run, and squinting at one screenshot is
 the slow way to fix it. Collect instead:
 
-    pixi run python calibration/collect_icons.py --slot grip --angles 6
+    pixi run python calibration/collect_templates.py --slot grip --targets rows
 
 It spawns one of every attachment in that slot, then photographs the inventory
 against several backgrounds, turning the view between captures. Two outputs:
 
-- **labelled crops** — `<item>__<background>__rowNN.png`, which is what
+- **labelled crops** — `<item>__rowNN__<weapon>__<background>.png`, which is what
   `calibrate-template` extracts from. The panel is translucent, so a template
   built from a single background tracks that background; varying the scene is
   the point, not a nicety.
@@ -229,8 +241,8 @@ presets of 0.800 and 0.550.
 | symptom | first command |
 |---|---|
 | anything at all | `calibration/state.py` |
-| `ABORT: game not focused` | the game is not running, or `game_hwnd()` returns None — check with `python -c "from press.pointer import game_hwnd; print(game_hwnd())"`. Windows can also refuse the handover; run it again |
-| "not on screen" for a part that is | `state.py --tab` → `UNRECOGNISED`? then `collect_icons.py --slot <slot>` |
+| `ABORT: game not focused` | the game is not running, or `game_hwnd()` returns None — check with `pixi run python -c "from control.focus import game_hwnd; print(game_hwnd())"`. Windows can also refuse the handover; run it again |
+| "not on screen" for a part that is | `state.py --tab` → `UNRECOGNISED`? then `collect_templates.py --slot <slot> --targets rows` |
 | "could not reach posture" | `state.py` — in ADS? inventory closed? |
 | "inventory would not open/close" | `state.py`, check the `type` pixel count against its window |
 | could not open the port | another tool has it; the error names the process. Wait, do not kill it |
@@ -245,15 +257,16 @@ presets of 0.800 and 0.550.
 | | |
 |---|---|
 | `calibration/state.py` | read-only state probe — start here |
-| `calibration/collect_icons.py` | spawn parts, photograph them, grade the templates |
+| `calibration/collect_templates.py` | spawn parts, photograph them, grade the templates |
 | `calibration/harvest.py` | spawn, dress, fire, measure; the unattended loop |
 | `calibration/sweep.py` | same measurement without the spawner, for a gun already in hand |
 | `calibration/fit_curve.py` | residual → new curve |
 | `calibration/range_session.py` | 20-minute eviction, budget and re-stock |
+| `control/stock.py` | what is in the backpack; drop the surplus, spawn the shortfall |
 | `detector/lobby_detector.py` | lobby vs match, by letterbox bars and the ping overlay |
-| `detector/lobby_control.py` | drives the lobby back into a match |
+| `control/lobby.py` | drives the lobby back into a match |
 | `calibration/weapon_switcher.py` | weapon supply interface |
 | `detector/view_tracker.py` | the measurement itself |
-| `press/pointer.py` | focus: `ensure_focus`, `focus_keeper`, `game_hwnd` |
+| `control/focus.py` | focus: `ensure_focus`, `focus_keeper`, `game_hwnd` |
 | `docs/game_quirks.md` | mechanics found by hitting them |
 | `docs/recoil_observer_design.md` | why the ROI is where it is |

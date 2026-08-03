@@ -22,14 +22,6 @@ def load_model(path, head_sizes, device, in_channels=3, hidden_dim=128):
     return model
 
 
-def crop_to_tensor(crop, device):
-    """BGR uint8 (H,W,3) -> (1,3,H,W) float32 tensor."""
-    t = torch.from_numpy(
-        crop.transpose(2, 0, 1).astype(np.float32) / 255.0
-    )
-    return t.unsqueeze(0).to(device)
-
-
 def crop_to_tensor_4ch(crop, device):
     """BGR uint8 (H,W,3) -> (1,4,H,W) float32 tensor (BGR + dewhite)."""
     dw = dewhite(crop)

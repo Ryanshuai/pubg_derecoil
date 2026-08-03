@@ -16,17 +16,49 @@ temp_debug
 training_data/pubg_assets/Item
 InGameScreenshot
 training_data/Manual
-# calibration DATA is generated and large; the tools next to it are source
-calibrate_distance/*.json
-calibrate_distance/*.png
-calibrate_distance/*.jsonl
-calibrate_distance/weapon_curve/
-calibrate_distance/weapon_curve_kava4/
+# Everything this repo has MEASURED lives under docs/; calibration/ is source
+# only. No rule here covers calibration/ on purpose -- a run that lands next to
+# its script should turn git status dirty, because that is the bug.
+#
+# The bulk of a measurement stays out of git. The small fitted facts do not:
+# docs/recoil/weapon_rpm.json, docs/pitch/pitch_range.json,
+# docs/compat/kit_facts.json and docs/ballistics/ are each a few hundred bytes
+# and are the answer, not the raw data.
+docs/recoil/curves/
+docs/recoil/curves_legacy/
+docs/recoil/runs/
+docs/k/
+docs/fail/
+# Raw telemetry, appended to by every goto(). The CONCLUSION it is for
+# (accordion or not) goes into docs/game_quirks.md by hand once
+# `pixi run goto-paths` has enough decisive rows to say.
+docs/spawner/goto_paths.jsonl
+# Same split for every other producer: the run goes, the fitted answer stays.
+# docs/spawner/layout.json and docs/regression_baseline.json are NOT here on
+# purpose -- both are read back as truth by an offline test, so they are source.
+docs/runs/
+docs/spawner/runs/
+docs/spawner/hover/
+docs/tab/runs/
+docs/compat/runs/
+docs/lobby/runs/
+docs/ammo_fire/
+docs/impulse/
+docs/kick/
+docs/gun_grab/
+docs/kit_checks/
+docs/shots/
+docs/.refactor_plan.bak.md
 
 .claude/settings.local.json
+# pixi env lives in the repo; the lock file is source, the env is not
+.pixi/
 training_data/human_detection
 training_data/highlight_eval
 
 pico_firmware/.vscode
 human_detection/test/
 human_detection/*.pt
+*.png
+
+docs/ads/runs/

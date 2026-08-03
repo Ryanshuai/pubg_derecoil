@@ -23,20 +23,38 @@ import time
 import threading
 from collections import deque
 
-from config import HUD_REGIONS
+from config import FRAME_REGIONS, HUD_REGIONS
 from detector.cropper import make_grabber
 
 
 class ScreenCapture:
     """Capture thread: owns all capture calls, stores timestamped frames."""
 
+    # How many times a lost DXGI backend is rebuilt as DXGI before the loop
+    # settles for GDI. Repeated losses mean the compositor is not giving the
+    # duplication interface back (exclusive fullscreen), and GDI at 48 fps
+    # beats a backend that keeps dying.
+    MAX_DXGI_RETRIES = 2
+
     def __init__(self, buffer_seconds=1.0, target_fps=144, prefer_dxgi=True,
                  dxgi_fps=120):
-        # Sized by duration, not frame count: DETECT_TABLE reads frames from
-        # before the key event (delay < 0), so the buffer must span more than
-        # the largest negative delay regardless of the achieved frame rate.
+        # Sized by duration, not frame count, so the span does not change with
+        # the achieved frame rate.
+        #
+        # It used to need the span: DETECT_TABLE read frames from BEFORE the
+        # key event (delay: -50) and the buffer had to still be holding them.
+        # Those entries are gone (control/tab_watch.py), and every remaining
+        # delay is positive, which means the frame wanted is the newest one at
+        # the moment it is asked for. So this is now oversized rather than
+        # load-bearing — left alone because a deep buffer is also what lets a
+        # detection survive a scheduling hiccup, and at FRAME_REGIONS' size it
+        # costs ~14 MB instead of the ~41 MB it did before the split.
         self._buffer = deque(maxlen=max(8, int(buffer_seconds * target_fps)))
-        self._regions = HUD_REGIONS
+        # FRAME_REGIONS, not HUD_REGIONS: the Tab screen's regions are read on
+        # demand by control/tab_watch.py. Grabbing them here cost 5.46 ms of
+        # every frame for a panel that is usually not on screen — see the
+        # comment on FRAME_REGIONS in config.py.
+        self._regions = {k: HUD_REGIONS[k] for k in FRAME_REGIONS}
         self._interval = 1.0 / target_fps
         self._prefer_dxgi = prefer_dxgi
         self._dxgi_fps = dxgi_fps
@@ -78,10 +96,37 @@ class ScreenCapture:
         window_start = time.perf_counter()
         reported = None   # becomes the first measured fps, used as baseline
         last_warn = 0.0
+        failures = 0
         try:
             while self._running:
                 ts = time.perf_counter()
-                frame = grabber.grab()
+                try:
+                    frame = grabber.grab()
+                except Exception as e:
+                    # A display-mode change (game entering exclusive
+                    # fullscreen, resolution switch) can take the DXGI capture
+                    # thread down. Rebuild instead of letting the loop die:
+                    # a dead capture loop is silent, and every detector
+                    # downstream would go on reading the last frame it got.
+                    failures += 1
+                    retry_dxgi = (self._prefer_dxgi
+                                  and failures <= self.MAX_DXGI_RETRIES)
+                    print(f'[capture] {self.backend} lost ({e}); rebuilding'
+                          f'{"" if retry_dxgi else " on GDI"}', flush=True)
+                    try:
+                        grabber.close()
+                    except Exception:
+                        pass
+                    grabber, paced = make_grabber(self._regions, retry_dxgi,
+                                                  self._dxgi_fps)
+                    self.backend = type(grabber).__name__
+                    # The new backend runs at its own rate, so the old
+                    # baseline would fire the slow-capture warning forever.
+                    reported = None
+                    frames, grab_total = 0, 0.0
+                    window_start = time.perf_counter()
+                    continue
+
                 self._buffer.append((ts, frame))
 
                 elapsed = time.perf_counter() - ts

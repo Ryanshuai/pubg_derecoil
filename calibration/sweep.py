@@ -44,76 +44,48 @@ import win32gui
 import win32process
 
 from config import (HUD_REGIONS, RECOIL_SIGHT_PROFILES,
-                    RECOIL_K_DEFAULT_SCOPED, TAB_PIXEL_THRESH,
-                    TAB_COUNT_MIN, TAB_COUNT_MAX)
+                    RECOIL_K_DEFAULT_SCOPED, SCREEN_W, SCREEN_H)
 from detector.attachment_detector import AttachmentDetector
-from detector.cropper import make_grabber
+from detector.cropper import FocusLost, ScreenBuffer
 from detector.posture_detector import PostureDetector
-from detector.view_tracker import ViewTracker, MagazineRecorder
+from detector.view_tracker import ViewTracker
 from detector.weapon import Weapon, WEAPON_RPM, ar, smg, mg
 from detector.weapon_template_detector import TabWeaponDetector
-from press.pico_mouse import (get_mouse, HID_KEY_TAB, HID_KEY_C, HID_KEY_Z)
+from press.pico_mouse import get_mouse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from weapon_switcher import get_switcher
+# The measurement maths, which needs no game and no hardware — so it lives
+# apart from the rig that does, and `pixi run analysis` can check it offline.
+# Import it from there, not from here: this module is not a re-export point.
+from analysis import analyse
 
 cv2.setNumThreads(1)
 HERE = os.path.dirname(os.path.abspath(__file__))
+# Runs are measurements, not source: they land under docs/ with the rest of
+# what this repo has measured, never next to the script that wrote them.
+RUNS = os.path.join(os.path.dirname(HERE), 'docs', 'recoil', 'runs')
+# Where GunDriver.dump() puts the crops behind a failed decision.
+FAIL_DIR = os.path.join(os.path.dirname(HERE), 'docs', 'fail')
 
-# ── timing (wall clock; frame counts are unreliable because DXGI re-serves
-#    the previous frame while the screen is idle) ──
-AMMO_THRESH = 200
-AMMO_CHANGED = 0.02
-EMPTY_STATIC_S = 0.55     # ammo frozen this long while firing => magazine out
-TAIL_RECORD_S = 0.25      # keep recording past the counter reaching zero, so the
-                          # last round's recoil is inside the recording
-MIN_FIRE_S = 0.8
-MAX_FIRE_S = 9.0
-RELOAD_TIMEOUT_S = 9.0
-RELOAD_STATIC_S = 0.35    # counter must hold this long before the mag is ready
-RELOAD_MIN_S = 2.0        # ...and if it never visibly moved, wait at least this
-SETTLE_AFTER_RELOAD_S = 1.8   # counter refills mid-animation; gun is not ready
-ADS_SETTLE_S = 0.5
-ADS_WATCH_S = 2.5         # how long to watch for the icon after a right-click;
-                          # measured ~0.85 s idle and slower right after firing
-POSTURE_WATCH_S = 1.5     # same, for the C/Z animation
-TAB_OPEN_S = 0.55
-TAB_CLOSE_S = 0.35
-POSTURE_SETTLE_S = 0.6
-RECENTER_SETTLE_S = 0.25   # let the view stop before the next burst
-
-# Closed-loop recentring. See Rig.recenter.
-RECENTER_TOL = 8        # counts; below this the next burst does not care
-RECENTER_TRIES = 4
-RECENTER_STEP = 60      # counts per move, so no single frame pair wraps
-TRACK_TIMEOUT_S = 2.0   # post-fire recovery has always finished well inside
-TRACK_STILL_S = 0.20    # this long under tol_px counts as stopped
-TRACK_STILL_PX = 1.0
-TRACK_MIN_S = 0.12      # USB command -> rendered frame; before this, "not
-                        # started" and "finished" look identical
-# Fraction of the correlator's half-patch range an absolute reading may use
-# before it is refused as possibly wrapped. See Rig.absolute_offset.
-ABS_TRUST_FRAC = 0.6
-# How far the absolute reading may disagree with the running total before the
-# reading is treated as wrapped rather than the total as drifted.
-ABS_AGREE_COUNTS = 45
-PROBE_COUNTS = 30       # for tracking_confirmed()
-
-# Homing against the pitch clamp. The clamp is the only absolute position the
-# game offers: a running total drifts and a correlation wraps, but "the game
-# refuses to rotate further" is the same place every time.
-CLAMP_PUSH = 4000       # one open-loop shove, comfortably past the travel
-CLAMP_SETTLE_S = 0.35
-BAND_STEP = 100         # rise per probe while mapping the measurable band
-BAND_MAX = 3000         # stop rising; the travel is well inside this
-BAND_TRACK_FRAC = 0.5   # observed/commanded above this counts as measurable
+# Warn when a magazine's view excursion eats this much of the headroom above
+# the aim. Past it the burst is finishing where tracking is already only
+# required to recover half the motion, so the recoil reads low.
+HEADROOM_WARN_FRAC = 0.6
 POSTURES = ('standing', 'crouching', 'prone')
 
 # One implementation, in press/pointer.py, because it guards the mouse calls
 # that live there too. Re-exported under the old names so importers of this
 # module keep working.
-from press.pointer import (game_focused, raise_game, ensure_focus,  # noqa: E402
-                           FocusKeeper, focus_keeper, GAME_EXES)
+from control.focus import (game_focused, raise_game, ensure_focus,  # noqa: E402
+                           focus_keeper, FocusKeeper, GAME_EXES)
+# The three closed loops this rig is made of. None of them is about recoil —
+# they are "point the view", "get the character into a known state" and "empty
+# a magazine and report what the game said", which is why they are in control/
+# and this file only decides WHICH cells to measure.
+from control.aim import ViewDriver, PROBE_COUNTS, BAND_STEP, CLAMP_SETTLE_S
+from control.gun import GunDriver
+from control.fire import FireDriver, MAX_FIRE_S  # noqa: F401  (tools import it)
 
 
 class Rig:
@@ -128,6 +100,25 @@ class Rig:
         self.att_det = AttachmentDetector()
         self.gun_det = TabWeaponDetector()
         self.posture_det = PostureDetector()
+        # Not wrapped in a try. The crosshair is half of the ADS gate, and the
+        # gate is what decides whether a whole run's numbers mean anything --
+        # the posture icon alone once passed a burst fired from the hip, in
+        # third person, and the run read as clean. A fallback here is a silent
+        # downgrade of the only thing standing between a bad burst and the
+        # curve, so a detector that will not build stops the run instead.
+        from detector.ads_detector import AdsDetector, CROP_R
+        self.ads_det = AdsDetector()
+        self.ads_region = (SCREEN_H // 2 - CROP_R, SCREEN_W // 2 - CROP_R,
+                           2 * CROP_R, 2 * CROP_R)
+        try:
+            from detector.fire_mode_detector import FireModeDetector
+            import torch
+            self.fire_det = FireModeDetector(
+                'cuda' if torch.cuda.is_available() else 'cpu')
+        except Exception as e:
+            print(f"  [!] no fire-mode detector ({e}) — cannot tell a gun that "
+                  f"spawned in single fire from one in full auto")
+            self.fire_det = None
         try:
             from detector.ammo_detector import AmmoDetector
             self.ammo_det = AmmoDetector()
@@ -136,26 +127,28 @@ class Rig:
                   f"ammo region flicker, which cannot count rounds")
             self.ammo_det = None
 
-        regions = dict(self.tracker.regions())
-        for k in ('ammo', 'type', 'posture', 'gun_name_1', 'gun_name_2'):
-            regions[k] = HUD_REGIONS[k]
-        for k, v in HUD_REGIONS.items():
-            if k.startswith('att_'):
-                regions[k] = v
-        self.grabber, self.paced = make_grabber(regions)
-        # Pitch owed back to the view, in ADS mouse counts. See recenter().
-        self.pending_pitch = 0.0
-        # Where this cell is aiming, for the absolute check. See set_reference.
-        self.ref_patches = None
-        # Set when the view's position stops being knowable. A cell measured
-        # after this is not wrong-looking, it is wrong — see recenter().
-        self.tracking_lost = False
-        # Counts above the bottom clamp where the view can be measured,
-        # found once. See calibrate_pitch.
-        self.pitch_centre = 0
-        # Off: the band scan sweeps the view ground-to-sky at the start of
-        # every posture, which is slow and unpleasant to watch. See reaim().
-        self.use_homing = False
+        self._build_grabber()
+        # The Rig is the frame source all three read through, which is why it
+        # can hand them `self`. It owns the detectors and the Pico; they own
+        # the loops.
+        self.view = ViewDriver(self.tracker, self.mouse, self, self.K, sight)
+        self.gun = GunDriver(self, self.mouse, self.posture_det, self.ads_det,
+                             fire_det=self.fire_det, gun_det=self.gun_det,
+                             att_det=self.att_det, dump_dir=FAIL_DIR)
+        # `gun` is not decoration here: a magazine's numbers are meaningless
+        # without knowing whether the shots were aimed, so the fire loop polls
+        # ADS all the way through the burst.
+        self.fire = FireDriver(self, self.mouse, self.tracker,
+                               ammo_det=self.ammo_det, gun=self.gun)
+        # Which posture the pitch band was mapped for. Set by callers that
+        # re-map per posture (harvest); pure bookkeeping, nobody here reads it.
+        self.band_posture = None
+
+    # Two diagnostics print these. Aliases rather than copies: set_sight
+    # rebuilds the region set underneath and a stale copy would name the wrong
+    # backend in the log of the run that changed it.
+    grabber = property(lambda s: s.frames.grabber)
+    paced = property(lambda s: s.frames.paced)
 
     def close(self):
         try:
@@ -163,702 +156,239 @@ class Rig:
             self.mouse.set_recoil_enabled(False)
         except Exception:
             pass
-        self.grabber.close()
+        self.frames.close()
 
     # ── screen reads ──
 
     def grab(self):
-        return self.grabber.grab()
+        return self.frames.grab()
 
     def flush(self, n=8):
-        for _ in range(n):
-            self.grabber.grab()
+        # 8, not ScreenBuffer's FLUSH_FRAMES of 3. Every call site here is
+        # explicit (flush(6) / flush(4) / flush(2)), so the default is only
+        # ever a fallback -- but it is the fallback this rig was tuned with.
+        self.frames.flush(n)
 
-    def ammo_sig(self, frame):
-        g = cv2.cvtColor(frame['ammo'], cv2.COLOR_BGR2GRAY)
-        return cv2.threshold(g, AMMO_THRESH, 255, cv2.THRESH_BINARY)[1] > 0
+    # ── the view: forwarded to control/aim.py ──
+    #
+    # Kept as forwards rather than made callers say `rig.view.recenter()`,
+    # because the state is SHARED and mutated from both sides: harvest does
+    # `rig.pending_pitch += a['view_drift_counts']` after every magazine, and
+    # a copy of that number on the Rig would drift away from the one the
+    # recentring loop is closing on. One owner, one value, aliases forward.
+    #
+    # New code should reach for `rig.view` directly; these exist so the split
+    # cost no call sites.
 
-    def read_ammo(self, frame=None):
-        """Rounds left in the magazine, or None if the number is not drawn.
-
-        None is NOT zero. An empty magazine still draws `0`; None means the
-        counter could not be read at all — mid-reload, inventory open, weapon
-        holstered — and treating it as zero reads as "just fired everything".
-        """
-        if self.ammo_det is None:
-            return None
-        try:
-            return self.ammo_det.classify(frame if frame is not None
-                                          else self.grab())
-        except Exception:
-            return None
-
-    def magazine_size(self, timeout_s=2.0):
-        """How many rounds are actually loaded, read off the HUD.
-
-        Worth reading rather than assuming: fitting an extended magazine
-        changes the capacity, the base magazine and the extended one differ by
-        ten rounds, and a cell that fires a different number of rounds than its
-        siblings is not a noisy repeat of them but a different measurement.
-        Before this the count came from watching the ammo region flicker, which
-        over-counted by about 2.4x and could not be compared against anything.
-        """
-        t0 = time.perf_counter()
-        while time.perf_counter() - t0 < timeout_s:
-            n = self.read_ammo()
-            if n:
-                return n
-            time.sleep(0.05)
-        return None
-
-    def tab_open(self, frame):
-        g = cv2.cvtColor(frame['type'], cv2.COLOR_BGR2GRAY)
-        n = int((g > TAB_PIXEL_THRESH).sum())
-        return TAB_COUNT_MIN <= n <= TAB_COUNT_MAX
-
-    def read_posture(self, timeout_s=0.8, gap_s=0.08):
-        """Watch the posture icon until it reads, or time out.
-
-        Deadline rather than a sample count: the icon is absent during the ADS
-        animation, the inventory fade and mid-posture-change, and how long that
-        lasts is not a constant — measured ~0.85 s to appear after a click, and
-        slower right after firing. A fixed handful of quick samples reads None
-        while the animation is still running, and the caller then toggles ADS
-        back off, which never converges.
-
-        A None must never be treated as a posture: toggling on an unknown state
-        is how an unattended run walks itself into a posture nobody asked for.
-        """
-        t0 = time.perf_counter()
-        while True:
-            self.flush(2)
-            p = self.posture_det.classify({'posture': self.grab()['posture']})
-            if p:
-                return p
-            if time.perf_counter() - t0 >= timeout_s:
-                return None
-            time.sleep(gap_s)
-
-    def dump(self, tag):
-        """Save the crops behind a failed decision, so a human can see what
-        the detector saw instead of guessing from a one-line error."""
-        try:
-            frame = self.grab()
-            for k in ('posture', 'type', 'ammo'):
-                if k in frame:
-                    cv2.imwrite(os.path.join(HERE, f'fail_{tag}_{k}.png'),
-                                frame[k])
-            print(f"      [dbg] wrote fail_{tag}_*.png")
-        except Exception as e:
-            print(f"      [dbg] dump failed: {e}")
-
-    def ensure_inventory_closed(self, tries=3):
-        """An inventory left open hides the posture icon AND swallows C/Z,
-        which looks exactly like a broken detector."""
-        for _ in range(tries):
-            self.flush(2)
-            if not self.tab_open(self.grab()):
-                return True
-            self.mouse.key(HID_KEY_TAB, 60)
-            time.sleep(TAB_CLOSE_S)
-        self.flush(2)
-        return not self.tab_open(self.grab())
-
-    def ensure_inventory_open(self, tries=3):
-        """Tab is a toggle, so pressing it blind lands in the wrong state half
-        the time. Watch instead."""
-        for _ in range(tries):
-            self.flush(2)
-            if self.tab_open(self.grab()):
-                return True
-            self.mouse.key(HID_KEY_TAB, 60)
-            time.sleep(TAB_OPEN_S)
-        self.flush(2)
-        return self.tab_open(self.grab())
-
-    def read_loadout(self, slot=1):
-        """One Tab cycle returns both the weapon name and its attachments."""
-        self.ensure_inventory_closed()
-        self.mouse.key(HID_KEY_TAB, 60)
-        time.sleep(TAB_OPEN_S)
-        frame = self.grab()
-        ok = self.tab_open(frame)
-        gun = att = None
-        if ok:
-            names = self.gun_det.classify(frame)
-            gun = names[slot - 1] or ''
-            att = self.att_det.classify(frame).get(slot)
-        if not self.ensure_inventory_closed():
-            print("      [!] inventory would not close")
-        return (gun, att) if ok else (None, None)
-
-    # ── state control ──
-
-    def ensure_ads(self, tries=3):
-        """Get into ADS, using the posture icon as the ADS indicator.
-
-        The icon only renders while aiming, so "icon visible" == "in ADS".
-        That matters because right-click is a TOGGLE here: clicking it without
-        knowing the current state lands in the wrong one half the time, and
-        there is no other reliable read of ADS from the HUD.
-
-        Each click is then WATCHED to completion rather than sampled once.
-        Clicking again while the previous ADS animation is still playing just
-        toggles back out, so an impatient version of this oscillates forever —
-        which is exactly what it did before."""
-        if self.read_posture(timeout_s=ADS_SETTLE_S) is not None:
-            return True
-        for _ in range(tries):
-            self.mouse.click(buttons=0x02, duration_ms=60)
-            t0 = time.perf_counter()
-            if self.read_posture(timeout_s=ADS_WATCH_S) is not None:
-                dt = time.perf_counter() - t0
-                if dt > ADS_SETTLE_S:
-                    print(f"      [ads] icon appeared {dt:.2f}s after click")
-                return True
-        return False
-
-    def ensure_posture(self, target, tries=4):
-        """Toggle until the icon detector agrees. Keypresses alone are not
-        trusted: one dropped toggle would mislabel an entire run.
-
-        Requires ADS (the icon does not render from the hip) and a closed
-        inventory (which hides the icon and swallows C/Z)."""
-        if not self.ensure_inventory_closed():
-            print("      [!] inventory stuck open — C/Z would be swallowed")
-            self.dump('inventory')
-            return False
-        if not self.ensure_ads():
-            print("      [!] no posture icon — not in ADS? cannot verify")
-            self.dump('ads')
-            return False
-        for _ in range(tries):
-            cur = self.read_posture(timeout_s=POSTURE_WATCH_S)
-            if cur is None and self.ensure_ads(tries=2):
-                # Going prone can drop ADS, and the icon goes with it — that
-                # reads identically to "detector broken", so re-aim and re-read
-                # before believing it.
-                cur = self.read_posture(timeout_s=POSTURE_WATCH_S)
-            if cur == target:
-                return True
-            if cur is None:
-                # Never toggle on an unknown state — a blind C/Z here is how an
-                # unattended run ends up measuring a posture nobody asked for.
-                print(f"      [!] posture unreadable (want {target})")
-                self.dump('posture')
-                return False
-            print(f"      posture {cur} -> {target}")
-            if target == 'prone':
-                self.mouse.key(HID_KEY_Z, 60)
-            elif target == 'crouching':
-                # from prone, Z stands up first; C then crouches
-                self.mouse.key(HID_KEY_Z if cur == 'prone' else HID_KEY_C, 60)
-            else:  # standing
-                self.mouse.key(HID_KEY_Z if cur == 'prone' else HID_KEY_C, 60)
-            time.sleep(POSTURE_SETTLE_S)
-        cur = self.read_posture(timeout_s=POSTURE_WATCH_S)
-        if cur != target:
-            print(f"      [!] gave up at {cur!r}, wanted {target}")
-            self.dump('posture')
-        return cur == target
+    pending_pitch = property(lambda s: s.view.pending_pitch,
+                             lambda s, v: setattr(s.view, 'pending_pitch', v))
+    ref_patches = property(lambda s: s.view.ref_patches,
+                           lambda s, v: setattr(s.view, 'ref_patches', v))
+    tracking_lost = property(lambda s: s.view.tracking_lost,
+                             lambda s, v: setattr(s.view, 'tracking_lost', v))
+    pitch_centre = property(lambda s: s.view.pitch_centre,
+                            lambda s, v: setattr(s.view, 'pitch_centre', v))
+    pitch_band = property(lambda s: s.view.pitch_band,
+                          lambda s, v: setattr(s.view, 'pitch_band', v))
+    use_homing = property(lambda s: s.view.use_homing,
+                          lambda s, v: setattr(s.view, 'use_homing', v))
 
     def set_reference(self):
-        """Remember where the cell is aiming, for absolute_offset()."""
-        self.ref_patches = self.tracker.slice_frame(self.grab())
-        self.pending_pitch = 0.0
-        self.tracking_lost = False
+        return self.view.set_reference()
 
     def absolute_offset(self):
-        """Counts between the view now and the cell's reference, or None.
+        return self.view.absolute_offset()
 
-        The incremental integral cannot catch an error in its own starting
-        belief — drive pending_pitch to zero and the view stays wherever that
-        belief was wrong by. This can, because it compares against the
-        reference itself rather than against a running total.
-
-        It only works CLOSE to the reference: past half a patch the
-        correlation wraps and answers confidently in the wrong direction. That
-        is exactly why it runs after the incremental loop and not instead of
-        it — by then the view is supposed to be within a few counts, so if the
-        comparison is out of range that is itself the finding.
-        """
-        if getattr(self, 'ref_patches', None) is None:
-            return None
-        cur = self.tracker.slice_frame(self.grab())
-        m = self.tracker.measure_pair(self.ref_patches, cur)
-        if m is None or m.out_of_range:
-            return None
-        off = m.dy / self.K
-        # A wrapped reading is not noisy, it is confident and wrong — the peak
-        # comes back a whole patch out, and every patch wraps together so the
-        # cross-patch agreement still looks healthy. There is no way to tell
-        # from the reading itself, so anything not comfortably inside the
-        # range is refused rather than believed. Measured: half a patch is
-        # 128 px, which at K=1.55 is 82 counts.
-        if abs(m.dy) > ABS_TRUST_FRAC * self.tracker.patch_h / 2:
-            return None
-        return off
+    def pitch_scale(self):
+        return self.view.pitch_scale()
 
     def home_to_clamp(self, direction=+1):
-        """Push the view into a pitch stop. Open loop, deliberately.
+        return self.view.home_to_clamp(direction)
 
-        +1 is down, -1 is up: a positive mouse dy pulls the view down.
-
-        Nothing is measured here, and nothing can be. The clamps are where the
-        view stares at bare ground or empty sky, which is exactly where phase
-        correlation has nothing to lock onto — the first version of this tried
-        to detect the stop by watching the view halt and reported the game's
-        entire pitch travel as 13 counts while the character was looking
-        straight down.
-
-        It does not need measuring. A stop is a stop: push further than the
-        travel could possibly be and the view is against it, wherever it
-        started. That is the one absolutely repeatable position this game
-        offers.
-        """
-        self.mouse.move(0, direction * CLAMP_PUSH)
-        time.sleep(CLAMP_SETTLE_S)
-
-    def calibrate_pitch(self, step=BAND_STEP):
-        """Find the band of pitch where the view can actually be measured.
-
-        From the bottom clamp, rise in steps and compare what the view did
-        against what it was told to do. Near either clamp the answer is
-        nothing — bare ground below, blank sky above, no texture for the
-        correlator either way. In between the two agree.
-
-        The middle of THAT band is where every magazine should start. Not the
-        geometric middle of the travel: the useful quantity is not "far from
-        both stops", it is "far from both stops AND measurable", and only one
-        of those can be observed.
-        """
-        self.home_to_clamp(+1)                       # bottom stop
-        rises, usable = 0, []
-        while rises < BAND_MAX:
-            prev = self.tracker.slice_frame(self.grab())
-            self.mouse.move(0, -step)
-            got = self.track_still(timeout_s=0.7, still_s=0.10, prev=prev)
-            rises += step
-            if abs(got) > step * BAND_TRACK_FRAC:
-                usable.append(rises)
-        if not usable:
-            print("  [!] no part of the pitch range tracks — is the view "
-                  "somewhere featureless, or the game not taking input?")
-            self.tracking_lost = True
-            return 0
-        lo, hi = usable[0], usable[-1]
-        self.pitch_centre = (lo + hi) // 2
-        print(f"  pitch: measurable from {lo} to {hi} counts above the bottom "
-              f"clamp; aiming at {self.pitch_centre}")
-        return self.pitch_centre
-
-    def reaim(self):
-        """Put the view back where the magazine should start.
-
-        Two ways, and the switch is Rig.use_homing (off by default).
-
-        OFF — measure the way back to the cell's own reference. Cheap and
-        invisible: the view barely moves and nothing sweeps the screen.
-
-        ON — home against the pitch clamp and rise to the middle of the
-        measurable band. Immune to drift in a way the other cannot be, since
-        it returns to a hard stop rather than to a running total. It is also
-        obtrusive: mapping the band whips the view from the ground to the sky
-        and back at the start of every posture, which is unpleasant to sit
-        behind and slow. Worth it for a long unattended sweep; not worth it
-        for a few magazines with someone watching.
-        """
-        if self.use_homing:
-            back = self.goto_pitch_centre()
-            self.set_reference()
-            return back
-        return self.recenter()
-
-    def goto_pitch_centre(self):
-        """Home against the bottom stop, then rise to the measurable middle.
-
-        Every magazine starts here. A burst walks the view a few hundred
-        counts and the walk accumulates, so starting from wherever the last
-        one finished eventually means firing into the clamp — where the view
-        stops moving, the weapon measures unusually mild, and nothing reports
-        a problem.
-
-        Homing is what makes this immune to the drift it is correcting. Going
-        back to a remembered picture depends on the running total that got you
-        there and on a correlation that wraps past half a patch; going back to
-        a hard stop depends on neither.
-        """
-        if not getattr(self, 'pitch_centre', 0):
-            self.calibrate_pitch()
-        self.home_to_clamp(+1)
-        # One move, open loop. There is nothing to measure: the clamp says
-        # where the view is and pitch_centre says how far to go, so stepping
-        # and re-measuring the way home only buys the correlator's opinion of
-        # a distance already known — twenty-odd tracked steps per magazine for
-        # an answer that was in hand before the first one.
-        self.mouse.move(0, -int(self.pitch_centre))
-        time.sleep(RECENTER_SETTLE_S)
-        self.pending_pitch = 0.0
-        return int(self.pitch_centre)
+    def track_still(self, **kw):
+        return self.view.track_still(**kw)
 
     def tracking_confirmed(self, probe=PROBE_COUNTS):
-        """Push the view a known amount and check the reading follows.
-
-        Guards the one failure the range check cannot: a WRAPPED correlation
-        that lands near zero. Knocked 300 counts off centre, absolute_offset()
-        came back -0.3 — not noisy, not flagged, just confidently claiming the
-        view was exactly where it started. A reading that is large and
-        suspicious can be refused on its magnitude; a reading that is small and
-        wrong looks identical to success.
-
-        So instead of asking whether the number is plausible, this makes the
-        view move by a known amount and asks whether the number moved with it.
-        Nothing else in the loop can tell "centred" from "lost".
-        """
-        before = self.absolute_offset()
-        if before is None:
-            return False
-        self._move_tracked(probe)
-        after = self.absolute_offset()
-        self._move_tracked(-probe)
-        if after is None:
-            return False
-        # A positive mouse dy pulls the view DOWN, so the offset moves by
-        # -probe. Generous tolerance: this is separating "tracking" from
-        # "not tracking at all", not calibrating anything.
-        return abs((after - before) + probe) < probe * 0.4
-
-    def track_still(self, timeout_s=TRACK_TIMEOUT_S, still_s=TRACK_STILL_S,
-                    tol_px=TRACK_STILL_PX, prev=None, min_s=TRACK_MIN_S):
-        """Integrate view motion until it stops. Returns counts moved.
-
-        Frame to frame, so it never wraps: the correlator's range is half a
-        patch per PAIR of frames, not per interval, and at ~150 fps nothing
-        the game or the mouse does covers that between two frames. An absolute
-        match against a reference taken a magazine ago would wrap long before
-        the drift got interesting.
-
-        Waiting for "still" matters as much as the integral. PUBG pulls the
-        view back for a while after the trigger releases, and a reading taken
-        before that finishes describes a position the view is already leaving.
-        """
-        # `prev` must be captured BEFORE the move that is being measured. A
-        # mouse command lands in the frame or two right after it is issued, so
-        # a tracker that grabs its own first frame afterwards starts counting
-        # from a view that has already arrived — it sees nothing move and
-        # says so. That mistake measured the game's entire pitch travel as 14
-        # counts.
-        if prev is None:
-            prev = self.tracker.slice_frame(self.grab())
-        t0 = time.perf_counter()
-        total_px, quiet_since = 0.0, None
-        while time.perf_counter() - t0 < timeout_s:
-            cur = self.tracker.slice_frame(self.grab())
-            m = self.tracker.measure_pair(prev, cur)
-            prev = cur
-            if m is None:
-                continue
-            if not m.out_of_range:
-                total_px += m.dy
-            now = time.perf_counter()
-            # min_s covers the gap between issuing a move over USB and the
-            # game rendering it; before then "not moving yet" and "finished
-            # moving" look the same.
-            if abs(m.dy) <= tol_px and now - t0 >= min_s:
-                if quiet_since is None:
-                    quiet_since = now
-                elif now - quiet_since >= still_s:
-                    break
-            elif abs(m.dy) > tol_px:
-                quiet_since = None
-        return total_px / self.K
-
-    def _move_tracked(self, d_counts):
-        """Move the view and measure what actually happened.
-
-        Split into steps: a single jump of a few hundred counts lands entirely
-        between two frames, which is exactly the case the correlator cannot
-        measure — it wraps and reports a small move in the wrong direction.
-        Stepping keeps every frame-to-frame displacement inside the range that
-        makes the measurement meaningful.
-        """
-        moved = 0.0
-        left = int(round(d_counts))
-        while left:
-            step = max(-RECENTER_STEP, min(RECENTER_STEP, left))
-            prev = self.tracker.slice_frame(self.grab())
-            self.mouse.move(0, step)
-            left -= step
-            got = self.track_still(timeout_s=0.8, still_s=0.10, prev=prev)
-            moved += got
-            # Commanded a move, the view did not move: that IS the pitch
-            # clamp. PUBG stops rotating at straight up and straight down, and
-            # a magazine fired there measures near-zero recoil while reporting
-            # nothing wrong. Shoving harder cannot help — the old open-loop
-            # code had no way to notice and would keep pushing into it.
-            if abs(step) >= RECENTER_STEP and abs(got) < abs(step) * 0.2:
-                self.tracking_lost = True
-                print(f"        [!] moved {step:+d} counts and the view did "
-                      f"not follow ({got:+.0f}) — at the pitch clamp, or the "
-                      f"game is not taking input")
-                break
-        return moved
+        return self.view.tracking_confirmed(probe)
 
     def recenter(self):
-        """Put the view back where the cell started, and prove it did.
+        return self.view.recenter()
 
-        A magazine never ends where it started: the compensation is wrong by
-        exactly the residual being measured, so every burst walks the view a
-        few hundred counts. PUBG clamps pitch — at straight up or straight
-        down the view stops moving, and a magazine fired there measures
-        near-zero recoil while reporting nothing wrong. A silently corrupted
-        cell is worse than a failed one.
+    def goto_level(self, posture):
+        return self.view.goto_level(posture)
 
-        This used to compute an offset from the burst recording and move by
-        it, open loop, with nothing checking the result. It did not come back:
-        magazine after magazine the log read "residual +197, recentred +66",
-        and the leftover accumulated in one direction until the cell was
-        firing into the clamp. Two reasons, both invisible without a check —
-        the recording's drift figure does not subtract the player's own mouse
-        movement, and the recording stops while PUBG is still pulling the view
-        back, so whatever recovery happens afterwards is never seen.
+    def calibrate_pitch(self, step=BAND_STEP):
+        return self.view.calibrate_pitch(step)
 
-        So: move, measure, repeat until the screen agrees. self.pending_pitch
-        is the integrated offset from the cell's reference, updated by every
-        measurement including this function's own moves, which is what makes
-        the loop close.
+    def goto_pitch_centre(self):
+        return self.view.goto_pitch_centre()
 
-        Must run in ADS. The offset is in ADS counts and a mouse count buys a
-        third as much rotation from the hip (K 0.50 against 1.55), so
-        recentring from the hip under-corrects threefold — and the auto-reload
-        drops out of ADS, which is exactly when it is tempting to do this.
-        """
-        # Let post-fire recovery finish before believing any number.
-        self.pending_pitch += self.track_still()
-        # Sign: dy > 0 means the view rotated UP (the recoil direction), and a
-        # positive mouse dy pulls it back DOWN — so the correction has the same
-        # sign as the drift, and what the screen then does comes back negative,
-        # which is what walks pending_pitch to zero.
-        total = 0
-        for _ in range(RECENTER_TRIES):
-            d = int(round(self.pending_pitch))
-            if abs(d) < RECENTER_TOL:
-                break
-            self.pending_pitch += self._move_tracked(d)
-            total += d
+    def reaim(self):
+        return self.view.reaim()
 
-        # Now that the view is supposed to be back, ask the reference rather
-        # than the running total. This is the only step that can catch the
-        # integral having started from a wrong belief.
-        for _ in range(RECENTER_TRIES):
-            off = self.absolute_offset()
-            if off is None:
-                print(f"        [!] cannot place the view against the cell's "
-                      f"reference — more than "
-                      f"{ABS_TRUST_FRAC * self.tracker.patch_h / 2 / self.K:.0f}"
-                      f" counts away, or the scene changed. Running total says "
-                      f"{self.pending_pitch:+.0f}; going with that")
-                break
-            # The reference outranks the running total only when the two
-            # roughly agree. They are independent — one integrates frame to
-            # frame and cannot wrap, the other compares against a picture from
-            # a magazine ago and can — so a disagreement means the wrapping
-            # one is lying, and it is not the integral.
-            if abs(off - self.pending_pitch) > ABS_AGREE_COUNTS:
-                print(f"        [!] reference says {off:+.0f} counts, running "
-                      f"total says {self.pending_pitch:+.0f} — the reference "
-                      f"reading has wrapped; going with the total")
-                break
-            self.pending_pitch = off
-            if abs(off) < RECENTER_TOL:
-                # "Already centred" is exactly what a wrapped reading looks
-                # like, so it is the one answer worth confirming.
-                if not self.tracking_confirmed():
-                    print("        [!] the view reads centred but does not "
-                          "respond to a test move — the reference match has "
-                          "wrapped and this cell's position is unknown")
-                    self.tracking_lost = True
-                self.pending_pitch = 0.0
-                break
-            self._move_tracked(off)
-            total += int(round(off))
-        else:
-            print(f"        [!] view will not come back ({off:+.0f} counts "
-                  f"off) — at the pitch clamp? the next magazine measures "
-                  f"short and looks fine doing it")
-        return total
+    # ── the character: forwarded to control/gun.py ──
+
+    def ads_signals(self, frame=None):
+        return self.gun.ads_signals(frame)
+
+    def in_ads(self, frame=None):
+        return self.gun.in_ads(frame)
 
     def enter_ads(self):
-        self.mouse.click(buttons=0x02, duration_ms=60)
-        time.sleep(ADS_SETTLE_S)
+        return self.gun.enter_ads()
 
-    # ── one magazine ──
+    def ensure_ads(self, tries=3):
+        return self.gun.ensure_ads(tries)
+
+    def read_posture(self, **kw):
+        return self.gun.read_posture(**kw)
+
+    def ensure_posture(self, target, tries=4):
+        return self.gun.ensure_posture(target, tries)
+
+    def read_fire_mode(self):
+        return self.gun.read_fire_mode()
+
+    def ensure_fire_mode(self, weapon, tries=6):
+        return self.gun.ensure_fire_mode(weapon, tries)
+
+    def tab_open(self, frame):
+        return self.gun.tab_open(frame)
+
+    def ensure_inventory_closed(self, tries=3):
+        return self.gun.ensure_inventory_closed(tries)
+
+    def ensure_inventory_open(self, tries=3):
+        return self.gun.ensure_inventory_open(tries)
+
+    def read_loadout(self, slot=1):
+        return self.gun.read_loadout(slot)
+
+    def dump(self, tag):
+        return self.gun.dump(tag)
+
+    # ── the magazine: forwarded to control/fire.py ──
+    #
+    # ammo_debug_dir is a property for the same reason the view's state is:
+    # harvest sets `rig.ammo_debug_dir = ...` and the fire loop reads it, so a
+    # copy on the Rig would be a setting that silently does nothing.
+
+    ammo_debug_dir = property(lambda s: s.fire.ammo_debug_dir,
+                              lambda s, v: setattr(s.fire, 'ammo_debug_dir', v))
+
+    def ammo_sig(self, frame):
+        return self.fire.ammo_sig(frame)
+
+    def read_ammo(self, frame=None):
+        return self.fire.read_ammo(frame)
+
+    def magazine_size(self, timeout_s=2.0):
+        return self.fire.magazine_size(timeout_s)
 
     def fire_magazine(self):
-        rec = MagazineRecorder(
-            self.tracker,
-            human_fn=getattr(self.mouse, 'human_totals', None))
-        self.mouse.click(buttons=0x01, duration_ms=int(MAX_FIRE_S * 1000))
-        t0 = time.perf_counter()
-        prev, last_change, steps = None, t0, 0
-        empty_at = None
-        while True:
-            now = time.perf_counter()
-            if now - t0 > MAX_FIRE_S:
-                break
-            frame = self.grab()
-            rec.push(now, frame)
-            sig = self.ammo_sig(frame)
-            if prev is not None and float(np.mean(sig != prev)) > AMMO_CHANGED:
-                last_change = now
-                steps += 1
-            prev = sig
-            # The counter reaching zero is the magazine ending, stated by the
-            # game rather than inferred from pixels that stopped moving. The
-            # flicker heuristic below still runs as the fallback -- it is what
-            # covers a weapon whose counter cannot be read -- but on its own it
-            # cannot say how many rounds went out, only that something stopped
-            # changing, and it over-counted them by about 2.4x.
-            n = self.read_ammo(frame)
-            if n == 0:
-                # The counter reads zero the instant the last round leaves,
-                # and that round's recoil has not played out yet. Breaking
-                # here throws away the biggest kick in the magazine — the tail
-                # rounds are the steepest part of every curve. Keep recording
-                # for a couple of bullet intervals so the last shot lands
-                # inside the recording it belongs to.
-                if empty_at is None:
-                    empty_at = now
-                    last_change = now
-                elif now - empty_at >= TAIL_RECORD_S:
-                    break
-            if (now - t0) > MIN_FIRE_S and (now - last_change) > EMPTY_STATIC_S:
-                break
-        self.mouse.click(buttons=0x00, duration_ms=0)
-        # last_change is the last round leaving the magazine. Everything after
-        # it is the camera drifting back toward the pre-fire aim, which is real
-        # but happens after the bullets are already gone -- folding it into the
-        # residual flatters the total while telling you nothing about where the
-        # rounds went.
-        return rec, time.perf_counter() - t0, steps, last_change
+        return self.fire.fire_magazine()
 
     def wait_reload(self):
-        """PUBG reloads by itself; we only wait it out (and it exits ADS).
+        return self.fire.wait_reload()
 
-        Watches for the counter to leave its empty-magazine reading and then
-        hold still, rather than waiting for it to match a snapshot taken back
-        at the start of the cell. The snapshot goes stale — the standing cell
-        lost four of its five magazines twice running to a reference that
-        never came back — and "moved, then settled" needs no reference at all.
+    def top_up(self, settle_s=0.4):
+        return self.fire.top_up(settle_s)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    def _regions(self):
+        """Every window this rig reads, for the current tracker patches."""
+        regions = dict(self.tracker.regions())
+        for k in ('ammo', 'type', 'posture', 'fire_mode',
+                  'gun_name_1', 'gun_name_2'):
+            regions[k] = HUD_REGIONS[k]
+        if self.ads_region:
+            regions['crosshair'] = self.ads_region
+        for k, v in HUD_REGIONS.items():
+            if k.startswith('att_'):
+                regions[k] = v
+        return regions
+
+    def _build_grabber(self):
+        """(Re)open the banded grabber for the current tracker patches.
+
+        focus_fn is passed, and it is the one behaviour change worth stating:
+        grab() now RAISES when the game is not in the foreground, instead of
+        handing back the frozen picture PUBG leaves on screen. A run that keeps
+        grabbing through a lost foreground does not fail -- it measures a still
+        image and reports a suspiciously clean residual. Callers that fire have
+        to catch FocusLost; see calibrate_combo.
         """
-        empty = self.ammo_sig(self.grab())
-        t0 = time.perf_counter()
-        prev, stable_since = None, None
-        while True:
-            now = time.perf_counter()
-            if now - t0 >= RELOAD_TIMEOUT_S:
-                break
-            sig = self.ammo_sig(self.grab())
-            if prev is not None and float(np.mean(sig != prev)) < AMMO_CHANGED:
-                if stable_since is None:
-                    stable_since = now
-            else:
-                stable_since = None
-            prev = sig
-            if stable_since is None or now - stable_since <= RELOAD_STATIC_S:
-                continue
-            # Normally the counter visibly climbs back and holds. But the
-            # magazine can refill inside the 0.55 s the fire loop spends
-            # confirming the gun is empty — a quickdraw magazine is that fast —
-            # and then `empty` is already the full reading and no change ever
-            # comes. Settled plus long enough is the same evidence.
-            if float(np.mean(sig != empty)) > AMMO_CHANGED or \
-                    now - t0 > RELOAD_MIN_S:
-                time.sleep(SETTLE_AFTER_RELOAD_S)
-                return now - t0
-        self.dump('reload')
-        return None
+        self.frames = ScreenBuffer(self._regions(), prefer_dxgi=True,
+                                   focus_fn=game_focused)
+
+    def set_sight(self, sight):
+        """Switch which optic the measurement assumes. True if it changed.
+
+        Not just K. Each profile carries its own patch columns, because what
+        the scope body hides differs: the red dot leaves seven usable columns
+        across the screen, the VSS's integral PSO-1 leaves three, and putting
+        a patch on the scope tube measures the tube rather than the world. So
+        the tracker and the grabber are rebuilt, not just the constant.
+
+        This exists because the VSS cannot be measured any other way — it
+        carries a fixed 4x and takes no sight, so a run pinned to the red dot
+        analyses its 1.875 counts-per-pixel view with 1.5474 and reports a
+        recoil of MINUS 482 counts.
+        """
+        if sight == self.sight:
+            return False
+        prof = RECOIL_SIGHT_PROFILES.get(sight)
+        if not prof:
+            print(f"  [!] no sight profile {sight!r} — staying on {self.sight}")
+            return False
+        self.sight = sight
+        self.K = prof.get('K', RECOIL_K_DEFAULT_SCOPED)
+        self.tracker = ViewTracker(patch_xs=prof.get('patch_xs'))
+        # The regions move with the patches; set_regions swaps them without
+        # dropping the buffer or reopening a capture backend.
+        self.frames.set_regions(self._regions())
+        # The view driver holds the old optic's tracker, K and reference, and
+        # all three are wrong now: a 4x buys 3.3x the rotation per count.
+        self.view.retune(self.tracker, self.K, sight)
+        print(f"  sight -> {sight}  K={self.K:.4f}  "
+              f"{len(self.tracker.xs)} patches")
+        return True
+
+    # The table itself lives on GunDriver, which is what reads it. Aliased
+    # rather than copied: two dicts named the same thing would drift, and the
+    # symptom of drifting would be the MG3 measured against the wrong one of
+    # its two automatic fire rates — a wrong number, not an error.
+    FIRE_MODE_FOR = GunDriver.FIRE_MODE_FOR
 
 
-def analyse(res, K, bullet_interval_s, fire_end_ts=None, n_bullets=None):
-    dy = np.asarray(res.dy, dtype=float)
-    ts = np.asarray(res.ts, dtype=float)
-    if len(ts) < 2:
-        return None
 
-    # Screen motion is recoil - compensation - hand, all in mouse counts. The
-    # compensation is what we set out to grade, so only the hand has to come
-    # back out; without the Pico reporting it this is a zero vector and the
-    # measurement silently assumes a still hand.
-    human = (np.asarray(res.human_dy, dtype=float) if res.human_dy
-             else np.zeros_like(dy))
 
-    oor = np.asarray(res.out_of_range, dtype=bool)
-    if len(oor) != len(dy):                     # replayed or truncated result
-        oor = np.zeros(len(dy), dtype=bool)
 
-    # Where the view actually ended up, over the WHOLE recording rather than
-    # the burst — post-fire recovery moves it too, and recentring has to undo
-    # the real position, not the analytically interesting part of it.
-    drift = float(np.nansum(np.where(oor, np.nan, dy)) / K)
 
-    # Cut at the last round fired, plus the one bullet interval its own recoil
-    # needs to play out. Every per-frame array is sliced together — slicing
-    # some and not others misaligns the out-of-range mask, and a misaligned
-    # mask fails silently.
-    if fire_end_ts is not None:
-        keep = ts <= fire_end_ts + bullet_interval_s
-        if keep.sum() >= 2:
-            dy, human, ts, oor = dy[keep], human[keep], ts[keep], oor[keep]
 
-    ts = ts - ts[0]
-    counts = dy / K + human
 
-    # Past half a patch the correlation peak wraps, so a frame flagged
-    # out-of-range is not merely imprecise, it is wrong by a whole patch —
-    # 83 counts at K=1.55. Dropping the frame costs only the ~1 count of
-    # residual it carried; keeping it cost 266 counts on a magazine where the
-    # hand moved fast enough to hit the limit three times.
-    counts = np.where(oor, np.nan, counts)
 
-    # How many rounds went out is the magazine's business, not the burst
-    # duration's. Deriving it from the recording's span comes back one or two
-    # short every time — the last round's kick is still playing when the
-    # counter hits zero — and a curve rebuilt from that can never catch up to
-    # the magazine: it grows by a round or two per pass and still reports rounds
-    # firing uncompensated, forever. n_bullets is what the HUD counter said the
-    # magazine held before the first round left it.
-    span_bins = int(ts[-1] / bullet_interval_s) + 1
-    nb = int(n_bullets) if n_bullets else span_bins
-    short = max(0, nb - span_bins)
-    per_bullet = []
-    for b in range(nb):
-        m = (ts >= b * bullet_interval_s) & (ts < (b + 1) * bullet_interval_s)
-        per_bullet.append(float(np.nansum(counts[m])) if m.any() else 0.0)
-    return {
-        'n_frames': len(dy), 'span_s': float(ts[-1]),
-        'cum_px': float(np.nansum(dy)),
-        'cum_counts': float(np.nansum(counts)),
-        'per_bullet_counts': [round(v, 3) for v in per_bullet],
-        'max_abs_frame_px': float(np.nanmax(np.abs(dy))),
-        'n_rejected': int(np.sum(res.n_rejected)),
-        'n_out_of_range': int(np.sum(res.out_of_range)),
-        'n_dropped_oor': int(np.sum(oor)),
-        # Bins the magazine says exist that the recording did not reach. Zero
-        # when healthy. Non-zero means the tail of per_bullet_counts is padding
-        # rather than measurement, and a curve fitted to it would be flat where
-        # the recoil is steepest.
-        'bullets_missing': short,
-        'view_drift_counts': drift,
-        'n_low_gate': int(np.sum(res.gates)),
-        # Net is what was removed from the residual; abs is how much hand
-        # motion happened at all. A small net with a large abs means the hand
-        # wandered and came back — the correction still holds, but the run is
-        # noisier than a still one.
-        'human_counts': float(np.nansum(human)),
-        'human_abs_counts': float(np.nansum(np.abs(human))),
-        'mean_mad': float(np.mean(res.mad)) if res.mad else float('nan'),
-    }
+
+
+
+
+
+
 
 
 def calibrate_combo(rig, weapon, posture, mags, log):
@@ -909,13 +439,27 @@ def calibrate_combo(rig, weapon, posture, mags, log):
                 break
             rig.reaim()
 
-        rec, fire_s, steps, fire_end = rig.fire_magazine()
+        try:
+            rec, fire_s, steps, fire_end, first_shot, _ = rig.fire_magazine()
+        except FocusLost:
+            # The game left the foreground mid-burst. The frames after that
+            # are the frozen picture PUBG leaves behind, so this magazine is
+            # gone -- but the CELL is not: take the foreground back and fire
+            # another one. Before ScreenBuffer's focus_fn there was nothing to
+            # catch: the run kept grabbing the same still image and reported a
+            # suspiciously clean residual.
+            print("      [!] lost the foreground mid-magazine — discarded")
+            if not focus_keeper().ok(f'{weapon}/{posture} mag {i}'):
+                break
+            rig.flush(6)
+            continue
         if steps == 0:
             print(f"      mag {i}: no rounds fired (reload still running?) "
                   f"— skipped")
             time.sleep(1.5)
             continue
-        a = analyse(rec.finish(), rig.K, w.bullet_interval_s, fire_end)
+        a = analyse(rec.finish(), rig.K, w.bullet_interval_s, fire_end,
+                    first_shot_ts=first_shot)
         if a is None:
             continue
         a.update(mag=i, fire_s=round(fire_s, 2), ammo_steps=steps,
@@ -1015,7 +559,8 @@ def main():
         return 1
 
     out = args.out or os.path.join(
-        HERE, f"sweep_{args.sight}_{datetime.now().strftime('%m%d_%H%M')}.jsonl")
+        RUNS, f"sweep_{args.sight}_{datetime.now().strftime('%m%d_%H%M')}.jsonl")
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     done = load_done(out) if args.resume else set()
 
     total = len(weapons) * len(postures)

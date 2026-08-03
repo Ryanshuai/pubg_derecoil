@@ -1,4 +1,6 @@
-"""Cursor placement, clicks and drags on the game's UI screens.
+"""Cursor placement, clicks and drags on the game's UI screens — plus the
+relative moves that aim, which are the same device and nothing like the same
+gesture. See Pointer.move() vs Pointer.move_to().
 
 Placement is always SetCursorPos: the spawner and Tab screens are UI, where
 the game's cursor follows the system cursor. The *button* is a different
@@ -6,20 +8,35 @@ matter — it goes through the Pico as a real HID report, which the game sees
 even under raw input. SendInput is the fallback when no Pico is attached, and
 it is a genuinely worse one; see press/soft_mouse.py.
 
-game_focused() lives here rather than in a detector because it guards every
-one of these calls: driving the mouse while the game is not frontmost types
-into whatever *is* frontmost.
+Focus is not handled here: taking and holding the game window is its own
+closed loop, so it lives in control/focus.py. Call ensure_focus() from there
+before driving anything through this module.
 """
 import ctypes
 import time
 
-import win32gui
-import win32process
-
 _MOUSEEVENTF_LEFTDOWN = 0x0002
 _MOUSEEVENTF_LEFTUP = 0x0004
+_MOUSEEVENTF_RIGHTDOWN = 0x0008
+_MOUSEEVENTF_RIGHTUP = 0x0010
 
 MOVE_WAIT = 0.12       # cursor settle before the button goes down
+
+# A UI click is three waits, and every one of them is on the critical path of
+# every calibration run: the spawner alone fires a dozen per kit.
+#
+# Measured 2026-08-02 (tools/probe_click_speed.py, right-click equips read back
+# off the weapon slot). settle held at 5/5 all the way down to 0, hold_ms down
+# to 10 ms, after down to 0.02 -- but after=0 lands 0/5, because the click is
+# handed to the Pico asynchronously and returning immediately races the CDC
+# write. The values here sit one notch above each measured floor.
+#
+# Only settle and after cost wall clock. pico.click() returns at once and the
+# firmware times the hold itself, so hold_ms buys nothing back -- it is kept
+# short only so `after` can be, without a click returning mid-press.
+CLICK_SETTLE = 0.015   # cursor placed -> button down (was 0.12)
+CLICK_HOLD_MS = 20     # button held down, per click (was 80)
+CLICK_AFTER_S = 0.035  # after the release, before returning (was 0.09)
 
 # ── Drag timings ─────────────────────────────────────────────────────────
 # A drag is press -> travel -> release with the button held the whole way.
@@ -39,217 +56,21 @@ DRAG_DROP_WAIT = 0.25   # after release, before the screen is read back
 DRAG_HOLD_MS = 400      # Pico hold per arm; must exceed DRAG_REARM_S by a lot
 DRAG_REARM_S = 0.15     # so a dropped CDC packet still leaves 250 ms of hold
 
+# ── Getting hold of the device ────────────────────────────────────────────
+PICO_RETRIES = 3         # A brief retry only covers the CDC port still closing
+PICO_RETRY_S = 1.0       # behind a run of this tool. It is deliberately short:
+                         # this Pico is shared with other agents, and a locked
+                         # port usually means one of them is using it right now
+                         # — that is a reason to get out of the way, not to
+                         # wait longer and take it the moment they finish.
+
+
+class NoPico(RuntimeError):
+    """No Pico, so nothing the caller sends would reach the game as raw input."""
+
 
 class _POINT(ctypes.Structure):
     _fields_ = [('x', ctypes.c_long), ('y', ctypes.c_long)]
-
-
-GAME_EXES = ('tslgame',)     # PUBG ships as TslGame.exe
-
-
-def _exe_of(hwnd):
-    try:
-        import psutil
-        _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        return psutil.Process(pid).name().lower()
-    except Exception:
-        return ''
-
-
-def _is_game(hwnd):
-    exe = _exe_of(hwnd)
-    return any(exe.startswith(k) for k in GAME_EXES)
-
-
-def game_focused():
-    """Is PUBG the foreground window?
-
-    Matched on the EXECUTABLE, never the title. The title-based version
-    accepted any window whose caption contained "pubg" — which includes this
-    repository open in an editor, so every focus guard here silently passed
-    while the game sat in the background. That is the exact failure the guards
-    exist to catch.
-    """
-    try:
-        return _is_game(win32gui.GetForegroundWindow())
-    except Exception:
-        return False
-
-
-def game_hwnd():
-    """The game's main window, found by process rather than caption.
-
-    Largest visible window belonging to the game process: PUBG owns several
-    (splash, IME, hidden helpers) and only one of them is the one that takes
-    input."""
-    best, best_area = None, 0
-    def _cb(hwnd, _):
-        nonlocal best, best_area
-        if not win32gui.IsWindowVisible(hwnd) or not _is_game(hwnd):
-            return
-        try:
-            l, t, r, b = win32gui.GetWindowRect(hwnd)
-        except Exception:
-            return
-        area = max(0, r - l) * max(0, b - t)
-        if area > best_area:
-            best, best_area = hwnd, area
-    try:
-        win32gui.EnumWindows(_cb, None)
-    except Exception:
-        return None
-    return best
-
-
-def raise_game(settle_s=0.8):
-    """Put the game window in front. Returns whether it actually got focus.
-
-    Every tool here is launched from a terminal, so at t=0 the terminal owns
-    focus and the game does not — which means the very first `game_focused()`
-    fails and the run aborts before doing anything. The established workaround
-    is a countdown that asks a human to alt-tab (harvest.py --countdown), and
-    that is the reason those runs are not truly unattended.
-
-    Calling this first removes the human from the loop. Windows only lets the
-    current foreground process hand focus away, so SetForegroundWindow can
-    legitimately refuse — hence a bool rather than an exception, and hence the
-    countdown staying as a fallback:
-
-        if not game_focused():
-            raise_game()
-        if not game_focused():
-            ...count down and let a human switch...
-
-    Verifying with game_focused() afterwards is not optional. The call can
-    return without error and still leave the window flashing in the taskbar
-    instead of frontmost — which is exactly what a bare SetForegroundWindow
-    does from here, and it cost a run that reported focused=True on its first
-    line and then could not open the spawner panel.
-    """
-    import win32api
-    import win32con
-    import win32process
-
-    hwnd = game_hwnd()
-    if hwnd is None:
-        return False
-
-    # SetForegroundWindow on its own is refused: Windows only lets the process
-    # that currently owns the foreground hand it over. Attaching our input
-    # queue to the foreground thread borrows that right for the length of the
-    # call, which is the standard way round it and needs no synthetic ALT
-    # keypress — ALT is free-look in this game and would be seen by it.
-    fg = win32gui.GetForegroundWindow()
-    try:
-        fg_tid = win32process.GetWindowThreadProcessId(fg)[0] if fg else 0
-    except Exception:
-        fg_tid = 0
-    my_tid = win32api.GetCurrentThreadId()
-    attached = False
-    try:
-        if fg_tid and fg_tid != my_tid:
-            win32process.AttachThreadInput(fg_tid, my_tid, True)
-            attached = True
-        if win32gui.IsIconic(hwnd):
-            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-        win32gui.BringWindowToTop(hwnd)
-        win32gui.SetForegroundWindow(hwnd)
-    except Exception:
-        pass
-    finally:
-        if attached:
-            try:
-                win32process.AttachThreadInput(fg_tid, my_tid, False)
-            except Exception:
-                pass
-    time.sleep(settle_s)
-    return game_focused()
-
-
-# A run that keeps losing the foreground is not a run worth continuing: some
-# other window is fighting for it, and every keypress in between went there.
-MAX_REGAINS = 5
-
-
-def ensure_focus(countdown_s=0, tries=3, label=''):
-    """Take the foreground, verify it, and only then let the caller proceed.
-
-    This is what makes a run unattended. Every tool here starts from a
-    terminal, so at t=0 the terminal owns the foreground and the game does
-    not — the guard fires and the run aborts having done nothing. The old
-    answer was a countdown asking a human to alt-tab, which is precisely the
-    human the harvest loop is supposed to remove.
-
-    Windows may legitimately refuse to hand focus over, so this retries and
-    then falls back to the countdown rather than pretending. Returns whether
-    the game actually ended up frontmost — never assume it did.
-    """
-    if game_focused():
-        return True
-    for i in range(max(1, tries)):
-        if raise_game():
-            return True
-        time.sleep(0.4)
-    if countdown_s > 0:
-        print(f"    [!] could not take focus{' for ' + label if label else ''}"
-              f" — switch to the game within {countdown_s:.0f}s")
-        for s in range(int(countdown_s), 0, -1):
-            if game_focused():
-                return True
-            print(f"    starting in {s} ...", flush=True)
-            time.sleep(1.0)
-    return game_focused()
-
-
-class FocusKeeper:
-    """Re-takes the foreground mid-run, a bounded number of times.
-
-    Losing focus mid-magazine is usually something else stealing it — an
-    overlay, a notification — and taking it straight back is right. Losing it
-    repeatedly is not: either something is contending, or a human is trying to
-    get out. Both mean stop, so the regains are counted rather than infinite.
-
-    To stop a run by hand, Ctrl-C the terminal. It will take focus back up to
-    MAX_REGAINS times before giving up on its own.
-    """
-
-    def __init__(self, budget=MAX_REGAINS):
-        self.budget = budget
-        self.used = 0
-
-    def ok(self, where=''):
-        if game_focused():
-            return True
-        if self.used >= self.budget:
-            print(f"    [!] focus lost again ({self.used} regains used) — "
-                  f"stopping instead of fighting for it")
-            return False
-        self.used += 1
-        print(f"    [!] lost focus{' at ' + where if where else ''} — "
-              f"taking it back ({self.used}/{self.budget})")
-        # Retried rather than attempted once: focus is most often lost *during*
-        # a screen transition, and for a second or two around one the window is
-        # not raisable at all. A single 0.8 s try lands inside that window and
-        # calls a recoverable blip fatal — which is how leaving the training
-        # range failed one click short of the lobby.
-        if ensure_focus(tries=4):
-            time.sleep(0.4)      # the game swallows the first frames after a
-            return True          # foreground change; do not press into them
-        print("    [!] could not get the foreground back")
-        return False
-
-
-_KEEPER = None
-
-
-def focus_keeper():
-    """Shared across the process, so the regain budget counts a *run* rather
-    than one loop inside it. A tool that lost focus three times in its outer
-    loop should not get five more inside the inner one."""
-    global _KEEPER
-    if _KEEPER is None:
-        _KEEPER = FocusKeeper()
-    return _KEEPER
 
 
 def move_cursor(xy):
@@ -259,7 +80,14 @@ def move_cursor(xy):
 
 
 class Pointer:
-    """Cursor placement + left click + drag."""
+    """Cursor placement, buttons, drags — and relative aiming moves.
+
+    Two different mice live behind one object, and mixing them up is the
+    mistake to avoid: move_to() is the SYSTEM CURSOR, which the UI screens
+    follow, while move() is RAW MOTION, which turns the character's view. The
+    game reads them off separate paths, which is why SendInput is good enough
+    for the first and close to useless for the second.
+    """
 
     def __init__(self, backend='auto'):
         self.pico = None
@@ -282,27 +110,127 @@ class Pointer:
         self.backend = 'pico' if self.pico else 'sendinput'
         print(f'[pointer] click backend = {self.backend}')
 
+    @classmethod
+    def opened(cls, backend='auto', retries=PICO_RETRIES, retry_s=PICO_RETRY_S):
+        """A Pointer with a Pico behind it, retried, and fatal if it never arrives.
+
+        Two separate lessons. The retry: the CDC port stays locked for about a
+        second after a previous run exits, so "busy" arrives as
+        PermissionError and is indistinguishable from "unplugged" — one run
+        died that way seconds after a successful one.
+
+        The refusal: falling back to SendInput used to be a printed warning
+        that the run then sailed straight past, into the operator prompt, ready
+        to spend four minutes producing frames the game never acted on. A
+        degraded backend is not a degraded run here, it is a worthless one, so
+        it takes an explicit --backend sendinput to get it.
+
+        Both lessons are the DEVICE's rather than any one caller's, which is
+        why they live here and not in the tool that learned them: PUBG reads
+        raw HID, so a synthetic right-click or view move is ignored no matter
+        who sent it. Plain Pointer() stays the constructor for callers that
+        genuinely tolerate SendInput — a UI click through SetCursorPos does
+        land — and this is the one for callers that do not.
+        """
+        for i in range(retries):
+            p = cls(backend)
+            if p.pico or backend == 'sendinput':
+                return p
+            if i + 1 < retries:
+                print(f'[pointer] no Pico yet — retrying in {retry_s:g}s '
+                      f'({i + 1}/{retries - 1})', flush=True)
+                time.sleep(retry_s)
+        raise NoPico(
+            f'no Pico after {retries} tries. The game reads raw input, so '
+            f'a SendInput right-click is ignored and every "ads" frame would '
+            f'be hip fire. If the port came back "access denied", something '
+            f'else has it — this Pico is shared, so check whether another '
+            f'agent is mid-run before taking it. Otherwise check the cable, '
+            f'or pass --backend sendinput to capture without it anyway.')
+
     def move_to(self, x, y):
         ctypes.windll.user32.SetCursorPos(int(x), int(y))
+
+    def move(self, dx, dy):
+        """Relative motion — the mouse as an AIMING device, not as a cursor.
+
+        Nothing to do with move_to(). That places the system cursor so a UI
+        click lands on a widget; this rotates the character's view, and the
+        game reads the two off different paths — which is why SetCursorPos is
+        enough for the Tab screen and useless for turning.
+
+        SendInput here is the same bad fallback it is for the button (PUBG
+        takes raw HID for aiming), but it is press/'s bad fallback in ONE
+        place. It used to be a ctypes.windll.user32.mouse_event copied into
+        whichever tool needed to turn the view, which bypassed this whole
+        layer and, worse, used the legacy API rather than the SendInput path
+        in press/soft_mouse.py that carries the 64-bit INPUT alignment fix.
+        """
+        if not dx and not dy:
+            return
+        if self.pico:
+            # The firmware accumulates the delta and drains it at 127/report,
+            # so an arbitrarily large jump is safe to send in one packet.
+            self.pico.move(int(dx), int(dy))
+        else:
+            # Private on purpose: _send_move is the struct that got the
+            # alignment right. Re-deriving it here is how a second copy of
+            # that bug gets born.
+            from press.soft_mouse import _send_move
+            _send_move(int(dx), int(dy))
+
+    def click(self, buttons=0x01, hold_ms=CLICK_HOLD_MS, after=0.0):
+        """Press and release wherever the cursor already is.
+
+        Split out of click_at because not every button press is a UI click.
+        ADS is the case that forced it: the right button toggles the sight,
+        the cursor's position is irrelevant, and placing it first would be a
+        SetCursorPos nobody asked for in the middle of a capture.
+
+        `after` only means anything on the Pico path — see click_at, where the
+        measurement behind it is written down.
+        """
+        if self.pico:
+            self.pico.click(buttons, hold_ms)
+            if after:
+                time.sleep(after)
+        else:
+            down = (_MOUSEEVENTF_RIGHTDOWN if buttons & 0x02
+                    else _MOUSEEVENTF_LEFTDOWN)
+            up = (_MOUSEEVENTF_RIGHTUP if buttons & 0x02
+                  else _MOUSEEVENTF_LEFTUP)
+            ctypes.windll.user32.mouse_event(down, 0, 0, 0, 0)
+            time.sleep(hold_ms / 1000.0)
+            ctypes.windll.user32.mouse_event(up, 0, 0, 0, 0)
 
     def cursor_pos(self):
         pt = _POINT()
         ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
         return pt.x, pt.y
 
-    def click_at(self, x, y, settle=MOVE_WAIT):
+    def click_at(self, x, y, settle=CLICK_SETTLE, buttons=0x01,
+                 hold_ms=CLICK_HOLD_MS, after=CLICK_AFTER_S):
+        """Click at (x, y). buttons=0x02 is the right button.
+
+        Right-click is a real gesture on the Tab screen, not a curiosity: it
+        equips the item under the cursor straight onto the gun, which is one
+        click where a drag is a press-travel-release with a settle at each end.
+        """
         self.move_to(x, y)
         time.sleep(settle)
         got = self.cursor_pos()
         if abs(got[0] - x) > 2 or abs(got[1] - y) > 2:
             print(f'[pointer] warning: cursor landed at {got}, wanted {(x, y)}')
-        if self.pico:
-            self.pico.click(0x01, 80)
-            time.sleep(0.09)
-        else:
-            ctypes.windll.user32.mouse_event(_MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-            time.sleep(0.06)
-            ctypes.windll.user32.mouse_event(_MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        # This is click() plus the placement. The old SendInput branch capped
+        # its hold at 60 ms; no caller has ever passed hold_ms, so at the
+        # 20 ms default the cap never applied and dropping it changes nothing
+        # any measurement here was taken with.
+        self.click(buttons, hold_ms, after=after)
+
+    def right_click_at(self, x, y, **kw):
+        """Right-click — on the Tab screen, "equip this"."""
+        kw.setdefault('buttons', 0x02)
+        return self.click_at(x, y, **kw)
 
     # ── Drag ──
 

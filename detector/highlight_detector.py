@@ -18,6 +18,26 @@ ASSET_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data',
 ICON_H = 53
 _NAME_TO_FILE = {v: k for k, v in WEAPON_ICON_MAP.items()}
 
+# How far _align re-crops the template before matching. 0 means "trust
+# matchTemplate", which already slides the template over the whole crop; each
+# extra step multiplies the matchTemplate calls by (2j+1)^2 x 2 sources — j=2
+# is 50 calls per slot for j=0's 2.
+#
+# Measured on the 254 labelled pairs in training_data/highlight_eval
+# (temp_debug/eval_highlight_jitter.py):
+#
+#     jitter=2   254/254   11.7 ms/pair
+#     jitter=1   254/254    5.9 ms/pair
+#     jitter=0   254/254    3.6 ms/pair
+#
+# Identical accuracy, so it is off by default. It is still wired all the way
+# through — HighlightDetector(state, jitter=2), or raise this constant — for
+# the case the eval set does not cover: a crop that clips the icon at its edge,
+# where re-cropping the template is the only thing that can recover it. That
+# set has no such case (errors_v4/ is empty), which is the only reason to keep
+# the knob rather than delete the loop.
+ALIGN_JITTER = 0
+
 
 def _dewhite(img_bgr):
     bg = cv2.GaussianBlur(img_bgr.astype(np.float32), (31, 31), 10)
@@ -60,7 +80,7 @@ class _TemplateCache:
         return icon_bgr, icon_alpha
 
 
-def _align(crop, tmpl_alpha, jitter=2):
+def _align(crop, tmpl_alpha, jitter=ALIGN_JITTER):
     tmpl_u8 = (tmpl_alpha * 255).astype(np.uint8)
     dw = _dewhite(crop)
     r_ch = crop[:, :, 2]
@@ -98,9 +118,9 @@ def _place(crop_h, crop_w, icon_bgr, icon_alpha, loc):
     return full_bgr, full_alpha
 
 
-def _hypothesis_score(crop, icon_bgr, icon_alpha):
+def _hypothesis_score(crop, icon_bgr, icon_alpha, jitter=ALIGN_JITTER):
     ch, cw = crop.shape[:2]
-    loc = _align(crop, icon_alpha)
+    loc = _align(crop, icon_alpha, jitter)
     full_bgr, full_alpha = _place(ch, cw, icon_bgr, icon_alpha, loc)
     mask = full_alpha > 0.1
     outside = ~mask
@@ -128,17 +148,18 @@ def _hypothesis_score(crop, icon_bgr, icon_alpha):
     return min(diff_wl, diff_rl) - min(diff_wh, diff_rh)
 
 
-def _score(crop, icon_bgr, icon_alpha):
+def _score(crop, icon_bgr, icon_alpha, jitter=ALIGN_JITTER):
     cm = _combined_max(crop)
     if icon_bgr is not None:
-        cm += _hypothesis_score(crop, icon_bgr, icon_alpha)
+        cm += _hypothesis_score(crop, icon_bgr, icon_alpha, jitter)
     return cm
 
 
 class HighlightDetector:
 
-    def __init__(self, state):
+    def __init__(self, state, jitter=ALIGN_JITTER):
         self.state = state
+        self.jitter = jitter
         self._templates = _TemplateCache()
 
     def classify(self, crops):
@@ -158,8 +179,8 @@ class HighlightDetector:
         icon1_bgr, icon1_alpha = self._templates.get(w1_name) if w1_name else (None, None)
         icon2_bgr, icon2_alpha = self._templates.get(w2_name) if w2_name else (None, None)
 
-        s1 = _score(crop1, icon1_bgr, icon1_alpha)
-        s2 = _score(crop2, icon2_bgr, icon2_alpha)
+        s1 = _score(crop1, icon1_bgr, icon1_alpha, self.jitter)
+        s2 = _score(crop2, icon2_bgr, icon2_alpha, self.jitter)
 
         if s1 == s2:
             return 0
