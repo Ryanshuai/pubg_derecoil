@@ -150,3 +150,14 @@ goto-paths = "python tools/report_goto_paths.py"
 # drift is silent (detector/CLAUDE.md's first iron law) and only a
 # compare-against-truth pass sees it.
 snaps = "python tools/test_snapshot.py"
+# The two offline suites that existed with no way to run them. A test nobody
+# invokes rots silently and then reads as coverage, which is worse than not
+# having it -- test_stocktake.py had already been migrated onto
+# control.stock by 5n without anyone being able to see that it still passed.
+stocktake-test = "python tools/test_stocktake.py"
+# The ONLY offline regression for the lobby state machine (detector/CLAUDE.md
+# says so). 8 cases: lobby, training range, Tab open, the exit-confirm dialog,
+# two error overlays, the results screen, and the ESC menu -- that last one
+# because every pixel probe reads a system menu as "in the match" while the
+# keys all go to the menu, which silently voided a whole harvest run.
+lobby-detector = "python tools/verify_lobby_detector.py"
