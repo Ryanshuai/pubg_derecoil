@@ -103,12 +103,18 @@ def shoot_parked(settle=0.10):
 # game. The answer decides whether a same-column category switch costs 1 click
 # or 2, which is docs/refactor_plan.md section 2's whole cost table.
 #
-# WRITTEN BY EVERY goto(), ON BY DEFAULT, AND THAT IS THE DESIGN. Answering
-# this needs a lot of transitions from a lot of prior states, and a dedicated
-# probe would produce a synthetic sample of whatever sequence the probe author
-# thought of. Every calibration run already makes dozens of real ones. So this
-# rides along: one appended line per goto, no caller does anything, and the
-# sample is the traffic the panel actually sees.
+# WRITTEN BY EVERY goto(), ON BY DEFAULT. One appended line per transition, no
+# caller does anything.
+#
+# WHAT IT DOES NOT COVER, stated because the first version of this comment
+# claimed otherwise: give_many() -- the primary path, and the one every
+# calibration run takes -- does NOT go through goto(). It expands through
+# spawn()/_click_await, which has no `path` to record. So the sample here is
+# the RESCUE surface plus deliberate probing, not the panel's whole traffic.
+# The measurement it was built for is done anyway (see docs/game_quirks.md,
+# and the answer turned out to be neither of the two candidates); what remains
+# is a tripwire for that answer changing, and a tripwire on one of two paths is
+# worth what it is worth.
 #
 # Cheap enough to leave on: one open-append-close of ~120 bytes against a
 # transition that costs a click, a screenshot and a poll. Failures are
@@ -492,20 +498,52 @@ class PanelState:
     collapsing again.
     """
 
-    __slots__ = ('open', 'expanded', 'entries', 'why')
+    __slots__ = ('open', 'expanded', 'entries', 'why', 'all')
 
-    def __init__(self, open, expanded, entries, why):
+    def __init__(self, open, expanded, entries, why, all=None):
         self.open = open            # is the spawner panel up at all
-        self.expanded = expanded    # (col, row) or None
+        self.expanded = expanded    # (col, row) of the FIRST one, or None
         self.entries = entries      # submenu entries of `expanded`
         self.why = why              # human-readable, for logs and failures
+        # EVERY expanded node, because there can be more than one. Measured
+        # 2026-08-03: the menu is MULTI-OPEN across columns — expanding
+        # col2_row01 leaves col1_row01 open, 16/16 transitions.
+        #
+        # `expanded` and `entries` stay as the first one for the callers and
+        # the 44-frame regression that predate this; `at()` and `entries_for()`
+        # are the ones that got fixed.
+        self.all = list(all if all is not None else
+                        ([(expanded[0], expanded[1], entries)]
+                         if expanded is not None else []))
 
     @property
     def collapsed(self):
-        return self.open and self.expanded is None
+        return self.open and not self.all
 
     def at(self, col, row):
-        return self.expanded == (col, row)
+        """Is (col,row) expanded? ANY of them, not just the first.
+
+        This used to be `self.expanded == (col, row)`, and with two columns
+        open it answered False for the second one — so goto() concluded its
+        click had failed, collapsed everything, and clicked again. Measured
+        cost before the fix: entering column 2 while column 1 was open took
+        `path='via-root'` and 2 clicks, 8/8, while the reverse direction took
+        1, 8/8. The asymmetry was never about the menu. It was this line
+        reading a list through a single slot.
+        """
+        return any(c == col and r == row for c, r, _ in self.all)
+
+    def entries_for(self, col, row):
+        """That node's submenu entries — not the first node's.
+
+        Same bug, quieter: `entries` belongs to whichever expansion came
+        first, so a caller that opened column 2 and read entries while column
+        1 was also open got column 1's list, with plausible indices.
+        """
+        for c, r, e in self.all:
+            if c == col and r == row:
+                return e
+        return []
 
     def __repr__(self):
         if not self.open:
@@ -859,12 +897,15 @@ class SpawnerControl:
         if not found:
             return PanelState(True, None, [], 'all collapsed')
         if len(found) > 1:
-            # Never seen in 42 ground-truthed frames, but the panel is the
-            # game's to change: say so rather than silently taking the first.
-            self._log(f'{len(found)} columns expanded at once: '
+            # THE NORMAL CASE, measured 2026-08-03 — not the anomaly this
+            # branch was written for. The 42 ground-truthed frames all expand
+            # from a COLLAPSED panel, so none of them could ever have shown
+            # two, and the comment here used to say "never seen" on that
+            # basis. Kept as a debug line, demoted from a warning.
+            self._log(f'{len(found)} expanded at once: '
                       f'{[(c, r) for c, r, _ in found]}')
         col, row, entries = found[0]
-        return PanelState(True, (col, row), entries, 'expanded')
+        return PanelState(True, (col, row), entries, 'expanded', all=found)
 
     # ════════════════════════════════════════════════════════════
     # L1 — transitions. Shortest path from wherever we happen to be.
@@ -909,9 +950,10 @@ class SpawnerControl:
             return {'ok': False, 'clicks': 0, 'path': 'closed', 'from': None,
                     'entries': [], 'error': st.why}
         was = tuple(st.expanded) if st.expanded is not None else None
-        if st.at(col, row) and st.entries:
+        ents = st.entries_for(col, row)
+        if st.at(col, row) and ents:
             return {'ok': True, 'clicks': 0, 'path': 'already', 'from': was,
-                    'entries': st.entries, 'error': None}
+                    'entries': ents, 'error': None}
 
         # Is the measured coordinate for (col,row) still where that row is
         # drawn? It is, unless an expanded submenu ABOVE it in the SAME column
@@ -928,10 +970,11 @@ class SpawnerControl:
         self._click_category(col, row)
         clicks += 1
         st = self._read()
-        if st.at(col, row) and st.entries:
+        ents = st.entries_for(col, row)
+        if st.at(col, row) and ents:
             return {'ok': True, 'clicks': clicks, 'from': was,
                     'path': 'direct' if clicks == 1 else 'closed-blocker',
-                    'entries': st.entries, 'error': None}
+                    'entries': ents, 'error': None}
 
         # Whatever is in the way, the root is a state every coordinate is
         # valid in. One extra collapse beats guessing.
@@ -939,9 +982,10 @@ class SpawnerControl:
         self._click_category(col, row)
         clicks += 1
         st = self._read()
-        if st.at(col, row) and st.entries:
+        ents = st.entries_for(col, row)
+        if st.at(col, row) and ents:
             return {'ok': True, 'clicks': clicks, 'path': 'via-root',
-                    'from': was, 'entries': st.entries, 'error': None}
+                    'from': was, 'entries': ents, 'error': None}
 
         # Twice from a state every coordinate is valid in, and the row still
         # did not open. Either the panel is misbehaving or the MEASURED LAYOUT
@@ -962,14 +1006,15 @@ class SpawnerControl:
                 self._click_category(col, row)
                 clicks += 1
                 st = self._read()
-                if st.at(col, row) and st.entries:
+                ents = st.entries_for(col, row)
+        if st.at(col, row) and ents:
                     self._log('THE PANEL HAS MOVED: recognition works where '
                               'the measured layout does not. Re-run '
                               'tools/scrape_spawner.py and update the '
                               'constants in detector/spawner_layout.py')
                     return {'ok': True, 'clicks': clicks,
                             'path': 'recalibrated', 'from': was,
-                            'entries': st.entries, 'error': None}
+                            'entries': ents, 'error': None}
 
         return {'ok': False, 'clicks': clicks, 'path': 'failed',
                 'from': was, 'entries': [],
@@ -1189,12 +1234,20 @@ class SpawnerControl:
 
         # One look, to confirm the category really opened and that the
         # catalogue still agrees about how many entries it has.
-        st = self._click_await(col, row, lambda s: s.at(col, row) and s.entries)
-        if not (st.at(col, row) and st.entries):
+        st = self._click_await(col, row,
+                               lambda s: s.entries_for(col, row))
+        ents = st.entries_for(col, row)
+        if not ents:
             return f'col{col}_row{row:02d} would not expand ({st!r})'
+        # entries_for, not st.entries. This guard is the thing that stops a
+        # stale layout clicking whatever happens to sit at the old
+        # coordinates, and with two columns open `st.entries` is the FIRST
+        # column's list -- so it would have compared column 1's entry count
+        # against column 2's expectation and refused a perfectly good panel,
+        # or, with matching counts, passed while pointing at the wrong list.
         expect = mv.get('expect')
-        if expect is not None and len(st.entries) != expect:
-            return (f'col{col}_row{row:02d} shows {len(st.entries)} entries, '
+        if expect is not None and len(ents) != expect:
+            return (f'col{col}_row{row:02d} shows {len(ents)} entries, '
                     f'the catalogue says {expect} — indices are stale, '
                     f're-scrape before trusting them')
         return None

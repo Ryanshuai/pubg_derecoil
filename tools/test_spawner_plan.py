@@ -328,25 +328,31 @@ from tools.report_goto_paths import classify
 
 CASES = [
     # A one-click transition from a COLLAPSED panel is not evidence. There was
-    # nothing to close. This is most of the traffic, and counting paths without
-    # separating it out would look like an overwhelming accordion result.
+    # nothing to close. This is most of the traffic.
     ({'to': [1, 1], 'from': None, 'path': 'direct', 'ok': True},
      'from a collapsed panel'),
-    # THE decisive cell: something else was open, one click, and it worked.
-    ({'to': [2, 3], 'from': [2, 1], 'path': 'direct', 'ok': True},
-     'ACCORDION: one click closed the other'),
-    ({'to': [1, 5], 'from': [2, 3], 'path': 'via-root', 'ok': True},
-     'MULTI-OPEN: needed a full collapse'),
-    # Geometry, not menu discipline: an expanded submenu above the target in
-    # the same column pushes its row ~360 px down, out from under the measured
-    # coordinate. Says nothing about whether opening one closes another.
-    ({'to': [2, 4], 'from': [2, 1], 'path': 'closed-blocker', 'ok': True},
-     'blocker above it, same column'),
-    # A transition that failed says nothing about the menu's discipline, and
-    # letting it into the ratio would quietly move the number.
-    ({'to': [1, 5], 'from': [2, 3], 'path': 'failed', 'ok': False}, 'failed'),
+    # THE MEASURED FACT (2026-08-03): the panel keeps ONE expansion per column
+    # and holds them across columns. So asking for a node that is already open
+    # is free, and that is the multi-open payoff rather than an anomaly.
     ({'to': [2, 1], 'from': [2, 1], 'path': 'already', 'ok': True},
-     'already there'),
+     'already open — 0 clicks'),
+    # Same column, target ABOVE the open one: nothing is in the way, 1 click.
+    ({'to': [2, 1], 'from': [2, 5], 'path': 'direct', 'clicks': 1, 'ok': True},
+     'same column, UP: direct (1 clicks)'),
+    # Same column, target BELOW the open one: its submenu pushes the target's
+    # row ~360 px down out from under the measured coordinate. Geometry, and
+    # it costs 2-3 clicks.
+    ({'to': [2, 4], 'from': [2, 1], 'path': 'closed-blocker', 'clicks': 2,
+      'ok': True},
+     'same column, DOWN (open one is above): closed-blocker (2 clicks)'),
+    ({'to': [2, 5], 'from': [2, 1], 'path': 'via-root', 'clicks': 3,
+      'ok': True},
+     'same column, DOWN (open one is above): via-root (3 clicks)'),
+    ({'to': [2, 1], 'from': [1, 1], 'path': 'direct', 'clicks': 1, 'ok': True},
+     'cross-column: direct (1 clicks)'),
+    # A transition that failed says nothing about the menu, and letting it
+    # into the means would quietly move them.
+    ({'to': [1, 5], 'from': [2, 3], 'path': 'failed', 'ok': False}, 'failed'),
 ]
 for row, want in CASES:
     check(f'{row["path"]:14} from {row["from"]}', classify(row), want)

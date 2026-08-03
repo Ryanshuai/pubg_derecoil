@@ -70,25 +70,38 @@ def load(path):
 
 
 def classify(r):
-    """-> the bucket this transition belongs in, for the verdict."""
+    """-> the bucket this transition belongs in, for the verdict.
+
+    THE BUCKETS DESCRIBE WHAT WAS OBSERVED, NOT WHY. They used to be named
+    'ACCORDION' and 'MULTI-OPEN', on the assumption that the menu had to be
+    one or the other. It is neither, and the first real sample said so:
+    the panel keeps BOTH columns open at once, and what a transition costs
+    depends on DIRECTION, not on any accordion discipline. A bucket named
+    after a mechanism would have gone on asserting the wrong one while the
+    counts underneath it were perfectly good.
+
+    So: same-column-up, same-column-down and cross-column are separated,
+    because that is the split the measurements actually landed on.
+    """
     if not r.get('ok'):
         return 'failed'
     src, dst = r.get('from'), r.get('to')
     if r.get('path') == 'already':
-        return 'already there'
+        return 'already open — 0 clicks'
     if src is None:
         return 'from a collapsed panel'          # uninformative by construction
     if list(src) == list(dst or []):
-        return 'already there'
-    if r.get('path') == 'closed-blocker':
-        # Geometry, not menu discipline: a submenu above the target in the
-        # same column pushes its row down out from under the coordinate.
-        return 'blocker above it, same column'
-    if r.get('path') == 'direct':
-        return 'ACCORDION: one click closed the other'
-    if r.get('path') == 'via-root':
-        return 'MULTI-OPEN: needed a full collapse'
-    return f"other ({r.get('path')})"
+        return 'already open — 0 clicks'
+    same_col = dst and src[0] == dst[0]
+    if not same_col:
+        where = 'cross-column'
+    elif src[1] < dst[1]:
+        # The open one is ABOVE the target, so its submenu pushes the target's
+        # row ~360 px down out from under the measured coordinate. Geometry.
+        where = 'same column, DOWN (open one is above)'
+    else:
+        where = 'same column, UP'
+    return f'{where}: {r.get("path")} ({r.get("clicks")} clicks)'
 
 
 def main():
@@ -113,44 +126,37 @@ def main():
     for name, n in buckets.most_common():
         print(f'  {n:5d}  {name}')
 
-    acc = buckets['ACCORDION: one click closed the other']
-    multi = buckets['MULTI-OPEN: needed a full collapse']
-    decisive = acc + multi
-    print(f'\ndecisive transitions (another category was open, and no blocker '
-          f'above the target): {decisive}')
+    # Cost per direction, which is what the cost table in
+    # docs/refactor_plan.md section 2 is actually asking about.
+    # `already` rows are counted apart, NOT folded into a direction. The
+    # target IS the open node, so there is no direction to attribute them to,
+    # and averaging them into both buckets (which an earlier version did)
+    # halves every number by double-counting the same rows twice.
+    already = sum(1 for r in rows if r.get('ok') and r.get('from')
+                  and classify(r) == 'already open — 0 clicks')
+    print(f'\n{already} transitions were free: the target was ALREADY open. '
+          f'That is the multi-open payoff — a column keeps its expansion while '
+          f'you work in another one.')
+    print('\nmean clicks when a move was actually needed:')
+    for where in ('cross-column', 'same column, UP',
+                  'same column, DOWN (open one is above)'):
+        got = [r for r in rows
+               if r.get('ok') and r.get('from') and r.get('path') != 'already'
+               and classify(r).startswith(where)]
+        if not got:
+            print(f'  {where:42} no samples')
+            continue
+        n = len(got)
+        total = sum(r.get('clicks') or 0 for r in got)
+        flag = '' if n >= MIN_DECISIVE else f'   <-- only {n}, thin'
+        print(f'  {where:42} {total / n:4.2f}  (n={n}){flag}')
 
-    if decisive == 0:
-        print('\nNothing decisive yet. Every logged transition either started '
-              'from a collapsed panel or had to close a blocker above the '
-              'target in the same column, and neither answers the question. '
-              'What is missing is a switch BETWEEN categories with one already '
-              'open — give_many() makes those whenever a list spans two '
-              'categories in the same column, so a run that spawns e.g. a '
-              'muzzle and a grip will produce them.')
-        return 0
-    if decisive < MIN_DECISIVE:
-        print(f'\nOnly {decisive} of them — not enough. {acc} say accordion, '
-              f'{multi} say multi-open. Do not write this into '
-              f'detector/spawner_layout.py or the cost table yet; "3 out of 3" '
-              f'is exactly how a wrong constant gets in.')
-        return 0
-
-    if multi == 0:
-        print(f'\nACCORDION, {acc}/{acc}. Opening one category closes the '
-              f'last, so a same-column switch really is 1 click and '
-              f'refactor_plan section 2\'s cost table is achievable. Write it '
-              f'into docs/game_quirks.md with this count.')
-    elif acc == 0:
-        print(f'\nMULTI-OPEN, {multi}/{multi}. Several categories stand open, '
-              f'so a switch genuinely costs the collapse. The cost table\'s '
-              f'"1 click" is not reachable — say so there and stop planning '
-              f'around it.')
-    else:
-        print(f'\nMIXED: {acc} accordion, {multi} multi-open. That is the '
-              f'interesting outcome and it means the menu\'s behaviour depends '
-              f'on something not being recorded here — most likely which '
-              f'column, or whether the two categories share one. Look at the '
-              f'raw rows before concluding anything.')
+    print(f'\nThe question this was built to answer — accordion or '
+          f'multi-open — turned out to be the wrong question. Measured '
+          f'2026-08-03: the panel holds ONE expansion PER COLUMN and keeps '
+          f'them across columns, so cost depends on direction, not on any '
+          f'accordion rule. See docs/game_quirks.md. What this report is for '
+          f'now is noticing when that stops being true.')
     return 0
 
 

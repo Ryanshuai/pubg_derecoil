@@ -32,7 +32,7 @@ docs/fail/
 # Raw telemetry, appended to by every goto(). The CONCLUSION it is for
 # (accordion or not) goes into docs/game_quirks.md by hand once
 # `pixi run goto-paths` has enough decisive rows to say.
-docs/spawner/goto_paths.jsonl
+docs/spawner/goto_paths*.jsonl
 # Same split for every other producer: the run goes, the fitted answer stays.
 # docs/spawner/layout.json and docs/regression_baseline.json are NOT here on
 # purpose -- both are read back as truth by an offline test, so they are source.
