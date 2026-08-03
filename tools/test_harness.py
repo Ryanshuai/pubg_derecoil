@@ -30,7 +30,10 @@ def check(name, got, want):
 
 def good_record(**over):
     """A record that passes every threshold, so each test can spoil one."""
-    rec = {'reached': True, 'mags_kept': 4, 'rate_resid_ms': 3.2,
+    # rate_resid_ms is the spread four real AUG magazines produced (0.24 ms),
+    # not a round number: a fixture that passes only because the threshold is
+    # loose stops noticing when the threshold moves.
+    rec = {'reached': True, 'mags_kept': 4, 'rate_resid_ms': 0.24,
            'rounds': 40, 'impulse_off_rounds': 0.1, 'ads_frac': 0.97,
            'track_alive_frac': 0.8, 'curve': [1, 2, 3]}
     rec.update(over)
@@ -142,6 +145,127 @@ def test_manifest():
               [x for x in os.listdir(d) if x.endswith('.tmp')], [])
 
 
+def a_mag(**over):
+    """One kept magazine, as measure_cell records it."""
+    row = {'per_bullet_counts': [10.0] * 40, 'n_out_of_range': 0,
+           'ads_cross_frac': 0.98, 'measured_interval_ms': 83.0}
+    row.update(over)
+    return row
+
+
+def a_cell(rows, discarded=(), **over):
+    rec = {'mags': list(rows), 'mags_discarded': list(discarded),
+           'mags_asked': 5, 'bullets_fired': 40,
+           'residual_counts_mean': 12.0, 'true_counts': 1900.0}
+    rec.update(over)
+    return rec
+
+
+def test_adapter():
+    """_fill turns a cell record into the harness's numbers.
+
+    Every check here is on a quantity that is WRONG IN A PLAUSIBLE DIRECTION
+    when the code is wrong: a tracking fraction measured over survivors reads
+    high, a rate residual from a two-endpoint fit reads zero, an ADS mean
+    hides one bad magazine behind four good ones. All three pass the verdict
+    gates while being false, which is the only reason they are worth testing.
+    """
+    from harness import adapter
+
+    print('\nadapter — tracking is measured over what was FIRED, not kept')
+    # Four of five magazines thrown away. The one survivor tracked perfectly;
+    # a fraction computed from `mags` alone would say 100%.
+    rec = adapter._fill(adapter._blank({'id': 'aug|standing|red_dot'}),
+                        a_cell([a_mag()], discarded=['tracking'] * 4), 0.0)
+    check('one of five kept, tracker did not hold the rest',
+          round(rec['track_alive_frac'], 2), 0.2)
+    check('  and the survivor count is not the tracking number',
+          rec['mags_kept'], 1)
+
+    # All five kept, one of them half blind.
+    rows = [a_mag() for _ in range(4)] + [a_mag(n_out_of_range=20)]
+    rec = adapter._fill(adapter._blank({'id': 'x'}), a_cell(rows), 0.0)
+    check('out-of-range rounds come off the numerator',
+          round(rec['track_alive_frac'], 2), 0.9)
+
+    print('\nadapter — the rate check is agreement, not a fit residual')
+    rows = [a_mag(measured_interval_ms=83.0), a_mag(measured_interval_ms=83.4)]
+    rec = adapter._fill(adapter._blank({'id': 'x'}), a_cell(rows), 0.0)
+    check('magazines that agree', round(rec['rate_resid_ms'], 2), 0.2)
+    rows = [a_mag(measured_interval_ms=83.0), a_mag(measured_interval_ms=60.0)]
+    rec = adapter._fill(adapter._blank({'id': 'x'}), a_cell(rows), 0.0)
+    check('a missed last change reads as a faster gun',
+          round(rec['rate_resid_ms'], 1), 11.5)
+    check('  and that fails the rate gate',
+          judge(dict(rec, mags_kept=4, reached=True))['why'], 'rate')
+    # THE point of the whole field. One magazine has nothing to disagree with,
+    # and 0.0 would sail through the gate having checked nothing.
+    rec = adapter._fill(adapter._blank({'id': 'x'}), a_cell([a_mag()]), 0.0)
+    check('one magazine cannot agree with itself', rec['rate_resid_ms'], None)
+    check('  so it fails closed rather than passing at 0.0',
+          judge(dict(rec, mags_kept=4, reached=True))['why'], 'rate')
+
+    print('\nadapter — ADS is the worst accepted magazine, not the mean')
+    rows = [a_mag() for _ in range(4)] + [a_mag(ads_cross_frac=0.40)]
+    rec = adapter._fill(adapter._blank({'id': 'x'}), a_cell(rows), 0.0)
+    check('one hip-fired magazine is not averaged away',
+          rec['ads_frac'], 0.40)
+    check('  and it fails the ads gate',
+          judge(dict(rec, mags_kept=4, reached=True,
+                     rate_resid_ms=0.2))['why'], 'ads')
+
+    print('\nadapter — a crash is a cell, not the end of the night')
+    # The first real run died here: a KeyError inside one cell took the
+    # process, and with it every cell that had not run yet. The loop catches
+    # it now; this pins that a caught crash is still a FAILURE, and routed
+    # somewhere different from "the game would not cooperate".
+    crashed = {'reached': False, 'crashed': True,
+               'reached_why': "KeyError: (slice(123, 168), slice(2275, 2525))"}
+    check('a crash does not pass', judge(crashed)['usable'], False)
+    check('and is not filed as a game-state problem',
+          judge(crashed)['why'], 'crash')
+    check('the traceback reaches the verdict detail',
+          'KeyError' in judge(crashed)['detail'], True)
+    from harness.verdict import PROBE_FOR
+    check('every verdict reason routes somewhere',
+          [w for w in ('crash', 'state', 'mags', 'rate', 'impulse', 'ads',
+                       'tracking') if w not in PROBE_FOR], [])
+
+    print('\nadapter — an unreached cell claims nothing')
+    rec = adapter._blank({'id': 'aug|standing|red_dot'})
+    check('every field present', sorted(rec) != [], True)
+    check('nothing is missing rather than None',
+          [k for k in adapter.RECORD_FIELDS if k not in rec], [])
+    check('and it judges as state', judge(rec)['why'], 'state')
+
+    print('\nadapter — the rate threshold has one meaning, in two places')
+    # harness/verdict.py may not import calibration (only adapter.py may), so
+    # the number is written twice. This is what keeps the copies honest: a
+    # change to either is a failing test rather than two layers quietly
+    # disagreeing about what a good fire rate is.
+    from calibration.rpm_store import AGREE_MS
+    from harness.verdict import RATE_RESID_MS_MAX
+    check('verdict and rpm_store agree on the tolerance',
+          RATE_RESID_MS_MAX, AGREE_MS)
+
+    # Same story for ADS, and the same reason it is written twice. This one
+    # was NOT equal for a while: verdict held 0.90 against analysis's 0.80,
+    # which is not a second opinion, it is the same opinion with a harsher
+    # number nobody derived. It threw away an akm cell that was clean on every
+    # other axis, twice, at 0.897 and 0.898.
+    from calibration.analysis import ADS_FRAC_MIN as MEASURED_MIN
+    from harness.verdict import ADS_FRAC_MIN as JUDGED_MIN
+    check('verdict and analysis agree on the ADS floor',
+          JUDGED_MIN, MEASURED_MIN)
+
+    print('\nadapter — ragged magazines are truncated, not padded')
+    rows = [a_mag(per_bullet_counts=[10.0] * 40),
+            a_mag(per_bullet_counts=[10.0] * 12)]
+    rec = adapter._fill(adapter._blank({'id': 'x'}), a_cell(rows), 0.0)
+    check('the curve is as long as the shortest magazine',
+          len(rec['curve']), 12)
+
+
 def main():
     try:
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -149,6 +273,7 @@ def main():
         pass
     test_verdict()
     test_manifest()
+    test_adapter()
     if FAILS:
         print(f'\n{len(FAILS)} failed:')
         for f in FAILS:

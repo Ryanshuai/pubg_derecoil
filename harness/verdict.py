@@ -25,7 +25,6 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from calibration.rpm_store import RESID_MS_MAX      # noqa: E402
 
 # ── thresholds ──
 #
@@ -36,10 +35,31 @@ from calibration.rpm_store import RESID_MS_MAX      # noqa: E402
 # slack this allows on top of a result that measured exactly zero twice.
 IMPULSE_OFF_MAX = 0.5           # rounds
 
-# MEASURED. Instrumenting the two ADS signals separately over five magazines:
-# the crosshair agreed 96% of polls, the posture icon 48%. The gate is now
-# crosshair-led; this is the canary on that decision, not a new claim.
-ADS_FRAC_MIN = 0.90
+# DERIVED FROM THE FAILURE MODE, and the same number the measurement layer
+# uses (calibration/analysis.ADS_FRAC_MIN). Hip fire is what this is for: the
+# posture icon stops rendering, the burst is analysed with the scoped K of 1.55
+# against the hip's 0.50, and a confident +498 counts comes back on a weapon
+# that measured -31 an hour earlier. That is a ~3x error, nowhere near 90%.
+#
+# It was 0.90, and 0.90 was wrong in a way worth keeping written down. The
+# comment justifying it said "the crosshair agreed 96% of polls, the posture
+# icon 48% -- this is the canary on that decision", which describes a check on
+# the GAP between the two signals. What was implemented was a floor on the
+# crosshair's absolute level, set just under one weapon's happy number from one
+# session. It is not a canary, and it is not independent: `ads_frac` here and
+# the `ads_frac` magazine_fault gates are the same crosshair-led quantity, so
+# every magazine reaching this function already passed 0.80.
+#
+# It cost a good cell within the hour: the akm measured 0.897 and then 0.898 on
+# two full attempts, with 5/5 magazines kept, rate spread 0.19 ms, tracking 99%
+# and the impulse dead on. Twice rejected for two tenths of a point.
+#
+# Kept here rather than deleted as redundant, and kept at the SAME value: this
+# layer has to judge a record even if the measurement layer's gate is changed,
+# bypassed, or the record came from somewhere else. Defence in depth with the
+# same derived number is honest; a stricter arbitrary one is a second opinion
+# nobody derived. tools/test_harness.py asserts the two stay equal.
+ADS_FRAC_MIN = 0.80
 
 # NOT a target -- a floor under a known defect. Phase-correlation tracking is
 # lost after 3-4 magazines of 5 ("the reference match has wrapped"), so half of
@@ -51,10 +71,32 @@ TRACK_ALIVE_MIN = 0.50
 # tracker eats one or two, so three is what is left on a good night.
 MAGS_MIN = 3
 
-# The fire rate is measured per magazine from two endpoints; RESID_MS_MAX is
-# the same constant rpm_store accepts a rate at, imported rather than retyped
-# so the two cannot drift into disagreeing about what a good fit is.
-RATE_RESID_MS_MAX = RESID_MS_MAX
+# DERIVED, then checked against real magazines.
+#
+# What is measured is not a fit residual -- interval_from_span uses the two
+# endpoints of the magazine, so its residual is ZERO BY CONSTRUCTION and a
+# gate on it would pass everything. What the harness measures instead is
+# DISAGREEMENT BETWEEN MAGAZINES, which is what that function's own docstring
+# asks the caller to require: "a missed LAST change shortens the span and
+# reads as a faster gun ... it shows up as a rate that disagrees between
+# magazines of the same cell".
+#
+# The threshold follows from what an interval error DOES. It is not an offset,
+# it compounds: round k lands k*d/T bullets late for an interval error of d.
+# Over a 42-round magazine at T=83 ms, d = 1.0 ms puts the last round
+# 41*1.0/83 = 0.49 bullets off -- which is IMPULSE_OFF_MAX, deliberately, so
+# the two timing gates allow the same error at the same place rather than
+# each allowing its own.
+#
+# Measured for scale: four AUG magazines fired 2026-08-03 read 83.08, 82.93,
+# 82.73 and 83.39 ms -- a spread of 0.24 ms, four times inside this.
+#
+# This used to import rpm_store.RESID_MS_MAX (12.0) "so the two cannot drift".
+# They are not the same quantity: that one bounds a straight-line fit through
+# per-round counter transitions located to ~25 ms, and borrowing it let 11.5 ms
+# of disagreement -- 5.5 bullets of phase by the end of the magazine -- pass as
+# a good cell. Caught by tools/test_harness.py the hour the check was written.
+RATE_RESID_MS_MAX = 1.0
 
 OK = 'ok'
 
@@ -73,6 +115,16 @@ def judge(rec):
 
     def bad(why, detail):
         return {'usable': False, 'why': why, 'detail': detail, 'metrics': m}
+
+    # 0. The code broke, as opposed to the game not cooperating. Routed apart
+    #    from `state` because the two send a human to completely different
+    #    places: `state` means the game did something the driver did not
+    #    expect, `crash` means this repo has a bug and the traceback says
+    #    where. Merging them would have filed the night's first failure -- a
+    #    KeyError from indexing a dict of crops with a pair of slices -- as
+    #    "the weapon would not spawn".
+    if rec.get('crashed'):
+        return bad('crash', rec.get('reached_why') or 'exception')
 
     # 1. Did the cell ever reach the configuration it is labelled with? A
     #    weapon that never got into the rack, a sight that never went on, a
@@ -94,10 +146,10 @@ def judge(rec):
     #    fitted.
     resid = rec.get('rate_resid_ms')
     if resid is None:
-        return bad('rate', 'rate_resid_ms missing')
+        return bad('rate', rec.get('rate_note') or 'rate_resid_ms missing')
     if resid > RATE_RESID_MS_MAX:
-        return bad('rate', f'fire-rate fit residual {resid:.1f} ms > '
-                           f'{RATE_RESID_MS_MAX:.0f}')
+        return bad('rate', f'the magazines disagree about the fire rate by '
+                           f'{resid:.2f} ms, over {RATE_RESID_MS_MAX:.1f}')
 
     # 4. THE out-of-loop check, and the reason the other three are not enough.
     #    A run can satisfy every check above and still be measuring on a grid
@@ -139,6 +191,8 @@ def judge(rec):
 # routing lives next to the thresholds that produce it rather than in prose
 # somewhere that can fall out of step.
 PROBE_FOR = {
+    'crash':    'this repo has a bug — the traceback is in the evidence '
+                'directory, state.json. Not a game problem.',
     'state':    'the cell never reached its configuration — control/, not '
                 'measurement. Read the evidence frame first.',
     'mags':     'tools/probe_ammo_during_fire.py — magazines were discarded, '

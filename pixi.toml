@@ -161,3 +161,9 @@ stocktake-test = "python tools/test_stocktake.py"
 # because every pixel probe reads a system menu as "in the match" while the
 # keys all go to the menu, which silently voided a whole harvest run.
 lobby-detector = "python tools/verify_lobby_detector.py"
+# What the game says right now, photographed. Reads, never drives — opens the
+# Tab screen and closes it. Needs the game. The frame lands BEFORE any key is
+# pressed, which is the whole design: "the Tab screen would not open" is a
+# sentence about the screen, and the first version discarded the screen to
+# say it. Same code path harness/adapter.dump uses at 04:00.
+dump-state = "python tools/dump_state.py"
