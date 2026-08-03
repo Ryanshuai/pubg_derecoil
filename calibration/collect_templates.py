@@ -20,16 +20,31 @@ frame already grabbed is free, so all four come from the same pass.
 GROUND TRUTH IS SELF-SPECIFIED, AND NO TEMPLATE ESTABLISHES IT — the items
 worth collecting are exactly the ones no template can name. Spawning the host
 weapon evicts the old gun to the floor with its attachments, so it arrives bare
-and 库存 does not grow round over round; parts then spawn into 库存, which
-fills from the top with no gaps, so row N holds a known item. Fitting drags
-bottom row first (pulling row i out shifts only rows below it) and is verified
-by two independent facts: the slot's pixels changed and gained detail, AND 库存
-lost exactly one row. Both are Laplacian/difference tests.
+and 库存 does not grow round over round.
+
+WHICH ROW HOLDS WHICH PART IS AN ANSWER, NOT AN ASSUMPTION. It used to be
+assumed: "库存 fills from the top with no gaps, so row N holds a known item."
+The count is right and is still used; the ORDER is not. The game sorts that
+list its own way, and the first real run of this collector spawned angled_grip,
+brake_ar, cheek_pad, ext_ar, holo into rows holding holo, cheek_pad, ext_ar,
+brake_ar and a grip — 228 crops, every label on the wrong one.
+
+So the rows are photographed UNLABELLED, and then each is RIGHT-CLICKED, which
+hands it to the game to place. The slot that gains an icon names the part,
+because a round's parts want different slots and the catalogue says which. The
+row is learned on the way past. Two independent facts still confirm it and
+neither reads a template: exactly one slot went from empty to drawn, AND 库存
+lost exactly one row. Scenery can move pixels; it cannot take a row out of a
+list.
+
+Right-click and not a drag: 库存 -> gun measured 0 landings out of 4 by drag
+against 4/4 by right click (docs/game_quirks.md, control/CLAUDE.md). The old
+version dragged, so no part was ever fitted and every `slots` capture came back
+empty.
 
 A retry only happens when nothing changed at all — the one case where the
-source row is provably still the source row. A drag with any other effect ends
-the round, because a second drag would fit whatever slid into that row and
-mislabel every crop after it.
+source row is provably still the source row. Any other effect ends the round,
+because a second click would equip whatever slid into that row.
 
 Turning happens with Tab CLOSED: with it open the mouse drives a cursor, not
 the view, and every capture comes back identical.
@@ -47,10 +62,11 @@ manifest.
 WHICH LABELS ARE GROUND TRUTH, AND WHY THIS FILE HAS THE STRONGEST CLAIM IN
 THE REPOSITORY — see label_for(). Short version: `slots` and `rows` are
 LABEL_REQUESTED because the identity travels an addressing chain (spawner
-coordinate -> 库存 row -> slot) whose every hop is confirmed WITHOUT A
-TEMPLATE, which is exactly what makes it non-circular for the templates being
-collected. `plate` and `type` get no label at all, and the reasons are in
-label_for() too.
+coordinate -> 库存 -> the slot the game chose) whose every hop is confirmed
+WITHOUT A TEMPLATE, which is exactly what makes it non-circular for the
+templates being collected. `plate` is LABEL_REQUESTED only when a weapon was
+watched ARRIVING on a cleared rack; `type` gets no label at all. Both reasons
+are in label_for().
 """
 import argparse
 import os
@@ -71,14 +87,15 @@ from detector.attachment_catalog import (ATTACHMENTS, ROSTER, SLOTS, fits,
                                          is_live)
 from detector.cropper import win32_cap
 from detector.tab_detector import TabTypeDetector
-from detector.attachment_detector import SLOT_DETAIL_MIN
+from detector.attachment_detector import SLOT_DETAIL_MIN, SLOT_NAMES
 from detector.tab_items import ROW_DETAIL_MIN, tab_blocks
 from detector.tab_layout import INV_ROWS, icon_box
 from control.focus import ensure_focus, focus_keeper
 
 from control.spawner import SpawnerControl
-from control.inventory import InventoryControl, at_inv, at_slot
+from control.inventory import InventoryControl, at_inv
 from harvest import BACKPACK
+from range_session import get_session
 from sweep import Rig
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -293,7 +310,7 @@ def label_for(target, key, slot, by, arrived=False):
                         gaining Laplacian detail AND 库存 losing exactly one
                         row — two facts that cannot both be faked by scenery
 
-    Which is why fit_one() must stay hand-rolled rather than call
+    Which is why fit_row() must stay hand-rolled rather than call
     InventoryControl.ensure_kit: ensure_kit verifies by matching the part's
     ICON TEMPLATE, and a part with no template yet would read as "cannot be
     proven". Running that here would throw away every capture of exactly the
@@ -334,6 +351,14 @@ def label_for(target, key, slot, by, arrived=False):
     reading by the one detector no template can taint, which is precisely what
     --as-is exists to supply. `by: operator` keeps it distinguishable.
     """
+    # No key, no label — never a label that names nothing. The rows pass
+    # photographs 库存 BEFORE anything is fitted, which is the only moment the
+    # parts are visible and also the moment nobody knows which row is which,
+    # so it writes key=None and relabel() fills it in afterwards. Without this
+    # guard those crops would land carrying `asset: None` as REQUESTED ground
+    # truth: a claim to know, attached to the one thing not yet known.
+    if not key:
+        return []
     if target == 'slots':
         return [{'slot': slot, 'asset': key, 'source': LABEL_REQUESTED,
                  'by': by}]
@@ -463,100 +488,273 @@ class Collector:
             print(f'    [!] the spawner would not produce {weapon}')
             ok = False
         for k in (keys if ok else []):
+            if self.sc.give_attachment(k)['ok']:
+                continue
+            # One re-read and one more try, the way control/stock.restock
+            # handles the same thing: the usual cause is the accordion, a
+            # category refusing to expand because a different one is, and a
+            # fresh sync clears it. Without this a single stuck panel cost the
+            # rest of the round's parts -- the loop used to break on the first
+            # refusal.
+            print(f'    [!] the spawner would not produce {k} — re-reading '
+                  f'the layout and retrying once')
+            self.sc.menu = None
+            self.sc.sync(need_cols=(1, 2))
             if not self.sc.give_attachment(k)['ok']:
-                print(f'    [!] the spawner would not produce {k}')
-                ok = False
-                break
+                print(f'    [!] {k} still would not spawn — carrying on '
+                      f'without it')
         self.sc.ensure_panel(False)
         time.sleep(SPAWN_SETTLE_S)
         return ok
 
     def rows_of(self, keys):
-        """{row: key} for the parts loose in 库存, or None if the count is off.
+        """WHICH ROWS this round's parts occupy — not which part is in which.
 
-        Spawn order is row order: the list fills from the top with no gaps, so
-        these are the last len(keys) occupied rows.
+        -> [row, ...], or None if the count says something did not spawn.
+
+        It used to return {row: key}, on the reasoning that "spawn order is row
+        order: the list fills from the top with no gaps". The count part is
+        true and is still used. The ORDER part is false: the game sorts 库存 by
+        its own rule, and the first real run of this collector spawned
+        angled_grip, brake_ar, cheek_pad, ext_ar, holo into rows holding holo,
+        cheek_pad, ext_ar, brake_ar and a grip. Every one of 228 row crops was
+        labelled with the wrong part.
+
+        Which row holds which part is now an OUTPUT, of fit(): the game is
+        asked to place each one and the slot it fills names it.
         """
         n = inv_rows(self.frame())
         base = n - len(keys)
         if base < 0:
+            # A shortfall no longer costs the round. It used to: fewer rows
+            # than parts meant the row->key mapping could not be built, so all
+            # of them were dropped. That mapping is not built here any more --
+            # fit() discovers it -- so the rows that ARE there can be
+            # photographed and named, and whichever key never turns up in the
+            # result is the one that did not spawn, identified by elimination
+            # and without reading a template.
+            #
+            # Seen twice on live runs (a round asking for 5 and finding 4, and
+            # tools/probe_autofit.py's condition C). The cause is still open:
+            # NOT auto-fitting onto the gun, which that probe ruled out.
             print(f'    [!] 库存 shows {n} rows for {len(keys)} parts — '
-                  f'something did not spawn. Skipping rather than mislabelling.')
-            return None
+                  f'{len(keys) - n} did not spawn. Collecting the {n} that '
+                  f'did; the missing one names itself when the fits come back.')
+            base = 0
         if base:
             print(f'    ({base} row(s) already in 库存; parts are {base}..{n-1})')
-        return {base + i: k for i, k in enumerate(keys)}
+        return list(range(base, n))
 
     # ── fitting ──
 
-    def fit(self, rows):
-        """Drag every part out of 库存 onto its slot. {key: record}.
+    def fit(self, rows, keys):
+        """Equip every part in 库存 and learn what each row held. -> (map, recs)
 
-        Bottom row first: pulling row i out shifts only the rows below it, so
-        descending order leaves every queued source where it was.
+        `map` is {row: key}, DISCOVERED. `rows` only says which row indices
+        hold this round's parts; `keys` is the set that was spawned. The
+        pairing between them is what this works out, by right-clicking a row
+        and seeing which slot the game filled — the catalogue then names the
+        part, because a round's parts occupy different slots.
+
+        That direction is the whole change. It used to take {row: key} as an
+        INPUT, built on "spawn order is row order", and the first real run
+        showed the game sorts 库存 its own way: round 1 spawned angled_grip,
+        brake_ar, cheek_pad, ext_ar, holo and the rows held holo, cheek_pad,
+        ext_ar, brake_ar, grip. Every label went on the wrong crop.
+
+        Bottom row first: taking row i out shifts only the rows below it, so a
+        descending pass leaves every queued source where it was.
         """
-        out = {}
+        # THE SCREEN FIRST. fit() is called straight after the rows sweep, and
+        # every background in that sweep goes through turn(), whose first line
+        # is ensure_inventory_closed() -- with Tab open the mouse drives a
+        # cursor, not the view. So the panel is SHUT on the way in here, and
+        # hold() will not open it either: it restores Tab only when Tab was
+        # already up (`was_open`).
+        #
+        # Without this the right click lands in the WORLD, where it means
+        # aim-down-sights: the whole picture is redrawn, all five slot crops
+        # change at once, and inv_rows reads scenery. Measured exactly that,
+        # every round of every run -- "5 slot(s) gained an icon, rows 12->0".
+        # The old drag-based version had the same hole; it just also had the
+        # 0/4 gesture on top, so this one never got a chance to show.
+        # tools/probe_fit_smoke.py prints the Tab state at each step.
+        if not self.tab():
+            print('    [!] the inventory would not open for fitting')
+            return {}, {}
+
+        # In hand, once for the round. The 2x2 in docs/game_quirks.md says the
+        # right click lands 5/5 whether or not the gun is held, so this is not
+        # what makes it work -- but that was measured with ONE gun in the rack,
+        # and which weapon an unheld right-click chooses when there are two has
+        # never been tested. A round here can have a leftover in the other
+        # slot. Holding removes the question for the price of one Tab cycle.
+        self.ac.held = None
+        # hold() closes Tab to press the number and reopens it, because it saw
+        # it open. That ordering matters: the tab() above is what makes
+        # `was_open` true.
+        if not self.ac.hold(self.gun):
+            print(f'    [!] could not take gun{self.gun} in hand — a right '
+                  f'click may equip onto the other rack slot')
+
+        want = {}
+        for k in keys:
+            want.setdefault(ATTACHMENTS[k]['slot'], []).append(k)
+        found, recs = {}, {}
         for row in sorted(rows, reverse=True):
-            key = rows[row]
-            out[key] = rec = self.fit_one(row, key)
-            print(f'    row{row:2d} -> {ATTACHMENTS[key]["slot"]:<9}{key:<16}'
-                  + ('ok' if rec['ok'] else f'FAILED — {rec["error"]}'))
+            rec = self.fit_row(row)
+            key = None
+            if rec['ok']:
+                here = want.get(rec['slot']) or []
+                if len(here) == 1:
+                    key = here[0]
+                    found[row] = key
+                else:
+                    # Two parts of this round want the same slot, so the slot
+                    # cannot name which one landed. Not an error and not a
+                    # label: the crop is kept, unlabelled, and plan_rounds is
+                    # what should stop this happening.
+                    rec['error'] = (f'{len(here)} of this round\'s parts are '
+                                    f'{rec["slot"]}s ({", ".join(here)}) — the '
+                                    f'slot cannot say which one this was')
+            recs[row] = rec
+            print(f'    row{row:2d} -> '
+                  + (f'{rec["slot"]:<9}{key or "(ambiguous)":<16}ok'
+                     if key else f'FAILED — {rec["error"]}'))
             if rec['fatal']:
                 break
-        return out
+        return found, recs
 
-    def fit_one(self, row, key, tries=2):
-        """One drag, verified by pixels and by the row count.
+    def relabel(self, shots, found):
+        """Attach the discovered row->key mapping to captures already taken.
 
-        Two independent facts on purpose: the slot's crop changed and gained
-        detail, and 库存 lost exactly one row. Either alone can be argued with
-        — scenery moves, and a part can land on the floor — together they
-        cannot.
+        The rows pass photographs 库存 before anything is fitted, which is the
+        only moment the parts are there to photograph — and the moment nobody
+        yet knows which row is which. So those entries go down with the row
+        recorded and no label, and this fills them in once the fits have said.
 
-        DELIBERATELY NOT InventoryControl.ensure_kit, and this is the one
-        fitting loop in the repo that must stay hand-rolled. ensure_kit
-        verifies a slot by matching the part's ICON TEMPLATE — and this file
-        exists to COLLECT that template. Using it here is circular: a part
-        with no template yet reads as "cannot be proven", so every capture of
-        a new attachment would be thrown away for lacking the very thing it is
-        being run to produce. Pixels and the row count need no template.
+        A row the fits could not name keeps NO label rather than a guess. That
+        is the same rule as everywhere else here: an unlabelled crop is still
+        useful to a human, a wrongly labelled one poisons the template it is
+        used to fit.
         """
-        slot = ATTACHMENTS[key]['slot']
-        rec = {'slot': slot, 'row': row, 'ok': False, 'error': None,
-               'fatal': False}
-        for attempt in range(tries):
+        n = 0
+        for s in shots:
+            if s.get('target') != 'rows':
+                continue
+            key = found.get(s.get('row'))
+            if key is None:
+                continue
+            s['key'] = key
+            s['capture_key'] = key
+            s['labels'] = label_for('rows', key, None, self.by)
+            s['ok'] = bool(s.get('read')) and s['read'] == key
+            n += 1
+        if n:
+            print(f'    labelled {n} row crop(s) from what the fits revealed')
+
+    def slot_crops(self, frame):
+        """{slot: crop} for every attachment slot, copied.
+
+        Copied because the caller holds them across another grab, and the
+        grabber reuses its buffers.
+        """
+        return {s: self.crop(frame, s).copy() for s in SLOT_NAMES}
+
+    def fit_row(self, row, tries=2):
+        """RIGHT-CLICK one 库存 row and report WHICH SLOT it filled.
+
+        -> {'slot', 'row', 'ok', ...}. `slot` is the answer, not the argument.
+
+        THE GESTURE. This was a drag from the row to a slot chosen from the
+        catalogue, and docs/game_quirks.md has that exact direction measured at
+        **0 landings out of 4**, against 4/4 for the right click. control/
+        CLAUDE.md states it as a rule -- 装用右键、卸用拖拽. The collector was
+        using the one gesture the repo had already recorded as not working, so
+        no part was ever fitted and the `slots` half of every run came back
+        empty. That is not a subtle failure and it survived because this file
+        had never been run.
+
+        THE DIRECTION OF IDENTITY. Right-clicking hands the part to the GAME,
+        which puts it in the slot it belongs in -- and the catalogue says each
+        of a round's parts wants a different slot. So the slot that gains an
+        icon names the part, and the row it came from is learned rather than
+        assumed. That kills the assumption underneath the old version, which
+        was that 库存 fills in spawn order: it does not, the game sorts it, and
+        every label in the first real run was attached to the wrong crop.
+
+        Still verified by two independent facts, and still with no template
+        consulted: a slot gained detail, AND 库存 lost exactly one row.
+        Scenery can move pixels; it cannot take a row out of the list.
+
+        DELIBERATELY NOT InventoryControl.ensure_kit, which is the one reason
+        this loop stays hand-rolled: ensure_kit proves a slot by matching the
+        part's ICON TEMPLATE, and this file exists to COLLECT that template. A
+        part with no template yet would read as "cannot be proven", throwing
+        away every capture of exactly the attachment the run was started for.
+        """
+        rec = {'slot': None, 'row': row, 'ok': False, 'error': None,
+               'fatal': False, 'change': 0.0, 'detail': 0.0}
+        for _ in range(tries):
             f0 = self.frame()
-            before, n0 = self.crop(f0, slot).copy(), inv_rows(f0)
-            # verify=False, not a reach into ac.pointer. Same gesture, but the
-            # address vocabulary and _reject() still apply -- a drag onto a
-            # slot this gun does not have is refused before the mouse moves,
-            # and the raw-pointer version had no idea such a thing existed.
-            self.ac.drag(at_inv(row), at_slot(self.gun, slot), verify=False)
+            before, n0 = self.slot_crops(f0), inv_rows(f0)
+            # auto_equip, not equip: equip() takes a destination slot and
+            # refuses without one, and the destination is precisely what is
+            # being asked. The game places it; which slot lit up is the answer.
+            if not self.ac.auto_equip(at_inv(row)):
+                rec['error'] = f'row {row} is not a clickable source'
+                rec['fatal'] = True
+                return rec
 
             deadline = time.perf_counter() + FIT_TIMEOUT_S
             while True:
                 f1 = self.frame(flush=2)
-                after, n1 = self.crop(f1, slot), inv_rows(f1)
-                rec.update(change=change(before, after), detail=detail(after))
-                rec['ok'] = (rec['change'] >= CHANGE_MIN
-                             and rec['detail'] >= SLOT_DETAIL_MIN
-                             and n1 == n0 - 1)
-                if rec['ok'] or time.perf_counter() >= deadline:
+                after, n1 = self.slot_crops(f1), inv_rows(f1)
+                # The slot whose picture CHANGED — not the one that crossed a
+                # detail threshold. SLOT_DETAIL_MIN answers "is UI drawn in
+                # this cell", and a gun in the rack draws every slot it owns
+                # whether or not anything is in it: measured, an EMPTY muzzle
+                # slot scores 728 against a floor of 100
+                # (tools/probe_autofit.py). A gained-detail test therefore
+                # never fires, and the first version of this method would have
+                # failed every fit. CHANGE_MIN is the number that was measured
+                # for this question: an icon landing in a 63x63 slot moves most
+                # pixels most of the way, and scenery with the player standing
+                # still moves nothing.
+                moved = {s: change(before[s], after[s]) for s in SLOT_NAMES}
+                gained = [s for s in SLOT_NAMES if moved[s] >= CHANGE_MIN]
+                # Recorded on EVERY pass, not only on success. It used to be
+                # written just inside the `ok` branch, so a failure reported
+                # `change=0.0` -- which reads as "nothing moved" and is in fact
+                # "nobody wrote the number down". The message underneath then
+                # asserted that cause out loud. Same shape as the two other
+                # messages this repo has had to correct for naming a reason
+                # they had not checked.
+                rec.update(moved={s: round(v, 1) for s, v in moved.items()},
+                           rows=(n0, n1))
+                if len(gained) == 1 and n1 == n0 - 1:
+                    rec.update(slot=gained[0], ok=True,
+                               change=moved[gained[0]],
+                               detail=detail(after[gained[0]]))
+                    return rec
+                if time.perf_counter() >= deadline:
                     break
                 time.sleep(FIT_POLL_S)
-            if rec['ok']:
-                return rec
-            # Retrying is safe only while the screen is exactly as it was: then
-            # the part never left and `row` still points at it. If anything
-            # moved, a second drag would pick up whatever slid into that row.
-            if n1 != n0 or rec['change'] >= CHANGE_MIN:
-                rec['error'] = (f'had an effect but not the expected one '
-                                f'(change={rec["change"]:.1f} '
-                                f'detail={rec["detail"]:.0f} rows {n0}->{n1})')
+
+            if n1 != n0 or len(gained) > 1:
+                rec['error'] = (
+                    f'had an effect but not a nameable one — '
+                    f'{len(gained)} slot(s) gained an icon ({gained}), '
+                    f'rows {n0}->{n1}. Two slots filling at once means the '
+                    f'part cannot be told from the one beside it.')
                 rec['fatal'] = True
                 return rec
-        rec['error'] = (f'nothing moved (change={rec["change"]:.1f} '
-                        f'detail={rec["detail"]:.0f})')
+        rec['error'] = (
+            f'no single slot changed enough to name — per-slot movement '
+            f'{rec.get("moved")}, threshold {CHANGE_MIN}, rows '
+            f'{rec.get("rows")}. Says WHAT was measured rather than asserting '
+            f'why: "the click did nothing" and "it swapped a part for one that '
+            f'looks the same" are the same picture.')
         return rec
 
     # ── capturing ──
@@ -611,14 +809,18 @@ class Collector:
 
         if 'rows' in self.targets and rows:
             found = self.ac.look(frame).inventory
-            for row, key in rows.items():
+            for row in rows:
                 x0, y0, x1, y1 = icon_box(row, 'inventory')
                 item = found[row] if row < len(found) else None
+                # No key in the name and no label: at this moment nobody knows
+                # which part sits in this row, and the game's own sort is why.
+                # relabel() fills both in once the fits have said. The row and
+                # the round are in the name so it can find them again.
                 shots.append(self._shot(
                     frame[y0:y1, x0:x1],
-                    f'{key}__row{row:02d}__{wname}__{tag}.png',
-                    'rows', key, (y0, x0, y1 - y0, x1 - x0),
-                    (item.key or '') if item else '', self._has(key), row=row))
+                    f'row{row:02d}__{wname}__{tag}.png',
+                    'rows', None, (y0, x0, y1 - y0, x1 - x0),
+                    (item.key or '') if item else '', False, row=row))
 
         if 'plate' in self.targets and weapon:
             name = f'gun_name_{self.gun}'
@@ -727,15 +929,28 @@ class Collector:
                 return None
         shots = []
         if fit:
-            # 库存 holds the parts only until they are fitted, so a rows pass
+            # 库存 holds the parts only until they are fitted, so the rows pass
             # has to happen now. The yaw keeps advancing across both passes, so
             # the second sees different scenery rather than repeating this.
+            #
+            # These crops go down with NO label. Which row held which part is
+            # not known yet and cannot be guessed -- the game sorts 库存 its own
+            # way. The fits below discover it, and relabel() then attaches the
+            # labels to captures already on disk.
             if 'rows' in self.targets:
                 shots += self.sweep(weapon, [], rows, angles, n, 'l')
-            done = self.fit(rows)
-            # Only what provably landed is photographed; a crop of nothing
-            # labelled as a part is worse than no crop.
-            keys = [k for k in keys if done.get(k, {}).get('ok')]
+            found, _ = self.fit(rows, keys)
+            self.relabel(shots, found)
+            # Only what provably landed is photographed in the slots pass; a
+            # crop of nothing labelled as a part is worse than no crop.
+            missed = [k for k in keys if k not in found.values()]
+            if missed:
+                # By elimination, and without a template: these are the parts
+                # the fits never produced, so either they never spawned or the
+                # right click did not land them. Named so a later run can ask
+                # for exactly these with --keys.
+                print(f'    not collected this round: {", ".join(missed)}')
+            keys = [k for k in keys if k in found.values()]
             rows = {}
         return shots + self.sweep(weapon, keys, rows, angles, n, 'f')
 
@@ -918,11 +1133,33 @@ def main():
                     InventoryControl(verbose=False), args.gun, run, targets,
                     by='operator' if args.as_is else 'spawn')
 
+    # The training range evicts at 20 minutes and a full collection runs far
+    # longer than that -- 12 rounds x 6 backgrounds x 2 passes, or 30 weapons.
+    # Without this the run is thrown into the lobby somewhere in the middle and
+    # every round after it photographs a menu, or dies on a spawner that will
+    # not open. harvest re-enters between weapons for the same reason; this is
+    # the same call at the same granularity.
+    #
+    # Re-entry is a RESTART: the rack and the backpack come back empty, so the
+    # round after one has to spawn its own parts again. `backpack` below is
+    # already keyed off "does this round have parts", so a re-entered round
+    # asks for the backpack too rather than dropping its parts on the floor.
+    session = get_session('auto')
+
     shots = []
     try:
         for i, (weapon, ks, fit) in enumerate(rounds, 1):
+            ok, re_entered = session.ensure()
+            if not ok:
+                print('[!] could not get back into the training range — '
+                      'stopping rather than photographing a lobby')
+                break
+            if re_entered:
+                print('    re-entered the range — the rack and pack are empty '
+                      'again')
             got = col.round(weapon, ks, fit, args.angles, i,
-                            spawn=not args.as_is, backpack=i == 1 and bool(ks))
+                            spawn=not args.as_is,
+                            backpack=(i == 1 or re_entered) and bool(ks))
             if got is None:
                 print(f'    [!] round {i} produced nothing; carrying on')
                 continue
@@ -940,6 +1177,10 @@ def main():
         run.save()
         col.close()
         rig.close()
+        try:
+            session.close()
+        except Exception:
+            pass
     return 0
 
 

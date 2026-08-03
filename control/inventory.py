@@ -1195,6 +1195,42 @@ class InventoryControl:
         """Drop whatever is at `src` on the floor. Works from a slot too."""
         return self.drag(src, at_ground(), retries=retries)
 
+    def auto_equip(self, src):
+        """Right-click `src` and let the GAME choose the slot. -> True if sent.
+
+        A different action from equip(), not a convenience over it: equip()
+        takes a destination and refuses without one, because it is checking
+        that a named part reaches a named slot. Here the destination is the
+        ANSWER — the caller is asking the game where this part belongs.
+
+        The one caller is calibration/collect_templates.py, and its reason is
+        the reason this cannot be equip(): it is photographing parts whose
+        templates do not exist yet, so it cannot name what it is holding, and
+        naming a slot for it would mean trusting the row order. The game knows
+        both. Right-clicking gets the part placed, and WHICH SLOT LIT UP then
+        identifies the part, via the catalogue, with no template read.
+
+        Verification is the caller's, deliberately: what counts as "it landed"
+        differs by what the caller already knows, and the only check available
+        here would be an icon-template match — exactly what that caller must
+        not depend on.
+
+        Right-click and not a drag, because 库存 -> gun measured 0 landings out
+        of 4 by drag against 4/4 by right click (docs/game_quirks.md). The
+        weapon must be IN HAND for the click to reach it; see hold().
+        """
+        loc = as_loc(src)
+        if loc[0] not in PANEL_KINDS or len(loc) < 2 or loc[1] is None:
+            # A panel with no row is a RELEASE point, not a thing to click,
+            # and a slot or a gun is not a source for this. Named rather than
+            # attempted: point_of() would happily hand back the panel's drop
+            # point and the click would land on nothing.
+            self._log(f'auto_equip needs a specific 库存/附近 row, not {loc!r}')
+            return False
+        x, y = self.point_of(loc)
+        self.pointer.right_click_at(x, y)
+        return True
+
     def drop_weapon(self, gun, retries=1, gesture='auto'):
         """Throw the gun in rack slot `gun` on the floor, WEARING its parts.
 

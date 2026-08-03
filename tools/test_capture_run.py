@@ -415,6 +415,15 @@ def t_label_for():
     check('the band brackets every occupied sample seen',
           PLATE_INK_MIN < 679 and 901 < PLATE_INK_MAX)
 
+    # A row photographed before anything was fitted has no key yet -- the game
+    # sorts 库存 its own way, so which row holds which part is not known until
+    # the fits reveal it. A label naming nothing is worse than no label: it
+    # claims ground truth for the one thing still unknown.
+    print('\ncollect_templates: a crop with no key gets no label')
+    for target in ('slots', 'rows', 'plate'):
+        check(f'{target} with key=None',
+              label_for(target, None, 'grip', 'spawn', arrived=True) == [])
+
 
 def main():
     tmp = tempfile.mkdtemp(prefix='capture_run_test_')
