@@ -35,6 +35,7 @@ class Dispatcher:
         self._pending = deque()  # (target_ts, detect_entry)
         self._running = False
         self._thread = None
+        self._shut_done = False
         # Both share the detector registry by reference: register() mutates
         # the dict in place, so detectors added later are visible to them too.
         self.mismatch = MismatchCollector(state, capture, self._detectors)
@@ -94,7 +95,7 @@ class Dispatcher:
         """Process a single KeyEvent: actions + schedule detections."""
         # Shutdown
         if ev.key == 'f13' and ev.event == 'press':
-            self._shutdown()
+            self.shutdown()
             self._running = False
             return
 
@@ -217,7 +218,7 @@ class Dispatcher:
                     else:
                         m.upload_pattern(w.dx_s, w.dy_s, w.t_s, w.bullet_interval_s)
                 elif action == 'shutdown':
-                    self._shutdown()
+                    self.shutdown()
                     self._running = False
             except Exception as e:
                 print(f"[hw] {action}: {e}", flush=True)
@@ -301,15 +302,32 @@ class Dispatcher:
     # Shutdown
     # ════════════════════════════════════════════════════════════
 
-    def _shutdown(self):
+    def shutdown(self):
+        """Disarm the firmware and persist. Call this, not just stop().
+
+        stop() only clears the flag; the loop keeps running until it notices.
+        Reset the hardware before that and the next pass re-arms it, which is
+        why robot.py joins the thread first.
+
+        Idempotent because two paths land here: the f13 key and process exit.
+        Whichever runs second must not repeat the save or re-report it.
+
+        The disarm is not allowed to fail quietly. One Pico that stays armed
+        after this process is gone keeps compensating for a gun nobody is
+        holding, and three agents share this one serial port -- the next run
+        would measure that instead of the recoil it fired.
+        """
+        if self._shut_done:
+            return
+        self._shut_done = True
         try:
             m = get_mouse()
             m.set_recoil_enabled(False)
             m.clear_pattern()
             m.set_aim_mode(False)
             m.set_delta(0, 0)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[shutdown] !! FIRMWARE STILL ARMED: {e}", flush=True)
         self.tab.close()          # releases the two on-demand GDI grabbers
         Weapon.save_scales()
         print("[shutdown] scales saved", flush=True)

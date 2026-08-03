@@ -81,11 +81,6 @@ DROP_XY = {
 INV_X0, INV_X1, INV_ICON_X = PANELS['inventory']
 NEARBY_X0, NEARBY_X1, NEARBY_ICON_X = PANELS['nearby']
 
-INV_Y_FIRST = ROW_Y_FIRST       # back-compat aliases
-INV_PITCH = ROW_PITCH
-INV_ROW_H = ROW_H
-INV_ICON_W = ICON_W
-
 # Scroll bar, for detecting that a list has more rows than are shown.
 INV_SCROLL_X = 897
 
@@ -360,7 +355,7 @@ _assert_on_screen()
 if __name__ == '__main__':
     print(f'inventory rows (x={INV_ICON_X}):')
     for i in range(INV_ROWS):
-        print(f'  row{i:2d}  y={inv_row_y(i):4d}  box={inv_row_box(i)}')
+        print(f'  row{i:2d}  y={row_y(i):4d}  box={row_box(i)}')
     print('\nattachment slots:')
     for name in sorted(ATT_SLOT_XY):
         print(f'  {name:16s} {ATT_SLOT_XY[name]}')

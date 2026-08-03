@@ -34,6 +34,7 @@ import win32gui
 import win32process
 
 from config import RECOIL_PATCH
+from control.focus import game_focused
 from detector.cropper import make_grabber
 from detector.view_tracker import ViewTracker, MagazineRecorder
 from press.pico_mouse import get_mouse
@@ -52,11 +53,21 @@ SETTLE_S = 0.45         # pause between trials (and after the reset move)
 ADS_SETTLE_S = 0.40     # time for the scope-in animation before measuring
 
 
-GAME_HINTS = ('battlegrounds', 'pubg', 'tslgame')
-
-
 def foreground_name():
-    """Window title + exe of whatever currently has focus, ascii-safe."""
+    """Window title + exe of whatever currently has focus, ascii-safe.
+
+    Diagnostics only -- what to print when the guard says no. The guard
+    itself is control.focus.game_focused(). This file used to decide with
+    `any(k in (title+exe).lower() for k in ('battlegrounds','pubg','tslgame'))`
+    and the repository is called pubg_derecoil, so an editor or a terminal
+    showing the path answered yes. The docstring below it read "without this
+    check a whole run silently reads zero -- which is exactly what happened
+    once", and the check was the thing that was broken.
+
+    That matters most here of all: K is the counts-to-degrees map every
+    recoil curve is scaled by, and an unfocused run measures zero motion
+    while reporting focused=True.
+    """
     hwnd = win32gui.GetForegroundWindow()
     try:
         title = win32gui.GetWindowText(hwnd)
@@ -71,13 +82,6 @@ def foreground_name():
         pass
     safe = title.encode('ascii', 'backslashreplace').decode('ascii')
     return safe, exe
-
-
-def game_focused():
-    """The game only acts on mouse input while focused. Without this check a
-    whole run silently reads zero — which is exactly what happened once."""
-    title, exe = foreground_name()
-    return any(k in (title + exe).lower() for k in GAME_HINTS)
 
 
 def _inject(mouse, counts, n_steps, duration, t_start, log):

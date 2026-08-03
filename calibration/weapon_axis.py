@@ -172,8 +172,13 @@ def finish_pair(rig, ac):
     return drops
 
 
-def spawn_pair(panel, sc, pair):
+def spawn_pair(sc, pair):
     """Both guns, one panel visit, ONE click each.
+
+    The `panel` parameter went with the Panel class in 5f. The body never
+    read it, so nothing here broke -- but the call site kept passing a name
+    that no longer exists in that scope, and every batch raised NameError on
+    its first spawn.
 
     weapon_times=1 -- the default, and stated anyway because it is load-
     bearing here: the rack has two slots and this fills both, so a second
@@ -290,7 +295,7 @@ def main():
             # the ext_ar and vert_grip that were spawned for it, but leftovers
             # the backpack happened to still hold. The cell was labelled with
             # what was asked for and measured something else.
-            if not spawn_pair(panel, sc, pair):
+            if not spawn_pair(sc, pair):
                 continue
             # Onto the plain extended magazine, then read back what the game
             # actually put on both guns. One Tab session for both. The two

@@ -17,7 +17,6 @@ except (AttributeError, OSError):
 import torch
 
 from detector.game_state import GameState
-from detector.weapon import Weapon
 from detector.weapon_dl_detector import WeaponClassifier
 from detector.fire_mode_detector import FireModeDetector
 from detector.posture_detector import PostureDetector
@@ -56,11 +55,21 @@ class Robot:
         print("init done", flush=True)
 
     def shutdown(self):
+        """Stop the threads, THEN disarm.
+
+        This used to be stop() plus save_scales(), and stop() only clears a
+        flag -- so every exit that was not the f13 key (Ctrl-C, an exception,
+        join() returning) left the firmware compensating and the pattern
+        loaded. Dispatcher.shutdown() is where the hardware reset lives; the
+        join() in between is what stops the loop from re-arming it.
+
+        It also saves the scales, so this no longer does.
+        """
         self.poller.stop()
         self.capture.stop()
         self.dispatcher.stop()
-        Weapon.save_scales()
-        print("[shutdown] scales saved", flush=True)
+        self.dispatcher.join()
+        self.dispatcher.shutdown()
 
 
 if __name__ == '__main__':
