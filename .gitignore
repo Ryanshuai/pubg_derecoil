@@ -60,5 +60,29 @@ pico_firmware/.vscode
 human_detection/test/
 human_detection/*.pt
 *.png
+# ...except the verification assets. detector/CLAUDE.md names these as the
+# reference shots, and docs/regression_baseline.json -- which IS in git --
+# scores 5 of its 52 frames against them. The other 47 live under
+# docs/spawner/runs/ and stay out as run product, so a fresh clone can only
+# reproduce those 5. tools/regression_check.py says so rather than quietly
+# grading whatever it happens to find.
+# Named one by one, not docs/*.png: that would also drag in the diagnostic
+# renders next to them (_right_panel, ocr_template_montage, gun_name_live_masks,
+# tab_gun1_row) and tab_full_check.png, which is a composite, not a capture --
+# it was once labelled "Tab open" and became the only false negative in the
+# tab-open regression. Product, by the same split as everything above.
+!docs/tab_inventory.png
+!docs/tab_inventory_2.png
+!docs/tab_layout.png
+!docs/tab_live_aug_vss.png
+!docs/training_epuipment.png
 
 docs/ads/runs/
+
+# Ground-truth crops. These are FIXTURES, not run product: `pixi run snaps`
+# asserts detector output against them, and a fresh clone that has the sidecar
+# but not the image reports "no ground-truth crops on disk" and passes with
+# nothing checked. Silent degradation of exactly the kind the labels exist to
+# stop, so they are forced back in.
+!docs/tab/truth/
+!docs/tab/truth/**
