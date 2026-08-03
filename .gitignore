@@ -18,6 +18,9 @@ training_data
 InGameScreenshot
 docs
 
+# RT-DETR/YOLO weights, 189 MB each. Downloaded or trained, never edited.
+human_detection/*.pt
+
 # Checkpoints nothing loads. train.py writes all four; only two are ever read
 # back -- fire_mode.pth.tar and gun_name.pth.tar, by their detectors. These
 # two have no reader at all: detector/tab_detector.py decides on pixels and

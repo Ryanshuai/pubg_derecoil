@@ -1,0 +1,43 @@
+#!/bin/sh
+# Refuse to add a file bigger than LIMIT.
+#
+# WHY A HOOK AND NOT A .gitignore RULE. .gitignore already said *.png, and
+# 15 MB of full-screen captures went in anyway (b2c3fb7) because whoever was
+# adding them wrote themselves an `!docs/tab_inventory.png` exception and a
+# paragraph of justification to go with it. A pattern list stops the slip; it
+# does not stop a considered mistake. temp_image/ is the same story from the
+# other end -- the rule was added later and the 7.6 GB already in history was
+# never taken out.
+#
+# So the check is on SIZE, which no argument about what a file means can get
+# around, and it fires at the moment of the commit rather than in a review
+# nobody runs.
+#
+# ADDED files only. Changing something already tracked is fine: gun_name.pth.tar
+# is 6 MB and retraining it is a legitimate commit. What must not happen is a
+# NEW blob of that size arriving without anyone deciding to.
+#
+# Deliberate exceptions: `git commit --no-verify`. That is a visible action
+# taken by a person, which is the whole difference from a justification typed
+# into a commit message.
+
+LIMIT=$((2 * 1024 * 1024))
+
+big=$(git diff --cached --name-only --diff-filter=A -z |
+      while IFS= read -r -d '' f; do
+        oid=$(git rev-parse ":$f" 2>/dev/null) || continue
+        size=$(git cat-file -s "$oid" 2>/dev/null) || continue
+        if [ "$size" -gt "$LIMIT" ]; then
+          printf '  %8.1f MB  %s\n' "$(echo "$size" | awk '{print $1/1048576}')" "$f"
+        fi
+      done)
+
+if [ -n "$big" ]; then
+  echo "pre-commit: refusing new files over $((LIMIT / 1024 / 1024)) MB"
+  echo ""
+  echo "$big"
+  echo ""
+  echo "  Measurements, captures and run output live on disk, not in git --"
+  echo "  see .gitignore. If this really is source, commit with --no-verify."
+  exit 1
+fi
