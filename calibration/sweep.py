@@ -40,8 +40,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import cv2
 import numpy as np
-import win32gui
-import win32process
 
 from config import (HUD_REGIONS, RECOIL_SIGHT_PROFILES,
                     RECOIL_K_DEFAULT_SCOPED, SCREEN_W, SCREEN_H)
@@ -83,7 +81,7 @@ from control.focus import (game_focused, raise_game, ensure_focus,  # noqa: E402
 # they are "point the view", "get the character into a known state" and "empty
 # a magazine and report what the game said", which is why they are in control/
 # and this file only decides WHICH cells to measure.
-from control.aim import ViewDriver, PROBE_COUNTS, BAND_STEP, CLAMP_SETTLE_S
+from control.aim import ViewDriver, PROBE_COUNTS, BAND_STEP
 from control.gun import GunDriver
 from control.fire import FireDriver, MAX_FIRE_S  # noqa: F401  (tools import it)
 

@@ -75,7 +75,7 @@ import numpy as np
 from detector.attachment_detector import (AttachmentDetector, SLOT_NAMES,
                                           OFFSET_Y, OFFSET_X, MSE_EMPTY_TH)
 from detector.attachment_catalog import ATTACHMENTS, compatible
-from detector.tab_layout import (PANELS, INV_ROWS, ICON_W, icon_box, row_point,
+from detector.tab_layout import (PANELS, INV_ROWS, icon_box, row_point,
                                  ATT_SLOT_XY)
 from config import HUD_REGIONS, SCREEN_W, SCREEN_H
 

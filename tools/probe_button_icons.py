@@ -6,7 +6,6 @@ carries the scene through and only its shape survives. Three screenshots with
 different scenes behind the same buttons answer it directly.
 """
 import os
-import sys
 
 import cv2
 import numpy as np

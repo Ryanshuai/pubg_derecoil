@@ -21,7 +21,6 @@ import re
 import sys
 
 import cv2
-import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)

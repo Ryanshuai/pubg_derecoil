@@ -32,10 +32,10 @@ try:
 except (AttributeError, OSError):
     pass
 
-from control.inventory import InventoryControl, at_inv
+from control.inventory import InventoryControl
 from control.focus import ensure_focus
 from control.spawner import SpawnerControl
-from press.pico_mouse import HID_KEY_TAB, get_mouse
+from press.pico_mouse import get_mouse
 
 GUN = 'm416'
 # Two DIFFERENT muzzles, alternated. Fitting the same part twice cannot be

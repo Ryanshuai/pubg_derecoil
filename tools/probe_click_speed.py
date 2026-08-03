@@ -32,7 +32,7 @@ except (AttributeError, OSError):
 from control.inventory import InventoryControl
 from control.focus import ensure_focus, focus_keeper
 from control.spawner import SpawnerControl
-from press.pico_mouse import HID_KEY_TAB, get_mouse
+from press.pico_mouse import get_mouse
 
 PART = 'comp_ar'
 SLOT = 'muzzle'

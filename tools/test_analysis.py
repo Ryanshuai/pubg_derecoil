@@ -21,7 +21,6 @@ Two kinds of check here:
 """
 import glob
 import json
-import math
 import os
 import sys
 
@@ -35,7 +34,6 @@ try:
 except (AttributeError, OSError):
     pass
 
-import numpy as np
 
 from analysis import (analyse, fit_interval, interval_from_span,
                       magazine_fault)

@@ -28,7 +28,7 @@ from control.inventory import InventoryControl
 from control.focus import ensure_focus
 from control.lobby import LobbyControl
 from control.spawner import SpawnerControl
-from press.pico_mouse import HID_KEY_TAB, get_mouse
+from press.pico_mouse import get_mouse
 
 PART = 'comp_ar'
 WAITS = [0.30, 0.15, 0.08, 0.04, 0.0]

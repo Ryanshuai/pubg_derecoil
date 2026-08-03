@@ -46,7 +46,7 @@ import cv2
 import numpy as np
 
 from config import (RECOIL_PATCH, RECOIL_PATCH_H, RECOIL_PATCH_XS,
-                    RECOIL_BAND_Y, SCREEN_H, SCREEN_W)
+                    RECOIL_BAND_Y, SCREEN_W)
 from detector.view_tracker import ViewTracker
 
 K = 1.5474          # red dot, measured

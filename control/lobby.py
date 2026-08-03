@@ -69,7 +69,7 @@ from detector.lobby_nav import (SAFE_MODE, SUB_TABS, confident, read_mode,
                                 read_page, tab_xy)
 from detector.cropper import capture_screen
 from press.pointer import Pointer, move_cursor
-from control.focus import game_focused, ensure_focus, focus_keeper
+from control.focus import ensure_focus, focus_keeper
 
 POLL = 0.5              # how often the screen is sampled
 

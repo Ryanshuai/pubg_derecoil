@@ -38,7 +38,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import cv2
-import numpy as np
 
 from config import (RECOIL_PATCH, RECOIL_PATCH_H, RECOIL_PATCH_XS,
                     RECOIL_BAND_Y)

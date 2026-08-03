@@ -45,7 +45,7 @@ import numpy as np
 
 from config import (TAB_SLOT_FILLED_EDGES, TAB_SLOT_NO_TILE,
                     TAB_SLOT_PRESENT_MIN, TAB_SLOT_RING_HALF,
-                    TAB_SLOT_RING_PAD, TAB_SLOT_TILE, TAB_SLOT_TILE_OFF)
+                    TAB_SLOT_RING_PAD)
 from config import HUD_REGIONS
 from detector.tab_layout import slot_tile_box, SLOT_NAMES
 

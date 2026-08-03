@@ -25,7 +25,6 @@ from detector.geometry import segments
 from detector.spawner_layout import (find_menu, bright_mask,
                                      PANEL_Y0, PANEL_Y1, MIN_COL_PIX, COL_GAP)
 from control.focus import ensure_focus
-from press.pico_mouse import get_mouse
 
 from control.spawner import SpawnerControl, shoot_parked
 
