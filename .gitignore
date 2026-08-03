@@ -7,82 +7,20 @@ __pycache__
 *.xml
 *.iml
 *.jpg
+*.png
 *.jpeg
 *.log
 *.webm
 *.mp4
 *.mkv
 temp_debug
-training_data/pubg_assets/Item
+training_data
 InGameScreenshot
-training_data/Manual
-# Everything this repo has MEASURED lives under docs/; calibration/ is source
-# only. No rule here covers calibration/ on purpose -- a run that lands next to
-# its script should turn git status dirty, because that is the bug.
-#
-# The bulk of a measurement stays out of git. The small fitted facts do not:
-# docs/recoil/weapon_rpm.json, docs/pitch/pitch_range.json,
-# docs/compat/kit_facts.json and docs/ballistics/ are each a few hundred bytes
-# and are the answer, not the raw data.
-docs/recoil/curves/
-docs/recoil/curves_legacy/
-docs/recoil/runs/
-docs/k/
-docs/fail/
-# Raw telemetry, appended to by every goto(). The CONCLUSION it is for
-# (accordion or not) goes into docs/game_quirks.md by hand once
-# `pixi run goto-paths` has enough decisive rows to say.
-docs/spawner/goto_paths*.jsonl
-# Same split for every other producer: the run goes, the fitted answer stays.
-# docs/spawner/layout.json and docs/regression_baseline.json are NOT here on
-# purpose -- both are read back as truth by an offline test, so they are source.
-docs/runs/
-docs/spawner/runs/
-docs/spawner/hover/
-docs/tab/runs/
-docs/compat/runs/
-docs/lobby/runs/
-docs/ammo_fire/
-docs/impulse/
-docs/kick/
-docs/gun_grab/
-docs/kit_checks/
-docs/shots/
-docs/.refactor_plan.bak.md
+docs
+
 
 .claude/settings.local.json
-# pixi env lives in the repo; the lock file is source, the env is not
 .pixi/
-training_data/human_detection
-training_data/highlight_eval
 
 pico_firmware/.vscode
-human_detection/test/
-human_detection/*.pt
-*.png
-# ...except the verification assets. detector/CLAUDE.md names these as the
-# reference shots, and docs/regression_baseline.json -- which IS in git --
-# scores 5 of its 52 frames against them. The other 47 live under
-# docs/spawner/runs/ and stay out as run product, so a fresh clone can only
-# reproduce those 5. tools/regression_check.py says so rather than quietly
-# grading whatever it happens to find.
-# Named one by one, not docs/*.png: that would also drag in the diagnostic
-# renders next to them (_right_panel, ocr_template_montage, gun_name_live_masks,
-# tab_gun1_row) and tab_full_check.png, which is a composite, not a capture --
-# it was once labelled "Tab open" and became the only false negative in the
-# tab-open regression. Product, by the same split as everything above.
-!docs/tab_inventory.png
-!docs/tab_inventory_2.png
-!docs/tab_layout.png
-!docs/tab_live_aug_vss.png
-!docs/training_epuipment.png
 
-docs/ads/runs/
-
-# Ground-truth crops. These are FIXTURES, not run product: `pixi run snaps`
-# asserts detector output against them, and a fresh clone that has the sidecar
-# but not the image reports "no ground-truth crops on disk" and passes with
-# nothing checked. Silent degradation of exactly the kind the labels exist to
-# stop, so they are forced back in.
-!docs/tab/truth/
-!docs/tab/truth/**

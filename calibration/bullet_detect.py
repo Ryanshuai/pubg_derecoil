@@ -49,10 +49,23 @@ class Updater:
         self.detect_diff = detect_bullet(im)
 
     def determine(self):
-        with open(DISTANCE_PATH, "r") as f:
-            self.distance_dict = json.load(f)
-        with open(TIME_PATH, "r") as f:
-            self.time_dict = json.load(f)
+        # Both live under docs/, which is measurement rather than source and
+        # is not in git. A fresh clone therefore has neither, and saying so is
+        # the whole handling this needs: they are built by firing at the range
+        # and there is no default worth inventing. The two are loaded together
+        # because time_dict is the divisor of the EMA that distance_dict feeds,
+        # so half a pair is worse than none.
+        try:
+            with open(DISTANCE_PATH, encoding='utf-8') as f:
+                self.distance_dict = json.load(f)
+            with open(TIME_PATH, encoding='utf-8') as f:
+                self.time_dict = json.load(f)
+        except (OSError, ValueError) as e:
+            raise SystemExit(
+                f'no ballistics table yet ({e}).\n'
+                f'  expected: {DISTANCE_PATH}\n'
+                f'            {TIME_PATH}\n'
+                f'  These are measured, not shipped -- docs/ is not in git.')
 
         original_distance = np.array(self.distance_dict[self.gun_name])
         l = max([50, len(self.detect_diff), len(original_distance)])
