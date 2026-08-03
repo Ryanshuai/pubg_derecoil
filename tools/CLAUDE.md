@@ -20,7 +20,7 @@
 
 | 你想做 | 别自己写 | 用这个 |
 |---|---|---|
-| 抢游戏焦点 | `SetForegroundWindow` / 按窗口**标题**判游戏 | `control.focus.ensure_focus(countdown_s=6)`，之后 `time.sleep(0.6)`；跑到一半用 `focus_keeper().ok('mag 3')` |
+| 抢游戏焦点 | `SetForegroundWindow` / 按窗口**标题**判游戏 / 后面补一个 `time.sleep(0.6)` | `control.focus.ensure_focus(countdown_s=6)`——**它自己会 settle**；跑到一半用 `focus_keeper().ok('mag 3')` |
 | 开/关 Tab | `mouse.key(HID_KEY_TAB, 60)` + `sleep` + 截图 | `InventoryControl.ensure_tab(want)` / `with ac.tab_up():` |
 | 开/关刷新器面板 | `mouse.key(HID_KEY_COMMA, 60)` + `sleep` | `SpawnerControl.ensure_panel(want)` / `panel_open()` |
 | 判「Tab 开没开」 | 自己数亮像素 / 自己算 luma | `detector.tab_detector.TabTypeDetector` |

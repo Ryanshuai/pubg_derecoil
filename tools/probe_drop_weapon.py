@@ -85,7 +85,6 @@ def main():
 
     if not ensure_focus(countdown_s=args.countdown, label='the gun-drop probe'):
         return 1
-    time.sleep(0.6)
 
     with LobbyControl(verbose=False) as lc:
         if not lc.state().playable:

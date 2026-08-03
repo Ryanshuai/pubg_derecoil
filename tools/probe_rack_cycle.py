@@ -60,7 +60,6 @@ def main():
     if not ensure_focus(countdown_s=args.countdown, label='the rack probe'):
         print('[!] could not focus the game')
         return 1
-    time.sleep(0.6)
     with LobbyControl() as lc:
         if not lc.ensure_in_match()['ok']:
             print('[!] not in a match')

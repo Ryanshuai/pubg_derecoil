@@ -44,9 +44,8 @@ pixi run layering      # 只解析 import，不跑任何东西
 ```python
 from control.focus import ensure_focus, focus_keeper
 
-if not ensure_focus(countdown_s=6):    # 抢→验→重试3次→倒计时兜底
+if not ensure_focus(countdown_s=6):    # 抢→验→重试3次→倒计时兜底→settle
     return 1
-time.sleep(0.6)                        # 切前台后头几帧游戏不收输入
 ...
 if not focus_keeper().ok('mag 3'):     # 跑到一半掉了就抢回来，上限 5 次
     break
@@ -57,6 +56,7 @@ if not focus_keeper().ok('mag 3'):     # 跑到一半掉了就抢回来，上限
 - **裸 `SetForegroundWindow` 会被拒。** Windows 只允许当前前台进程交出焦点。`raise_game()` 用 `AttachThreadInput` 借前台线程的输入队列绕过去；不模拟 ALT 键，因为 ALT 在这游戏里是自由视角。
 - **调完必须再验一次 `game_focused()`。** 它可以不报错地失败——曾经有个 run 第一行打印 `focused=True`，然后打不开刷新器面板。
 - **焦点不是拿到一次就固定的。** 终端会反复抢回去。**关键操作要每次重试前重新抢**，别只在开头抢一次。
+- **切前台后头几帧游戏不收输入**，所以 `ensure_focus()` 成功抢到之后自己会等 `FOCUS_SETTLE_S`（0.6 s），调用方不用再 sleep。已经在前台时**不等**——没有前台切换就没有被吞的帧。这个等待原来散在 25 个调用点里，漂成 0.4/0.5/0.6/0.7/0.8 五个值，没有一个有实测支持。要自己管就传 `settle_s=0`。
 
 **最小化不用管，`raise_game()` 自己会还原。** 刷 Pico 固件会把游戏丢回桌面——但游戏没退，只是最小化了，就是任务栏那个头盔图标。`raise_game()` 里 `IsIconic` → `SW_RESTORE` 干的正是点那个图标的事，实测 `minimised=True focused=False` → `minimised=False focused=True`（2026-08-03）。所以刷完固件直接 `ensure_focus()` 就行，不需要人点。
 

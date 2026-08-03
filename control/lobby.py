@@ -480,7 +480,6 @@ def main():
         if not ensure_focus(countdown_s=args.countdown, label=args.action):
             print('[lobby] could not bring the game to the foreground')
             return 1
-        time.sleep(0.6)          # the first frames after a focus swap
 
         if args.action == 'mode':
             rec = lc.ensure_mode(args.mode)

@@ -785,7 +785,6 @@ def main():
     if not ensure_focus(countdown_s=args.countdown, label='template collection'):
         print('[!] ABORT: game not focused and could not take the foreground.')
         return 1
-    time.sleep(0.6)
 
     rig = Rig('red_dot')
     if not hasattr(rig.mouse, 'key'):

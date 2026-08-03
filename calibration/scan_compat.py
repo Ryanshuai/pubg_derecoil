@@ -191,7 +191,6 @@ def main():
     if not ensure_focus(countdown_s=args.countdown, label='scan_compat'):
         print('could not bring the game to the foreground')
         return 1
-    time.sleep(0.6)
 
     with LobbyControl(args.backend) as lc:
         rec = lc.ensure_in_match()

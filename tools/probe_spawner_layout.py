@@ -12,7 +12,6 @@ has to be taken while it is up.
 """
 import os
 import sys
-import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -39,7 +38,6 @@ def main():
     if not ensure_focus(countdown_s=5, label='the spawner layout probe'):
         print('[!] could not focus the game')
         return 1
-    time.sleep(0.6)
 
     sc = SpawnerControl(verbose=False)
     print(f'panel says open: {sc.panel_open()}')

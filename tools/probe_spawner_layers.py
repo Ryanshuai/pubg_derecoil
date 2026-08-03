@@ -47,7 +47,6 @@ def main():
     if not ensure_focus(countdown_s=args.countdown, label='the spawner probe'):
         print('[!] could not focus the game')
         return 1
-    time.sleep(0.6)
 
     sc = SpawnerControl()
 

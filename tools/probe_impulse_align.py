@@ -76,7 +76,6 @@ def main():
     if not ensure_focus(countdown_s=args.countdown, label='the impulse probe'):
         print('[!] could not focus the game')
         return 1
-    time.sleep(0.6)
 
     # In a match, with a gun, before anything is believed. The first run of
     # this fired a whole magazine at the LOBBY -- another agent had left the

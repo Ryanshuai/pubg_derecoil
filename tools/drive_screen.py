@@ -122,7 +122,6 @@ def drive(screen, shoot_as=None, keep_open=False, ensure_match=True,
     if not ensure_focus(countdown_s=countdown, label=f'drive {screen.name}'):
         return {'ok': False, 'path': None,
                 'error': 'could not bring the game to the foreground'}
-    time.sleep(0.6)              # the first frames after a focus swap
 
     if ensure_match:
         with LobbyControl(backend, verbose=verbose) as lc:

@@ -88,7 +88,6 @@ def main():
     if not ensure_focus(countdown_s=args.countdown, label='the drag probe'):
         print('[!] could not focus the game')
         return 1
-    time.sleep(0.6)
 
     print('=== stocking up ===')
     sc = SpawnerControl(verbose=False)

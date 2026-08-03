@@ -75,7 +75,6 @@ def main():
 
     if not ensure_focus(countdown_s=args.countdown, label='the unequip probe'):
         return 1
-    time.sleep(0.8)
 
     ac = InventoryControl(verbose=True)
     try:

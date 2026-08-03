@@ -137,7 +137,6 @@ def main():
     if not ensure_focus(countdown_s=args.countdown, label='scan_fits'):
         print('could not focus the game')
         return 1
-    time.sleep(0.6)
     with LobbyControl(args.backend) as lc:
         if not lc.ensure_in_match()['ok']:
             print('not in a match')

@@ -49,7 +49,6 @@ def main():
     if not ensure_focus(countdown_s=6, label='the gun-grab probe'):
         print('[!] could not focus the game')
         return 1
-    time.sleep(0.7)
 
     ac = InventoryControl(verbose=False)
     os.makedirs(OUT, exist_ok=True)

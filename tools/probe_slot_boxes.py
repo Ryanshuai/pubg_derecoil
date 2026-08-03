@@ -78,7 +78,6 @@ def main():
     if not ensure_focus(countdown_s=args.countdown, label='slot boxes'):
         print('could not focus the game')
         return 1
-    time.sleep(0.6)
 
     with LobbyControl(args.backend) as lc:
         rec = lc.ensure_in_match()

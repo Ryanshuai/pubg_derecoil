@@ -310,7 +310,6 @@ def main():
 
     if not ensure_focus(countdown_s=args.countdown, label='the toggle probe'):
         return 1
-    time.sleep(0.6)
 
     with LobbyControl(verbose=False) as lc:
         st = lc.state()

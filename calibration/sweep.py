@@ -588,8 +588,7 @@ def main():
               "foreground. Is PUBG running?")
         rig.close()
         return 1
-    time.sleep(0.6)              # the game ignores the first frames after a
-    keeper = focus_keeper()      # foreground change
+    keeper = focus_keeper()
 
     log = open(out, 'a')
     log.write(json.dumps({

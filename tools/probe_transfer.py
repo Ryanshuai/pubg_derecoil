@@ -97,7 +97,6 @@ def main():
     if not ensure_focus(countdown_s=args.countdown, label='probe_transfer'):
         print('[!] could not focus the game')
         return 1
-    time.sleep(0.6)
 
     ac = InventoryControl(args.backend)
     try:

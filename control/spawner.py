@@ -1439,7 +1439,6 @@ def main():
     if not ensure_focus(countdown_s=args.countdown, label='the spawner'):
         print('[!] ABORT: could not focus the game.')
         return 1
-    time.sleep(0.6)
 
     with SpawnerControl(args.backend) as sc:
         rec = sc.give_many(keys, switch=not args.no_switch)

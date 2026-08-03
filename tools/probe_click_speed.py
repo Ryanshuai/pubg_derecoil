@@ -93,7 +93,6 @@ def main():
 
     if not ensure_focus(countdown_s=args.countdown, label='the click probe'):
         return 1
-    time.sleep(0.5)
 
     mouse = get_mouse()
     ac = InventoryControl(verbose=False)

@@ -487,7 +487,6 @@ def restock(ac, sc, want, backpack=BACKPACK,
 
 def main():
     import argparse
-    import time
 
     try:            # item names are Chinese; a cp1252 console dies on 倍
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -526,7 +525,6 @@ def main():
     if not ensure_focus(countdown_s=args.countdown, label='the stocktake'):
         print('[!] ABORT: could not focus the game.')
         return 1
-    time.sleep(0.6)
 
     ac = InventoryControl(verbose=False)
     sc = SpawnerControl()

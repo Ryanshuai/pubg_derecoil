@@ -56,7 +56,6 @@ def main():
 
     if not ensure_focus(countdown_s=args.countdown, label='the spawn-wait probe'):
         return 1
-    time.sleep(0.5)
 
     # A training-range session ends on its own, and a probe that stops there is
     # a probe that needs a human. Walking back is what LobbyControl is for.

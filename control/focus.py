@@ -140,22 +140,20 @@ def raise_game(settle_s=0.8):
 # other window is fighting for it, and every keypress in between went there.
 MAX_REGAINS = 5
 
+# The game ignores input for the first frames after a foreground change, so
+# every caller has to wait after taking it. That is the kind of thing a caller
+# forgets exactly once and then debugs as "the panel would not open", and
+# refactor_plan lists it among the traps that caught its own author.
+#
+# It lived in 25 call sites and had drifted to five values (0.4 in
+# FocusKeeper.ok, 0.5, 0.6, 0.7, 0.8 in various probes) with nothing measured
+# behind any of them. 0.6 is the one control/CLAUDE.md documents and the one
+# most sites used. It is now here and applied by ensure_focus itself.
+FOCUS_SETTLE_S = 0.6
 
-def ensure_focus(countdown_s=0, tries=3, label=''):
-    """Take the foreground, verify it, and only then let the caller proceed.
 
-    This is what makes a run unattended. Every tool here starts from a
-    terminal, so at t=0 the terminal owns the foreground and the game does
-    not — the guard fires and the run aborts having done nothing. The old
-    answer was a countdown asking a human to alt-tab, which is precisely the
-    human the harvest loop is supposed to remove.
-
-    Windows may legitimately refuse to hand focus over, so this retries and
-    then falls back to the countdown rather than pretending. Returns whether
-    the game actually ended up frontmost — never assume it did.
-    """
-    if game_focused():
-        return True
+def _take_focus(countdown_s, tries, label):
+    """The attempt itself, without the settle. -> bool"""
     for i in range(max(1, tries)):
         if raise_game():
             return True
@@ -169,6 +167,34 @@ def ensure_focus(countdown_s=0, tries=3, label=''):
             print(f"    starting in {s} ...", flush=True)
             time.sleep(1.0)
     return game_focused()
+
+
+def ensure_focus(countdown_s=0, tries=3, label='', settle_s=FOCUS_SETTLE_S):
+    """Take the foreground, verify it, settle, and only then return.
+
+    This is what makes a run unattended. Every tool here starts from a
+    terminal, so at t=0 the terminal owns the foreground and the game does
+    not — the guard fires and the run aborts having done nothing. The old
+    answer was a countdown asking a human to alt-tab, which is precisely the
+    human the harvest loop is supposed to remove.
+
+    Windows may legitimately refuse to hand focus over, so this retries and
+    then falls back to the countdown rather than pretending. Returns whether
+    the game actually ended up frontmost — never assume it did.
+
+    On a successful TAKE it sleeps settle_s first (see the constant). It does
+    not sleep when the game was already frontmost: there was no foreground
+    change, so there are no swallowed frames to wait out. Pass settle_s=0 to
+    opt out — but the caller then owns the wait, which is the arrangement this
+    replaced.
+    """
+    if game_focused():
+        return True
+    if not _take_focus(countdown_s, tries, label):
+        return False
+    if settle_s:
+        time.sleep(settle_s)
+    return True
 
 
 class FocusKeeper:
@@ -203,8 +229,7 @@ class FocusKeeper:
         # calls a recoverable blip fatal — which is how leaving the training
         # range failed one click short of the lobby.
         if ensure_focus(tries=4):
-            time.sleep(0.4)      # the game swallows the first frames after a
-            return True          # foreground change; do not press into them
+            return True          # ensure_focus settles; see FOCUS_SETTLE_S
         print("    [!] could not get the foreground back")
         return False
 
