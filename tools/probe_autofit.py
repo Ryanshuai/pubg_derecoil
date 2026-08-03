@@ -18,15 +18,20 @@ docstring already records the mirror failure, that spawning the weapon LAST
 makes it "pick up the parts already in the backpack", so both orders lose parts
 to the same mechanism from opposite ends.
 
-WHAT IS MEASURED, and why it needs no template. Two numbers either side of one
-spawn:
+WHAT IS MEASURED, either side of one spawn:
 
-    inv_rows(frame)     how many rows 库存 is showing
-    detail(slot crop)   Laplacian variance, i.e. "is something drawn here"
+    inv_rows(frame)          how many rows 库存 is showing
+    read_slots(gun)[SLOT]    what the slot holds, '' for empty
 
-Neither reads an icon, so this says nothing about WHICH part arrived -- only
-where it went, which is the whole question. +1 row means 库存; a slot going
-from empty to drawn means the gun.
+The first version used Laplacian detail for the second, to keep the reading
+template-free. That was a measurement of nothing: SLOT_DETAIL_MIN answers "is
+UI drawn in this cell", and a racked gun draws every slot it owns, so an EMPTY
+muzzle scored 728 against a floor of 100. Condition B was never set up, and
+its answer was reported and believed anyway.
+
+AND THE GUN IS STRIPPED before condition B, for the same reason: a gun does
+not arrive bare, it picks up whatever fits out of 库存 as it spawns. Without
+the strip, "slot EMPTY" is again a condition that was never established.
 
 THREE CONDITIONS, one variable between them:
 
@@ -51,12 +56,11 @@ try:
 except (AttributeError, OSError):
     pass
 
-from collect_templates import detail, inv_rows          # noqa: E402
+from collect_templates import inv_rows                  # noqa: E402
 from control.focus import ensure_focus                  # noqa: E402
-from control.inventory import InventoryControl, at_inv  # noqa: E402
+from control.inventory import (InventoryControl, at_ground,  # noqa: E402
+                               at_inv)
 from control.spawner import SpawnerControl              # noqa: E402
-from detector.attachment_detector import SLOT_DETAIL_MIN  # noqa: E402
-from config import HUD_REGIONS                          # noqa: E402
 from range_session import get_session                   # noqa: E402
 
 GUN = 'sks'
@@ -67,16 +71,28 @@ GUN_SLOT = 1
 
 
 def snap(ac, gun_slot):
-    """(rows, slot detail) — neither reads a template."""
-    f = ac.frame()
-    y, x, h, w = HUD_REGIONS[f'att_{gun_slot}_{SLOT}']
-    return inv_rows(f), detail(f[y:y + h, x:x + w])
+    """(rows, what the slot holds) -> (int, str)
+
+    The slot is read with read_slots, NOT with the Laplacian detail that the
+    first version of this probe used. SLOT_DETAIL_MIN answers "is UI drawn in
+    this cell", and a racked gun draws every slot it owns: an EMPTY muzzle
+    measured 728 against a floor of 100. So the detail version could not tell
+    empty from occupied at all, and condition B -- "gun racked, slot EMPTY" --
+    was never actually set up. Its answer was reported anyway, and it was
+    wrong.
+
+    That does make this reading template-dependent, which the first version
+    was trying to avoid. It is the right trade here: the question is where the
+    part WENT, the alternative was a measurement of nothing, and a wrong slot
+    name still tells empty from occupied.
+    """
+    return inv_rows(ac.frame()), (ac.read_slots(gun_slot).get(SLOT) or '')
 
 
 def where(before, after):
-    rows0, det0 = before
-    rows1, det1 = after
-    to_gun = det0 < SLOT_DETAIL_MIN <= det1
+    rows0, held0 = before
+    rows1, held1 = after
+    to_gun = held1 and held1 != held0
     if rows1 == rows0 + 1 and not to_gun:
         return 'INVENTORY'
     if to_gun and rows1 == rows0:
@@ -85,7 +101,7 @@ def where(before, after):
         return 'both?? (a row AND the slot filled)'
     if rows1 == rows0:
         return 'NOWHERE — the floor, or it never spawned'
-    return f'unclear (rows {rows0}->{rows1}, detail {det0:.0f}->{det1:.0f})'
+    return f'unclear (rows {rows0}->{rows1}, slot {held0!r}->{held1!r})'
 
 
 def main():
@@ -143,6 +159,14 @@ def main():
                 ac.ensure_tab(True)
                 ac.held = None
                 ac.hold(GUN_SLOT)
+                # STRIP IT. A gun does not arrive bare -- it takes whatever
+                # fits out of 库存 on the way in. Without this, "slot EMPTY"
+                # is a label on a condition that was never set up, which is
+                # exactly how the first version of this probe reported an
+                # answer for a question it never asked. To the floor, so the
+                # parts do not sit in the list the next spawn is counted
+                # against.
+                ac.strip(GUN_SLOT, to=at_ground())
             if cond == 'C':
                 # Fill the slot, so the incoming part has nowhere to auto-fit.
                 if not give(OTHER):
@@ -154,7 +178,7 @@ def main():
                 if item is not None:
                     ac.auto_equip(item.where)
                     time.sleep(0.6)
-                if snap(ac, GUN_SLOT)[1] < SLOT_DETAIL_MIN:
+                if not snap(ac, GUN_SLOT)[1]:
                     print(f'  {i}: could not occupy the slot — skipping')
                     continue
 
@@ -166,7 +190,7 @@ def main():
             verdict = where(before, after) if ok else 'the spawner refused'
             hits.append(verdict)
             print(f'  {i}: rows {before[0]}->{after[0]}  '
-                  f'slot detail {before[1]:6.0f}->{after[1]:6.0f}   {verdict}')
+                  f'slot {before[1][:20]!r}->{after[1][:20]!r}   {verdict}')
         out[cond] = hits
 
     print('\n=== summary ===')

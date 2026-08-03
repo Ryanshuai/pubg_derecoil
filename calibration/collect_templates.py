@@ -93,7 +93,7 @@ from detector.tab_layout import INV_ROWS, icon_box
 from control.focus import ensure_focus, focus_keeper
 
 from control.spawner import SpawnerControl
-from control.inventory import InventoryControl, at_inv
+from control.inventory import InventoryControl, at_ground, at_inv
 from harvest import BACKPACK
 from range_session import get_session
 from sweep import Rig
@@ -467,13 +467,52 @@ class Collector:
             return None
         return ink
 
-    def spawn(self, weapon, keys, backpack):
-        """Host weapon first, then the parts in order.
+    def bare_host(self, weapon, backpack):
+        """Get `weapon` into the rack wearing NOTHING. -> bool
 
-        The weapon goes first for two reasons: a gun arriving with parts
-        already in the backpack picks them up on the spot, which would empty
-        the rows the drags below index into; and spawning it is what clears the
-        last round, since a full rack evicts the old gun and its attachments.
+        Three steps, in an order that is the whole point:
+
+          1. spawn the gun. It does not arrive bare -- it picks up whatever
+             fits out of the backpack as it appears, which is this file's
+             oldest recorded quirk and was measured again on the smoke run: an
+             sks asked for with one comp_ar came out wearing a 6x scope, a
+             suppressor, an extended magazine and a cheek pad.
+          2. strip it TO THE FLOOR, not into 库存. Into 库存 would leave those
+             parts sitting in the list this round is about to index, and worse,
+             a stripped suppressor and a requested comp_ar are both muzzles --
+             so the slot that fills would no longer name which one landed.
+          3. only then spawn the round's parts, into a 库存 that holds nothing
+             else.
+
+        After this every slot is empty, so every fit is a filling rather than a
+        swap: the crop always changes, and 库存 always loses exactly one row.
+        Both halves of fit_row's check become true by construction instead of
+        being loosened until they pass.
+        """
+        if not self.spawn(weapon, [], backpack):
+            return False
+        if not self.tab():
+            print('    [!] the inventory would not open to strip the host')
+            return False
+        # to=at_ground(): the floor, by drag. unequip's default sends it to
+        # 库存 by right click, which is the one destination that must not be
+        # used here.
+        rec = self.ac.strip(self.gun, to=at_ground())
+        if rec.get('worn'):
+            print(f'    host arrived wearing {", ".join(rec["worn"])} — '
+                  f'stripped to the floor')
+        left = [s for s, v in self.ac.read_slots(self.gun).items() if v]
+        if left:
+            print(f'    [!] still wearing {left} — every fit into those slots '
+                  f'will be a swap and cannot be named')
+            return False
+        return True
+
+    def spawn(self, weapon, keys, backpack):
+        """Spawn a host weapon and/or a list of parts. One panel visit.
+
+        Callers wanting a host for FITTING want bare_host(), which is this plus
+        the strip that makes the gun actually bare.
         """
         if not self.sc.ensure_panel(True):
             print('    [!] the spawner panel would not open')
@@ -890,6 +929,68 @@ class Collector:
             self.turn(0, -pitch)        # undo the pitch, keep the yaw
         return shots
 
+    def one_part(self, weapon, key, angles, tag_n):
+        """Collect ONE attachment, in both renderings. -> [entries] or None
+
+        The identity of every crop rests on one fact: exactly one thing was
+        spawned, so whatever appeared is that thing. No template is read and no
+        row ordering is assumed -- the two mechanisms that produced 228
+        mislabelled crops and a run of empty slot captures.
+
+        Both states are arranged rather than hoped for, using the measured
+        auto-fit rule (tools/probe_autofit.py, 3/3 each way):
+
+            with the slot ALREADY FULL  the part lands in 库存
+            with the slot EMPTY         the part lands on the gun
+
+        so `rows` is photographed with a blocker in the slot, and `slots` after
+        equipping. `rows` first, because 库存 only holds it until it is fitted.
+        """
+        slot = ATTACHMENTS[key]['slot']
+        shots = []
+        if not self.tab():
+            return None
+
+        # ── 1. an empty slot, so the first copy auto-fits onto the gun ──
+        # To the floor, not 库存: a part sitting in the list would be a second
+        # row, and this whole method rests on there being exactly one.
+        self.ac.strip(self.gun, to=at_ground())
+        if self.ac.read_slots(self.gun).get(slot):
+            print(f'    {key}: {slot} would not empty — cannot tell what an '
+                  f'icon landing there is')
+            return None
+        n0 = inv_rows(self.frame())
+
+        if not self.spawn(None, [key], False) or not self.tab():
+            return None
+        if not self.ac.read_slots(self.gun).get(slot):
+            print(f'    {key}: spawned but {slot} is still empty — it did not '
+                  f'arrive, or the catalogue has the wrong slot for it')
+            return None
+        if 'slots' in self.targets:
+            shots += self.sweep(weapon, [key], [], angles, tag_n, 'f')
+
+        # ── 2. a second copy, which the now-occupied slot sends to 库存 ──
+        # The same part, so no ordering question and no second identity to
+        # keep track of: whatever appears in that one row is `key`, because
+        # `key` is the only thing that was asked for.
+        if 'rows' in self.targets:
+            if not self.tab():
+                return shots
+            n1 = inv_rows(self.frame())
+            if not self.spawn(None, [key], False) or not self.tab():
+                return shots
+            n2 = inv_rows(self.frame())
+            if n2 != n1 + 1:
+                print(f'    {key}: 库存 went {n1}->{n2}, wanted one more row '
+                      f'— the second copy did not arrive, so the row it would '
+                      f'have filled is not it')
+                return shots
+            rows_shots = self.sweep(weapon, [], [n2 - 1], angles, tag_n, 'l')
+            self.relabel(rows_shots, {n2 - 1: key})
+            shots += rows_shots
+        return shots
+
     def round(self, weapon, keys, fit, angles, n, spawn=True, backpack=False):
         print(f'\n── round {n}: {weapon or "no weapon"} ── '
               + (', '.join(keys) or '(no parts)'))
@@ -906,8 +1007,16 @@ class Collector:
         if 'plate' in self.targets and weapon and spawn:
             self.plate_ink0 = self.empty_rack()
 
-        if spawn and not self.spawn(weapon, keys, backpack):
-            return None
+        if spawn:
+            # The HOST only. Its parts are spawned by one_part, one at a time,
+            # each into a slot state it has arranged -- spawning them here as
+            # well produced two copies of everything and left one_part looking
+            # for a slot the bulk spawn had already filled.
+            if weapon:
+                if not self.bare_host(weapon, backpack):
+                    return None
+            elif not self.spawn(None, [] if fit else keys, backpack):
+                return None
 
         if self.plate_ink0 is not None:
             after = self.ac.plate_ink(self.gun, self.frame(flush=2)) \
@@ -929,29 +1038,34 @@ class Collector:
                 return None
         shots = []
         if fit:
-            # 库存 holds the parts only until they are fitted, so the rows pass
-            # has to happen now. The yaw keeps advancing across both passes, so
-            # the second sees different scenery rather than repeating this.
+            # ONE PART AT A TIME, and the identity comes from having spawned
+            # exactly one thing.
             #
-            # These crops go down with NO label. Which row held which part is
-            # not known yet and cannot be guessed -- the game sorts 库存 its own
-            # way. The fits below discover it, and relabel() then attaches the
-            # labels to captures already on disk.
-            if 'rows' in self.targets:
-                shots += self.sweep(weapon, [], rows, angles, n, 'l')
-            found, _ = self.fit(rows, keys)
-            self.relabel(shots, found)
-            # Only what provably landed is photographed in the slots pass; a
-            # crop of nothing labelled as a part is worse than no crop.
-            missed = [k for k in keys if k not in found.values()]
-            if missed:
-                # By elimination, and without a template: these are the parts
-                # the fits never produced, so either they never spawned or the
-                # right click did not land them. Named so a later run can ask
-                # for exactly these with --keys.
-                print(f'    not collected this round: {", ".join(missed)}')
-            keys = [k for k in keys if k in found.values()]
-            rows = {}
+            # Nothing here asks a detector what an icon is, and nothing depends
+            # on the order 库存 chose. Both were tried and both failed: spawn
+            # order is not row order (the game sorts the list, and 228 crops
+            # went out under the wrong names), and a run that identifies parts
+            # by reading them is using the detector it exists to test.
+            #
+            # The auto-fit rule makes this work, and it is why the rule was
+            # worth measuring (tools/probe_autofit.py):
+            #
+            #   slot EMPTY    -> the part goes straight ONTO THE GUN   3/3
+            #   slot OCCUPIED -> the part goes to 库存                 3/3
+            #   no gun racked -> 库存                                  3/3
+            #
+            # So each part is spawned twice, into a deliberately chosen state:
+            # once with the slot blocked, which puts it in 库存 as the ONLY row
+            # there, to photograph `rows`; then equipped, which puts it in the
+            # slot, to photograph `slots`. One row and one slot, one part in
+            # play, no ordering question to get wrong.
+            for k in keys:
+                got = self.one_part(weapon, k, angles, n)
+                if got is None:
+                    print(f'    {k}: not collected')
+                    continue
+                shots += got
+            return shots
         return shots + self.sweep(weapon, keys, rows, angles, n, 'f')
 
 

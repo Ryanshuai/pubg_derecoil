@@ -69,8 +69,15 @@ def main():
         show('at the start')
         ac.ensure_tab(True)
         ac.clear_rack()
-        col.spawn(GUN, [PART], backpack=True)
-        show('after spawn')
+        # The same two steps round() takes, and in the same order: a BARE host
+        # first, then the parts. Calling spawn() with both at once is what
+        # round() used to do, and it is why the gun turned up wearing a 6x, a
+        # suppressor, a magazine and a cheek pad -- a gun picks up whatever
+        # fits as it arrives.
+        col.bare_host(GUN, backpack=True)
+        show('after bare_host')
+        col.spawn(None, [PART], backpack=False)
+        show('after the part spawns')
 
         print('\n=== what round() does before fit(): a rows sweep ===')
         if not col.tab():
