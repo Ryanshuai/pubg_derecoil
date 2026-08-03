@@ -106,6 +106,25 @@ class Pointer:
             except Exception as e:
                 if backend == 'pico':
                     raise
+                # "unplugged" and "someone else has it" are not the same
+                # problem and must not get the same answer. Falling back to
+                # SendInput when ANOTHER AGENT holds the port means: I cannot
+                # have the device, so I will drive the mouse of whoever does.
+                # That is worse than failing -- park() alone moves the cursor,
+                # and the run being disturbed is mid-magazine with no way to
+                # tell that its numbers just went wrong.
+                #
+                # Seen 2026-08-03: a verify run started while a harvest held
+                # COM10, fell back here, and went on to move the cursor and
+                # try to toggle Tab under it.
+                from press.pico_mouse import other_agents
+                busy = other_agents()
+                if busy:
+                    raise RuntimeError(
+                        f'the Pico is held by another agent ({busy}), and '
+                        f'SendInput would drive the same mouse it is using. '
+                        f'Refusing rather than interfering — wait for it, and '
+                        f'do not kill it. ({e})')
                 print(f'[pointer] no Pico ({e}); falling back to SendInput')
         self.backend = 'pico' if self.pico else 'sendinput'
         print(f'[pointer] click backend = {self.backend}')
