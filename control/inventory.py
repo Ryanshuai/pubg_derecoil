@@ -84,7 +84,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import HUD_REGIONS
 from detector.attachment_catalog import ATTACHMENTS, ROSTER, fits, has_slot, is_live
-from detector.attachment_detector import SLOT_NAMES
+from detector.attachment_detector import AttachmentDetector, SLOT_NAMES
 from detector.cropper import win32_cap
 from detector.tab_detector import TabTypeDetector
 from detector.tab_items import TabGrabber, TabItemDetector
@@ -1230,6 +1230,45 @@ class InventoryControl:
         x, y = self.point_of(loc)
         self.pointer.right_click_at(x, y)
         return True
+
+    def gun_slot(self, frame=None):
+        """Which rack slot holds a gun. -> 1 | 2 | None
+
+        A racked gun DRAWS the boxes for the slots it owns; an empty rack slot
+        draws nothing. AttachmentDetector.drawn answers exactly that, and it is
+        a much weaker claim than "a part is in there" -- no name, no template,
+        no icon match.
+
+        Not the name plate. That OCR read None on two plainly-racked guns and
+        cost a cell (calibration/harvest.Kitter.find_gun), and this question
+        does not need a name.
+
+        Callers were hardcoding 2. The spawner does not promise a slot -- an
+        empty rack takes the first gun into slot 1, and re-entering the range
+        empties the rack -- so `read_slots(2)` was reading a slot with no gun
+        in it and answering '' for every attachment, which reads exactly like
+        "the part never arrived".
+        """
+        frame = self._frame() if frame is None else frame
+        for gun in GUNS:
+            for slot in SLOT_NAMES:
+                y, x, h, w = HUD_REGIONS[f'att_{gun}_{slot}']
+                if AttachmentDetector.drawn(frame[y:y + h, x:x + w]):
+                    return gun
+        return None
+
+    def auto_equip_key(self, att, frame=None):
+        """Find `att` in 库存 and right-click it. -> True if the click went.
+
+        The lookup DOES read a template, and that is a real limitation rather
+        than an oversight: a part with no icon in the catalogue cannot be found
+        this way. calibration/collect_templates.py uses it only to re-stage a
+        part it has just watched arrive, never to decide what a crop is.
+        """
+        item = self.look(frame).find(att)
+        if item is None:
+            return False
+        return self.auto_equip(item.where)
 
     def drop_weapon(self, gun, retries=1, gesture='auto'):
         """Throw the gun in rack slot `gun` on the floor, WEARING its parts.

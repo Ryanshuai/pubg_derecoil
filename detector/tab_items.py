@@ -247,6 +247,42 @@ class TabItemDetector:
 # Capture
 # ════════════════════════════════════════════════════════════
 
+def row_icons(frame, n, panel='inventory'):
+    """The first `n` row icons of a panel, copied. [crop, ...]"""
+    out = []
+    for i in range(n):
+        x0, y0, x1, y1 = icon_box(i, panel)
+        out.append(frame[y0:y1, x0:x1].copy())
+    return out
+
+
+def inserted_row(before, after, change_min=6.0):
+    """Which row is NEW between two readings of a panel. -> index | None
+
+    Frames in, an index out -- no game, no device, and no template. It reads
+    an icon only as pixels that did or did not move.
+
+    The game sorts its lists, so a new item is INSERTED rather than appended:
+    rows above the insertion are untouched and everything below shifts down by
+    one. That is what makes the index findable without naming anything --
+
+        the insertion point is the first row whose picture changed
+
+    and every row after it is just its predecessor, moved.
+
+    Taking `len(after) - 1` instead assumed the new row was the last one. It is
+    not, and a template collection run built on that assumption photographed
+    the same leftover row seven times under seven different part names.
+    """
+    for i, (b, a) in enumerate(zip(before, after)):
+        d = np.abs(b.astype(np.float32) - a.astype(np.float32)).mean()
+        if d >= change_min:
+            return i
+    # Nothing above moved, so the new row is the first one only `after` has --
+    # the genuinely-appended case, which happens when the sort puts it last.
+    return len(before) if len(after) > len(before) else None
+
+
 def tab_blocks():
     """The two screen rectangles Tab detection reads, as (y, x, h, w).
 
