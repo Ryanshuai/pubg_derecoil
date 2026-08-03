@@ -18,6 +18,15 @@ training_data
 InGameScreenshot
 docs
 
+# Checkpoints nothing loads. train.py writes all four; only two are ever read
+# back -- fire_mode.pth.tar and gun_name.pth.tar, by their detectors. These
+# two have no reader at all: detector/tab_detector.py decides on pixels and
+# says in its own docstring that the MobileNet which used to sit there "was
+# never consulted", and attachment_detector.py is template matching end to
+# end. They are rebuildable output, so they are product like everything above.
+dl_models/tab_detect.pth.tar
+dl_models/weapon_attachment.pth.tar
+
 
 .claude/settings.local.json
 .pixi/
