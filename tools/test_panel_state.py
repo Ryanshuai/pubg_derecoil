@@ -20,7 +20,8 @@ try:
 except (AttributeError, OSError):
     pass
 
-from detector.spawner_layout import column_boxes, expansions, find_menu
+from control.spawner import builtin_layout
+from detector.spawner_layout import expansions
 
 NAME_RE = re.compile(r'col(\d+)_row(\d+)_open\.png$')
 
@@ -30,14 +31,30 @@ def main():
     if not runs:
         raise SystemExit('no runs under docs/spawner/runs/')
 
+    # The coordinates under test are the ones production uses. This read
+    # find_menu(base) + column_boxes(menu) per run, which is the RECALIBRATE
+    # path -- sync() has used the measured constants since 5b and only falls
+    # back to find_menu when asked to. So the constants could go wrong by a
+    # pixel and this stayed at 44/44, having quietly re-derived a second set
+    # from each frame it was supposed to be judging.
+    #
+    # builtin_layout() rather than known_layout(): the former is the entry
+    # sync() actually calls, and the latter returns dicts where expansions()
+    # wants .y -- despite a docstring claiming they are the same shape.
+    #
+    # What this does and does not catch, measured by shifting COLUMN_BOX:
+    # +40px is still 44/44, +200px drops to 28/44. The columns are 475 wide
+    # with a 25px gap, and the verdict counts changed text pixels inside the
+    # box, so a small slip still lands on the same words. It catches a column
+    # that has moved, not a pixel that has.
+    menu, boxes = builtin_layout()
+
     total = ok = 0
     failures = []
     for run in runs:
         base = cv2.imread(os.path.join(run, '00_baseline.png'))
         if base is None:
             continue
-        menu = find_menu(base, verbose=False)
-        boxes = column_boxes(menu)
         name = os.path.basename(run)
 
         # collapsed must read as nothing expanded
