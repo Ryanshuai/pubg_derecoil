@@ -25,7 +25,15 @@ deliberately conservative about saying yes:
   * a function using `global`/`nonlocal`, or any name bound ANYWHERE in the
     function, counts as bound for the whole function. Python's own scoping is
     function-wide, so this matches rather than approximates.
-  * attribute access (`self.x`, `mod.y`) is not a bare name and is not checked.
+  * attribute access (`mod.y`) is not a bare name and is not checked.
+
+`self.x` IS checked, within one class: a method calling `self.foo()` where no
+`foo` is defined anywhere in that class or its bases-by-name is reported. That
+gap cost a live run within the hour of this file being written -- a dead-code
+sweep deleted a method that still had one caller, and nothing here saw it,
+because `self.slot_crops` is an attribute and the first version only looked at
+bare names. Inheritance from anything not defined in the same file switches
+the check off for that class rather than guessing at it.
 
 A false positive here would be worse than the bug: a check people learn to
 ignore stops being a check. So it errs to silence, and what it does report is
@@ -113,6 +121,56 @@ def scopes(node, enclosing, out):
             scopes(child, enclosing, out)
 
 
+def self_attrs(cls):
+    """(used, defined) — `self.x` reads vs what the class body provides."""
+    used, defined = set(), set()
+    for n in ast.walk(cls):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                and n in cls.body:
+            defined.add(n.name)
+        elif isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) \
+                and n.value.id == 'self':
+            if isinstance(n.ctx, ast.Load):
+                used.add(n.attr)
+            else:
+                defined.add(n.attr)          # self.x = ... defines it
+        elif isinstance(n, ast.Assign):
+            for t in n.targets:
+                if isinstance(t, ast.Name):
+                    defined.add(t.id)        # a class attribute
+        elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name):
+            # `dy: list = field(...)`. Dataclass fields are annotated
+            # assignments, and missing them reported ViewTracker's own
+            # declared fields as undefined -- a false positive, which is the
+            # one thing this file must not produce.
+            defined.add(n.target.id)
+    return used, defined
+
+
+def check_selfs(tree, module):
+    """Methods calling `self.something` that the class never defines."""
+    out = []
+    for cls in [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
+        # Only classes whose bases are all defined in THIS file can be judged;
+        # anything else may inherit the attribute and guessing would be a
+        # false positive, which is worse than the miss.
+        bases = [b.id for b in cls.bases if isinstance(b, ast.Name)]
+        if any(b not in module for b in bases):
+            continue
+        used, defined = self_attrs(cls)
+        for b in bases:
+            for other in [n for n in ast.walk(tree)
+                          if isinstance(n, ast.ClassDef) and n.name == b]:
+                defined |= self_attrs(other)[1]
+        for name in sorted(used - defined):
+            line = next((n.lineno for n in ast.walk(cls)
+                         if isinstance(n, ast.Attribute) and n.attr == name
+                         and isinstance(n.value, ast.Name)
+                         and n.value.id == 'self'), cls.lineno)
+            out.append((line, f'self.{name}'))
+    return out
+
+
 def check(path):
     src = open(path, encoding='utf-8').read()
     try:
@@ -128,6 +186,7 @@ def check(path):
         if name not in module and name not in BUILTINS:
             out.append((line, name))
     scopes(tree, module, out)
+    out += check_selfs(tree, module)
     return sorted(set(out))
 
 

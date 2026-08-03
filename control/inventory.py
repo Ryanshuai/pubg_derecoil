@@ -288,6 +288,12 @@ DROP_SETTLE = 0.5
 # the only one, and it is the one number here nobody has measured.
 KIT_SETTLE = 0.6
 
+# How long gun_slot() watches for the slot boxes to be drawn. The Tab panel
+# fades in, so the answer right after it opens is "no gun" for a few frames on
+# a rack that plainly holds one. Generous because the cost of waiting is a few
+# frames and the cost of answering early is a round thrown away.
+GUN_SLOT_WATCH_S = 1.2
+
 
 # ════════════════════════════════════════════════════════════
 # Locations
@@ -1231,7 +1237,7 @@ class InventoryControl:
         self.pointer.right_click_at(x, y)
         return True
 
-    def gun_slot(self, frame=None):
+    def gun_slot(self, frame=None, timeout=GUN_SLOT_WATCH_S):
         """Which rack slot holds a gun. -> 1 | 2 | None
 
         A racked gun DRAWS the boxes for the slots it owns; an empty rack slot
@@ -1248,14 +1254,28 @@ class InventoryControl:
         empties the rack -- so `read_slots(2)` was reading a slot with no gun
         in it and answering '' for every attachment, which reads exactly like
         "the part never arrived".
+
+        WATCHED, not sampled once -- the same rule every toggle here follows.
+        The Tab panel fades in, so a single grab taken the instant it opens
+        catches the slot boxes before they are drawn and answers "no gun". The
+        version this replaces got away with it only because its caller happened
+        to flush three frames first; moving it here without the watch made it
+        return None on a gun that was plainly racked.
+
+        Pass `frame` to ask about one you already hold, in which case there is
+        nothing to wait for and it is read once.
         """
-        frame = self._frame() if frame is None else frame
-        for gun in GUNS:
-            for slot in SLOT_NAMES:
-                y, x, h, w = HUD_REGIONS[f'att_{gun}_{slot}']
-                if AttachmentDetector.drawn(frame[y:y + h, x:x + w]):
-                    return gun
-        return None
+        deadline = time.perf_counter() + (0 if frame is not None else timeout)
+        while True:
+            f = self._frame() if frame is None else frame
+            for gun in GUNS:
+                for slot in SLOT_NAMES:
+                    y, x, h, w = HUD_REGIONS[f'att_{gun}_{slot}']
+                    if AttachmentDetector.drawn(f[y:y + h, x:x + w]):
+                        return gun
+            if time.perf_counter() >= deadline:
+                return None
+            time.sleep(0.08)
 
     def auto_equip_key(self, att, frame=None):
         """Find `att` in 库存 and right-click it. -> True if the click went.

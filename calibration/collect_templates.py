@@ -428,6 +428,14 @@ class Collector:
     def crop(self, frame, slot):
         return cut(frame, f'att_{self.gun}_{slot}')
 
+    def slot_crops(self, frame):
+        """{slot: crop} for every attachment slot, copied.
+
+        Copied because the caller holds them across another grab and the
+        grabber reuses its buffers.
+        """
+        return {s: self.crop(frame, s).copy() for s in SLOT_NAMES}
+
     def tab(self):
         return bool(self.rig.ensure_inventory_open()) and bool(self.ac.sync())
 
