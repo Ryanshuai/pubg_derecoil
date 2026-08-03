@@ -4,13 +4,31 @@ This table exists for one job: turning weapon_scales.json's calibrated numbers
 into a scale for whatever is actually on the gun. It only models the two slots
 that change vertical recoil. For the full picture — all five slots, every
 attachment, and which weapons are still in the game — see
-detector/attachment_catalog.py, which is the authority; anything here that
-disagrees with it is this file being out of date.
+detector/attachment_catalog.py, which is the authority.
 
-Weapons removed from the game in the June 2026 update (42.1) are gone from
-WEAPON_SLOTS: qbu, pp19, dp28. Their measured recoil curves are preserved under
-"_vaulted" in press/weapon_scales.json rather than deleted.
-Recoil factors are from PUBG Wiki (pubg.wiki.gg):
+WHICH SLOTS A GUN HAS IS NO LONGER WRITTEN DOWN HERE. It is derived from that
+catalogue, because "anything here that disagrees with it is out of date" was
+true of two entries and nothing said so:
+
+  js9  had grip=True   -- the catalogue measured no grip tile (ring 18.6) on
+                          2026-08-02 and notes the wiki has no JS9 page at
+                          all, so the True was a guess about a slot that does
+                          not exist
+  mp9  had muzzle='comp' -- its silencer is integral and not removable, so
+                          there is no muzzle slot to put a compensator in
+
+Both fed calibration_factor(), which divides the calibrated scale to recover a
+bare-gun number. Dividing by an attachment that could not have been fitted
+during calibration makes that number too big: js9 divided by 0.7225 instead of
+0.85 and mp9 by 0.85 instead of 1.0, each **17.65% over-compensating** at
+runtime. validate_attachments() had the mirror of the same fault -- it let a
+phantom mp9 suppressor through and would not have cleared a phantom js9 grip.
+
+Deriving costs one thing worth stating: js9 and mp9 now compensate 17.65% less
+than they did before 2026-08-03. That is the correction, not a regression, but
+their numbers are not comparable across that line.
+
+Recoil factors are still from PUBG Wiki (pubg.wiki.gg):
   - Compensator: 0.85 vertical recoil
   - Vertical Foregrip: 0.85 vertical recoil
   - Suppressor: 1.0 (no recoil effect)
@@ -24,6 +42,8 @@ At runtime:
   effective_scale = base_scale * current_factor
   base_scale = weapon_scales[gun] / calibration_factor
 """
+
+from detector.attachment_catalog import SLOTS as CATALOG_SLOTS, compatible, has_slot
 
 # Muzzle vertical recoil multipliers
 MUZZLE_FACTOR = {
@@ -53,46 +73,39 @@ GRIP = 0.85
 #   grip only  → 0.85 (tommy: suppressor + vertical)
 #   nothing    → 1.0
 
-WEAPON_SLOTS = {
-    # ── AR ─────────────────────────────────────────
-    'akm':    {'muzzle': 'comp', 'grip': False},
-    'm416':   {'muzzle': 'comp', 'grip': True},
-    'scar':   {'muzzle': 'comp', 'grip': True},
-    'm762':   {'muzzle': 'comp', 'grip': True},
-    'aug':    {'muzzle': 'comp', 'grip': True},
-    'qbz':    {'muzzle': 'comp', 'grip': True},
-    'g36c':   {'muzzle': 'comp', 'grip': True},
-    'm16':    {'muzzle': 'comp', 'grip': False},
-    'mk47':   {'muzzle': 'comp', 'grip': True},
-    'groza':  {'muzzle': 'supp_only', 'grip': False},
-    'k2':     {'muzzle': 'comp', 'grip': False},
-    'ace32':  {'muzzle': 'comp', 'grip': True},
-    'famas':  {'muzzle': 'comp', 'grip': False},
 
-    # ── SMG ────────────────────────────────────────
-    'tommy':  {'muzzle': 'supp_only', 'grip': True},   # suppressor only + vertical only
-    'uzi':    {'muzzle': 'comp', 'grip': False},
-    'ump45':  {'muzzle': 'comp', 'grip': True},
-    'vector': {'muzzle': 'comp', 'grip': True},
-    'mp5k':   {'muzzle': 'comp', 'grip': True},
-    'p90':    {'muzzle': None, 'grip': False},          # built-in suppressor, no attachments
-    'mp9':    {'muzzle': 'comp', 'grip': False},
-    'js9':    {'muzzle': 'comp', 'grip': True},
+def muzzle_kind(gun):
+    """None | 'supp_only' | 'comp' -- can this gun wear a compensator?
 
-    # ── MG ─────────────────────────────────────────
-    'm249':   {'muzzle': None, 'grip': False},
-    'mg3':    {'muzzle': None, 'grip': False},
+    Three states because two questions stack: does the muzzle slot exist at
+    all (vss, p90, m249, mg3, mp9 -- integral or absent), and if it does, does
+    the gun accept anything other than a suppressor (groza and tommy do not).
+    Both answers already live in attachment_catalog: the slot list is measured
+    and the suppressor-only rule is its EXCLUDE table.
+    """
+    if not has_slot(gun, 'muzzle'):
+        return None
+    muzzles = compatible(gun).get('muzzle', ())
+    return 'comp' if any(k.startswith('comp') for k in muzzles) else 'supp_only'
 
-    # ── DMR ────────────────────────────────────────
-    'vss':    {'muzzle': None, 'grip': False},          # built-in suppressor + scope
-    'mk14':   {'muzzle': 'comp', 'grip': False},
-    'sks':    {'muzzle': 'comp', 'grip': True},
-    'mini14': {'muzzle': 'comp', 'grip': False},
-    'slr':    {'muzzle': 'comp', 'grip': False},
-    'mk12':   {'muzzle': 'comp', 'grip': True},         # lower rail, like the SKS
-    'dragunov': {'muzzle': 'comp', 'grip': False},
-}
 
+def takes_vertical_grip(gun):
+    """Can this gun hold the vertical foregrip the calibration assumed?
+
+    Not `has_slot(gun, 'grip')`: tommy has a grip slot that takes only the
+    vertical, and GRIP_ONLY in the catalogue is what encodes that. Asking for
+    the specific attachment gets both facts in one question.
+    """
+    return 'vert_grip' in compatible(gun).get('grip', ())
+
+
+# Computed, never edited. Kept in this shape because calibration_factor() and
+# validate_attachments() read it and because __main__ dumps it, but every row
+# comes from the catalogue. Verified against the 30 hand-written rows this
+# replaced: 28 identical, and the 2 that were not are the bug in the module
+# docstring.
+WEAPON_SLOTS = {gun: {'muzzle': muzzle_kind(gun), 'grip': takes_vertical_grip(gun)}
+                for gun in CATALOG_SLOTS}
 
 def calibration_factor(gun_name):
     """Factor that was applied during training ground calibration.
