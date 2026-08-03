@@ -93,6 +93,28 @@ SPAWN_SETTLE_S = 0.7
 FIT_TIMEOUT_S = 0.8             # the part animates into the slot
 FIT_POLL_S = 0.08
 
+# A NAME PLATE IS DRAWN HERE — the band, not a floor.
+#
+# MEASURED (2026-08-03), white-text-mask pixels over gun_name_N, Tab up:
+#
+#   empty rack slot      0        6 of 6 samples, exactly zero
+#   a gun is racked      679-901  13 samples
+#
+# One of those frames carries its own control: an akm round read 682 on slot 1
+# and 0 on slot 2 — same frame, same scenery, one slot occupied and one not.
+#
+# It is a BAND for the same reason TAB_COUNT_MIN/MAX is one. With the panel up
+# the backdrop is dimmed (blend_tab_background: blur(bg,k=41)*0.49), but the
+# mask is only "near-white and achromatic", and over 293 Tab-SHUT frames this
+# region saturates at 11250 — the whole crop — on 80 of them. Bright everywhere
+# is scenery, not glyphs. A reading above the ceiling is refused rather than
+# believed, exactly as the tab detector refuses sky.
+#
+# 200 sits ~3.4x under the lowest real plate and far above the zero floor; 4000
+# is 4.4x over the highest real plate and well under saturation.
+PLATE_INK_MIN = 200
+PLATE_INK_MAX = 4000
+
 # Mean |after-before| over a slot crop, grey levels, for "an icon appeared".
 # An icon landing in an empty 63x63 slot moves most pixels most of the way;
 # scenery a second apart with the player standing still moves nothing. Kept low
@@ -233,7 +255,25 @@ def inv_rows(frame):
 KIND = 'attachments'     # see calibration/capture_run.py for the layout
 
 
-def label_for(target, key, slot, by):
+def plate_arrived(before, after):
+    """Did a weapon arrive in the rack between these two ink readings? -> bool
+
+    `before` is taken on a CLEARED rack, `after` once the spawner has been
+    asked for exactly one weapon. Both are white-text-mask pixel counts over
+    the name plate — no template is consulted, which is the whole point: the
+    plate OCR is the detector this evidence exists to label samples FOR.
+
+    Neither reading alone would do. A plate that was already there stays there
+    if the spawn silently produced nothing, so the zero is what makes the
+    second number mean "arrived" rather than "is present". And the after has a
+    CEILING as well as a floor, because the mask is only "near-white and
+    achromatic": with nothing to dim it this region saturates on scenery.
+    """
+    return (before < PLATE_INK_MIN
+            and PLATE_INK_MIN <= after <= PLATE_INK_MAX)
+
+
+def label_for(target, key, slot, by, arrived=False):
     """The label a crop of `target` may carry. -> [] or [one label]
 
     capture_run.py's rule: a label exists only when someone looked, and
@@ -259,22 +299,27 @@ def label_for(target, key, slot, by):
     proven". Running that here would throw away every capture of exactly the
     new attachment the run was started to photograph.
 
-    `plate` gets NO LABEL, and that is a deliberate hole rather than an
-    oversight. The weapon's identity rests on give_weapon() returning ok, which
-    means "the click went to the right entry index", not "a gun arrived". The
-    rack-eviction rule then says it is in this slot. Nothing reads it back
-    without a template — the plate OCR is the detector under test — so a spawn
-    that silently produced nothing leaves the PREVIOUS weapon in front of the
-    camera under the new name. That is the exact shape of ADS run
-    20260802_015545, 40 frames of the wrong gun. A crop with no label is still
-    on disk with its requested key in the filename and in the entry's facts,
-    so the calibrate-template skill can still use it with a human in the loop;
-    it simply is not machine ground truth.
+    `plate` gets LABEL_REQUESTED only when `arrived` says a weapon was watched
+    ARRIVING — see plate_arrived. Identity was never the doubtful part: the
+    spawner clicked one measured coordinate for one named weapon. What
+    give_weapon()'s ok means is "the click went to the right entry index", not
+    "a gun appeared", and nothing read it back without the plate OCR, which is
+    the detector under test. A spawn that silently produced nothing therefore
+    left the PREVIOUS weapon in front of the camera under the new name — the
+    exact shape of ADS run 20260802_015545, 40 frames of the wrong gun.
 
-    Closing that hole needs a template-free "a different gun is there now"
-    test, and the obvious one does not work: the name plate sits on the
-    translucent Tab panel, so its pixels change between backgrounds for the
-    same gun. A crop diff cannot separate "new weapon" from "new scenery".
+    THE TEST THAT WAS REJECTED, and why this one is different. A crop diff of
+    the plate cannot work: the plate sits on the translucent Tab panel, so its
+    pixels change between backgrounds for the same gun and "new weapon" is
+    indistinguishable from "new scenery". That reasoning stands. This is not a
+    diff between two similar images — it is INK COUNT ON A CLEARED RACK, zero
+    against several hundred, and an empty slot draws no plate at all whatever
+    is behind it. Measured: 0 on 6 empty samples, 679-901 on 13 occupied, with
+    one frame carrying both at once.
+
+    Without `arrived` the crop still lands on disk with its requested key in
+    the filename and in the entry's facts, so a human in the loop can use it;
+    it simply is not machine ground truth.
 
     `type` gets no label either, for two reasons that each suffice. There is no
     asset to name — it is an ink count, not an icon. And "the Tab screen is up"
@@ -294,6 +339,9 @@ def label_for(target, key, slot, by):
                  'by': by}]
     if target == 'rows':
         return [{'slot': 'inventory', 'asset': key, 'source': LABEL_REQUESTED,
+                 'by': by}]
+    if target == 'plate' and arrived:
+        return [{'slot': 'plate', 'asset': key, 'source': LABEL_REQUESTED,
                  'by': by}]
     return []
 
@@ -317,6 +365,12 @@ class Collector:
         # be one more reach past a high-level object, which is the thing this
         # pass exists to remove.
         self.type_det = TabTypeDetector()
+        # Set per round by round(): the plate ink on the cleared rack, and
+        # whether the spawn that followed was watched arriving. False here so a
+        # caller that never runs a round (or a target that is not `plate`)
+        # cannot accidentally claim ground truth.
+        self.plate_ink0 = None
+        self.plate_arrived = False
 
     def close(self):
         try:
@@ -365,6 +419,28 @@ class Collector:
         return self.run.add(crop, name, **facts)
 
     # ── spawning ──
+
+    def empty_rack(self):
+        """Clear both rack slots and read the plate back as blank. -> ink|None
+
+        None means the rack could not be proven empty, and the caller must not
+        claim an arrival off the spawn that follows.
+
+        Plain clear_rack, not the strip-then-drop harvest uses: a plates round
+        fits nothing, so there is no part worth keeping out of the drop, and
+        the gun leaves wearing the magazine the game fitted for itself.
+        """
+        if not self.tab():
+            print('    [!] the inventory would not open to clear the rack')
+            return None
+        self.ac.clear_rack()
+        ink = self.ac.plate_ink(self.gun, self.frame(flush=2))
+        if ink >= PLATE_INK_MIN:
+            print(f'    [!] rack cleared but the plate still reads {ink} ink '
+                  f'(< {PLATE_INK_MIN} expected) — cannot call the next spawn '
+                  f'an arrival')
+            return None
+        return ink
 
     def spawn(self, weapon, keys, backpack):
         """Host weapon first, then the parts in order.
@@ -497,7 +573,8 @@ class Collector:
         return self.write(name, crop, target=target, key=key,
                           region=list(region), read=read,
                           has_template=has_tmpl, ok=has_tmpl and read == key,
-                          labels=label_for(target, key, slot, self.by),
+                          labels=label_for(target, key, slot, self.by,
+                                           arrived=self.plate_arrived),
                           **({} if slot is None else {'slot': slot}), **extra)
 
     def capture(self, weapon, keys, rows, tag, tag_n):
@@ -617,8 +694,28 @@ class Collector:
         if not focus_keeper().ok(f'round {n}'):
             print('    [!] lost the foreground and could not take it back')
             return None
+
+        # Empty the rack and read the plate blank BEFORE the spawn, so what
+        # follows can be called an arrival rather than assumed to be one. Only
+        # when a plate is actually being collected: it costs a Tab cycle and
+        # two drops, and a round that photographs attachments wants the host
+        # gun left exactly where it is.
+        self.plate_ink0 = None
+        if 'plate' in self.targets and weapon and spawn:
+            self.plate_ink0 = self.empty_rack()
+
         if spawn and not self.spawn(weapon, keys, backpack):
             return None
+
+        if self.plate_ink0 is not None:
+            after = self.ac.plate_ink(self.gun, self.frame(flush=2)) \
+                if self.tab() else 0
+            self.plate_arrived = plate_arrived(self.plate_ink0, after)
+            print(f'    plate ink {self.plate_ink0} -> {after}  '
+                  + ('ARRIVED, labelled' if self.plate_arrived else
+                     'NOT an arrival — captured without a label'))
+        else:
+            self.plate_arrived = False
 
         rows = {}
         if keys and spawn:

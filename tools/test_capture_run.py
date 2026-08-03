@@ -386,11 +386,34 @@ def t_label_for():
               f'{got_slot}')
     check("`by` reaches the label",
           label_for('slots', 'k', 'grip', 'operator')[0]['by'] == 'operator')
-    # A crop nobody can name must not become a sample: the plate OCR is the
-    # detector under test, and a spawn that silently produced nothing leaves
-    # the previous weapon in front of the camera.
-    check('a plate is never ground truth',
+
+    # THE PLATE, and the condition it now turns on. A crop nobody watched
+    # arrive must not become a sample: the plate OCR is the detector under
+    # test, so a spawn that silently produced nothing leaves the previous
+    # weapon in front of the camera under the new name.
+    check('a plate with no arrival is not ground truth',
           label_for('plate', 'm416', None, 'operator') == [])
+    labs = label_for('plate', 'm416', None, 'spawn', arrived=True)
+    check('a plate watched arriving IS ground truth',
+          bool(labs) and labs[0]['source'] == LABEL_REQUESTED
+          and labs[0]['asset'] == 'm416', f'{labs}')
+
+    # The predicate itself, on the MEASURED numbers. Both directions matter:
+    # a floor alone would believe scenery, and no floor at all would believe a
+    # gun that was already sitting there.
+    print('\ncollect_templates.plate_arrived()')
+    from collect_templates import plate_arrived, PLATE_INK_MIN, PLATE_INK_MAX
+    check('cleared rack -> a real plate (0 -> 682, measured)',
+          plate_arrived(0, 682) is True)
+    check('the two extremes of the occupied samples',
+          plate_arrived(0, 679) and plate_arrived(0, 901))
+    check('a plate that was ALREADY there is not an arrival',
+          plate_arrived(682, 857) is False)
+    check('saturation is scenery, not glyphs (0 -> 11250, measured Tab-shut)',
+          plate_arrived(0, 11250) is False)
+    check('nothing arrived (0 -> 0)', plate_arrived(0, 0) is False)
+    check('the band brackets every occupied sample seen',
+          PLATE_INK_MIN < 679 and 901 < PLATE_INK_MAX)
 
 
 def main():
