@@ -70,6 +70,7 @@ from config import (HUD_REGIONS, TAB_PIXEL_THRESH, TAB_COUNT_MIN,
 from detector.attachment_catalog import (ATTACHMENTS, ROSTER, SLOTS, fits,
                                          is_live)
 from detector.cropper import win32_cap
+from detector.tab_detector import TabTypeDetector
 from detector.attachment_detector import SLOT_DETAIL_MIN
 from detector.tab_items import ROW_DETAIL_MIN, tab_blocks
 from detector.tab_layout import INV_ROWS, icon_box
@@ -309,6 +310,13 @@ class Collector:
         self.gun, self.run, self.targets = gun, run, targets
         self.by = by
         self.panel_box = tab_blocks()['right']
+        # Built here rather than reached for through `ac`, on the rule
+        # GunDriver states for the same detector: stateless and pixel-only
+        # (device=None loads no model), so every caller wants the same one and
+        # constructing it is cheaper than an accessor. `ac.tab.ink(...)` would
+        # be one more reach past a high-level object, which is the thing this
+        # pass exists to remove.
+        self.type_det = TabTypeDetector()
 
     def close(self):
         try:
@@ -319,11 +327,15 @@ class Collector:
     # ── screen ──
 
     def frame(self, flush=3):
-        """A Tab frame with the cursor parked — a hovered slot draws a tooltip
-        straight over the icon being photographed."""
-        self.ac.park()
+        """A Tab frame, settled — a hovered slot draws a tooltip straight over
+        the icon being photographed, and the panel fades in.
+
+        InventoryControl.frame() parks the cursor itself; the flush is this
+        collector's own concern, because it is the only caller that needs the
+        panel to have finished animating rather than merely to be up.
+        """
         for _ in range(flush):
-            f = self.ac.grabber.grab()
+            f = self.ac.frame()
         return f
 
     def crop(self, frame, slot):
@@ -521,7 +533,7 @@ class Collector:
                     slot=slot))
 
         if 'rows' in self.targets and rows:
-            found = self.ac.items.detect(frame, self.ac.guns).inventory
+            found = self.ac.look(frame).inventory
             for row, key in rows.items():
                 x0, y0, x1, y1 = icon_box(row, 'inventory')
                 item = found[row] if row < len(found) else None
@@ -533,20 +545,30 @@ class Collector:
 
         if 'plate' in self.targets and weapon:
             name = f'gun_name_{self.gun}'
-            read = self.ac.ocr.classify(
-                {k: cut(frame, k) for k in ('gun_name_1', 'gun_name_2')})
+            read = self.ac.read_weapons(frame)
             shots.append(self._shot(
                 cut(frame, name), f'plate__{weapon}__{tag}.png',
                 'plate', weapon, HUD_REGIONS[name],
-                read[self.gun - 1] or '', True))
+                read.get(self.gun) or '', True,
+                # The arrival evidence, recorded per capture. Zero here on a
+                # rack that was emptied first means no weapon is drawn, so the
+                # crop is of nothing and the label must not be believed --
+                # which is the one thing give_weapon()'s ok cannot tell you.
+                ink=self.ac.plate_ink(self.gun, frame)))
 
         if 'type' in self.targets:
             # Its own grab: 类型 sits at y=129, just above the block TabGrabber
             # copies, and widening that block for 18x41 px would cost every
             # frame of every run that uses it.
             cell = win32_cap(HUD_REGIONS['type'])
-            ink = int((cv2.cvtColor(cell, cv2.COLOR_BGR2GRAY)
-                       > TAB_PIXEL_THRESH).sum())
+            # TabTypeDetector.ink, not a count computed here. This used to be
+            # cvtColor(BGR2GRAY) -- a luma average -- compared against
+            # TAB_COUNT_MIN/MAX, which are measured on the CHANNEL MAXIMUM.
+            # Averaging three channels to find white ink dilutes it, so every
+            # count came out low against bounds that assumed otherwise and the
+            # `ok` flag below was wrong in one direction. The detector owns the
+            # number now; there is one definition of it.
+            ink = self.type_det.ink(cell)
             s = self._shot(cell, f'type__{wname}__{tag}.png',
                            'type', 'type', HUD_REGIONS['type'], str(ink), True,
                            ink=ink)

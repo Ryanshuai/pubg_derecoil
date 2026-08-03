@@ -263,19 +263,32 @@ def tidy(ac, want, drop_unwanted=True, verbose=True, keep=1):
     drags. Between passes the screen IS re-read, because rows from further
     down the backpack scroll up into view as the ones above leave.
 
-    A pass that drops nothing ends it. So does a pass after which the view is
-    UNCHANGED — same keys, same order — because that is what a release landing
-    somewhere other than the ground panel looks like, and repeating it forever
-    would achieve nothing.
+    A pass that drops nothing ends it. Nothing else does, short of
+    TIDY_PASSES.
 
-    The stop condition is deliberately "the view did not move" and not "the
-    item count went down". The Tab list shows twelve rows and the backpack
-    holds far more, so rows scroll up from below as the ones above leave: a
-    pass that successfully drops five parts can come back holding MORE named
-    attachments than it started with, and a count-based test reads that
-    success as a failure. It did, on a backpack carrying six surplus SMG parts
-    from an earlier run -- tidy quit after two passes, reported the drops were
-    not landing, and left the junk in place for every run after.
+    BOTH EARLIER STOP CONDITIONS WERE WRONG, and for one reason: the Tab list
+    shows twelve rows while the backpack holds far more, so anything read off
+    those twelve describes a WINDOW and not the pack.
+
+      * "the item count went down" -- rows scroll up from below as the ones
+        above leave, so a pass that successfully drops five parts can come
+        back holding MORE named attachments than it started with. It quit
+        after two passes on a pack carrying six surplus SMG parts and left the
+        junk in place for every run after.
+
+      * "the view did not move" -- same defect, one level subtler. Twelve
+        rows leaving and twelve similar ones arriving is an unchanged
+        signature, and a pack full of duplicates produces exactly that. It
+        cost an unattended run four cells: tidy stopped early, the pack stayed
+        deep, ext_smg sat below the window where find() cannot see it, restock
+        spawned more that landed below the window too, and every SMG cell
+        failed with `magazine reads ''` while the magazine was in the backpack
+        the whole time.
+
+    So there is no view-derived stop condition here any more. The drags do
+    land -- tools/probe_backpack_depth.py settles it by dropping exactly ONE
+    item and watching a previously invisible row take its place -- and
+    TIDY_PASSES is the bound.
 
     Leaves the Tab screen SHUT, whatever state it was found in. Not tab_up():
     the caller's next move is the spawner panel or the range, and both of
@@ -307,11 +320,33 @@ def tidy(ac, want, drop_unwanted=True, verbose=True, keep=1):
             stock = read_stock(ac, close=False)
             if stock is None:
                 return dropped, None
-            if _view_sig(stock) == before:
-                print("      [!] the backpack is unchanged after dropping "
-                      f"{len(targets)} — is the 附近 panel drawn? stopping "
-                      f"rather than looping")
-                break
+            # An unchanged view is REPORTED and no longer stops the loop.
+            #
+            # It was a stop condition on the reading that it "is what a release
+            # landing somewhere other than the ground panel looks like". It is
+            # also what a successful pass looks like when the rows scrolling up
+            # from below happen to match the ones that left -- which a backpack
+            # full of duplicates produces routinely, and which this same
+            # docstring already describes happening for the count test.
+            #
+            # Settled by experiment rather than by argument
+            # (tools/probe_backpack_depth.py): sixteen DISTINCT parts spawned
+            # into an empty pack, the reader saw twelve, and dropping exactly
+            # ONE moved that row out and scrolled a previously invisible one
+            # in. The drags land. Stopping here cost an unattended run four
+            # cells: the pack stayed deep, ext_smg sat below the window where
+            # find() cannot see it, restock kept spawning more, and every SMG
+            # cell failed with `magazine reads ''` while the magazine was in
+            # the backpack the whole time.
+            #
+            # TIDY_PASSES already bounds the loop, so a drag that genuinely
+            # stopped landing costs a handful of passes and says so every time
+            # rather than being guessed at once.
+            if _view_sig(stock) == before and verbose:
+                print("      [stock] the twelve visible rows read the same "
+                      "after dropping "
+                      f"{len(targets)} — expected when the pack is deeper "
+                      "than the window; continuing")
     finally:
         ac.ensure_tab(False)
     return dropped, stock

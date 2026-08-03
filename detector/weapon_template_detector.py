@@ -111,6 +111,40 @@ class TabWeaponDetector:
                 tmpl = tmpl[:, :, 0]
             self._templates.setdefault(m.group(1), []).append(tmpl)
 
+    @staticmethod
+    def ink(crop):
+        """How many white-text pixels are on this plate. -> int
+
+        NOT a reading of the name — this cannot tell an AKM from an M416 and
+        must not be used as if it could. It answers the weaker question
+        `classify` cannot: **is there a name plate here at all?**
+
+        That question has a caller. Whether a spawned weapon actually ARRIVED
+        cannot be settled by the OCR, because the OCR is the thing under test:
+        a spawn that silently produced nothing leaves the PREVIOUS gun in
+        front of the camera, and the plate reads fine and names the wrong
+        weapon. calibration/collect_templates.py records that hole, and one
+        run of 40 frames was captured through it.
+
+        With the rack emptied first, an empty slot draws no plate at all, so
+        `0 ink -> ink` is arrival, established without consulting a template.
+        The identity then comes from the request, which is the one thing that
+        was never in doubt.
+
+        It deliberately uses `_white_text_mask`, the SAME mask `classify`
+        matches through. "There is text here" and "the OCR can read it" have
+        to be claims about the same pixels, or the arrival test and the
+        detector it is guarding disagree about what counts as text — which is
+        exactly the kind of split this hole started as.
+
+        A crop with no colour channels is refused rather than guessed at: the
+        mask is defined on BGR and `IMREAD_GRAYSCALE` does not guarantee one
+        channel here (anything importing ultralytics replaces cv2.imread).
+        """
+        if crop is None or crop.ndim != 3 or crop.shape[2] < 3:
+            return 0
+        return int((_white_text_mask(crop) > 0).sum())
+
     def classify(self, crops):
         """Match weapon names from gun_name crops.
 

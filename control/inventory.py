@@ -772,23 +772,64 @@ class InventoryControl:
         self.pointer.move_to(*PARK_XY)
         time.sleep(PARK_SETTLE)
 
-    def look(self):
+    def frame(self):
+        """One Tab-screen frame, cursor parked. -> the grabber's crops.
+
+        Public because callers need it and were taking it anyway: a collector
+        that photographs the screen and then wants it READ has to hand the
+        same pixels to both, or it is describing one frame with another
+        frame's answer. calibration/collect_templates.py reached through to
+        `ac.grabber.grab()` for exactly this, which skips park() — and a
+        hovered slot draws a tooltip over itself.
+        """
+        return self._frame()
+
+    def look(self, frame=None):
         """Grab the Tab screen and read it. Returns a TabView.
 
         Also caches what it learned: which weapon is in each slot (so slot
         reads can narrow their template bank) and how many rows each list is
         showing (so a drop into a panel lands past the end of it).
+
+        `frame` reads a frame the caller ALREADY HAS instead of grabbing a new
+        one. Not an optimisation: a caller holding a captured frame and asking
+        this to grab its own gets an answer about a different instant, and on
+        a screen that is being dragged on that is a different screen. It also
+        skips park(), so the second grab can land while the cursor is over a
+        slot. Both were live in collect_templates, which reached past this
+        method into `ac.items.detect(...)` to get it.
         """
-        frame = self._frame()
+        frame = self._frame() if frame is None else frame
         self.guns = self._read_guns(frame)
         view = self.items.detect(frame, self.guns)
         self.set_rows(nearby=view.rows('nearby'),
                       inventory=view.rows('inventory'))
         return view
 
-    def read_weapons(self):
-        """{1: key, 2: key} off the two name plates; None where unmatched."""
-        return self._read_guns(self._frame())
+    def read_weapons(self, frame=None):
+        """{1: key, 2: key} off the two name plates; None where unmatched.
+
+        `frame` names the guns in a frame the caller already holds, for the
+        same reason look() takes one. collect_templates went to
+        `ac.ocr.classify({...})` to get this, cutting the two plate regions by
+        hand — which is this method's body, minus the roster filter that stops
+        an unrecognised name narrowing every slot's template bank to nothing.
+        """
+        return self._read_guns(self._frame() if frame is None else frame)
+
+    def plate_ink(self, gun, frame=None):
+        """White-text pixels on gun `gun`'s name plate. -> int
+
+        Not a name. It answers "is a plate drawn here at all", which the OCR
+        cannot be asked, because on this screen the OCR is the thing being
+        checked. See TabWeaponDetector.ink: with the rack emptied first, zero
+        ink to some ink is a weapon ARRIVING, established without consulting
+        any template, and that is the missing half of labelling a plate
+        capture with the weapon that was requested.
+        """
+        frame = self._frame() if frame is None else frame
+        y, x, h, w = HUD_REGIONS[f'gun_name_{gun}']
+        return self.ocr.ink(frame[y:y + h, x:x + w])
 
     def read_slots(self, gun=None):
         """What the guns are wearing, as template names ('' when empty).

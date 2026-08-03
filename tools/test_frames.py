@@ -412,6 +412,80 @@ except ValueError as e:
 sb.close()
 
 
+
+# ════════════════════════════════════════════════════════════
+
+print('\n=== every frame source implements what the drivers ask of it ===')
+#
+# The drivers take `frames` as a duck: "anything with grab() and flush(n)",
+# says control/gun.py's header. calibration/sweep.Rig is one of those ducks --
+# it passes `self` to ViewDriver, GunDriver and FireDriver -- and it forwards
+# by hand, one method at a time.
+#
+# So a driver reaching for a method the Rig does not forward is an
+# AttributeError with no static warning, discovered only when that line runs
+# in a live game. It cost the first unattended night: read_loadout started
+# calling full(), the Rig had never forwarded it, and the run died three
+# minutes in with every remaining cell unmeasured.
+#
+# This reads the drivers for `self.frames.<name>` and asks the ducks whether
+# they have it. AST, not import: no game, no Pico, no detectors built.
+import ast
+import inspect
+
+DRIVERS = ('control/aim.py', 'control/fire.py', 'control/gun.py')
+
+
+def asked_of_frames(path):
+    """{method names the module calls on self.frames}."""
+    tree = ast.parse(open(os.path.join(ROOT, path), encoding='utf-8').read())
+    out = set()
+    for node in ast.walk(tree):
+        # self.frames.NAME(...)  ->  Call(func=Attribute(value=Attribute(...)))
+        if not isinstance(node, ast.Attribute):
+            continue
+        inner = node.value
+        if (isinstance(inner, ast.Attribute) and inner.attr == 'frames'
+                and isinstance(inner.value, ast.Name)
+                and inner.value.id == 'self'):
+            out.add(node.attr)
+    return out
+
+wanted = set()
+for d in DRIVERS:
+    got = asked_of_frames(d)
+    wanted |= got
+    print(f'  {os.path.basename(d):<10} asks for {", ".join(sorted(got))}')
+
+# The ducks. ScreenBuffer is the real one; Rig is the hand-forwarding one that
+# has already been caught short once. Checked as CLASSES, so nothing is built.
+from calibration.sweep import Rig                                # noqa: E402
+
+for name, cls in (('ScreenBuffer', ScreenBuffer), ('Rig', Rig)):
+    missing = sorted(m for m in wanted if not hasattr(cls, m))
+    check(f'{name} implements all of {", ".join(sorted(wanted))}', missing, [])
+
+# Does the check discriminate, or does it pass by construction? A duck missing
+# exactly the method that was missing in real life has to be caught, or "Rig
+# implements all of ..." is a sentence with no test behind it.
+class HalfADuck:
+    def grab(self): pass
+    def flush(self, n=None): pass
+    # no full() -- which is precisely the shape the Rig had at 02:53
+
+check('a frame source missing full() is caught',
+      sorted(m for m in wanted if not hasattr(HalfADuck, m)), ['full'])
+
+# And the same for the drivers' own signature: GunDriver.full has to accept a
+# frame, or read_loadout's "crops and composite from the same instant" is a
+# second capture and a different moment.
+from control.gun import GunDriver                                # noqa: E402
+check('GunDriver.full takes a frame',
+      'frame' in inspect.signature(GunDriver.full).parameters, True)
+check('Rig.full takes one too',
+      'frame' in inspect.signature(Rig.full).parameters, True)
+
+
 print()
 if FAILS:
     print(f'{len(FAILS)} FAILED: {", ".join(FAILS)}')

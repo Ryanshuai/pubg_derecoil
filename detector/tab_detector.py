@@ -46,12 +46,31 @@ class TabTypeDetector:
         crop = crops.get('type') if isinstance(crops, dict) else crops
         if crop is None:
             return False
-
-        # Channel maximum, not luma: the ink is white, so any channel carrying
-        # it is evidence, and averaging the three only dilutes it.
-        gray = np.max(crop, axis=2)
-        bright_count = int((gray > TAB_PIXEL_THRESH).sum())
+        bright_count = self.ink(crop)
         if not TAB_COUNT_MIN < bright_count < TAB_COUNT_MAX:
             return False
         # Ink implies a backdrop. Bright everywhere means sky, not glyphs.
-        return int(np.percentile(gray, 10)) < TAB_DARK_FLOOR_MAX
+        return int(np.percentile(np.max(crop, axis=2), 10)) < TAB_DARK_FLOOR_MAX
+
+    @staticmethod
+    def ink(crop):
+        """Bright pixels in the Type/类型 band. -> int
+
+        The number `classify` thresholds, exposed because callers were
+        recomputing it and getting a DIFFERENT number. calibration/
+        collect_templates.py measured it with `cvtColor(BGR2GRAY)` -- a luma
+        average -- and then compared the result against TAB_COUNT_MIN/MAX,
+        which were measured on the channel maximum. Averaging three channels
+        to find white ink dilutes it, so every count came out low against
+        bounds that assumed otherwise, and the run's own `ok` flag on those
+        captures was wrong in one direction.
+
+        One definition, one caller-visible number. Recomputing a detector's
+        internals beside it is how the two drift, and this one had already
+        drifted before anybody looked.
+        """
+        if crop is None:
+            return 0
+        # Channel maximum, not luma: the ink is white, so any channel carrying
+        # it is evidence, and averaging the three only dilutes it.
+        return int((np.max(crop, axis=2) > TAB_PIXEL_THRESH).sum())
