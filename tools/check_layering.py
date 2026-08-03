@@ -77,7 +77,27 @@ RULES = [
      'calibration/ declares what to measure; control/ knows how to make the '
      'game do it. A press import here means a parallel driver, and every one '
      'of them so far has drifted from the control/ version it duplicates.'),
+
+    ('only the spawner detector may recompute its anchor box',
+     lambda p: p.as_posix() not in ICON_BOX_OWNERS,
+     lambda m: m.startswith('config:SPAWNER_ICON_'),
+     'detector.spawner_detector.ICON_BOX is that box, computed once and '
+     'clamped. The four constants have no other honest use: every caller so '
+     'far wanted the box, and the one that imported them instead '
+     '(tools/probe_toggle_latency.py) reimplemented the arithmetic without '
+     "anchor_box's max(0, ...) clamp. Import ICON_BOX."),
 ]
+
+# Rule 7's owners. Same discipline as the rule 6 ledger: a reason that belongs
+# to the CODE, not to the schedule.
+ICON_BOX_OWNERS = {
+    'detector/spawner_detector.py':
+        'defines ICON_BOX. It has to read the constants to compute it.',
+    'tools/test_frames.py':
+        'is anchor_box()\'s test. It must be able to feed it the real inputs '
+        'and pin the result to the measured literal (964, 2490, 311, 118); a '
+        'test that imported the answer would assert nothing.',
+}
 
 # ════════════════════════════════════════════════════════════
 # Rule 6's ledger — a RATCHET, not an excuse list
@@ -145,7 +165,13 @@ def check_ledger(offenders):
 
 
 def imports_of(path):
-    """(module, lineno) for every import, including function-local ones."""
+    """(module, lineno) for every import, including function-local ones.
+
+    `from X import a, b` also yields "X:a" and "X:b" so a rule can name a
+    SYMBOL and not just a module. The colon keeps those entries away from the
+    module-level predicates: "config:SPAWNER_ICON_W" is neither == 'config'
+    nor startswith('config.').
+    """
     try:
         tree = ast.parse(path.read_text(encoding='utf-8'))
     except (SyntaxError, UnicodeDecodeError):
@@ -156,6 +182,7 @@ def imports_of(path):
             out += [(a.name, n.lineno) for a in n.names]
         elif isinstance(n, ast.ImportFrom) and n.module and not n.level:
             out.append((n.module, n.lineno))
+            out += [(f'{n.module}:{a.name}', n.lineno) for a in n.names]
     return out
 
 

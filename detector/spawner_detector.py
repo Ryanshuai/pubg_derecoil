@@ -17,11 +17,23 @@ import numpy as np
 from config import (SPAWNER_ICON_ANCHORS, SPAWNER_ICON_W, SPAWNER_ICON_H,
                     SPAWNER_ICON_THRESH, SPAWNER_ICON_SEARCH,
                     SPAWNER_MIN_SCORE)
+from detector.cropper import anchor_box
 
 ASSET_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data',
                          'pubg_assets')
 TMPL_NAME = 'spawner_icon_{}_mask.png'
 N_ICONS = len(SPAWNER_ICON_ANCHORS)
+
+# One rect covering all three button glyphs plus their search pad, so an
+# is-the-panel-open check costs a small grab instead of a 70 ms full screen.
+#
+# Bound here rather than left as a four-argument call, because that call was
+# being made in three places and one of them (tools/probe_toggle_latency.py)
+# had inlined the arithmetic instead -- without anchor_box's max(0, ...)
+# clamp. Everyone who wants this box imports it; nobody needs SPAWNER_ICON_*
+# to compute it again.
+ICON_BOX = anchor_box(SPAWNER_ICON_ANCHORS, SPAWNER_ICON_W, SPAWNER_ICON_H,
+                      SPAWNER_ICON_SEARCH)
 
 
 def icon_mask(img):

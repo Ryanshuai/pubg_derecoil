@@ -27,12 +27,10 @@ import numpy as np
 
 from config import (HUD_REGIONS, RECOIL_SIGHT_PROFILES,
                     TAB_PIXEL_THRESH, TAB_COUNT_MIN, TAB_COUNT_MAX,
-                    TAB_DARK_FLOOR_MAX,
-                    SPAWNER_ICON_ANCHORS, SPAWNER_ICON_W, SPAWNER_ICON_H,
-                    SPAWNER_ICON_SEARCH)
-from detector.cropper import ScreenBuffer, anchor_box
+                    TAB_DARK_FLOOR_MAX)
+from detector.cropper import ScreenBuffer
 from detector.posture_detector import PostureDetector
-from detector.spawner_detector import SpawnerDetector
+from detector.spawner_detector import ICON_BOX, SpawnerDetector
 from detector.tab_detector import TabTypeDetector
 from detector.view_tracker import ViewTracker
 
@@ -54,8 +52,7 @@ class Probe:
         regions = {k: HUD_REGIONS[k] for k in
                    ('ammo', 'type', 'posture', 'weapon_1', 'weapon_2')}
         regions.update(self.tracker.regions())
-        self._sp_box = anchor_box(SPAWNER_ICON_ANCHORS, SPAWNER_ICON_W,
-                                  SPAWNER_ICON_H, SPAWNER_ICON_SEARCH)
+        self._sp_box = ICON_BOX
         regions['spawner'] = self._sp_box
         self.regions = regions
         # NO focus_fn, deliberately. This tool's whole promise is that it is

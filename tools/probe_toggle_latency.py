@@ -46,12 +46,11 @@ except (AttributeError, OSError):
 import cv2
 import numpy as np
 
-from config import (SCREEN_H, SCREEN_W, SPAWNER_ICON_ANCHORS,
-                    SPAWNER_ICON_H, SPAWNER_ICON_SEARCH, SPAWNER_ICON_W)
+from config import SCREEN_H, SCREEN_W
 from control.focus import ensure_focus, focus_keeper
 from control.lobby import LobbyControl
 from detector.cropper import capture_screen, win32_cap
-from detector.spawner_detector import SpawnerDetector
+from detector.spawner_detector import ICON_BOX, SpawnerDetector
 from detector.spawner_layout import find_menu
 from detector.tab_items import TabGrabber
 from press.pico_mouse import HID_KEY_COMMA, HID_KEY_TAB, get_mouse
@@ -60,14 +59,10 @@ POLL_TIMEOUT = 3.0      # give up on a transition
 QUIET = 0.35            # between the two halves of a cycle, so neither leaks
 EXPECTED_ROWS = {1: 10, 2: 5, 3: 6}
 
-# One rect covering all three spawner button glyphs plus their search pad, so
-# the open-check costs one small grab instead of a 70 ms full screen.
-_xs = [x for x, _ in SPAWNER_ICON_ANCHORS]
-_ys = [y for _, y in SPAWNER_ICON_ANCHORS]
-_x0, _y0 = min(_xs) - SPAWNER_ICON_SEARCH, min(_ys) - SPAWNER_ICON_SEARCH
-_x1 = max(_xs) + SPAWNER_ICON_W + SPAWNER_ICON_SEARCH
-_y1 = max(_ys) + SPAWNER_ICON_H + SPAWNER_ICON_SEARCH
-ICON_BOX = (_y0, _x0, _y1 - _y0, _x1 - _x0)
+# ICON_BOX (imported) is the one rect covering all three spawner button glyphs
+# plus their search pad, so the open-check costs one small grab instead of a
+# 70 ms full screen. This file used to compute it inline from SPAWNER_ICON_*,
+# which came to the same numbers but without anchor_box's max(0, ...) clamp.
 
 
 class TabScreen:
