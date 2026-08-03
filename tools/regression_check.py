@@ -104,11 +104,11 @@ def _checkers():
     tab = TabTypeDetector()
 
     def _att(crop):
-        # Any att_* key works; the detector cares about the pixels, and the
-        # region name only tells it which gun and slot to file the answer
-        # under.
-        got = att.classify({'att_1_muzzle': crop})
-        return (got.get(1) or {}).get('muzzle')
+        # classify() takes a full frame now, so a single crop goes through
+        # classify_crop instead. The slot name picks the template bank; no
+        # weapon is named, which is the harder case and the right one to
+        # assert against a labelled crop.
+        return att.classify_crop(crop, 'muzzle')
 
     def _gun(crop):
         return (gun.classify({'gun_name_1': crop}) or [None])[0]

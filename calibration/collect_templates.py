@@ -70,7 +70,8 @@ from config import (HUD_REGIONS, TAB_PIXEL_THRESH, TAB_COUNT_MIN,
 from detector.attachment_catalog import (ATTACHMENTS, ROSTER, SLOTS, fits,
                                          is_live)
 from detector.cropper import win32_cap
-from detector.tab_items import ROW_DETAIL_MIN, SLOT_DETAIL_MIN, tab_blocks
+from detector.attachment_detector import SLOT_DETAIL_MIN
+from detector.tab_items import ROW_DETAIL_MIN, tab_blocks
 from detector.tab_layout import INV_ROWS, icon_box
 from control.focus import ensure_focus, focus_keeper
 

@@ -48,6 +48,7 @@ class FakeScreen:
         self.guns = ('aug', 'm416')
         self.type_reads = 0
         self.panel_reads = 0
+        self.att_told = 'never called'   # what the attachment read was given
 
     def type_det(self):
         s = self
@@ -68,7 +69,13 @@ class FakeScreen:
     def att_det(self):
         s = self
         class D:
-            def classify(_self, crops):
+            # Takes a frame and the weapon names, like the real one. Naming
+            # the guns is what narrows each slot's template bank, so a caller
+            # that forgets to pass them reads every slot against all 55
+            # templates and gets a confident wrong answer -- which is what
+            # this recorded argument exists to catch.
+            def classify(_self, frame, weapons=None):
+                s.att_told = weapons
                 return {1: {'muzzle': 'comp'}, 2: {'muzzle': ''}}
         return D()
 
@@ -144,6 +151,11 @@ t = run(w, TAB_REFRESH_S * 3.5, t0=t)
 check('re-read the panel while open', screen.panel_reads > before, True)
 check('weapon_gt published', state.weapon_gt, ('aug', 'm416'))
 check('attachments published', state.attachments[1], {'muzzle': 'comp'})
+# The names were read off THIS frame and used to be discarded, leaving the
+# slots to be matched blind against every template. That is how a UZI read as
+# wearing a sniper cheek pad, and it feeds the recoil scale.
+check('the weapon names reach the attachment read',
+      screen.att_told, {1: 'aug', 2: 'm416'})
 
 print('\n=== a SWALLOWED keypress must not move the flag ===')
 w2, state2, screen2 = build()

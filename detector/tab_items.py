@@ -72,9 +72,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import cv2
 import numpy as np
 
-from detector.attachment_detector import (AttachmentDetector, SLOT_NAMES,
-                                          OFFSET_Y, OFFSET_X, MSE_EMPTY_TH)
-from detector.attachment_catalog import ATTACHMENTS, compatible
+from detector.attachment_detector import AttachmentDetector
+from detector.attachment_catalog import ATTACHMENTS
 from detector.tab_layout import (PANELS, INV_ROWS, icon_box, row_point,
                                  ATT_SLOT_XY)
 from config import HUD_REGIONS, SCREEN_W, SCREEN_H
@@ -93,20 +92,6 @@ ROW_MARGIN_MIN = 1.25    # runner-up must be this much worse to trust the win
 # but high-frequency detail does: an icon has hard edges, the blur has none.
 # Measured over both captures: occupied rows 702..6393, empty 0..2.
 ROW_DETAIL_MIN = 100
-
-# The same question for a weapon slot, and it needs asking for the same reason:
-# a slot the weapon does not have is not drawn, and an *empty weapon slot*
-# draws nothing at all, so both show blurred scenery. MSE alone does not
-# reject that — on docs/tab_live_aug_vss.png, whose second weapon slot is
-# empty, the magazine position matched Magazine_SR_ExtendedQuick_Mag_Vss at
-# under the 450 empty threshold, and the gun read as wearing a VSS magazine it
-# did not have.
-#
-# Measured over the three captures: slots holding something score 300..4756
-# (the floor is a suppressor, a plain grey tube), slots not drawn score 1..14.
-# A slot that is drawn but empty is not in that sample; the gate is deliberately
-# only a floor, so anything above it still has to pass the MSE test below.
-SLOT_DETAIL_MIN = 100
 
 # asset name -> catalog key
 _BY_ASSET = {a['asset']: k for k, a in ATTACHMENTS.items() if a.get('asset')}
@@ -181,50 +166,13 @@ class TabItemDetector:
             for n in names:
                 self._slot_of[n] = slot
 
-    # ── scoring ──
-
-    _SHIFTS = tuple((sy, sx) for sy in (-1, 0, 1) for sx in (-1, 0, 1))
-
-    def _score(self, crop_f, name, shifts=_SHIFTS):
-        """AttachmentDetector's own metric, over one template.
-
-        `crop_f` is float32 already — converting it once per row rather than
-        once per template is worth ~15% on its own.
-        """
-        tmpl_vals, ys, xs = self._det._templates[name]
-        h, w = crop_f.shape[:2]
-        cy, cx = ys + OFFSET_Y, xs + OFFSET_X
-        best = None
-        for sy, sx in shifts:
-            ny = np.clip(cy + sy, 0, h - 1)
-            nx = np.clip(cx + sx, 0, w - 1)
-            se = ((crop_f[ny, nx] - tmpl_vals) ** 2).sum(axis=1)
-            best = se if best is None else np.minimum(best, se)
-        return float(best.mean() / 3)
-
-    def _best_two(self, crop, names, shortlist=10):
-        """Best and runner-up, two-stage.
-
-        Scoring every template at all nine sub-pixel shifts costs 9x what the
-        answer needs, so rank once un-shifted and re-score only the shortlist
-        properly.
-
-        The shortlist has to be generous: a shift can promote a template a long
-        way. 4倍瞄准镜 does not survive a shortlist of 5 — un-shifted it ranks
-        outside the top five and drops out. 8 is where both reference captures
-        come back identical to the exhaustive answer; 10 is that plus margin,
-        and costs 3 ms over 8 against the 170 ms it saves over 55.
-        """
-        crop_f = crop.astype(np.float32)
-        coarse = sorted(((self._score(crop_f, n, shifts=((0, 0),)), n)
-                         for n in names))
-        top = [n for _, n in coarse[:shortlist]]
-        fine = sorted(((self._score(crop_f, n), n) for n in top))
-        m1, n1 = fine[0]
-        m2 = fine[1][0] if len(fine) > 1 else float('inf')
-        return n1, m1, (m2 / m1 if m1 > 0 else float('inf'))
-
     # ── panels ──
+    #
+    # The metric is AttachmentDetector.best_two(). A list row and a weapon slot
+    # differ in which templates they try and how strict they are about the win,
+    # never in how a template is scored -- so there is one implementation and
+    # this asks it, rather than holding a copy that can drift from what the
+    # live recoil loop reads through.
 
     def _read_row(self, frame, panel, i):
         x0, y0, x1, y1 = icon_box(i, panel)
@@ -238,7 +186,7 @@ class TabItemDetector:
         if not occupied:
             return None, False
         cell = cv2.resize(cell, (63, 63), interpolation=cv2.INTER_AREA)
-        name, mse, margin = self._best_two(cell, self._all)
+        name, mse, margin = self._det.best_two(cell, self._all)
         if mse <= ROW_MSE_MAX and margin >= ROW_MARGIN_MIN:
             return Item(name, self._slot_of.get(name, '?'), row_point(i, panel),
                         (panel, i), mse, margin), True
@@ -255,32 +203,6 @@ class TabItemDetector:
 
     # ── weapons ──
 
-    @staticmethod
-    def _drawn(crop):
-        """Is there UI in this cell, or is it the blurred world showing through?
-
-        The one test that separates them; see SLOT_DETAIL_MIN. Applied before
-        matching rather than after, because the answer is not "which template
-        is closest" — there is no box on screen to hold a template at all.
-        """
-        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-        return float(cv2.Laplacian(gray, cv2.CV_32F).var()) >= SLOT_DETAIL_MIN
-
-    def _candidates(self, slot, weapon):
-        """Templates worth testing in this slot.
-
-        Naming the weapon narrows the bank to what it can physically hold,
-        which is what separates Suppressor (SMG) from Suppressor (AR) — two
-        near-identical icons that a blind match picks between on ~1.3x margin.
-        """
-        names = self._det._slot_index.get(slot, [])
-        if not weapon:
-            return names
-        allowed = {ATTACHMENTS[k]['asset']
-                   for k in compatible(weapon).get(slot, [])
-                   if ATTACHMENTS[k].get('asset')}
-        return [n for n in names if n in allowed] if allowed else []
-
     def read_weapons(self, frame, weapons=None):
         """Just the two guns' slots — {1: {slot: Item|None}, 2: {...}}.
 
@@ -295,25 +217,16 @@ class TabItemDetector:
         return self._read_weapons(frame, weapons)
 
     def _read_weapons(self, frame, weapons=None):
-        weapons = weapons or {}
-        out = {}
-        for gun in (1, 2):
-            weapon = weapons.get(gun)
-            slots = {}
-            for slot in SLOT_NAMES:
-                region = f'att_{gun}_{slot}'
-                y, x, h, w = HUD_REGIONS[region]
-                crop = frame[y:y + h, x:x + w]
-                names = self._candidates(slot, weapon)
-                if crop.size == 0 or not names or not self._drawn(crop):
-                    slots[slot] = None
-                    continue
-                name, mse, margin = self._best_two(crop, names)
-                slots[slot] = (None if mse > MSE_EMPTY_TH else
-                               Item(name, slot, ATT_SLOT_XY[region],
-                                    ('weapon', gun, slot), mse, margin))
-            out[gun] = slots
-        return out
+        """AttachmentDetector.read_slots, wrapped as Items.
+
+        The gate, the candidate narrowing and the two-stage search are all
+        over there now; this adds the address a caller needs to click.
+        """
+        return {gun: {slot: (Item(hit[0], slot, ATT_SLOT_XY[f'att_{gun}_{slot}'],
+                                  ('weapon', gun, slot), hit[1], hit[2])
+                             if hit else None)
+                      for slot, hit in slots.items()}
+                for gun, slots in self._det.read_slots(frame, weapons).items()}
 
     # ── entry point ──
 

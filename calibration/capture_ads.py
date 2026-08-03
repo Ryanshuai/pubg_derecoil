@@ -902,7 +902,11 @@ class ScopeVerifier:
         try:
             y, x, h, w = self.region
             frame = grab()
-            return self.det._classify_slot(frame[y:y + h, x:x + w], 'scope')
+            # classify_crop, not the old private _classify_slot: same metric,
+            # plus the is-anything-drawn gate. An empty scope slot used to be
+            # answered with whatever template came closest, and this verifier
+            # exists precisely to catch a scope that never went on.
+            return self.det.classify_crop(frame[y:y + h, x:x + w], 'scope')
         finally:
             if not self.inv.ensure_tab(False):
                 print('[verify] Tab would not close')

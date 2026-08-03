@@ -357,7 +357,19 @@ class GunDriver:
         return self.tab_open(self.grab())
 
     def read_loadout(self, slot=1):
-        """One Tab cycle returns both the weapon name and its attachments."""
+        """One Tab cycle returns both the weapon name and its attachments.
+
+        Both reads used to hand the raw frame to a classify() that wanted a
+        dict of pre-cut crops, so this raised AttributeError every time it got
+        as far as reading anything. AttachmentDetector takes a frame now; the
+        name detector still takes crops, so they are cut here.
+
+        The name is fed to the attachment read rather than just returned:
+        naming the weapon narrows each slot's template bank to what that gun
+        can hold, which on the reference captures is the difference between
+        Suppressor (SMG) and Suppressor (AR).
+        """
+        from config import HUD_REGIONS
         self.ensure_inventory_closed()
         self.mouse.key(HID_KEY_TAB, 60)
         time.sleep(TAB_OPEN_S)
@@ -365,9 +377,14 @@ class GunDriver:
         ok = self.tab_open(frame)
         gun = att = None
         if ok:
-            names = self.gun_det.classify(frame)
+            crops = {}
+            for k in ('gun_name_1', 'gun_name_2'):
+                y, x, h, w = HUD_REGIONS[k]
+                crops[k] = frame[y:y + h, x:x + w]
+            names = self.gun_det.classify(crops)
             gun = names[slot - 1] or ''
-            att = self.att_det.classify(frame).get(slot)
+            named = {i + 1: n for i, n in enumerate(names) if n}
+            att = self.att_det.classify(frame, named).get(slot)
         if not self.ensure_inventory_closed():
             print("      [!] inventory would not close")
         return (gun, att) if ok else (None, None)

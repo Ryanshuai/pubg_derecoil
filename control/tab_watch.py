@@ -111,8 +111,15 @@ class TabWatch:
                 out['weapons'] = weap.classify(
                     {k: _crop(frame, k) for k in NAME_REGIONS})
             if att is not None:
-                out['attachments'] = att.classify(
-                    {k: _crop(frame, k) for k in ATT_REGIONS})
+                # The names go INTO the attachment read. They were already on
+                # this frame and were being thrown away, while the slots were
+                # matched blind against all 55 templates -- which is how a UZI
+                # came to be wearing a sniper cheek pad and an SKS an SMG
+                # suppressor. This feeds state.set_attachments() and from
+                # there the recoil scale, so a wrong slot is a wrong curve.
+                named = {i + 1: n for i, n in enumerate(out['weapons'] or ())
+                         if n}
+                out['attachments'] = att.classify(frame, named)
         except Exception as e:
             self._log(f'panel read failed: {e}')
             return None
