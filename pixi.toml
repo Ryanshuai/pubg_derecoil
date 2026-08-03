@@ -167,3 +167,11 @@ lobby-detector = "python tools/verify_lobby_detector.py"
 # sentence about the screen, and the first version discarded the screen to
 # say it. Same code path harness/adapter.dump uses at 04:00.
 dump-state = "python tools/dump_state.py"
+# Names used but never defined. Parses; runs nothing. Python resolves a global
+# at CALL time, so a name only mentioned inside a method survives import, every
+# import-only check, and any test that does not take that branch -- and then
+# raises NameError minutes into a live run. That is not hypothetical: SLOT_NAMES
+# went unimported in collect_templates and killed a collection two rounds in,
+# past `layering`, past `runs`, past a clean import. Verified to catch it by
+# putting it back.
+names = "python tools/check_names.py"
