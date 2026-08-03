@@ -136,6 +136,11 @@ def base_curve(weapon, posture, n_pts, nominal):
 def fire_one(rig, dy_pattern, nominal, mag_size, n_bins, label):
     """Upload a curve, fire a magazine, return its per-round profile."""
     n = len(dy_pattern)
+    # Bare, not rig.arm(): what goes up is a SYNTHETIC pattern -- zero
+    # everywhere but one spiked round -- and there is no Weapon behind it.
+    # This probe measures which round the firmware lands a spike on, so
+    # the upload is the thing under test, the same exemption
+    # calibrate_k.py holds for its bare mouse.move.
     rig.mouse.upload_pattern([0.0] * n, list(dy_pattern),
                              [k * nominal for k in range(n)], nominal)
     rig.mouse.set_recoil_enabled(True)
@@ -265,8 +270,9 @@ def main():
                 if per is not None:
                     spike_runs[k].append(per)
     finally:
-        rig.mouse.clear_pattern()
-        rig.mouse.set_recoil_enabled(True)
+        # clear=True because what this uploaded is a synthetic spike, not
+        # any weapon's curve -- worse to leave loaded than a real one.
+        rig.disarm(clear=True)
         rig.close()
 
     if not base_runs:

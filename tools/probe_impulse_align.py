@@ -110,6 +110,11 @@ def main():
         dy = [0.0] * n_pts
         dy[args.bullet] = args.spike
         t_s = [k * nominal for k in range(n_pts)]
+        # Bare, not rig.arm(): what goes up is a SYNTHETIC pattern -- zero
+        # everywhere but one spiked round -- and there is no Weapon behind it.
+        # This probe measures which round the firmware lands a spike on, so
+        # the upload is the thing under test, the same exemption
+        # calibrate_k.py holds for its bare mouse.move.
         rig.mouse.upload_pattern([0.0] * n_pts, dy, t_s, nominal)
         rig.mouse.set_recoil_enabled(True)
         time.sleep(0.3)
@@ -163,8 +168,7 @@ def main():
                          'per_round': [float(v) for v in per]})
             rig.wait_reload()
     finally:
-        rig.mouse.set_recoil_enabled(True)
-        rig.close()
+        rig.close()          # disarms; see FireDriver.disarm
 
     if not rows:
         print('[!] nothing measured')

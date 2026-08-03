@@ -209,8 +209,7 @@ def main():
     mags = []
     n_hip = 0
     try:
-        rig.mouse.upload_pattern(w.dx_s, w.dy_s, w.t_s, w.bullet_interval_s)
-        rig.mouse.set_recoil_enabled(True)
+        rig.arm(w)
         time.sleep(0.3)
 
         # In ADS before the FIRST magazine, not only after a reload. This used

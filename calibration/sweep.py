@@ -149,11 +149,13 @@ class Rig:
     paced = property(lambda s: s.frames.paced)
 
     def close(self):
+        # The trigger first: an exception escaping mid-burst leaves it held,
+        # and a disarmed firmware does not stop the character shooting.
         try:
             self.mouse.click(buttons=0x00, duration_ms=0)
-            self.mouse.set_recoil_enabled(False)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f'  [!] could not release the trigger: {e}', flush=True)
+        self.fire.disarm()
         self.frames.close()
 
     # ── screen reads ──
@@ -292,6 +294,12 @@ class Rig:
     def top_up(self, settle_s=0.4):
         return self.fire.top_up(settle_s)
 
+    def arm(self, weapon):
+        return self.fire.arm(weapon)
+
+    def disarm(self, clear=False):
+        return self.fire.disarm(clear)
+
 
 
 
@@ -412,8 +420,7 @@ def calibrate_combo(rig, weapon, posture, mags, log):
         return None
     pattern_counts = float(np.sum(w.dy_s))
 
-    rig.mouse.upload_pattern(w.dx_s, w.dy_s, w.t_s, w.bullet_interval_s)
-    rig.mouse.set_recoil_enabled(True)
+    rig.arm(w)
     time.sleep(0.3)
 
     # Enters ADS as a side effect — the posture icon is the ADS indicator.

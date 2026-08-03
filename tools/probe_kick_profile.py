@@ -169,14 +169,13 @@ def main():
     rows = []
     try:
         if args.no_comp:
-            rig.mouse.set_recoil_enabled(False)
+            rig.disarm()
         else:
             w = Weapon()
             w.set('name', args.weapon)
             w.set('posture', args.posture)
             w.set_seq()
-            rig.mouse.upload_pattern(w.dx_s, w.dy_s, w.t_s, w.bullet_interval_s)
-            rig.mouse.set_recoil_enabled(True)
+            rig.arm(w)
             time.sleep(0.3)
         if not rig.ensure_posture(args.posture):
             print(f'[!] could not reach {args.posture}')
@@ -237,8 +236,7 @@ def main():
                          'fitted': bool(iv), 'fit_rounds': n_iv})
             rig.wait_reload()
     finally:
-        rig.mouse.set_recoil_enabled(True)
-        rig.close()
+        rig.close()          # disarms; see FireDriver.disarm
 
     if not rows:
         print('[!] nothing measured')

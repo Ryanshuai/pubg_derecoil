@@ -128,7 +128,7 @@ def main():
     rec, ammo, both = [], [], []
     try:
         if not args.keep_comp:
-            rig.mouse.set_recoil_enabled(False)
+            rig.disarm()
         if not rig.ensure_ads():
             print('[!] could not enter ADS')
             return 1
@@ -150,8 +150,7 @@ def main():
             if r is not None and a is not None:
                 both.append(a - r)
     finally:
-        rig.mouse.set_recoil_enabled(True)
-        rig.close()
+        rig.close()          # disarms; see FireDriver.disarm
 
     print(f'\n{args.weapon}, {args.taps} taps, milliseconds from the click:')
     s_rec = report('S_recoil  view starts moving ', rec)

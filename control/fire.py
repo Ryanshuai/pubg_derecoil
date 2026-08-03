@@ -74,6 +74,46 @@ class FireDriver:
     def grab(self):
         return self.frames.grab()
 
+    # ── the firmware's compensation ──
+
+    def arm(self, weapon):
+        """Load this weapon's curve into the Pico and switch compensation on.
+
+        -> how many rounds the pattern covers, which is what a caller logs.
+
+        Nine files did these two lines by hand through rig.mouse, and the
+        count is the point: the repo has 13 sites that switch compensation ON
+        and 4 that switch it OFF. The asymmetry is not an accident of style,
+        it is the shape of the bug 5k found -- a run that dies between them
+        leaves the firmware compensating for a gun nobody is holding, and
+        three agents share this one serial port, so the next run measures that
+        instead of what it fired.
+
+        Pair it with disarm() in a finally, or let Rig.close() do it.
+        """
+        self.mouse.upload_pattern(weapon.dx_s, weapon.dy_s, weapon.t_s,
+                                  weapon.bullet_interval_s)
+        self.mouse.set_recoil_enabled(True)
+        return len(weapon.dy_s)
+
+    def disarm(self, clear=False):
+        """Compensation off. -> whether the firmware confirmed it.
+
+        Idempotent, and it does NOT swallow the failure. A disarm that throws
+        used to be caught and passed over in four separate teardown paths, so
+        a single CDC timeout -- which press/pico_mouse documents as a normal
+        occurrence under backpressure -- left the pattern running with nothing
+        said. Losing the message is how it stays lost.
+        """
+        try:
+            self.mouse.set_recoil_enabled(False)
+            if clear:
+                self.mouse.clear_pattern()
+        except Exception as e:
+            print(f'  [!] FIRMWARE STILL ARMED: {e}', flush=True)
+            return False
+        return True
+
     # ── the ammo counter ──
 
     def ammo_sig(self, frame):

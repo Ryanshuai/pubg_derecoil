@@ -68,8 +68,7 @@ def main():
         if not len(w.t_s):
             print(f'[!] no curve for {args.weapon}')
             return 1
-        rig.mouse.upload_pattern(w.dx_s, w.dy_s, w.t_s, w.bullet_interval_s)
-        rig.mouse.set_recoil_enabled(True)
+        rig.arm(w)
         time.sleep(0.3)
 
         if not rig.ensure_ads():

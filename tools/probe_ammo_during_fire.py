@@ -63,8 +63,7 @@ def main():
         w.set('posture', 'standing')
         w.set_seq()
         if len(w.t_s):
-            rig.mouse.upload_pattern(w.dx_s, w.dy_s, w.t_s, w.bullet_interval_s)
-            rig.mouse.set_recoil_enabled(True)
+            rig.arm(w)
             time.sleep(0.3)
         if not rig.ensure_ads():
             print('[!] could not enter ADS')
