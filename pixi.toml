@@ -143,3 +143,10 @@ recenter = "python tools/test_recenter.py"
 # makes is the point: a one-click transition from a COLLAPSED panel proves
 # nothing, and counting paths without that split looks like evidence.
 goto-paths = "python tools/report_goto_paths.py"
+# Sidecar metadata, and the ground-truth crop assertions it buys. Offline.
+# The half of the check that matters is that it CAN FAIL: "3/3 correct" looks
+# the same whether the checker discriminates or returns the expected answer by
+# construction, so each one is also fed a crop it must NOT match. Template
+# drift is silent (detector/CLAUDE.md's first iron law) and only a
+# compare-against-truth pass sees it.
+snaps = "python tools/test_snapshot.py"

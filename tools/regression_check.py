@@ -53,6 +53,99 @@ def _frames():
     return out
 
 
+def _labelled_crops():
+    """Crops under docs/ whose sidecar carries GROUND TRUTH.
+
+    -> [(relpath, img, [label, ...])]
+
+    This is the half of the corpus that was worth nothing until sidecars
+    existed. `_frames()` above keeps a file only if it happens to be
+    full-screen, so every cut-out region — which is most of what is on disk,
+    and exactly what template matching wants — was invisible to the harness.
+
+    And the assertion is a different KIND: _frames() compares against last
+    time, which catches a library bump; this compares against the truth, which
+    catches a wrong answer. A detector that has silently drifted passes the
+    first and fails the second.
+
+    DETECTED labels are not returned — snapshot.truth() refuses them. A
+    detector's own reading cannot be the truth it is judged against.
+    """
+    from detector.snapshot import KIND_CROP, read_sidecar, truth
+    out = []
+    for f in sorted(glob.glob(os.path.join(ROOT, 'docs', '**', '*.png'),
+                              recursive=True)):
+        meta = read_sidecar(f)
+        if not meta or meta.get('kind') != KIND_CROP:
+            continue
+        labs = truth(meta)
+        if not labs:
+            continue
+        img = cv2.imread(f)
+        if img is None:
+            continue
+        out.append((os.path.relpath(f, ROOT).replace('\\', '/'), img, labs))
+    return out
+
+
+def _checkers():
+    """target -> (callable(crop) -> value). Built once; each is one detector.
+
+    A target with no checker is REPORTED, not skipped quietly: an unchecked
+    label looks exactly like a passing one in a summary line, and the whole
+    point of the sidecar is to stop truth from going unexamined.
+    """
+    from detector.attachment_detector import AttachmentDetector
+    from detector.weapon_template_detector import TabWeaponDetector
+    from detector.tab_detector import TabTypeDetector
+
+    att = AttachmentDetector()
+    gun = TabWeaponDetector()
+    tab = TabTypeDetector()
+
+    def _att(crop):
+        # Any att_* key works; the detector cares about the pixels, and the
+        # region name only tells it which gun and slot to file the answer
+        # under.
+        got = att.classify({'att_1_muzzle': crop})
+        return (got.get(1) or {}).get('muzzle')
+
+    def _gun(crop):
+        return (gun.classify({'gun_name_1': crop}) or [None])[0]
+
+    return {
+        'attachment': _att,
+        'weapon_name': _gun,
+        'tab_open': lambda crop: bool(tab.classify({'type': crop})),
+    }
+
+
+def check_labels():
+    """Run every ground-truth crop past its detector. -> (n_ok, [failure, ...])"""
+    samples = _labelled_crops()
+    if not samples:
+        return 0, [], 0
+    checkers = _checkers()
+    ok, bad, unchecked = 0, [], 0
+    for name, img, labs in samples:
+        for lab in labs:
+            fn = checkers.get(lab['target'])
+            if fn is None:
+                unchecked += 1
+                bad.append((name, lab['target'], lab['value'],
+                            f'NO CHECKER for target {lab["target"]!r}'))
+                continue
+            try:
+                got = fn(img)
+            except Exception as e:
+                got = f'ERROR {type(e).__name__}: {e}'
+            if got == lab['value']:
+                ok += 1
+            else:
+                bad.append((name, lab['target'], lab['value'], got))
+    return ok, bad, unchecked
+
+
 def _crops(img, names):
     out = {}
     for n in names:
@@ -181,14 +274,43 @@ def _diff(a, b, path=''):
         yield f"{path}: {a!r} -> {b!r}"
 
 
+def _report_labels():
+    """The ground-truth pass on its own. -> exit code.
+
+    Separate from --compare on purpose. --compare answers "did anything move
+    since the baseline", needs torch and takes a while; this answers "is any
+    detector wrong", needs no baseline at all, and is the one worth running in
+    the gate set after touching a detector or a template.
+    """
+    ok, bad, unchecked = check_labels()
+    total = ok + len(bad)
+    if not total:
+        print('no ground-truth crops on disk yet.\n\n'
+              'A crop earns one by being saved through detector.snapshot.snap()'
+              ' with a REQUESTED label. Until then the corpus is full-screen '
+              'shots compared against themselves.')
+        return 0
+    print(f'{ok}/{total} ground-truth crops read correctly'
+          + (f'   ({unchecked} had no checker)' if unchecked else ''))
+    for name, target, want, got in bad:
+        print(f'  FAIL {name}\n       {target}: want {want!r}, got {got!r}')
+    return 0 if not bad else 1
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--save', action='store_true', help='write the baseline')
     ap.add_argument('--compare', action='store_true', help='diff against the baseline')
     ap.add_argument('--baseline', default=DEFAULT_BASELINE)
+    ap.add_argument('--labels', action='store_true',
+                    help='only run the ground-truth crop assertions (fast, '
+                         'no torch heads, no baseline)')
     args = ap.parse_args()
-    if not (args.save or args.compare):
-        ap.error('pass --save or --compare')
+    if not (args.save or args.compare or args.labels):
+        ap.error('pass --save, --compare or --labels')
+
+    if args.labels:
+        return _report_labels()
 
     cur = collect()
     print(f"{cur['n_frames']} frames  |  " +
@@ -206,9 +328,35 @@ def main():
     print("baseline versions: " +
           '  '.join(f"{k} {v}" for k, v in base['versions'].items()))
 
-    diffs = list(_diff(base['results'], cur['results']))
+    # Corpus coverage is reported apart from value drift, because they are
+    # different failures and the loud one hides the quiet one. 47 of the
+    # baseline's 52 frames live under docs/spawner/runs/, which is run product
+    # and stays out of git -- so a fresh clone is missing them and every one
+    # would land in _diff as "only in baseline", burying an actual reading
+    # that moved. Only the overlap is diffed; what is absent is named.
+    missing = sorted(set(base['results']) - set(cur['results']))
+    added = sorted(set(cur['results']) - set(base['results']))
+    if missing:
+        print(f"\n{len(missing)} baseline frame(s) not on disk -- NOT CHECKED:")
+        for m in missing[:10]:
+            print('  ' + m)
+        if len(missing) > 10:
+            print(f"  ... {len(missing) - 10} more")
+        print("  (run product is not in git; re-capture or ignore, but know "
+              "the corpus is partial)")
+    if added:
+        print(f"\n{len(added)} new frame(s) with no baseline entry:")
+        for a in added[:10]:
+            print('  ' + a)
+        if len(added) > 10:
+            print(f"  ... {len(added) - 10} more")
+
+    shared = set(base['results']) & set(cur['results'])
+    diffs = list(_diff({k: base['results'][k] for k in shared},
+                       {k: cur['results'][k] for k in shared}))
     if not diffs:
-        print(f"\nidentical across all {cur['n_frames']} frames (atol={ATOL})")
+        print(f"\nidentical across all {len(shared)} compared frames "
+              f"(atol={ATOL})")
         return 0
     print(f"\n{len(diffs)} difference(s):")
     for d in diffs[:80]:
