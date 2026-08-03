@@ -190,13 +190,6 @@ class ScreenCapture:
             return self._buffer[-1]
         return None, None
 
-    def get_crop(self, target_ts, region, max_age=0.5):
-        """Convenience: find frame and return a single region's crop."""
-        ts, frame = self.find_frame(target_ts, max_age)
-        if frame is None:
-            return None
-        return frame.get(region)
-
     def get_crops(self, target_ts, regions, max_age=0.5):
         """Convenience: find frame and return multiple regions as dict."""
         ts, frame = self.find_frame(target_ts, max_age)

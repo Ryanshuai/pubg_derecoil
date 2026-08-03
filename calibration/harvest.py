@@ -68,10 +68,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # what this repo has measured, never next to the script that wrote them.
 RUNS = os.path.join(os.path.dirname(HERE), 'docs', 'recoil', 'runs')
 
-PANEL_WATCH_S = 3.0       # comma -> panel drawn; generous, it is a full screen
-PANEL_SETTLE_S = 0.5
-KIT_SETTLE_S = 0.6
-
 # Which part fills each slot under test, per weapon class. A class that has no
 # part for a slot skips every config naming it, rather than silently measuring
 # bare twice under two different labels.

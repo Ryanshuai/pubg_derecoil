@@ -69,9 +69,6 @@ class MagazineResult:
     def cumulative_dy(self):
         return np.cumsum(np.nan_to_num(self.dy))
 
-    def cumulative_dx(self):
-        return np.cumsum(np.nan_to_num(self.dx))
-
     def n_frames(self):
         return len(self.ts)
 
@@ -260,9 +257,6 @@ class MagazineRecorder:
 
     def n_frames(self):
         return len(self._patches)
-
-    def patches(self):
-        return self._patches
 
     def finish(self, predicted_dy=None):
         """Worker-thread call. Batch-measures every consecutive frame pair.

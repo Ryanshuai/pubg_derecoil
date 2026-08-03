@@ -84,6 +84,26 @@ class GunDriver:
     def grab(self):
         return self.frames.grab()
 
+    def full(self, frame=None):
+        """The frame as SCREEN pixels, for a detector that cuts its own crops.
+
+        grab() hands back {region_name: crop} — a banded capture, because
+        grabbing 3440x1440 per poll is what the banding exists to avoid. Most
+        detectors take that dict and index it by name. Two do not: the gun
+        name plates and the attachment slots are cut by pixel coordinate, and
+        given the dict they raise KeyError on a tuple of slices.
+
+        ScreenBuffer.full() blits the crops back where they came from, so the
+        coordinates line up without a full-screen grab. Every region those two
+        detectors read is in the rig's set already (gun_name_1/2 and att_*),
+        which is what makes the blit sufficient rather than merely convenient.
+
+        Pass a frame already grabbed to avoid a second capture; the crops and
+        the composite then describe the same instant, which matters when the
+        thing being read is a screen that was just toggled open.
+        """
+        return self.frames.full(frame)
+
     def flush(self, n=8):
         self.frames.flush(n)
 
@@ -169,9 +189,13 @@ class GunDriver:
                 return False
             time.sleep(0.05)
 
-    def enter_ads(self):
-        self.mouse.click(buttons=0x02, duration_ms=60)
-        time.sleep(ADS_SETTLE_S)
+    # enter_ads() -- blind right-click plus a fixed ADS_SETTLE_S, no read-back
+    # -- was removed on 2026-08-03. Zero callers: the only reference was
+    # sweep.Rig's forward, which nothing called either. It was ensure_ads with
+    # the verification taken out, and right click is a TOGGLE, so a blind press
+    # lands out of ADS exactly as often as into it. That is the failure the
+    # docstring below spends a paragraph on. If a caller ever genuinely needs
+    # an unverified tap, ViewDriver.ads_tap() is the one with a guard on it.
 
     def ensure_ads(self, tries=3):
         """Get into ADS, and be sure of it before firing anything.
@@ -373,8 +397,14 @@ class GunDriver:
         self.ensure_inventory_closed()
         self.mouse.key(HID_KEY_TAB, 60)
         time.sleep(TAB_OPEN_S)
-        frame = self.grab()
-        ok = self.tab_open(frame)
+        # full(), not grab(). Both classify() calls below cut by SCREEN
+        # coordinate, and grab() returns {region_name: crop} -- indexing that
+        # with a pair of slices raises KeyError, which is what killed the first
+        # unattended night run three minutes after this method was last
+        # "fixed". tab_open() wants the named dict, so it keeps getting one.
+        cropped = self.grab()
+        frame = self.full(cropped)
+        ok = self.tab_open(cropped)
         gun = att = None
         if ok:
             crops = {}

@@ -283,9 +283,9 @@ DROP_SETTLE = 0.5
 
 # ensure_kit's final readback waits this long after the last step. Every step
 # it ran was already polled to a verified state, so this is only covering the
-# tail of the last one's icon animation -- it is harvest.KIT_SETTLE_S, kept at
-# the value that run has been using, and it is the one number here nobody has
-# measured.
+# tail of the last one's icon animation. It came over from harvest, which kept
+# an unread copy of this and two spawner timings until 2026-08-03; this is now
+# the only one, and it is the one number here nobody has measured.
 KIT_SETTLE = 0.6
 
 

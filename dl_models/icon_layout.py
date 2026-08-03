@@ -513,5 +513,3 @@ LAYOUTS = {
     'fire_mode': FireModeLayout,
 }
 
-def get_layout(name, **kwargs):
-    return LAYOUTS[name](**kwargs)

@@ -265,34 +265,6 @@ def _regular_run(centres):
     return [centres[i] for i in best] if len(best) >= MIN_ROWS else []
 
 
-def _panel_rows(gray_col, fill_max=110):
-    """(y0, y1) of the panel's body in one column, from its dimmed fill.
-
-    The panel is translucent and darkens everything behind it: sand that reads
-    255 in the open reads 81 under the panel. So the longest run of dim rows in
-    a column IS the panel, whatever the player happens to be facing -- which is
-    the one thing a brightness threshold on the raw image cannot survive.
-
-    Falls back to the whole search band when nothing is dim, which is what a
-    dark backdrop looks like and costs nothing there.
-    """
-    med = np.median(gray_col[PANEL_Y0:PANEL_Y1], axis=1)
-    dim = med < fill_max
-    best = (0, 0)
-    start = None
-    for i, v in enumerate(dim):
-        if v and start is None:
-            start = i
-        elif not v and start is not None:
-            if i - start > best[1] - best[0]:
-                best = (start, i)
-            start = None
-    if start is not None and len(dim) - start > best[1] - best[0]:
-        best = (start, len(dim))
-    if best[1] - best[0] < 100:
-        return PANEL_Y0, PANEL_Y1
-    return PANEL_Y0 + best[0], PANEL_Y0 + best[1]
-
 
 def find_menu(img, verbose=True):
     """Locate every clickable category row in a collapsed spawner panel.

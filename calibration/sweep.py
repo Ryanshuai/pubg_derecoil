@@ -72,11 +72,13 @@ FAIL_DIR = os.path.join(os.path.dirname(HERE), 'docs', 'fail')
 HEADROOM_WARN_FRAC = 0.6
 POSTURES = ('standing', 'crouching', 'prone')
 
-# One implementation, in press/pointer.py, because it guards the mouse calls
-# that live there too. Re-exported under the old names so importers of this
-# module keep working.
-from control.focus import (game_focused, raise_game, ensure_focus,  # noqa: E402
-                           focus_keeper, FocusKeeper, GAME_EXES)
+# Re-exported for the tools that reach them through this module. Checked
+# 2026-08-03: every `from sweep import` in the repo takes ensure_focus or
+# focus_keeper and nothing else, so raise_game / FocusKeeper / GAME_EXES were
+# dropped -- they were forwarding for importers that do not exist, while the
+# real users go to control.focus directly.
+from control.focus import (game_focused, ensure_focus,  # noqa: E402
+                           focus_keeper)
 # The three closed loops this rig is made of. None of them is about recoil —
 # they are "point the view", "get the character into a known state" and "empty
 # a magazine and report what the game said", which is why they are in control/
@@ -163,6 +165,18 @@ class Rig:
     def grab(self):
         return self.frames.grab()
 
+    def full(self, frame=None, only=None, copy=False):
+        """The banded crops blitted back to screen coordinates.
+
+        The Rig is the frame source it hands to ViewDriver, GunDriver and
+        FireDriver, so anything they can ask a ScreenBuffer for has to be
+        forwarded here or it is simply missing. This one was: GunDriver.
+        read_loadout cuts the gun name plates by pixel coordinate, got the
+        {name: crop} dict instead, and died with a KeyError on a pair of
+        slices -- three minutes into the first unattended run.
+        """
+        return self.frames.full(frame, only=only, copy=copy)
+
     def flush(self, n=8):
         # 8, not ScreenBuffer's FLUSH_FRAMES of 3. Every call site here is
         # explicit (flush(6) / flush(4) / flush(2)), so the default is only
@@ -182,14 +196,10 @@ class Rig:
 
     pending_pitch = property(lambda s: s.view.pending_pitch,
                              lambda s, v: setattr(s.view, 'pending_pitch', v))
-    ref_patches = property(lambda s: s.view.ref_patches,
-                           lambda s, v: setattr(s.view, 'ref_patches', v))
     tracking_lost = property(lambda s: s.view.tracking_lost,
                              lambda s, v: setattr(s.view, 'tracking_lost', v))
     pitch_centre = property(lambda s: s.view.pitch_centre,
                             lambda s, v: setattr(s.view, 'pitch_centre', v))
-    pitch_band = property(lambda s: s.view.pitch_band,
-                          lambda s, v: setattr(s.view, 'pitch_band', v))
     use_homing = property(lambda s: s.view.use_homing,
                           lambda s, v: setattr(s.view, 'use_homing', v))
 
@@ -198,9 +208,6 @@ class Rig:
 
     def absolute_offset(self):
         return self.view.absolute_offset()
-
-    def pitch_scale(self):
-        return self.view.pitch_scale()
 
     def home_to_clamp(self, direction=+1):
         return self.view.home_to_clamp(direction)
@@ -228,32 +235,14 @@ class Rig:
 
     # ── the character: forwarded to control/gun.py ──
 
-    def ads_signals(self, frame=None):
-        return self.gun.ads_signals(frame)
-
-    def in_ads(self, frame=None):
-        return self.gun.in_ads(frame)
-
-    def enter_ads(self):
-        return self.gun.enter_ads()
-
     def ensure_ads(self, tries=3):
         return self.gun.ensure_ads(tries)
-
-    def read_posture(self, **kw):
-        return self.gun.read_posture(**kw)
 
     def ensure_posture(self, target, tries=4):
         return self.gun.ensure_posture(target, tries)
 
-    def read_fire_mode(self):
-        return self.gun.read_fire_mode()
-
     def ensure_fire_mode(self, weapon, tries=6):
         return self.gun.ensure_fire_mode(weapon, tries)
-
-    def tab_open(self, frame):
-        return self.gun.tab_open(frame)
 
     def ensure_inventory_closed(self, tries=3):
         return self.gun.ensure_inventory_closed(tries)
@@ -264,14 +253,12 @@ class Rig:
     def read_loadout(self, slot=1):
         return self.gun.read_loadout(slot)
 
-    def dump(self, tag):
-        return self.gun.dump(tag)
-
     # ── the magazine: forwarded to control/fire.py ──
     #
-    # ammo_debug_dir is a property for the same reason the view's state is:
-    # harvest sets `rig.ammo_debug_dir = ...` and the fire loop reads it, so a
-    # copy on the Rig would be a setting that silently does nothing.
+    # ammo_debug_dir is a property rather than a copy, so setting it here
+    # actually reaches the fire loop that reads it. The comment used to say
+    # harvest sets it; nothing in the repo ever did, so the branch behind it
+    # was unreachable from the day it was written. --ammo-debug sets it now.
 
     ammo_debug_dir = property(lambda s: s.fire.ammo_debug_dir,
                               lambda s, v: setattr(s.fire, 'ammo_debug_dir', v))
@@ -551,6 +538,13 @@ def main():
     ap.add_argument('--out', default='')
     ap.add_argument('--resume', action='store_true')
     ap.add_argument('--countdown', type=int, default=6)
+    # Keeps the ammo crops the OCR could not read mid-burst. FireDriver has
+    # had the switch and the writing code since it was split out, and its
+    # comment said harvest sets it -- nothing ever did, in any file, so the
+    # branch was unreachable and the only way to see why the counter misses
+    # about five times in a 42-round magazine stayed shut off.
+    ap.add_argument('--ammo-debug', default='', metavar='DIR',
+                    help='write unreadable ammo crops here (default: off)')
     args = ap.parse_args()
 
     weapons = expand_weapons(args.weapons)
@@ -582,6 +576,9 @@ def main():
     print("\n[SHADOW MODE] nothing is written back to the scale files.\n")
 
     rig = Rig(args.sight)
+    if args.ammo_debug:
+        rig.ammo_debug_dir = args.ammo_debug
+        print(f"ammo dbg  : unreadable crops -> {args.ammo_debug}")
     print(f"grabber   : {type(rig.grabber).__name__} (paced={rig.paced})  "
           f"K={rig.K:.4f}  {len(rig.tracker.xs)} patches")
 

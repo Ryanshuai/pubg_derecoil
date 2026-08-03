@@ -48,10 +48,6 @@ class GameState:
         self.active = self.weapon_1 if slot == 1 else self.weapon_2
         self.highlight_pred = slot
 
-    @property
-    def active_slot(self):
-        return 1 if self.active is self.weapon_1 else 2
-
     # ════════════════════════════════════════════════════════════
     # Weapon name — two sources
     # ════════════════════════════════════════════════════════════
