@@ -147,6 +147,16 @@ PLATE_INK_MAX = 4000
 # one row, which no amount of scenery can fake.
 CHANGE_MIN = 6.0
 
+# ...and the winner has to DOMINATE, not merely clear the floor. brake_ar
+# landed in the muzzle at 25.6 while the stock read 6.1 against a floor of 6.0,
+# so a floor-only rule called it two slots at once and threw the part away. The
+# real landing beat the runner-up four times over.
+#
+# Raising CHANGE_MIN instead would trade this false rejection for a false
+# acceptance on some quieter icon. A ratio adapts: whatever the part, the slot
+# it went into moves far more than the panel breathing next door.
+CHANGE_MARGIN = 2.5
+
 BY_ASSET = {v['asset']: k for k, v in ATTACHMENTS.items() if v.get('asset')}
 
 
@@ -154,6 +164,23 @@ def cut(frame, region):
     """A HUD_REGIONS entry out of a screen-indexed frame."""
     y, x, h, w = HUD_REGIONS[region] if isinstance(region, str) else region
     return frame[y:y + h, x:x + w]
+
+
+def winner(moved):
+    """The one slot a part landed in, or None. `moved` is {slot: change}.
+
+    Two conditions, and the second is the one that matters: the top mover
+    clears CHANGE_MIN, AND it beats the runner-up by CHANGE_MARGIN. A floor
+    alone called brake_ar two slots at once -- muzzle 25.6, stock 6.1, floor
+    6.0 -- and threw away a part that had landed perfectly well.
+    """
+    if not moved:
+        return None
+    order = sorted(moved.items(), key=lambda kv: -kv[1])
+    top, second = order[0], (order[1][1] if len(order) > 1 else 0.0)
+    if top[1] < CHANGE_MIN:
+        return None
+    return top[0] if top[1] >= CHANGE_MARGIN * max(second, 1e-6) else None
 
 
 # ════════════════════════════════════════════════════════════
@@ -428,6 +455,41 @@ class Collector:
     def crop(self, frame, slot):
         return cut(frame, f'att_{self.gun}_{slot}')
 
+    def take_off(self, slot, timeout=1.5):
+        """Unequip `slot` and watch where it lands. -> row index | None
+
+        RETURNS THE ROW, and that is the point. The caller needs to put this
+        part back on at the next background, and the obvious way -- ask the
+        detector to find it in 库存 -- is the circularity this whole file
+        exists to avoid: `brake_ar`, `heavy_stock` and `variable` have no icon
+        in the catalogue at all, so a template search can never find them, and
+        they are precisely the three worth collecting. paired_sweep used
+        find(key) and brake_ar died on it every time.
+
+        Counting works for any part, named or not: 库存 gained exactly one row,
+        and inserted_row says which one by comparing pictures.
+
+        Verified, not assumed -- this was `unequip(); sleep(0.3)`, the one
+        fire-and-forget action in the flow and the one that failed.
+        """
+        f0 = self.frame()
+        before, n0 = self.crop(f0, slot).copy(), inv_rows(f0)
+        rows0 = row_icons(f0, n0)
+        self.ac.unequip(self.gun, slot)
+        deadline = time.perf_counter() + timeout
+        while True:
+            f1 = self.frame(flush=2)
+            n1 = inv_rows(f1)
+            if change(before, self.crop(f1, slot)) >= CHANGE_MIN \
+                    and n1 == n0 + 1:
+                return inserted_row(rows0, row_icons(f1, n1))
+            if time.perf_counter() >= deadline:
+                print(f'    {slot} would not come off: slot moved '
+                      f'{change(before, self.crop(f1, slot)):.1f}, 库存 '
+                      f'{n0}->{n1}')
+                return None
+            time.sleep(FIT_POLL_S)
+
     def slot_crops(self, frame):
         """{slot: crop} for every attachment slot, copied.
 
@@ -505,6 +567,18 @@ class Collector:
         Both halves of fit_row's check become true by construction instead of
         being loosened until they pass.
         """
+        # THE RACK EMPTY FIRST, so "which slot holds a gun" has one answer.
+        # gun_slot() returns the FIRST rack slot that draws its boxes, and with
+        # two guns racked that is whichever came earlier -- not this round's
+        # host. Round 8 swapped slr for ump45, the slr stayed in slot 1, and
+        # every read and every unequip for the next three rounds pointed at the
+        # slr's empty muzzle: "would not come off: slot moved 3.5, 库存 8->8",
+        # which is exactly what an empty slot looks like.
+        if not self.tab():
+            print('    [!] the inventory would not open to clear the rack')
+            return False
+        self.ac.clear_rack()
+
         if not self.spawn(weapon, [], backpack):
             return False
         if not self.tab():
@@ -611,7 +685,7 @@ class Collector:
         if n:
             print(f'    labelled {n} row crop(s) from what the fits revealed')
 
-    def paired_sweep(self, weapon, key, slot, angles, tag_n):
+    def paired_sweep(self, weapon, key, slot, angles, tag_n, row):
         """Per background, the same slot EMPTY and then FILLED. -> [entries]
 
         WHY PAIRS AND NOT JUST THE FILLED CROP. A composited crop is not the
@@ -646,18 +720,21 @@ class Collector:
                 break
             tag = f'p{a}'
 
-            # EMPTY first: this frame IS the backdrop for the pair.
+            # EMPTY first: this frame IS the backdrop for the pair. Held in
+            # memory, NOT written yet -- a backdrop is only meaningful next to
+            # the filled crop it explains, and writing it first left an orphan
+            # on disk for every part whose equip then failed. `shots.pop()`
+            # takes an entry out of the list; the file and its manifest row
+            # are already saved by then.
             f0 = self.frame()
             before = self.crop(f0, slot).copy()
-            shots.append(self._shot(
-                before, f'{key}__{slot}__{weapon or "none"}__{tag}bg.png',
-                'backdrop', key, HUD_REGIONS[f'att_{self.gun}_{slot}'],
-                '', False, slot=slot, angle=a))
 
-            item = self.ac.look(f0).find(key)
-            if item is None or not self.ac.auto_equip(item.where):
-                print(f'    {key}: not in 库存 to equip at background {a}')
-                shots.pop()
+            # The row is KNOWN -- take_off returned it. Not find(key), which
+            # is a template search and cannot see a part whose icon is the
+            # thing being collected.
+            if row is None or not self.ac.auto_equip(at_inv(row)):
+                print(f'    {key}: no known 库存 row to equip at background '
+                      f'{a}')
                 break
             time.sleep(FIT_TIMEOUT_S)
 
@@ -666,18 +743,21 @@ class Collector:
             if change(before, after) < CHANGE_MIN:
                 print(f'    {key}: the slot did not change at background {a} '
                       f'— the equip did not land, so this pair is not a pair')
-                shots.pop()
                 break
+            # Both, now that they are a pair.
+            region = HUD_REGIONS[f'att_{self.gun}_{slot}']
+            shots.append(self._shot(
+                before, f'{key}__{slot}__{weapon or "none"}__{tag}bg.png',
+                'backdrop', key, region, '', False, slot=slot, angle=a))
             shots.append(self._shot(
                 after, f'{key}__{slot}__{weapon or "none"}__{tag}fg.png',
-                'slots', key, HUD_REGIONS[f'att_{self.gun}_{slot}'],
+                'slots', key, region,
                 BY_ASSET.get(self.ac.read_slots(self.gun).get(slot, ''), ''),
                 self._has(key), slot=slot, angle=a))
 
             # Back to 库存 for the next background. Right click, per
             # unequip('auto') -- the drag lands on the floor instead.
-            self.ac.unequip(self.gun, slot)
-            time.sleep(0.3)
+            row = self.take_off(slot)
             self.turn(0, -pitch)
         return shots
 
@@ -869,7 +949,7 @@ class Collector:
         # method along.
         f1 = self.frame()
         moved = {s: change(slots0[s], self.crop(f1, s)) for s in SLOT_NAMES}
-        landed = [s for s in SLOT_NAMES if moved[s] >= CHANGE_MIN]
+        landed = [winner(moved)] if winner(moved) else []
         if landed != [slot]:
             # REPORT, do not assert. "it did not arrive" and "the catalogue has
             # the wrong slot" and "it went to 库存 instead" are three different
@@ -900,9 +980,12 @@ class Collector:
         # pairing starts from an empty slot and equips from the list at each
         # background.
         if 'slots' in self.targets:
-            self.ac.unequip(self.gun, slot)
-            time.sleep(0.3)
-            shots += self.paired_sweep(weapon, key, slot, angles, tag_n)
+            row = self.take_off(slot)
+            if row is None:
+                print(f'    {key}: could not get it off the gun to start the '
+                      f'pairing')
+                return shots
+            shots += self.paired_sweep(weapon, key, slot, angles, tag_n, row)
 
         # ── 3. the 库存 rendering, from where paired_sweep left it ──
         # No second copy is spawned. paired_sweep ends on an unequip, so the
@@ -918,23 +1001,16 @@ class Collector:
         if 'rows' in self.targets:
             if not self.tab():
                 return shots
-            if not self.ac.auto_equip_key(key):
-                print(f'    {key}: not in 库存 to stage the row capture')
+            # `row` is where take_off last put it -- known, not searched.
+            # auto_equip_key(key) was a template lookup, and a part with no
+            # icon in the catalogue can never be found that way. Those three
+            # are the whole reason this collector exists.
+            if row is None or not self.ac.auto_equip(at_inv(row)):
+                print(f'    {key}: no known 库存 row to stage the row capture')
                 return shots
             time.sleep(FIT_TIMEOUT_S)
-            fa = self.frame(flush=2)
-            n1 = inv_rows(fa)
-            rows0 = row_icons(fa, n1)
-
-            self.ac.unequip(self.gun, slot)
-            time.sleep(0.4)
-            fb = self.frame(flush=2)
-            n2 = inv_rows(fb)
-            row = (inserted_row(rows0, row_icons(fb, n2))
-                   if n2 == n1 + 1 else None)
+            row = self.take_off(slot)
             if row is None:
-                print(f'    {key}: 库存 went {n1}->{n2} on the unequip; cannot '
-                      f'say which row it landed in')
                 return shots
             rows_shots = self.sweep(weapon, [], [row], angles, tag_n, 'l')
             self.relabel(rows_shots, {row: key})
