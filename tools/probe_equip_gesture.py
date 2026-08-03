@@ -76,6 +76,15 @@ def main():
     if not ensure_focus(countdown_s=args.countdown, label='the equip probe'):
         return 1
 
+    # "the spawner would not come up" is what being in the lobby looks like
+    # from here, and the range evicts on its own clock. Walk back in rather
+    # than reporting a panel problem.
+    from range_session import get_session
+    session = get_session('auto')
+    if not session.ensure()[0]:
+        print('[!] could not get into the training range')
+        return 1
+
     mouse = get_mouse()
 
     if not args.no_stock:
@@ -84,8 +93,18 @@ def main():
         if not sc.ensure_panel(True) or not sc.sync(need_cols=(1, 2, 3)):
             print('[!] spawner would not come up')
             return 1
-        rec = sc.give_many(['backpack3', GUN] + [PART_A] * 3 + [PART_B] * 3,
-                           switch=True)
+        want = ['backpack3', GUN] + [PART_A] * 3 + [PART_B] * 3
+        rec = sc.give_many(want, switch=True)
+        if not rec['ok']:
+            # The accordion: a category that will not expand because a
+            # different one is. control/stock.restock retries exactly this way
+            # -- drop the cached menu, re-read the layout, go again -- and this
+            # probe had no such path, so one stuck panel meant zero spares and
+            # four conditions reporting "out of spares" instead of a result.
+            print(f"  [!] {rec['error']} — re-reading the layout and retrying")
+            sc.menu = None
+            sc.sync(need_cols=(1, 2, 3))
+            rec = sc.give_many(want, switch=True)
         print(f"  ok={rec['ok']} clicks={rec['clicks']} err={rec['error']}")
         sc.ensure_panel(False)
         time.sleep(0.6)
@@ -104,11 +123,27 @@ def main():
     print(f'库存: {[i.key for i in view.inventory if i][:10]}')
     print(f'附近: {[i.key for i in view.nearby if i][:10]}')
 
+    # 2x2, because the first run of this probe varied ONE of the two things
+    # that matter. It compared right-click against drag and never called
+    # hold(), so "drag lands 0 out of 4" was measured with the gun not in
+    # hand -- and control/CLAUDE.md's rule that a right-click only reaches the
+    # HELD weapon says holding is exactly the variable that was left out.
+    # Either the rule is wrong (the right click landed 4/4 without holding) or
+    # the drag was never given the condition it needed. One of those is true
+    # and the old table cannot say which.
     results = {}
-    for label in ('right-click', 'drag'):
-        print(f'\n=== {label} ===')
+    for label, held in (('right-click', False), ('right-click', True),
+                        ('drag', False), ('drag', True)):
+        print(f'\n=== {label}, gun {"in hand" if held else "not held"} ===')
         ok_n, times = 0, []
         for i in range(args.reps):
+            # Re-taken every repetition: equipping can put the gun away, and a
+            # belief about what is in hand is the kind of state this repo has
+            # been bitten by before.
+            ac.held = None
+            if held and not ac.hold(GUN_SLOT):
+                print(f'  {i}: could not take gun{GUN_SLOT} in hand')
+                continue
             # Empty the slot first, OUTSIDE the timer. '' -> comp_ar is an
             # assertion that cannot be satisfied by a gesture that did nothing,
             # which fitting the same part onto an occupied slot cannot say.
@@ -134,7 +169,12 @@ def main():
                 landed = slot_now(ac)
                 ok = landed == want
             else:
-                rec = ac.equip(GUN_SLOT, SLOT, item, att=part, retries=0)
+                # gesture='drag' forced. 'auto' picks the right click whenever
+                # the gun is in hand, which in the held half of this table
+                # would quietly measure the right click twice and report it as
+                # the drag.
+                rec = ac.equip(GUN_SLOT, SLOT, item, att=part, retries=0,
+                               gesture='drag')
                 landed = slot_now(ac)
                 ok = bool(rec.get('ok')) and landed == want
             dt = time.perf_counter() - t0
@@ -143,11 +183,17 @@ def main():
             print(f'  {i}: {"ok  " if ok else "FAIL"} {dt:.2f}s  '
                   f'{part:8s} {before[:22]!r} -> {landed[:22]!r}')
         if times:
-            results[label] = (ok_n, len(times), statistics.median(times))
+            results[(label, held)] = (ok_n, len(times),
+                                      statistics.median(times))
 
     print('\n=== summary ===')
-    for label, (ok_n, n, med) in results.items():
-        print(f'  {label:12s} {ok_n}/{n} landed   median {med:.2f}s')
+    print(f'  {"gesture":12s} {"held":>5s}  landed   median')
+    for (label, held), (ok_n, n, med) in results.items():
+        print(f'  {label:12s} {str(held):>5s}  {ok_n}/{n}      {med:.2f}s')
+    print('\n  docs/game_quirks.md currently records right-click 4/4 and drag'
+          '\n  0/4, both measured WITHOUT holding the gun. Whatever this says,'
+          '\n  update that table and control/CLAUDE.md together — the rule'
+          '\n  "装用右键、卸用拖拽" is derived from those two numbers.')
     if len(results) == 2:
         rc = results['right-click'][2]
         dr = results['drag'][2]
