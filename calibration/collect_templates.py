@@ -95,7 +95,8 @@ from detector.tab_layout import INV_ROWS, icon_box
 from control.focus import ensure_focus, focus_keeper
 
 from control.spawner import SpawnerControl
-from control.inventory import InventoryControl, at_ground, at_inv
+from control.inventory import (InventoryControl, PLATE_INK_MIN,
+                               at_ground, at_inv)
 from harvest import BACKPACK
 from range_session import get_session
 from sweep import Rig
@@ -119,27 +120,23 @@ SPAWN_SETTLE_S = 0.7
 FIT_TIMEOUT_S = 0.8             # the part animates into the slot
 FIT_POLL_S = 0.08
 
-# A NAME PLATE IS DRAWN HERE — the band, not a floor.
+# The CEILING on a name plate's ink. The floor lives in control/inventory.py
+# with plate_ink itself, because control acts on it; this one is only ever a
+# sanity check here, so it stays here.
 #
-# MEASURED (2026-08-03), white-text-mask pixels over gun_name_N, Tab up:
-#
-#   empty rack slot      0        6 of 6 samples, exactly zero
-#   a gun is racked      679-901  13 samples
-#
-# One of those frames carries its own control: an akm round read 682 on slot 1
-# and 0 on slot 2 — same frame, same scenery, one slot occupied and one not.
-#
-# It is a BAND for the same reason TAB_COUNT_MIN/MAX is one. With the panel up
-# the backdrop is dimmed (blend_tab_background: blur(bg,k=41)*0.49), but the
-# mask is only "near-white and achromatic", and over 293 Tab-SHUT frames this
-# region saturates at 11250 — the whole crop — on 80 of them. Bright everywhere
-# is scenery, not glyphs. A reading above the ceiling is refused rather than
-# believed, exactly as the tab detector refuses sky.
-#
-# 200 sits ~3.4x under the lowest real plate and far above the zero floor; 4000
-# is 4.4x over the highest real plate and well under saturation.
-PLATE_INK_MIN = 200
+# It is a band for the same reason TAB_COUNT_MIN/MAX is one. With the panel up
+# the backdrop is dimmed, but the mask is only "near-white and achromatic",
+# and over 293 Tab-SHUT frames this region saturates at 11250 — the whole crop
+# — on 80 of them. Bright everywhere is scenery, not glyphs, and a reading
+# above the ceiling is refused rather than believed. 4000 is 4.4x over the
+# highest real plate and well under saturation.
 PLATE_INK_MAX = 4000
+
+# How long to keep looking for the name plate before calling the rack empty.
+# The panel fades in after every Tab cycle, so "no ink in this one frame" is
+# not "no gun" -- it is usually "too early". Matches InventoryControl's
+# GUN_SLOT_WATCH_S, which exists for the same reason and was measured there.
+GUN_WATCH_S = 1.2
 
 # Mean |after-before| over a slot crop, grey levels, for "an icon appeared".
 # An icon landing in an empty 63x63 slot moves most pixels most of the way;
@@ -226,13 +223,19 @@ def plan_rounds(targets, keys, weapons, plates):
     """[(weapon|None, [key, ...], fit), ...] plus the keys nothing can wear.
 
     Three shapes, decided by what the targets need:
-      --plates      one weapon per round, no parts
+      --plates      TWO weapons per round, no parts
       slots         parts must physically fit, so one per slot on a host
       otherwise     parts only sit in 库存 — no compatibility to satisfy, and
                     the list holds INV_ROWS of them at a time
     """
     if plates:
-        return [(w, [], False) for w in weapons], []
+        # PAIRS. The rack holds two guns and both name plates are drawn in the
+        # same frame, so one turn to a background yields two plates. Turning is
+        # what a run spends its time on -- 30 weapons go from 30 sweeps to 15.
+        # An odd roster leaves a round of one, which plate_pair handles: it
+        # loops over whatever it was given.
+        return [(list(weapons[i:i + 2]), [], False)
+                for i in range(0, len(weapons), 2)], []
     if 'slots' in targets:
         if weapons:
             plan, left = [], set(keys)
@@ -428,12 +431,14 @@ class Collector:
         self.type_det = TabTypeDetector()
         # The one reader of a slot that does not match an icon; see one_part.
         self.slots = SlotDetector()
-        # Set per round by round(): the plate ink on the cleared rack, and
-        # whether the spawn that followed was watched arriving. False here so a
-        # caller that never runs a round (or a target that is not `plate`)
-        # cannot accidentally claim ground truth.
-        self.plate_ink0 = None
+        # Set by plate_pair once both guns are watched onto a cleared rack.
+        # False here so a caller that never runs one -- or a target that is not
+        # `plate` -- cannot accidentally claim ground truth.
         self.plate_arrived = False
+        # The order spawn()'s clicks actually went out in. Empty until one
+        # runs, so a caller reading it first gets nothing rather than a stale
+        # round's answer.
+        self.spawn_order = []
         # WHY NOTHING WAS COLLECTED IS A RESULT TOO, and it belongs in the
         # manifest rather than only on stdout. A grip run photographed six
         # parts, failed all six, and saved `entries: []` with an empty `bad`
@@ -509,37 +514,29 @@ class Collector:
         fire-and-forget action in the flow and the one that failed.
         """
         f0 = self.frame()
-        # NEVER RIGHT-CLICK A SLOT THAT HAS NOTHING IN IT. unequip's right
-        # click is measured 3/3 into 库存 with a part there; with the slot
-        # EMPTY the same click reaches the weapon row underneath, and a right
-        # click on a weapon is drop_weapon's own measured gesture -- the whole
-        # gun, attachments and all, onto the floor, 1/1 in 0.66 s.
+        # IS THERE A GUN IN THAT ROW AT ALL. Whether the SLOT is safe to touch
+        # is InventoryControl.unequip's own business now -- it refuses a slot
+        # whose tile says there is nothing in it, because either gesture aimed
+        # at an empty slot reaches the weapon row and drops the gun. That guard
+        # was written here first and moved: every caller of unequip has the
+        # same hazard, and a copy in one script only protects one script.
         #
-        # That is not a hazard being guarded against in advance. A commit that
-        # cleared the target slot unconditionally made every round throw its
-        # own host gun away before spawning anything: three runs of six parts
-        # each collected nothing, the plate read 0 ink, and the weapon panel
-        # was not drawn at all in the saved frames. `step=take_off` in
-        # facts.misses is where it was caught.
-        #
-        # The gate reads TILE GEOMETRY, not an icon, so it stays valid for the
-        # parts this file exists to photograph -- but only once the plate says
-        # a gun is actually there, since blurred scenery behind an empty panel
-        # reads `empty` just as convincingly.
+        # What stays here is the question unequip cannot answer, because it is
+        # about the RACK and not the slot: blurred scenery behind an empty
+        # panel reads `empty` as convincingly as a real empty slot, so the tile
+        # gate is only meaningful once the name plate says a gun is there.
         if self.ac.plate_ink(self.gun, f0) < PLATE_INK_MIN:
             if not quiet:
                 print(f'    no gun in rack slot {self.gun} — nothing to take '
                       f'{slot} off')
             return None
-        state = self.slots.classify(f0, self.gun).get(slot)
-        if state != 'filled' and not known_filled:
-            if not quiet:
-                print(f'    {slot} reads {state}, not filled — not clicking it,'
-                      f' the click would drop the gun')
-            return None
         before, n0 = self.crop(f0, slot).copy(), inv_rows(f0)
         rows0 = row_icons(f0, n0)
-        self.ac.unequip(self.gun, slot)
+        rec = self.ac.unequip(self.gun, slot)
+        if rec.get('slot_state') and not known_filled:
+            if not quiet:
+                print(f'    {slot}: {rec["error"]} — nothing was clicked')
+            return None
         deadline = time.perf_counter() + timeout
         while True:
             f1 = self.frame(flush=2)
@@ -590,28 +587,6 @@ class Collector:
         return self.run.add(crop, name, **facts)
 
     # ── spawning ──
-
-    def empty_rack(self):
-        """Clear both rack slots and read the plate back as blank. -> ink|None
-
-        None means the rack could not be proven empty, and the caller must not
-        claim an arrival off the spawn that follows.
-
-        Plain clear_rack, not the strip-then-drop harvest uses: a plates round
-        fits nothing, so there is no part worth keeping out of the drop, and
-        the gun leaves wearing the magazine the game fitted for itself.
-        """
-        if not self.tab():
-            print('    [!] the inventory would not open to clear the rack')
-            return None
-        self.ac.clear_rack()
-        ink = self.ac.plate_ink(self.gun, self.frame(flush=2))
-        if ink >= PLATE_INK_MIN:
-            print(f'    [!] rack cleared but the plate still reads {ink} ink '
-                  f'(< {PLATE_INK_MIN} expected) — cannot call the next spawn '
-                  f'an arrival')
-            return None
-        return ink
 
     def bare_host(self, weapon, backpack):
         """Get `weapon` into the rack wearing NOTHING. -> bool
@@ -703,42 +678,57 @@ class Collector:
         return True
 
     def spawn(self, weapon, keys, backpack):
-        """Spawn a host weapon and/or a list of parts. One panel visit.
+        """Spawn host weapon(s) and/or a list of parts. One panel visit.
+
+        `weapon` may be a list. Into an EMPTY rack the first gun spawned takes
+        row 1 and the second takes row 2, so two guns in one visit still have
+        known addresses -- see plate_pair, which is the reason this accepts
+        more than one.
 
         Callers wanting a host for FITTING want bare_host(), which is this plus
         the strip that makes the gun actually bare.
         """
-        if not self.sc.ensure_panel(True):
-            print('    [!] the spawner panel would not open')
-            return False
-        # Columns 1-2 only: the backpack has fixed coordinates (SpawnerControl
-        # .GEAR), so column 3 never has to be found.
-        ok = self.sc.sync(need_cols=(1, 2))
-        if ok and backpack and not self.sc.give_gear(BACKPACK).get('ok'):
-            print('    [!] no backpack: parts have nowhere to spawn')
-            ok = False
-        if ok and weapon and not self.sc.give_weapon(weapon)['ok']:
-            print(f'    [!] the spawner would not produce {weapon}')
-            ok = False
-        for k in (keys if ok else []):
-            if self.sc.give_attachment(k)['ok']:
-                continue
-            # One re-read and one more try, the way control/stock.restock
-            # handles the same thing: the usual cause is the accordion, a
-            # category refusing to expand because a different one is, and a
-            # fresh sync clears it. Without this a single stuck panel cost the
-            # rest of the round's parts -- the loop used to break on the first
-            # refusal.
-            print(f'    [!] the spawner would not produce {k} — re-reading '
-                  f'the layout and retrying once')
+        weapons = ([weapon] if isinstance(weapon, str)
+                   else list(weapon or []))
+        want = ([BACKPACK] if backpack else []) + weapons + list(keys)
+        if not want:
+            return True
+        # ONE CALL, and it decides the route. give_many groups by category so
+        # a category opens once instead of once per item, orders the visit so
+        # no coordinate goes stale behind an expanded submenu, and proves each
+        # category actually opened before clicking anything under it.
+        #
+        # This used to be a loop over give_weapon()/give_attachment(). Each of
+        # those returns the panel to fully collapsed, so two ARs paid two
+        # category trips -- and the second one landed on the category and
+        # never reached the gun. The entry point that avoids exactly this has
+        # existed the whole time; the loop simply did not use it.
+        #
+        # `spawn_order` is the order the clicks actually went out in, which is
+        # NOT the order asked for: plan() sorts within a column bottom-up and
+        # by entry index. Anything relying on "first spawned" -- plate_pair
+        # does, for which rack row a gun lands in -- has to read this rather
+        # than the request.
+        # switch=False: give_many's default presses 2 afterwards, which is for
+        # a caller that wants slot 2 in hand without reading the rack. Nothing
+        # here wants that -- bare_host and plate_pair both read which row the
+        # gun landed in, and a key press that changes what is in hand is one
+        # more thing happening between a spawn and the frame that judges it.
+        rec = self.sc.give_many(want, switch=False)
+        if not rec['ok']:
+            # One re-read and one more try, which is what the per-item loop
+            # did: the usual cause is a category refusing to expand because a
+            # different one is, and a fresh sync clears it.
+            print(f"    [!] spawner: {rec['error']} — re-reading and retrying")
             self.sc.menu = None
-            self.sc.sync(need_cols=(1, 2))
-            if not self.sc.give_attachment(k)['ok']:
-                print(f'    [!] {k} still would not spawn — carrying on '
-                      f'without it')
-        self.sc.ensure_panel(False)
+            rec = self.sc.give_many(want, switch=False)
+        self.spawn_order = [s['key'] for s in rec['steps']
+                            if s['kind'] == 'weapon' and s['clicked']]
+        missed = [s['key'] for s in rec['steps'] if not s['clicked']]
+        if missed:
+            print(f"    [!] never clicked: {', '.join(missed)}")
         time.sleep(SPAWN_SETTLE_S)
-        return ok
+        return rec['ok']
 
     # ── fitting ──
 
@@ -802,6 +792,8 @@ class Collector:
             pitch = PITCH_STEPS[a % len(PITCH_STEPS)]
             self.turn(TURN_COUNTS, pitch)
             if not self.tab():
+                self.miss(key, 'the inventory would not open mid-sweep',
+                          slot=slot, background=a, kept=len(shots) // 2)
                 break
             tag = f'p{a}'
 
@@ -818,16 +810,21 @@ class Collector:
             # is a template search and cannot see a part whose icon is the
             # thing being collected.
             if row is None or not self.ac.auto_equip(at_inv(row)):
-                print(f'    {key}: no known 库存 row to equip at background '
-                      f'{a}')
+                self.miss(key, 'no known 库存 row to equip at this background '
+                               '— the part is not where the last unequip put '
+                               'it', slot=slot, background=a, row=row,
+                          kept=len(shots) // 2)
                 break
             time.sleep(FIT_TIMEOUT_S)
 
             f1 = self.frame(flush=2)
             after = self.crop(f1, slot)
             if change(before, after) < CHANGE_MIN:
-                print(f'    {key}: the slot did not change at background {a} '
-                      f'— the equip did not land, so this pair is not a pair')
+                self.miss(key, 'the slot did not change — the equip did not '
+                               'land, so this pair is not a pair', frame=f1,
+                          slot=slot, background=a,
+                          moved=round(change(before, after), 1),
+                          kept=len(shots) // 2)
                 break
             # Both, now that they are a pair.
             region = HUD_REGIONS[f'att_{self.gun}_{slot}']
@@ -911,19 +908,6 @@ class Collector:
                     'rows', None, (y0, x0, y1 - y0, x1 - x0),
                     (item.key or '') if item else '', False, row=row))
 
-        if 'plate' in self.targets and weapon:
-            name = f'gun_name_{self.gun}'
-            read = self.ac.read_weapons(frame)
-            shots.append(self._shot(
-                cut(frame, name), f'plate__{weapon}__{tag}.png',
-                'plate', weapon, HUD_REGIONS[name],
-                read.get(self.gun) or '', True,
-                # The arrival evidence, recorded per capture. Zero here on a
-                # rack that was emptied first means no weapon is drawn, so the
-                # crop is of nothing and the label must not be believed --
-                # which is the one thing give_weapon()'s ok cannot tell you.
-                ink=self.ac.plate_ink(self.gun, frame)))
-
         if 'type' in self.targets:
             # Its own grab: 类型 sits at y=129, just above the block TabGrabber
             # copies, and widening that block for 18x41 px would cost every
@@ -979,6 +963,142 @@ class Collector:
             self.turn(0, -pitch)        # undo the pitch, keep the yaw
         return shots
 
+    def plate_pair(self, weapons, angles, tag_n):
+        """Two weapons' NAME PLATES over many backgrounds. -> [entries]
+
+        TWO AT A TIME BECAUSE THE RACK HOLDS TWO. Both plates are drawn in the
+        same frame -- one akm capture reads 682 ink on row 1 and 0 on row 2 at
+        the same instant -- so a background that has been turned to costs one
+        turn and yields two plates. Turning is what a run spends its time on;
+        a second crop out of a frame already grabbed is free. 30 weapons: 15
+        rounds instead of 30.
+
+        SPAWNED ONCE, NOT PER BACKGROUND. What is behind the panel changes
+        when the view turns; what is IN THE RACK does not. So the round racks
+        both guns at the start and then only ever does
+
+            Tab off -> turn -> Tab on -> two crops
+
+        for every background after that. The first version cleared the rack and
+        re-spawned both guns at every angle, which bought nothing and cost a
+        spawner round trip and two drops per background -- roughly ten times
+        the work for an identical set of crops.
+
+        WHICH ROW HOLDS WHICH GUN IS WATCHED, NOT ASSUMED. The guns go in one
+        at a time and the plate ink says where each landed -- 0 on an empty
+        row, 679-901 with a gun. Reading the plate to find out would be the
+        circularity this file exists to avoid: these are the templates that
+        would be doing the reading.
+
+        NO PAIRED BACKDROP, and that is deliberate rather than an omission.
+        The icons need one because a slot icon is alpha-blended over the scene
+        and cannot be recovered without it. A name plate is read through a
+        NEAR-WHITE, ACHROMATIC MASK instead (TabWeaponDetector._white_text_mask,
+        the same mask plate_ink counts), so the scene behind it is thresholded
+        away rather than mixed in. Pairing would mean emptying the rack at each
+        angle, which is exactly the drop-and-respawn this method stopped doing,
+        and the two passes cannot be aligned afterwards -- turn() is open-loop,
+        which is why paired_sweep pairs within one angle instead of across two
+        passes. What backgrounds buy here is the mask's robustness against
+        bright scenery leaking into it, and that needs many scenes, not pairs.
+        """
+        shots = []
+        if not self.tab():
+            return self.miss(','.join(weapons), 'the inventory would not open')
+
+        # ── both rows emptied by RIGHT CLICK, then both guns racked ──
+        #
+        # THE ORDER IS THE ADDRESS: into an empty rack, the first gun spawned
+        # takes row 1 and the second takes row 2. That is what makes one
+        # spawner trip enough for two guns -- with the rule, nothing has to be
+        # read between them, and reading between them is the only alternative
+        # (the plate itself cannot be asked; these are its templates).
+        #
+        # The rule is USED, and its precondition and its result are both still
+        # checked, because a rule that silently did not apply would mislabel
+        # every crop in the round:
+        #
+        #   before   both rows read 0 ink, or there is no "empty rack" for the
+        #            order to be defined against
+        #   after    both rows read a plate, or fewer than two guns arrived and
+        #            nothing here can say which one is missing
+        self.ac.clear_rack()
+        f = self.frame()
+        inks = {g: self.ac.plate_ink(g, f) for g in (1, 2)}
+        blank = {g: self.ac.plate_ink(g, f) for g in (1, 2)}
+        if any(v >= PLATE_INK_MIN for v in blank.values()):
+            return self.miss(','.join(weapons), 'the rack would not clear, so '
+                                                'first-spawned-is-row-1 has no '
+                                                'empty rack to count from',
+                             ink=blank, frame=f)
+        if not self.spawn(weapons, [], False) or not self.tab():
+            return self.miss(','.join(weapons),
+                             'the spawner would not produce the pair')
+        f = self.frame()
+        inks = {g: self.ac.plate_ink(g, f) for g in (1, 2)}
+        # plate_arrived and not `>= PLATE_INK_MIN`: it carries the CEILING too.
+        # The mask is only "near-white and achromatic", so with nothing to dim
+        # it this region saturates on bright scenery, and a reading above the
+        # band is refused rather than believed.
+        rows = [g for g in (1, 2) if plate_arrived(blank[g], inks[g])]
+        if len(rows) != len(weapons):
+            return self.miss(','.join(weapons),
+                             f'{len(rows)} of {len(weapons)} guns reached the '
+                             f'rack — with one missing, the order cannot say '
+                             f'which row belongs to which weapon',
+                             ink=inks, blank=blank, frame=f)
+        # THE ORDER CLICKED, not the order asked for. give_many sorts within a
+        # column bottom-up and by entry index, so `weapons` and the click
+        # sequence routinely differ -- akm and m762 share the AR category and
+        # come out in index order whichever way round they were named. Zipping
+        # the request against the rows would then label every crop in the round
+        # with the other gun's name, and nothing downstream could tell.
+        order = [w for w in self.spawn_order if w in weapons]
+        if len(order) != len(weapons):
+            return self.miss(','.join(weapons),
+                             f'the spawner clicked {order}, not all of '
+                             f'{weapons} — cannot map guns to rows',
+                             ink=inks, frame=f)
+        landed = dict(zip(order, rows))
+        print('    ' + ', '.join(f'{w}=row{g}' for w, g in landed.items()))
+
+        # Every crop below is of a gun watched onto a rack that read 0 ink and
+        # then read a plate. That IS the arrival label_for() insists on before
+        # it will call a plate crop ground truth, and it is established once
+        # here rather than re-argued per background -- nothing between the
+        # backgrounds touches the rack.
+        self.plate_arrived = True
+
+        for a in range(angles):
+            pitch = PITCH_STEPS[a % len(PITCH_STEPS)]
+            self.turn(TURN_COUNTS, pitch)       # turn() closes Tab to do it
+            if not self.tab():
+                self.miss(','.join(weapons), 'the inventory would not reopen '
+                                             'after turning', background=a)
+                break
+            f = self.frame()
+            read = self.ac.read_weapons(f)
+            gone = [w for w, g in landed.items()
+                    if self.ac.plate_ink(g, f) < PLATE_INK_MIN]
+            if gone:
+                # A gun cannot leave the rack by itself. If one has, every crop
+                # after it would be of an empty row under this weapon's name.
+                self.miss(','.join(gone), 'the rack lost a gun mid-sweep — '
+                                          'stopping rather than photographing '
+                                          'an empty row under its name',
+                          background=a, frame=f)
+                break
+            for w, g in landed.items():
+                shots.append(self._shot(
+                    cut(f, f'gun_name_{g}'), f'{w}__plate{g}__bg{a}.png',
+                    'plate', w, HUD_REGIONS[f'gun_name_{g}'],
+                    read.get(g) or '', True, slot='plate', angle=a, row=g,
+                    ink=self.ac.plate_ink(g, f)))
+            hit = sum(1 for w, g in landed.items() if read.get(g) == w)
+            print(f'    bg{a}: {hit}/{len(landed)} read correctly')
+            self.turn(0, -pitch)
+        return shots
+
     def one_part(self, weapon, key, angles, tag_n):
         """Collect ONE attachment, in both renderings. -> [entries] or None
 
@@ -1016,49 +1136,78 @@ class Collector:
         # panel not drawn at all — so something between them empties the rack,
         # and the three candidates need three different repairs. Asking after
         # each one costs a name-plate crop.
-        def still_here(step):
-            ink = self.ac.plate_ink(self.gun, self.frame(flush=1))
-            if ink >= PLATE_INK_MIN:
-                return True
-            self.miss(key, f'the gun left rack slot {self.gun} during "{step}"',
-                      frame=self.frame(flush=1), plate=ink, step=step)
-            return False
+        # WATCHED, not grabbed once. hold() closes Tab and opens it again, and
+        # the panel FADES IN -- a single grab lands before the plate is drawn
+        # and reads 0 ink, which is indistinguishable from the gun being gone.
+        # The first version did exactly that and reported 22 phantom losses in
+        # one run, 14 of them straight after hold(). gun_slot() carries the
+        # same watch for the same reason; this is that lesson, repeated.
+        def still_here(step, timeout=GUN_WATCH_S):
+            deadline = time.perf_counter() + timeout
+            while True:
+                ink = self.ac.plate_ink(self.gun, self.frame(flush=2))
+                if ink >= PLATE_INK_MIN:
+                    return True
+                if time.perf_counter() >= deadline:
+                    self.miss(key,
+                              f'the gun left rack slot {self.gun} during '
+                              f'"{step}"', frame=self.frame(), plate=ink,
+                              step=step, watched_s=timeout)
+                    return False
+                time.sleep(FIT_POLL_S)
 
         self.ac.held = None
         if not self.ac.hold(self.gun):
             return self.miss(key, f'could not take gun{self.gun} in hand')
         if not still_here('hold'):
             return None
-        # CLEAR THE TARGET SLOT WITH THE RIGHT CLICK, and do not ask a
-        # template whether it worked.
+        # EVERYTHING OFF, TO THE FLOOR. strip() picks its slots from the TILES
+        # now, not from read_slots -- a part with no template used to be
+        # invisible to it and stay on the gun, which is every part this file
+        # exists to collect.
         #
-        # `strip(to=at_ground())` drags, and tools/probe_unequip_where.py
-        # measured the two gestures going to different places: right click ->
-        # 库存 3/3, drag -> 附近 3/3. The drag emptied muzzles fine and left
-        # every grip in place, so all six grips then had the part sent to 库存
-        # instead of onto the gun -- which is what the autofit rule does when
-        # the slot is occupied.
-        #
-        # The check that used to follow was `read_slots(gun)[slot]`, a template
-        # read, in the file that exists because those templates are unreliable.
-        # It answered "empty" on an occupied grip and waved the round through.
-        # This is the third time that circularity has been left in this method.
-        #
-        # What replaces it is not a template either. take_off now asks the
-        # TILE whether anything is in the slot, and declines to click an empty
-        # one -- see its own comment for why that click was throwing the host
-        # gun on the floor.
+        # The floor and not 库存: a part sitting in the list would be a second
+        # row, and the identity of everything below rests on there being
+        # exactly one.
         self.ac.strip(self.gun, to=at_ground())
         if not still_here('strip'):
             return None
-        self.take_off(slot, timeout=0.6, quiet=True)
-        if not still_here('take_off'):
-            return None
+        # NOTHING TOUCHES A SLOT THAT DOES NOT READ `filled` -- in ANY gesture.
+        #
+        # The version before this one dragged the target slot blind, on the
+        # reasoning that "a drag from an empty slot picks up nothing" while a
+        # right click reaches the weapon underneath. That reasoning was never
+        # measured, and it is wrong: 11 of one run's 35 misses were the host
+        # gun disappearing at exactly this step. A drag that starts on an empty
+        # slot takes hold of the weapon row instead, and dragging a weapon left
+        # is drop_weapon's other measured gesture -- 1/1, the whole gun on the
+        # floor. Same trap as the right click, one gesture along.
+        #
+        # So the rule is about the SLOT, not the gesture: if the tile does not
+        # say something is in it, leave it alone. take_off carries the same
+        # gate and does the clearing when there is something to clear.
+        #
+        # `scope` reads `unknown` forever (no tile is drawn there), so it is
+        # never cleared here. That is a real limit, not a fix: a sight the
+        # spawn auto-fitted stays on, the next one goes to 库存, and the
+        # landing check below reports it with the row count. Nine sights need
+        # a mechanism that does not exist yet; photographing them against an
+        # unknown slot state would be worse than not photographing them.
         f0 = self.frame()
+        if self.slots.classify(f0, self.gun).get(slot) == 'filled':
+            self.take_off(slot, timeout=0.6, quiet=True, known_filled=True)
+            if not still_here('clear the slot'):
+                return None
+            f0 = self.frame()
 
         # AND IT HAS TO HAVE WORKED. `absent` is not a pass: this weapon does
         # not have the slot the catalogue says it does, and the part would land
         # somewhere else and be photographed under the wrong name.
+        #
+        # `unknown` IS a pass, and only scope ever returns it. Nothing can be
+        # read there, so the round proceeds and the landing check below is what
+        # judges it -- reporting a part that went to 库存 instead, with the row
+        # count, rather than photographing the wrong thing.
         state = self.slots.classify(f0, self.gun).get(slot)
         if state in ('filled', 'absent'):
             return self.miss(
@@ -1072,20 +1221,40 @@ class Collector:
 
         n0 = inv_rows(f0)
         slots0 = self.slot_crops(f0)
+        states0 = self.slots.classify(f0, self.gun)
 
         if not self.spawn(None, [key], False) or not self.tab():
             return self.miss(key, 'the spawner would not produce it, or Tab '
                                   'would not open afterwards')
-        # DID THE SLOT CHANGE -- not "does read_slots name something there".
-        # read_slots matches the part's ICON TEMPLATE, and this file exists to
-        # collect templates: for brake_ar, heavy_stock and variable the
-        # catalogue has no asset at all, so that question can only ever answer
-        # "empty" and those three could never be collected. It is the same
-        # circularity fit_one was kept hand-rolled to avoid, reintroduced one
-        # method along.
+        # WHICH SLOT WENT FROM NOT-FILLED TO FILLED. Not "does read_slots name
+        # something there": that matches the part's ICON TEMPLATE, and for
+        # brake_ar, heavy_stock and variable the catalogue has no asset at all,
+        # so it could only ever answer "empty" and those three would never be
+        # collectable. Same circularity, one method along.
+        #
+        # The tile transition is ABSOLUTE -- each end read on its own frame --
+        # where the frame difference below is RELATIVE, and the difference is
+        # not academic. A thumb_grip landed in the grip slot with the tile
+        # reading filled at 411 edges, while the muzzle crop had moved 49.6
+        # against the grip's 17.1 (the previous part leaving it), so the
+        # difference-based winner called it a muzzle and threw the part away.
+        # Scenery, a tooltip, or the slot next door emptying all move pixels;
+        # none of them make a tile read filled.
+        #
+        # The difference survives as the FALLBACK, for `scope` alone. That
+        # position draws no tile, so its state is `unknown` at both ends and no
+        # transition can ever be seen there.
         f1 = self.frame()
         moved = {s: change(slots0[s], self.crop(f1, s)) for s in SLOT_NAMES}
-        landed = [winner(moved)] if winner(moved) else []
+        states1 = self.slots.classify(f1, self.gun)
+        gained = [s for s in SLOT_NAMES
+                  if states1[s] == 'filled' and states0[s] != 'filled']
+        if gained:
+            landed = gained if len(gained) == 1 else []
+        elif states1.get(slot) == 'unknown':
+            landed = [winner(moved)] if winner(moved) else []
+        else:
+            landed = []
         if landed != [slot]:
             # REPORT, do not assert. "it did not arrive" and "the catalogue has
             # the wrong slot" and "it went to 库存 instead" are three different
@@ -1093,8 +1262,15 @@ class Collector:
             # says whether anything spawned at all, and the other slots say
             # whether it landed somewhere else.
             n1 = inv_rows(f1)
-            after = self.slots.classify(f1, self.gun).get(slot)
-            if n1 > n0 and not landed:
+            after = states1.get(slot)
+            if len(gained) > 1:
+                # Two tiles filled from one spawn. Nothing here can say which
+                # one is this part, and naming either is how 228 crops went out
+                # under the wrong labels.
+                why = (f'{len(gained)} slots filled at once ({gained}) — one '
+                       f'spawn cannot have landed in two, so the round before '
+                       f'this one left something half-done')
+            elif n1 > n0 and not landed:
                 # The autofit rule says 库存 means the slot was occupied. That
                 # is a claim about the slot, so the slot is read -- by tile
                 # geometry, the same instrument that gated this above. If it
@@ -1177,20 +1353,20 @@ class Collector:
         return shots
 
     def round(self, weapon, keys, fit, angles, n, spawn=True, backpack=False):
-        print(f'\n── round {n}: {weapon or "no weapon"} ── '
+        label = ', '.join(weapon) if isinstance(weapon, list) else weapon
+        print(f'\n── round {n}: {label or "no weapon"} ── '
               + (', '.join(keys) or '(no parts)'))
         if not focus_keeper().ok(f'round {n}'):
             return self.miss(f'round {n}', 'lost the foreground and could not '
                                            'take it back')
 
-        # Empty the rack and read the plate blank BEFORE the spawn, so what
-        # follows can be called an arrival rather than assumed to be one. Only
-        # when a plate is actually being collected: it costs a Tab cycle and
-        # two drops, and a round that photographs attachments wants the host
-        # gun left exactly where it is.
-        self.plate_ink0 = None
-        if 'plate' in self.targets and weapon and spawn:
-            self.plate_ink0 = self.empty_rack()
+        # PLATES ARE THEIR OWN SHAPE and share nothing below: no parts to fit,
+        # no host to keep bare, and the rack is cleared at EVERY background
+        # rather than once, because an empty rack is what a plate is paired
+        # against. plate_pair does its own spawning for the same reason -- the
+        # gun has to arrive after the backdrop is already photographed.
+        if isinstance(weapon, list):
+            return self.plate_pair(weapon, angles, n)
 
         if spawn:
             # The HOST only. Its parts are spawned by one_part, one at a time,
@@ -1204,16 +1380,6 @@ class Collector:
             elif not self.spawn(None, [] if fit else keys, backpack):
                 return self.miss(', '.join(keys),
                                  'the spawner would not produce this round')
-
-        if self.plate_ink0 is not None:
-            after = self.ac.plate_ink(self.gun, self.frame(flush=2)) \
-                if self.tab() else 0
-            self.plate_arrived = plate_arrived(self.plate_ink0, after)
-            print(f'    plate ink {self.plate_ink0} -> {after}  '
-                  + ('ARRIVED, labelled' if self.plate_arrived else
-                     'NOT an arrival — captured without a label'))
-        else:
-            self.plate_arrived = False
 
         # No rows_of here any more. It answered "which rows hold this round's
         # parts", and one_part does not need the answer: it puts exactly one
@@ -1342,7 +1508,7 @@ def main():
                          'needs --label')
     ap.add_argument('--label', help='--as-is: slot=key pairs naming what is on')
     ap.add_argument('--targets', help=f'{",".join(TARGETS)} (default slots, '
-                                      f'or plate,type with --plates)')
+                                      f'or plate with --plates)')
     ap.add_argument('--weapon', help='host weapon(s), comma separated. '
                                      'Default: the smallest covering set')
     ap.add_argument('--gun', type=int, default=2, choices=(1, 2),
@@ -1362,7 +1528,11 @@ def main():
     args = ap.parse_args()
 
     targets = tuple(t.strip() for t in
-                    (args.targets or ('plate,type' if args.plates
+                    # `plate` alone, not plate,type: plate_pair photographs the
+                    # rack and nothing else, because the 类型 marker is not
+                    # paired against anything and rides along free on the parts
+                    # runs, which grab a whole frame anyway.
+                    (args.targets or ('plate' if args.plates
                                       else 'slots')).split(',') if t.strip())
     unknown = [t for t in targets if t not in TARGETS]
     if unknown:
@@ -1408,7 +1578,8 @@ def main():
                  else 'no live weapon in ROSTER can wear them'))
     if args.plan:
         for i, (w, ks, _) in enumerate(rounds, 1):
-            print(f'  {i:2d}. {w or "-":<10}{", ".join(ks)}')
+            name = ' + '.join(w) if isinstance(w, list) else (w or '-')
+            print(f'  {i:2d}. {name:<22}{", ".join(ks)}')
         return 0
     if not rounds:
         ap.error('nothing to collect')
@@ -1467,7 +1638,7 @@ def main():
             if re_entered:
                 print('    re-entered the range — the rack and pack are empty '
                       'again')
-            elif i == 1 or col.misses:
+            elif ks and (i == 1 or col.misses):
                 # A FULL 库存 STOPS THE SPAWNER, silently. The pack fills up
                 # over a run because every part that fails to fit stays in it,
                 # and at 12 rows nothing else arrives -- give_attachment still
@@ -1478,6 +1649,13 @@ def main():
                 # last) and after any round that missed, which is the cheapest
                 # signal that something is accumulating. A re-entry has already
                 # emptied it.
+                #
+                # ONLY WHEN THIS ROUND SPAWNS PARTS (`ks`). Clearing is up to
+                # twelve LEFT-BUTTON DRAGS, and a plates round never touches
+                # the backpack -- it racks two guns and turns. Those drags were
+                # going out anyway, doing nothing, and a left button pressed
+                # while the Tab screen is not actually up reaches the game and
+                # fires the weapon in hand.
                 rec = col.ac.clear_inventory() if col.tab() else None
                 if rec and rec.get('rows_left'):
                     print(f"    [!] 库存 still holds {rec['rows_left']} row(s) "

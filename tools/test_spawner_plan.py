@@ -206,7 +206,9 @@ check('the three muzzles are consecutive, top-down',
 
 print('\n=== duplicates repeat the ENTRY click, not the category ===')
 script = click_plan(plan(['comp_ar', 'comp_ar']))
-check('acts', [m['act'] for m in script], ['open', 'entry', 'entry', 'close'])
+# One category run, so it is also the last one, so no close — see the shape
+# check below for why the trailing one went.
+check('acts', [m['act'] for m in script], ['open', 'entry', 'entry'])
 check('both entry clicks are the same point',
       len(set(points(script, 'entry'))), 1)
 
@@ -225,11 +227,18 @@ check('the attachment is untouched',
 print('\n=== the click script for a real shopping list ===')
 # The end-to-end claim: keys in, measured pixels out, nothing consulted.
 script = click_plan(plan(['m416', 'comp_ar', 'backpack3']))
+# The LAST category is not closed: give_many closes the whole panel next,
+# which resets the expansion by itself (measured -- expand a category, press
+# comma twice, it comes back `all collapsed`). The click that used to be here
+# was a LEFT click at a panel coordinate sent after the panel could already be
+# gone, and a left click with no panel under it fires the weapon in hand.
+# Between categories it stays: several open submenus run off the bottom of the
+# panel, and gear's blind coordinates are only valid from the root.
 check('shape', acts(script),
       [('root', 'backpack3'), ('open', 'backpack3'), ('entry', 'backpack3'),
        ('close', 'backpack3'),
        ('open', 'm416'), ('entry', 'm416'), ('close', 'm416'),
-       ('open', 'comp_ar'), ('entry', 'comp_ar'), ('close', 'comp_ar')])
+       ('open', 'comp_ar'), ('entry', 'comp_ar')])
 check('gear is the only blind move',
       {m['key'] for m in script if m['blind']}, {'backpack3'})
 
@@ -248,9 +257,10 @@ for key, want_cat in [('backpack3', (3, 6)), ('comp_ar', CATEGORY_OF_SLOT['muzzl
           [m['xy'] for m in ms if m['act'] == 'entry'],
           [entry_point(COLUMN_BOX[want_cat[0]],
                        category_point(*want_cat)[1], idx)])
-    check(f'{key} closes where it opened',
+    # comp_ar is the last run in this script, so it has no close at all.
+    check(f'{key} closes where it opened, when it closes',
           [m['xy'] for m in ms if m['act'] == 'close'],
-          [category_point(*want_cat)])
+          [] if key == 'comp_ar' else [category_point(*want_cat)])
 
 print('\n=== every click of every catalogued key is on the panel ===')
 # A blanket sweep, because an index that runs off the end of a submenu does

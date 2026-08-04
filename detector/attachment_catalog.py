@@ -80,6 +80,23 @@ ROSTER = {
 
     'm249':     ('LMG', 'M249'),
     'mg3':      ('LMG', 'MG3'),
+
+    # 狙击步枪, col1_row02, in the order the submenu draws them. Read off
+    # docs/spawner/runs/20260801_210656/col1_row02_submenu.png — the scrape is
+    # the source of truth for what the game currently offers, and the order is
+    # what give_many's entry index counts.
+    'kar98k':   ('SR',  'Kar98k'),
+    'm24':      ('SR',  'M24'),
+    'awm':      ('SR',  'AWM'),
+    'win94':    ('SR',  'Win94'),
+    'lynx':     ('SR',  'Lynx AMR'),
+
+    # 霰弹枪, col1_row04, same source, same ordering rule.
+    's686':     ('SG',  'S686'),
+    's12k':     ('SG',  'S12K'),
+    's1897':    ('SG',  'S1897'),
+    'dbs':      ('SG',  'DBS'),
+    'o12':      ('SG',  'O12'),
 }
 
 # Permanently removed in the June 2026 update (42.1). Kept as a named set

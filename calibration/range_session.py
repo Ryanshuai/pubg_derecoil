@@ -70,10 +70,27 @@ class RangeSession(ABC):
         """
         if not force and not self.expiring() and self.in_range():
             return True, False
+        # force means RESTART, and that has to LEAVE first. enter() is
+        # ensure_in_match(), which returns straight away when a match is
+        # already running -- so force=True on a healthy session used to cost
+        # 0 s and change nothing, while reporting `re_entered=True`. The one
+        # caller that wanted it wanted the SIDE EFFECT: re-entry is the only
+        # thing that empties the backpack and the floor, and both saturate at
+        # 12 rows, at which point the spawner silently stops delivering.
+        if force and self.in_range():
+            self.leave()
         ok = self.enter()
         if ok:
             self.mark_entered()
         return ok, ok
+
+    def leave(self):
+        """Get out of the range, so the next enter() is a real re-entry.
+
+        Base class cannot: a manual session has no way to drive the menus.
+        Overridden where there is one.
+        """
+        return False
 
     def close(self):
         """Release any resources. Safe to call more than once."""
@@ -143,6 +160,18 @@ class AutoSession(RangeSession):
         both look like a match to anything coarser, and input goes nowhere in
         either."""
         return bool(self._det.state().playable)      # a property, not a call
+
+    def leave(self):
+        """Walk the ESC menu out to the lobby. -> bool
+
+        control/lobby.py refuses to click LEAVE unless the entry's glyphs
+        match, because EXIT TO DESKTOP sits one pitch below it. A refusal here
+        is the guard working, not a failure to route around.
+        """
+        r = self._lc.exit_to_lobby()
+        if not r.get('ok'):
+            print(f"    [!] could not leave the range: {r}")
+        return bool(r.get('ok'))
 
     def enter(self, timeout_s=300.0):
         r = self._lc.ensure_in_match(timeout=timeout_s)

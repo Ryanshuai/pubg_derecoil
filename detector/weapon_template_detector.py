@@ -25,6 +25,13 @@ import cv2
 import numpy as np
 
 TMPL_THRESHOLD = 0.85
+# How close a rival has to score before the tie-break decides instead of the
+# score. 0.05 is set by the two cases that must NOT be disturbed: k2 sits 0.23
+# behind sks on an SKS plate, far outside; m24 sits 0.001-0.009 from m249 on an
+# M249 plate, well inside. Anything between those is unoccupied — the gap to
+# the nearest wrong answer is either a rounding error or a fifth of the scale.
+TIE_MARGIN = 0.05
+
 TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data', 'ocr_white')
 _OPEN_KERNEL = np.ones((3, 3), np.uint8)
 
@@ -55,13 +62,32 @@ def _template_match(crop, templates):
     SKS plate it lifts the wrong answer 'k2' to 0.877 against the right one's
     0.959. Keeping the window's own pixels in the denominator still charges
     for ink *under* the template, and holds that gap at 0.959 vs 0.728.
+
+    A WINDOWED SCORE CANNOT SEPARATE A PREFIX, which is what the tie-break
+    below is for. 'M24' is a literal prefix of 'M249', so the M24 template
+    lands on the first three glyphs of an M249 plate and its window stops
+    before the '9' — the pixel that distinguishes them is outside the window
+    and costs nothing. Measured over ten backgrounds of one M249 plate:
+
+        m24  0.995 0.933 0.980 0.989 0.971 0.982 0.982 0.984 0.989 0.971
+        m249 0.986 0.932 0.990 0.992 0.995 0.992 0.987 0.990 0.989 0.995
+
+    — the wrong answer wins twice and ties once. Raising the threshold cannot
+    fix that; both are near 1.0 and they cross.
+
+    So among candidates that score within TIE_MARGIN of the best, the one
+    covering MORE of the plate's ink wins. That is the question the windowed
+    IoU throws away: m249 explains the '9' and m24 leaves it unexplained. It
+    is a tie-break and not a new score, which is what keeps the two cases that
+    shaped the scoring intact — 'Micro UZI' has no near-scoring rival to be
+    compared against, and k2 is 0.23 behind sks, far outside the margin.
     """
     binary = _white_text_mask(crop)
     if np.count_nonzero(binary) == 0:
         return []
     results = []
     for code, tmpls in templates.items():
-        best = -1
+        best, covered = -1, 0
         for tmpl in tmpls:
             if tmpl.shape[0] > binary.shape[0] or tmpl.shape[1] > binary.shape[1]:
                 continue
@@ -74,11 +100,20 @@ def _template_match(crop, templates):
             inter = np.count_nonzero(win & tmpl)
             union = np.count_nonzero(win) + np.count_nonzero(tmpl) - inter
             iou = inter / max(union, 1)
-            best = max(best, iou)
+            if iou > best:
+                # How much of the plate's ink this template accounts for. Not
+                # part of the score — the tie-break below, and only that.
+                best, covered = iou, inter
         if best > 0:
-            results.append((best, code))
-    results.sort(reverse=True)
-    return results
+            results.append((best, covered, code))
+    if not results:
+        return []
+    top = max(r[0] for r in results)
+    near = sorted((r for r in results if r[0] >= top - TIE_MARGIN),
+                  key=lambda r: (-r[1], -r[0]))
+    rest = sorted((r for r in results if r[0] < top - TIE_MARGIN),
+                  key=lambda r: -r[0])
+    return [(iou, code) for iou, _cov, code in near + rest]
 
 
 class TabWeaponDetector:

@@ -25,6 +25,17 @@ one copy, live in the other.
 
 So the loop is here now and tab_items calls it. `weapons` is optional and
 everything still works without it, just less certainly.
+
+ONE ASSET, SEVERAL PICTURES OF IT. A template file may carry a tag —
+`Item_Attach_Weapon_Lower_Foregrip_C.solved.png` beside the untagged one —
+and every variant of an asset is scored, the best standing for the asset. Same
+convention as the weapon name plates, for a different reason: there the
+variants are languages, here they are where the picture came from. The shipped
+files are the game's own art, and the game does not draw its art unchanged —
+it scales it, outlines it and blends it into a translucent panel. A picture
+recovered FROM THE SCREEN (tools/solve_template.py) is what the screen
+actually shows, and it beats the art it was drawn from. The art stays because
+it covers parts no capture run has reached yet.
 """
 import os
 
@@ -77,49 +88,63 @@ _SHIFTS = tuple((sy, sx) for sy in (-1, 0, 1) for sx in (-1, 0, 1))
 class AttachmentDetector:
 
     def __init__(self):
-        self._templates = {}      # name → (tmpl_vals, ys, xs)
+        self._templates = {}      # name → [(tmpl_vals, ys, xs), ...] variants
         self._slot_index = {}     # slot_name → [name, ...]
         self._load_templates()
 
     def _load_templates(self):
         if not os.path.isdir(TMPL_DIR):
             return
-        for fname in os.listdir(TMPL_DIR):
+        for fname in sorted(os.listdir(TMPL_DIR)):
             if not fname.endswith('.png'):
                 continue
             img = cv2.imread(os.path.join(TMPL_DIR, fname), cv2.IMREAD_UNCHANGED)
             if img is None or img.shape[2] != 4:
                 continue
-            name = fname.replace('Item_Attach_Weapon_', '').replace('.png', '')
-            resized = cv2.resize(img, (TMPL_SIZE, TMPL_SIZE), interpolation=cv2.INTER_AREA)
+            # <Asset>.png, or <Asset>.<tag>.png for a variant of the same
+            # asset. Asset names carry no dot, so the first field is the key.
+            stem = fname[:-len('.png')].replace('Item_Attach_Weapon_', '')
+            name = stem.split('.')[0]
+            resized = (img if img.shape[:2] == (TMPL_SIZE, TMPL_SIZE) else
+                       cv2.resize(img, (TMPL_SIZE, TMPL_SIZE),
+                                  interpolation=cv2.INTER_AREA))
             mask = resized[:, :, 3] > ALPHA_TH
             if int(mask.sum()) < 30:
                 continue
             tmpl_bgr = resized[:, :, :3].astype(np.float32)
             ys, xs = np.where(mask)
-            self._templates[name] = (tmpl_bgr[ys, xs], ys, xs)
-            for slot_name, prefixes in SLOT_PREFIXES.items():
-                if any(name.startswith(p) for p in prefixes):
-                    self._slot_index.setdefault(slot_name, []).append(name)
+            if name not in self._templates:
+                for slot_name, prefixes in SLOT_PREFIXES.items():
+                    if any(name.startswith(p) for p in prefixes):
+                        self._slot_index.setdefault(slot_name, []).append(name)
+            self._templates.setdefault(name, []).append((tmpl_bgr[ys, xs],
+                                                         ys, xs))
 
     # ── scoring ──
 
     def score(self, crop_f, name, shifts=_SHIFTS):
-        """One template against one float32 crop. -> mean squared error.
+        """One asset against one float32 crop. -> mean squared error.
+
+        The best of the asset's variants, because they are pictures of the
+        same thing and the question asked of them is the same. A variant that
+        matches nothing costs a score and changes no answer.
 
         `crop_f` is float32 already: converting once per crop rather than once
         per template is worth ~15% on its own.
         """
-        tmpl_vals, ys, xs = self._templates[name]
         h, w = crop_f.shape[:2]
-        cy, cx = ys + OFFSET_Y, xs + OFFSET_X
-        best = None
-        for sy, sx in shifts:
-            ny = np.clip(cy + sy, 0, h - 1)
-            nx = np.clip(cx + sx, 0, w - 1)
-            se = ((crop_f[ny, nx] - tmpl_vals) ** 2).sum(axis=1)
-            best = se if best is None else np.minimum(best, se)
-        return float(best.mean() / 3)
+        out = None
+        for tmpl_vals, ys, xs in self._templates[name]:
+            cy, cx = ys + OFFSET_Y, xs + OFFSET_X
+            best = None
+            for sy, sx in shifts:
+                ny = np.clip(cy + sy, 0, h - 1)
+                nx = np.clip(cx + sx, 0, w - 1)
+                se = ((crop_f[ny, nx] - tmpl_vals) ** 2).sum(axis=1)
+                best = se if best is None else np.minimum(best, se)
+            mse = float(best.mean() / 3)
+            out = mse if out is None else min(out, mse)
+        return out
 
     def best_two(self, crop, names, shortlist=SHORTLIST):
         """-> (name, mse, margin). Two-stage; see SHORTLIST."""

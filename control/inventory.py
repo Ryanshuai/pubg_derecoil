@@ -85,6 +85,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import HUD_REGIONS
 from detector.attachment_catalog import ATTACHMENTS, ROSTER, fits, has_slot, is_live
 from detector.attachment_detector import AttachmentDetector, SLOT_NAMES
+from detector.slot_detector import (SlotDetector, ABSENT as SLOT_ABSENT,
+                                    EMPTY as SLOT_EMPTY)
 from detector.cropper import win32_cap
 from detector.tab_detector import TabTypeDetector
 from detector.tab_items import TabGrabber, TabItemDetector
@@ -293,6 +295,24 @@ KIT_SETTLE = 0.6
 # a rack that plainly holds one. Generous because the cost of waiting is a few
 # frames and the cost of answering early is a round thrown away.
 GUN_SLOT_WATCH_S = 1.2
+
+# "IS A GUN DRAWN IN THIS RACK ROW" — white-text-mask pixels over gun_name_N
+# with Tab up. MEASURED 2026-08-03:
+#
+#   empty rack row     0        6 of 6 samples, exactly zero
+#   a gun is racked    679-901  13 samples
+#
+# One frame carries its own control: an akm read 682 on row 1 and 0 on row 2 —
+# same frame, same scenery, one row occupied and one not.
+#
+# 200 sits ~3.4x under the lowest real plate and far above the zero floor. The
+# question this answers is the one the OCR cannot be asked on this screen,
+# because the OCR is what is being checked.
+#
+# Lives here rather than in a calibration script because control/ acts on it —
+# clear_rack decides whether to drop a gun by this number. A second copy in a
+# caller would drift, and the failure would be silent both ways.
+PLATE_INK_MIN = 200
 
 
 # ════════════════════════════════════════════════════════════
@@ -659,7 +679,17 @@ class InventoryControl:
         self.items = TabItemDetector()
         self.grabber = TabGrabber()
         self.tab = TabTypeDetector()          # device=None: pixel check only
-        self.ocr = TabWeaponDetector()
+        # NOT an OCR, whatever it gets called elsewhere: it matches a
+        # binary mask of the plate against one stored mask per weapon.
+        # There is no character recognition anywhere in this project, and
+        # the old name `self.ocr` invited callers to expect a reader that
+        # generalises to text it has never seen. It does not.
+        self.name_template = TabWeaponDetector()
+        # Built on first use. Every gesture aimed at a slot consults it, but a
+        # caller that only reads loadouts never does, and it is the same rule
+        # the Pointer follows -- do not construct what this instance may not
+        # need. See slot_states() for what it is for.
+        self._slots = None
         self.verbose = verbose
         self.rows = {'nearby': None, 'inventory': None}
         self.guns = {1: None, 2: None}        # catalog key per weapon slot
@@ -817,7 +847,7 @@ class InventoryControl:
 
         `frame` names the guns in a frame the caller already holds, for the
         same reason look() takes one. collect_templates went to
-        `ac.ocr.classify({...})` to get this, cutting the two plate regions by
+        `ac.name_template.classify({...})` to get this, cutting the two plate regions by
         hand — which is this method's body, minus the roster filter that stops
         an unrecognised name narrowing every slot's template bank to nothing.
         """
@@ -835,7 +865,34 @@ class InventoryControl:
         """
         frame = self._frame() if frame is None else frame
         y, x, h, w = HUD_REGIONS[f'gun_name_{gun}']
-        return self.ocr.ink(frame[y:y + h, x:x + w])
+        return self.name_template.ink(frame[y:y + h, x:x + w])
+
+    def slot_states(self, gun, frame=None):
+        """{slot: absent|empty|filled|unknown} for `gun`, from TILE GEOMETRY.
+
+        The other slot reader on this class, read_slots(), matches icon
+        TEMPLATES and answers a different question -- WHICH part is in there.
+        Both are needed and they fail differently, which is the point:
+
+          read_slots   drifts silently when the game re-draws an icon, and
+                       cannot see a part with no template at all. It has named
+                       four attachments on a rack holding no gun.
+          slot_states  never looks at an icon, so a missing or stale template
+                       cannot touch it. It cannot say WHICH part, and it
+                       returns `unknown` for `scope` forever (no tile is drawn
+                       there).
+
+        Anything asking "is it safe to send a gesture at this slot" wants THIS
+        one. See unequip() for what the wrong answer costs.
+        """
+        if self._slots is None:
+            self._slots = SlotDetector()
+        return self._slots.classify(self._frame() if frame is None else frame,
+                                    gun)
+
+    def slot_state(self, gun, slot, frame=None):
+        """One slot's tile state. -> absent|empty|filled|unknown"""
+        return self.slot_states(gun, frame).get(slot)
 
     def read_slots(self, gun=None):
         """What the guns are wearing, as template names ('' when empty).
@@ -1137,8 +1194,35 @@ class InventoryControl:
         TODO: re-measure the release point, then this can go back to being a
         real fallback. Until then 'auto' is not an optimisation, it is the
         only path that does what this function's name says.
+
+        AN EMPTY SLOT IS NOT AN INERT TARGET, so this refuses to act on one.
+        Either gesture aimed at a slot with nothing in it reaches the WEAPON
+        ROW underneath, and both of the weapon row's gestures throw the whole
+        gun on the floor with its attachments -- right click 1/1, drag-left
+        1/1, both measured (docs/game_quirks.md, drop_weapon). The two
+        outcomes are indistinguishable from the caller: same gesture, same
+        record, the difference is only on screen.
+
+        Measured the hard way. A collector cleared its target slot blind and
+        threw away its own host gun on every round -- 18 parts collected
+        nothing, three runs, while every log line looked healthy. Switching
+        the blind clear from a right click to a drag did not help, because the
+        hazard is the SLOT, not the gesture: 11 of the next run's 35 misses
+        were the same loss one gesture along.
+
+        `empty` and `absent` are refusals; `filled` and `unknown` go ahead.
+        Only a positive "there is nothing there" blocks, because the `scope`
+        position draws no tile and reads `unknown` forever -- refusing that
+        would make every sight unremovable.
         """
         dst = as_loc(to) if to is not None else at_inv()
+        state = self.slot_state(gun, slot)
+        if state in (SLOT_EMPTY, SLOT_ABSENT):
+            self._log(f'gun{gun}.{slot}: reads {state}, not clicking or '
+                      f'dragging it — that gesture reaches the weapon row and '
+                      f'drops the gun')
+            return step(at_slot(gun, slot), dst, ok=False, verified=True,
+                        error=f'slot reads {state}', slot_state=state)
         if gesture in ('auto', 'click') and dst[0] == 'inventory':
             rec = self.right_click_unequip(gun, slot, retries=retries)
             if rec['ok'] or gesture == 'click':
@@ -1191,11 +1275,36 @@ class InventoryControl:
 
         Returned a plain list until 2026-08-03. Its one caller ignored the
         value entirely, which is how the difference stayed invisible.
+
+        WHICH SLOTS TO PULL COMES FROM THE TILES, not from read_slots(). Two
+        failures follow from asking a template that question, and both have
+        been seen on this gun:
+
+          a part with NO template is invisible, so it never comes off. That is
+          every part a template collector exists to photograph, and it is why
+          six grips in a row stayed on a gun that reported itself stripped.
+
+          a template firing on an EMPTY slot puts a gesture on it, and a
+          gesture on an empty slot drops the whole gun (see unequip). unequip
+          now refuses those, so the cost is a wasted read rather than a lost
+          weapon -- but asking the right reader in the first place means the
+          refusal never has to fire.
+
+        `worn` still reports the NAMES, from read_slots, because that is what
+        a caller wants in the record. What is acted on is the tile.
         """
-        worn = self.read_slots(gun)
-        had = [s for s in SLOT_NAMES if worn[s]]
+        states = self.slot_states(gun)
+        named = self.read_slots(gun)
+        # `unknown` is scope, where no tile is drawn. Pull it when a template
+        # can see something there -- that is the one slot where read_slots is
+        # the better of the two readers, having any answer at all.
+        had = [s for s in SLOT_NAMES
+               if states.get(s) == 'filled'
+               or (states.get(s) == 'unknown' and named.get(s))]
         return batch([self.unequip(gun, s, to=to, retries=retries)
-                      for s in had], gun=gun, worn=had)
+                      for s in had], gun=gun,
+                     worn=[s for s in had if named.get(s)] or had,
+                     states={s: states.get(s) for s in had})
 
     def discard(self, src, retries=1):
         """Drop whatever is at `src` on the floor. Works from a slot too."""
@@ -1360,10 +1469,23 @@ class InventoryControl:
 
         `dropped` is the guns it actually acted on; an empty slot is skipped,
         not failed.
+
+        "IS THERE A GUN HERE" IS THE INK, NOT THE NAME. This asked
+        _read_guns() until 2026-08-03, which OCRs the name plate and returns
+        None for anything outside the live roster or anything whose template
+        has drifted -- and a None slot was SKIPPED. So the guns this could not
+        name were exactly the guns it would not clear, and the template
+        collector that exists to fix unreadable plates was the first caller to
+        be bitten: it cleared the rack, believed it, and racked its new pair on
+        top of whatever the OCR had failed to see.
+
+        plate_ink has no such failure mode. It counts near-white achromatic
+        pixels: 0 on an empty row, 679-901 with a gun, across 19 measured
+        samples including one frame carrying both.
         """
         out, did = [], []
         for g in guns:
-            if self._read_guns(self._frame()).get(g) is None:
+            if self.plate_ink(g) < PLATE_INK_MIN:
                 continue
             out.append(self.drop_weapon(g))
             did.append(g)
@@ -1798,10 +1920,26 @@ class InventoryControl:
             return att_slot_point(gun, slot)
         kind, row = loc[0], (loc[1] if len(loc) > 1 else None)
         if row is None:
-            # "Anywhere in this panel" is a RELEASE point, not a row. Rows are
-            # for picking a specific item up; releasing on one put the item on
-            # the floor. See tab_layout.DROP_XY for how the two points were
-            # measured and why a row point cannot stand in for them.
+            # "Anywhere in this panel" is a RELEASE point, not a row.
+            #
+            # For 库存 that has to be the measured constant. Releasing on a
+            # row there put the item on the FLOOR instead of in the pack --
+            # twice, cleanly reproduced -- and DROP_XY exists because of it.
+            #
+            # For 附近 the same objection does not apply, because THE WHOLE
+            # PANEL IS THE FLOOR. "It ended up on the floor" is not a failure
+            # there, it is the request. So the release can go to the FIRST
+            # EMPTY ROW, which is strictly safer than a fixed y: the constant
+            # sits between rows 4 and 5 and therefore lands on top of whatever
+            # is already in the list once the list is that long.
+            #
+            # set_rows() and its docstring have described this behaviour since
+            # they were written, and look() has been filling `self.rows` on
+            # every detection pass. Nothing read it. This is that mechanism
+            # connected, not a new one.
+            n = self.rows.get(kind)
+            if kind == 'nearby' and n is not None and 0 <= n < INV_ROWS:
+                return row_point(n, kind)
             return DROP_XY[kind]
         return row_point(row, kind)
 
@@ -1871,7 +2009,7 @@ class InventoryControl:
         for key in ('gun_name_1', 'gun_name_2'):
             y, x, h, w = HUD_REGIONS[key]
             crops[key] = frame[y:y + h, x:x + w]
-        names = self.ocr.classify(crops)
+        names = self.name_template.classify(crops)
         return {g: (n if n in ROSTER and is_live(n) else None)
                 for g, n in zip(GUNS, names)}
 

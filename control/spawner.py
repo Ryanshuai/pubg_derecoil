@@ -143,10 +143,15 @@ def record_goto(rec, col, row, path=None):
 # ROSTER match what each category expands to (AR 13, DMR 7, SMG 8, LMG 2).
 CATEGORY_OF_CLASS = {
     'AR':  (1, 1),    # 突击步枪
+    'SR':  (1, 2),    # 狙击步枪 — Kar98k, M24, AWM, Win94, Lynx AMR
     'DMR': (1, 3),    # 射手步枪
+    'SG':  (1, 4),    # 霰弹枪 — S686, S12K, S1897, DBS, O12
     'SMG': (1, 5),    # 冲锋枪
     'LMG': (1, 10),   # 轻机枪
 }
+# Column 1's other rows are not weapons this project drives: row 6 手枪,
+# row 7 可投掷物品, row 8 近战, row 9 其他. Labels read off
+# docs/spawner/runs/20260801_210656/col1_row*_label.png.
 
 # Same for attachments. Verified entry by entry against the captured submenus:
 # 弹匣 / 枪口 / 枪托 / 瞄准镜 match ATTACHMENTS' order exactly.
@@ -417,7 +422,8 @@ def click_plan(steps, menu=None, boxes=None):
         return items[row - 1].click_x, items[row - 1].y
 
     script = []
-    for cat, batch in _category_runs(steps):
+    runs = _category_runs(steps)
+    for n, (cat, batch) in enumerate(runs, 1):
         gear = cat is None
         col, row = GEAR[batch[0]['key']]['category'] if gear else cat
         cx, cy = point(col, row)
@@ -435,10 +441,21 @@ def click_plan(steps, menu=None, boxes=None):
             xy = entry_point(boxes[col], cy, s['index'])
             for _ in range(s['times']):
                 script.append(move('entry', s, xy))
-        # Close it before moving on: several open submenus would run off the
-        # bottom of the panel, and gear's blind coordinates are only valid
-        # from the root.
-        script.append(move('close', batch[-1], (cx, cy)))
+        # Close it BEFORE MOVING ON, and only then: several open submenus
+        # would run off the bottom of the panel, and gear's blind coordinates
+        # are only valid from the root. After the LAST category there is
+        # nothing to move on to — give_many closes the whole panel, which
+        # resets the expansion anyway (measured: expand col1_row01, press
+        # comma twice, the panel comes back `all collapsed`).
+        #
+        # The trailing click was not merely wasted. It is a LEFT CLICK at a
+        # panel coordinate, and by the time it goes out the panel may already
+        # be gone — a left click with no panel under it reaches the game, and
+        # the game fires the weapon in hand. Two of them per spawn, which is
+        # what a plates run looked like from the outside: guns arriving, then
+        # two shots.
+        if n < len(runs):
+            script.append(move('close', batch[-1], (cx, cy)))
     return script
 
 
@@ -1335,9 +1352,28 @@ class SpawnerControl:
                 out[key]['ok'], out[key]['error'] = False, err
                 break
 
-        closed = self._collapse_all()
-        if err is None and not closed:
-            err = 'stuck expanded'
+        # No _collapse_all() here. Closing the panel resets the expansion by
+        # itself (measured), so collapsing first was a second click on the
+        # same category row -- and that click is a LEFT click at a panel
+        # coordinate, which reaches the game and fires the weapon if the panel
+        # has already gone. Closing is the stronger operation; it is enough.
+        #
+        # AND THE PANEL COMES DOWN. It was opened here, so it is closed here —
+        # a caller told only WHAT it wants should not be left holding a screen
+        # it never asked to open.
+        #
+        # Collapsing the categories is not the same thing and used to be all
+        # that happened, which left the item-spawner panel up. With it up the
+        # Tab inventory will not open, so the NEXT thing the caller does fails
+        # instead of this one: a plate collection run spawned its first pair,
+        # returned ok, and then reported "the inventory would not open" for
+        # every round after it. Measured directly — panel_open() reads True
+        # after a give_many that reported success.
+        #
+        # Before switch_to_slot2, not after: that presses a number key, and
+        # keys go to whatever screen is up.
+        if not self.ensure_panel(False):
+            err = err or 'the item-spawner panel would not close'
         if err is None and switch and any(s['kind'] == 'weapon' for s in steps):
             self.switch_to_slot2()
         return {'ok': err is None, 'steps': [out[k] for k in order],
