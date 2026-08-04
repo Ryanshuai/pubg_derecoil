@@ -165,14 +165,41 @@ def rows_mode(run, man, write, paired=None):
     loses something. But an IoU near zero means one of the two is not looking
     at the icon at all.
     """
+    # THROUGH labelled(), NOT off `entries`. The first version of this read
+    # the manifest directly and it was wrong in exactly the way this whole
+    # module exists to avoid. A 库存 row capture can be claimed by several
+    # keys — the collector photographs the list BEFORE fitting anything, so
+    # every part of the round is sitting in it at once and which row belongs
+    # to which is inferred afterwards. When that inference is ambiguous the
+    # run holds a contradiction, and CaptureRun.conflicts() is what finds it:
+    # 70 contradicted (capture, slot) pairs in the 2026-08-04 run, seven
+    # groups of keys sharing one set of pixels. angled_grip, brake_ar and
+    # cheek_pad all claimed row00 of round 1.
+    #
+    # Solving a template from those would produce one picture and file it
+    # under three names — a fabricated template, which is worse than a
+    # missing one because nothing downstream can tell. labelled() drops
+    # contradicted labels for precisely this reason and everything else in
+    # the repository already goes through it.
+    from calibration.capture_run import CaptureRun
+    cr = CaptureRun.load_dir(run)
     by_key = defaultdict(list)
-    for e in man['entries']:
+    for e, lab, path in cr.labelled():
         if e.get('target') == 'rows' and e.get('key'):
             by_key[e['key']].append(e['capture'])
+    dropped = len({e['capture'] for e in man['entries']
+                   if e.get('target') == 'rows'}) - \
+        len({c for v in by_key.values() for c in v})
+    if dropped > 0:
+        print(f'{dropped} row capture(s) dropped: more than one key claims '
+              f'them, so at most one describes the pixels (CaptureRun.'
+              f'conflicts)\n')
 
     if not by_key:
-        print('No `rows` captures in this run. Collect with\n'
-              '  collect_templates.py --all --targets slots,rows')
+        print('No usable `rows` captures in this run — every one of them is '
+              'claimed by\nmore than one key. The crops are fine; the pairing '
+              'is what was lost. Collect\nwith --targets slots,rows and check '
+              'the round labelling before solving.')
         return 1
 
     out = os.path.join(run, 'solved_rows')
