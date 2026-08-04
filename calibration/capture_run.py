@@ -185,6 +185,35 @@ class CaptureRun:
         if frame is not None:
             dst = os.path.join(self.path, rel)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
+            # A NAME IS USED ONCE. Writing a second frame to a name already in
+            # this run leaves the first entry pointing at the second frame's
+            # pixels — a manifest that describes a file it no longer matches,
+            # and there is nothing in either the file or the entry that says
+            # so. It is the single most expensive failure this format has had,
+            # twice:
+            #
+            #   across ROUNDS   `row00__sks__lbg0.png` had no round in it, so
+            #                   round 2 overwrote round 1. Seven runs, 130
+            #                   captures, 580 row labels, one file claimed by
+            #                   twelve different attachments.
+            #   across PARTS    the round was added and the PART was not. Each
+            #                   part of a round is staged alone into an empty
+            #                   库存, so each lands at row 0 and every one of
+            #                   them wrote `row00__sks__r1__lbg0.png`. Found
+            #                   2026-08-04: 70 of 272 row captures in a fresh
+            #                   run, three keys per file.
+            #
+            # Both were caught long after the fact by conflicts(), which reads
+            # the labels. This reads the DISK, at the moment of the write, and
+            # cannot be out-argued: the second caller gets an exception instead
+            # of a silent overwrite.
+            if os.path.exists(dst):
+                raise FileExistsError(
+                    f'{rel} already exists in this run. A capture name is used '
+                    f'once — writing again would leave the first manifest '
+                    f'entry pointing at the second frame\'s pixels, which is '
+                    f'how 580 row labels were lost. Put whatever distinguishes '
+                    f'the two captures into the name.')
             cv2.imwrite(dst, frame, self._encode(rel))
         entry = {'capture': rel.replace('\\', '/'), 'labels': list(labels)}
         entry.update(facts)

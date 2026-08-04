@@ -858,7 +858,7 @@ class Collector:
                                            arrived=self.plate_arrived),
                           **({} if slot is None else {'slot': slot}), **extra)
 
-    def capture(self, weapon, keys, rows, tag, tag_n):
+    def capture(self, weapon, keys, rows, tag, tag_n, row_key=None):
         """One background. Returns the manifest entries it added.
 
         Every target checks whether it has anything to photograph, so the same
@@ -907,9 +907,23 @@ class Collector:
                 # since both are real row crops of real parts. Seven runs on
                 # disk carry the damage; CaptureRun.conflicts() finds it and
                 # labelled() refuses to hand any of it out.
+                # THE PART IS IN THE NAME, and the comment above is why it
+                # has to be. Adding the round fixed collisions BETWEEN rounds
+                # and left the ones WITHIN one: each part of a round is staged
+                # alone into an empty 库存, so each lands at row 0, so every
+                # part of round 1 wrote `row00__sks__r1__lbg0.png`. Three keys
+                # per file, 70 of 272 captures in the 2026-08-04 run.
+                #
+                # `row_key` is the caller's, not a reading: the rows pass is
+                # per-part and knows which part it just staged (see the block
+                # that calls sweep with one row). Where it is not known the
+                # name falls back to the row, and CaptureRun.add now refuses a
+                # repeat outright rather than overwriting.
+                stem = f'row{row:02d}__{wname}__r{tag_n}'
+                if row_key:
+                    stem += f'__{row_key}'
                 shots.append(self._shot(
-                    frame[y0:y1, x0:x1],
-                    f'row{row:02d}__{wname}__r{tag_n}__{tag}.png',
+                    frame[y0:y1, x0:x1], f'{stem}__{tag}.png',
                     'rows', None, (y0, x0, y1 - y0, x1 - x0),
                     (item.key or '') if item else '', False, row=row))
 
@@ -941,8 +955,19 @@ class Collector:
         # it in a second. See tools/verify_kit.py. Recorded as a capture with
         # no labels — it is for a human, and nothing established what is in it.
         y, x, h, w = self.panel_box
-        self.write(f'panel__{wname}__r{tag_n}__{tag}.png', frame[y:y+h, x:x+w],
-                   target='panel', weapon=wname, round=tag_n, labels=[])
+        # Same naming rule as the row crops above and for the same reason: a
+        # round photographs its parts one at a time, so round+background does
+        # not identify a capture. This one carries no labels, so a collision
+        # cost no ground truth — but it left 270 manifest entries in the
+        # 2026-08-04 run pointing at pixels from a later part, which is a lie
+        # about what a human is looking at. Found by CaptureRun.add's
+        # overwrite guard the first time it ran.
+        stem = f'panel__{wname}__r{tag_n}'
+        if row_key:
+            stem += f'__{row_key}'
+        self.write(f'{stem}__{tag}.png', frame[y:y+h, x:x+w],
+                   target='panel', weapon=wname, round=tag_n,
+                   key=row_key or None, labels=[])
         return shots
 
     @staticmethod
@@ -951,12 +976,14 @@ class Collector:
 
     # ── one round ──
 
-    def sweep(self, weapon, keys, rows, angles, tag_n, pass_tag):
+    def sweep(self, weapon, keys, rows, angles, tag_n, pass_tag,
+              row_key=None):
         shots = []
         for a in range(angles):
             pitch = PITCH_STEPS[a % len(PITCH_STEPS)]
             self.turn(TURN_COUNTS, pitch)
-            got = self.capture(weapon, keys, rows, f'{pass_tag}bg{a}', tag_n)
+            got = self.capture(weapon, keys, rows, f'{pass_tag}bg{a}',
+                               tag_n, row_key=row_key)
             by = {}
             for s in got:
                 h, n = by.get(s['target'], (0, 0))
@@ -1352,7 +1379,8 @@ class Collector:
                 self.miss(key, 'it would not come back off for the 库存 pass',
                           slot=slot)
                 return shots
-            rows_shots = self.sweep(weapon, [], [row], angles, tag_n, 'l')
+            rows_shots = self.sweep(weapon, [], [row], angles, tag_n, 'l',
+                                    row_key=key)
             self.relabel(rows_shots, {row: key})
             shots += rows_shots
         return shots
