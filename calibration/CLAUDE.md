@@ -88,6 +88,33 @@ self.ac.pointer.drag(src, dst)       # ✗ 绕过了 _reject()
 
 **三、多个 agent 共用一个 Pico 串口和一个游戏窗口。** 跑之前查有没有别的 python 进程占着（`press.pico_mouse.other_agents`），**别杀别人的**。
 
+## ⚠ 未解决：`the gun left rack slot N during "<step>"`，plate=0
+
+**采集器现在最大的单一失效来源**，2026-08-04 统计：**11 个 run、74 次**。它不是静默的（`facts.misses` 每次都记了原因和现场图），但它一次废掉一个件，严重的时候废掉整轮——`20260803_191649` 一轮里 31 个件全灭。
+
+### 事实
+
+```
+plate ink = 0        74/74 次，无一例外
+按步骤          hold 52   clear the slot 14   take_off 5   strip 3
+最近的例子      docs/attachments/runs/20260804_164135/miss_00_holo_shot.png
+```
+
+那张现场图**证明至少有一次是真的**：AKM 出现在**左边的地面/库存栏**里，而枪架那块（x≈2237）是空的。枪确实离开了枪架，`plate_ink=0` 不是误读。
+
+### 已排除
+
+- **不是「右键点空槽把枪扔了」**（`docs/game_quirks.md` 那条）。`strip` 选的是 `slot_states()=='filled'` 的**贴片**、不是模板读数，`unequip` 本身也拒绝空槽。那条路已经堵上了。
+- **不是刷新器**。这 74 次跟 `never clicked` / `would not expand` 是两组不同的失败，2026-08-04 刷新器改常量之后后者归零，这个照旧。
+
+### 没验过的（留给你看）
+
+**52 次发生在 `hold`，而 `hold()` 要关一次 Tab**（数字键在 Tab 开着时被吞，`InventoryControl.hold` 的注释写了）。如果检查在那个关闭窗口里读了名字板，读到的是游戏画面不是面板，ink 自然是 0——**这会让「枪掉了」和「读早了」长得一模一样**，而 74/74 全是 0 这个整齐度更像后者。
+
+分辨方法：失败时同时存一张**全屏**（现在存的是带状抓取，Tab 开没开看不出来），或者在读 plate 前先过一次 `tab_open()`。
+
+关口在 `collect_templates.py` 的 `ink = self.ac.plate_ink(g, self.frame(flush=2))`。
+
 ## 待办
 
 `docs/refactor_plan.md` 第 5 节。**5h 已完成（2026-08-03）**，第 5 节全清。
