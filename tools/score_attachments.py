@@ -525,8 +525,8 @@ COUNTED = ('slots', 'reference rows', 'rows')
 #
 # Going ABOVE the baseline fails too, on purpose: it means one of the above
 # was fixed and this comment is now a lie. Re-measure, then raise the numbers.
-BASELINE = {'slots': (1653, 1664), 'reference rows': (10, 12),
-            'rows': (421, 510)}
+BASELINE = {'slots': (1675, 1687), 'reference rows': (10, 12),
+            'rows': (441, 540)}
 
 
 def score(rows, title):
