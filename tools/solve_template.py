@@ -100,6 +100,137 @@ def solve(backdrops, filled):
     return icon, alpha, err
 
 
+# A pixel counts as opaque when the scene behind the panel moves it less than
+# this many grey levels, peak to peak, across the captures. It is a FLOOR on
+# the Otsu split rather than the split itself: Otsu always returns something,
+# including on a crop where every pixel is opaque and the "two classes" it
+# finds are two shades of the same icon.
+STABLE_FLOOR = 8.0
+
+
+def solve_stable(crops):
+    """Recover an icon with NO paired empty capture. -> (icon, alpha, spread)
+
+    solve() above needs the backdrop, and a 库存 row has no empty twin: the
+    list closes up the moment the part leaves it, so the pixels behind a row
+    are never photographed without the row. That is why the row templates in
+    this repository are the SLOT-scale solves resized, and why they carry a
+    systematic offset — `thumb_grip` lands first in the reference rows with a
+    margin of 1.44 and still fails, because its MSE is 175 against a gate of
+    150. Being right and failing an absolute threshold is what a scale error
+    looks like; correct labels cannot fix it.
+
+    What a row does have is the SAME artwork over ten different scenes, and
+    that is enough for the half of the answer that matters. Opaque pixels do
+    not move when the scene moves; transparent ones carry it through. So the
+    per-pixel spread across the captures IS the alpha map, inverted, and the
+    threshold comes from the spread's own histogram rather than a literal.
+
+    The half it cannot give: the COLOUR of a partly transparent pixel, which
+    needs the backdrop to subtract. Those pixels are marked transparent
+    instead of guessed, which costs the icon its feathered edge and nothing
+    else — matching is over the opaque part either way (skill Step 2, and the
+    spawner buttons where the dark alpha-blended parts moved up to 86 grey
+    levels and had to be excluded for exactly this reason).
+
+    Spread is p90-p10 rather than peak-to-peak: one frame caught mid-fade
+    should not condemn a pixel. The icon is the per-pixel MEDIAN for the same
+    reason.
+    """
+    a = np.stack(crops).astype(np.float32)              # (N, H, W, 3)
+    hi, lo = np.percentile(a, 90, axis=0), np.percentile(a, 10, axis=0)
+    spread = (hi - lo).max(axis=2)                      # worst channel
+    icon = np.median(a, axis=0)
+
+    t, _ = cv2.threshold(np.clip(spread, 0, 255).astype(np.uint8), 0, 255,
+                         cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    alpha = (spread <= max(float(t), STABLE_FLOOR)).astype(np.float32)
+    return icon, alpha, spread
+
+
+def rows_mode(run, man, write, paired=None):
+    """Solve every 库存 row in a run at ITS OWN scale. -> exit code
+
+    `paired` is the slot-scale result for the same keys, and it is the only
+    independent check available here: the two solves share no arithmetic and
+    no captures — one subtracts a photographed backdrop, the other watches
+    which pixels refuse to move — so where they agree on WHICH pixels are
+    opaque, both are describing the artwork rather than their own method. The
+    shapes are different sizes, so the comparison resizes the slot mask up and
+    reports IoU.
+
+    A low IoU does not automatically condemn this solve. The row icon really
+    is a different rendering (different size, different padding), and the
+    whole reason for solving it separately is that resizing between them
+    loses something. But an IoU near zero means one of the two is not looking
+    at the icon at all.
+    """
+    by_key = defaultdict(list)
+    for e in man['entries']:
+        if e.get('target') == 'rows' and e.get('key'):
+            by_key[e['key']].append(e['capture'])
+
+    if not by_key:
+        print('No `rows` captures in this run. Collect with\n'
+              '  collect_templates.py --all --targets slots,rows')
+        return 1
+
+    out = os.path.join(run, 'solved_rows')
+    if write:
+        os.makedirs(out, exist_ok=True)
+    print(f'{"key":<16}{"shots":>6}{"opaque":>8}{"cut":>7}{"px":>7}'
+          f'{"IoU vs slot":>13}')
+    bad = 0
+    for key, files in sorted(by_key.items()):
+        crops = [cv2.imread(os.path.join(run, f)) for f in files]
+        crops = [c for c in crops if c is not None]
+        if len(crops) < 3:
+            print(f'{key:<16}{len(crops):>6}   — at least three scenes are '
+                  f'needed before "it did not move" means anything')
+            bad += 1
+            continue
+        shapes = {c.shape for c in crops}
+        if len(shapes) > 1:
+            # Same row, different crop size: the list shifted under the
+            # capture. Averaging those would smear two different rows.
+            print(f'{key:<16}{len(crops):>6}   — crops disagree on size '
+                  f'{sorted(shapes)}')
+            bad += 1
+            continue
+        icon, alpha, spread = solve_stable(crops)
+        frac = float(alpha.mean())
+        iou = ''
+        if paired and key in paired:
+            pa = paired[key] > 0.5
+            pa = cv2.resize(pa.astype(np.uint8), (alpha.shape[1],
+                                                  alpha.shape[0]),
+                            interpolation=cv2.INTER_NEAREST) > 0
+            mine = alpha > 0.5
+            u = float((pa | mine).sum())
+            iou = f'{(pa & mine).sum() / u:.3f}' if u else '—'
+        # An icon that is almost all "opaque" means the split found two shades
+        # of scenery, not icon vs scene.
+        if frac > 0.9 or frac < 0.02:
+            bad += 1
+            iou += '  [!] implausible'
+        print(f'{key:<16}{len(crops):>6}{frac:>8.3f}'
+              f'{float(np.median(spread)):>7.1f}{alpha.shape[0]:>7}{iou:>13}')
+        if write:
+            cv2.imwrite(os.path.join(out, f'{key}.png'),
+                        np.dstack([icon.astype(np.uint8),
+                                   (alpha * 255).astype(np.uint8)]))
+            cv2.imwrite(os.path.join(out, f'{key}_alpha.png'),
+                        (alpha * 255).astype(np.uint8))
+
+    print('\n  `opaque` is the fraction of the crop the scene could not move; '
+          'that IS\n  the alpha mask. `cut` is the median spread the Otsu '
+          'split ran on.\n  LOOK AT _alpha.png — a clean glyph means the '
+          'solve found the icon, a\n  cloud means it found the scene.')
+    if write:
+        print(f'\n  -> {os.path.relpath(out, ROOT)}')
+    return 1 if bad else 0
+
+
 def stability(run, pairs):
     """How many backgrounds are enough, measured on HELD-OUT captures.
 
@@ -154,6 +285,10 @@ def main():
     ap.add_argument('run', nargs='?', default='')
     ap.add_argument('--write', action='store_true',
                     help='save the solved BGRA icons into the run directory')
+    ap.add_argument('--rows', action='store_true',
+                    help='solve the 库存 list icons at THEIR OWN scale, from '
+                         'the same row over many scenes. No paired empty '
+                         'capture is needed or possible — see solve_stable.')
     ap.add_argument('--stability', action='store_true',
                     help='how many backgrounds the solve needs, measured by '
                          'HOLD-OUT: solve on k captures, predict one that was '
@@ -181,12 +316,27 @@ def main():
             continue
         pairs[e['key']].setdefault(a, {})[e['target']] = e['capture']
 
-    if not pairs:
+    if not pairs and not args.rows:
         print('No paired captures in this run. paired_sweep writes `backdrop`\n'
               'entries alongside `slots` ones with an `angle`; a run collected\n'
               'before that existed has the filled crops only, and the icon\n'
               'cannot be separated from the scene behind it.')
         return 1
+
+    if args.rows:
+        # Solve the slot scale first, unwritten, purely to have something
+        # independent to check the row masks against.
+        paired = {}
+        for key, angles in pairs.items():
+            usable = [v for v in angles.values()
+                      if 'backdrop' in v and 'slots' in v]
+            if len(usable) < 2:
+                continue
+            bg = [cv2.imread(os.path.join(run, v['backdrop'])) for v in usable]
+            fg = [cv2.imread(os.path.join(run, v['slots'])) for v in usable]
+            if not any(x is None for x in bg + fg):
+                paired[key] = solve(bg, fg)[1]
+        return rows_mode(run, man, args.write, paired)
 
     if args.stability:
         return stability(run, pairs)

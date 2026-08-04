@@ -14,6 +14,36 @@
 
 ---
 
+## 第一行永远是这句
+
+```python
+from control.session import ensure_ready
+
+if not ensure_ready(label='the pitch probe')['ok']:
+    return 1
+```
+
+**`ensure_focus` 不够，而且它的不够看起来像够。** 焦点 = 四项里的一项：
+
+| 检查 | 不做会怎样 |
+|---|---|
+| 焦点 | 鼠标键盘打进当前前台那个窗口 |
+| **在局内** | 大厅 / 加载页 / ESC 菜单 / 结算页**全都匹配窗口标题、全都吞按键**，而每个驱动都报成功 |
+| **Tab 关着** | `1`/`2` 切枪键被吞（`docs/game_quirks.md`），脚本以为拿了枪，其实空手 |
+| **刷新器面板关着** | 面板对世界是模态的：HUD 在、人不动，视角类探针测的是一张静止的屏幕，还会报一个漂亮的零 |
+
+这条是 2026-08-04 用一次实机付账买来的：`probe_pitch_range.py` 检查了焦点、拿到 True，然后**对着大厅界面**把三个姿势的状态机整个跑了一遍，三次打印 `posture unreadable`。那句话是真的——那张屏幕上确实没有姿势图标，因为它压根没有 HUD。加上局内判断之后失败**正好前进一步**：在局内了，但手上没枪，因为刚进训练场是空手。
+
+两次都是**已经写好、只是没被调用**的检查。
+
+`ensure_ready` 自己调 `ensure_focus`，所以这是**替换不是追加**。要跳过某一项就传 `match=False` / `tab=False` / `panel=False`——**为了让红的跑绿而跳过，就是在重建上面那个失败**。它不管枪和配件：那是实验的事，走 `control.stock.restock` / `ac.ensure_kit`。
+
+**规则 9 管着**（`pixi run layering`）。判据是「调了 `ensure_focus` 却没调 `ensure_ready`」——不是「import 了 control」，那会误伤半个目录的离线回归（试过，48 个假阳性）。抢前台是驱动游戏唯一诚实的声明。
+
+账本跟规则 6 同构，也是**棘轮**：`READY_EXEMPT` 理由归代码、不过期；`READY_DEBT` 理由归排期、**必须离开这张表**，修好了不销账照样报错。存量 30 个探针挂在 DEBT 上，每次绿跑都会把剩余条数打出来。**新脚本从第一行就受管。**
+
+---
+
 ## 要做 X，别自己写，用 Y
 
 每一行都是审出来的重复，不是假想的。
@@ -35,7 +65,9 @@
 | 开镜 | `mouse.click(0x02, 60)` + 自己的 `ADS_SETTLE_S` | `GunDriver.ensure_ads()` |
 | 转视角 | `rig.mouse.move(yaw, pitch)` | `ViewDriver.turn()`（开环）/ `recenter()`（闭环） |
 | 切枪 | `mouse.key(HID_KEY_1, 60)` | `InventoryControl.hold(n)` |
+| 确认游戏能被驱动 | `ensure_focus` 就开跑 | `control.session.ensure_ready()`——焦点 + 局内 + Tab + 面板，见上一节 |
 | 确认在局内 | 自己看像素 | `LobbyControl.ensure_in_match()` |
+| 刷一把枪并装好镜子 | `give_many` + 自己开合面板 | `sc.ensure_panel(True)` → `sync()` → `give_many` → `finally ensure_panel(False)`，配件走 `restock` + `ac.ensure_kit(n, {'scope': 'red_dot'})`。**漏掉 `ensure_panel(True)` 的话 `collapse_all()` 是对着关着的面板收的，等于没收** |
 | 截一张全屏 | `PIL.ImageGrab` / 自己建 bettercam | `detector.cropper.capture_screen()`；要区域用 `win32_cap(box)` / `ScreenBuffer` |
 | 截图时避开 hover 高亮 | 自己 `move_cursor` + sleep | `control.spawner.shoot_parked(settle=…)` |
 | 读弹药数 | 自己二值化 + 连通域 | `detector.ammo_detector.AmmoDetector`（**`None` 不是 0**） |
@@ -88,10 +120,12 @@
 ## 有机器在管
 
 ```
-pixi run layering        # 8 条规则，只解析 import，不跑任何东西
+pixi run layering        # 9 条规则
 ```
 
-跟 `tools/` 有关的是**规则 7**：除了 `detector/spawner_detector.py`（定义 `ICON_BOX`）和 `tools/test_frames.py`（`anchor_box` 的测试），谁都不许 import `SPAWNER_ICON_*`。
+跟 `tools/` 有关的有两条。**规则 9** 是上面那节（`ensure_ready`），它是唯一一条**读调用而不是读 import** 的——import 表达不了「开跑之前先确认游戏能被驱动」。
+
+**规则 7**：除了 `detector/spawner_detector.py`（定义 `ICON_BOX`）和 `tools/test_frames.py`（`anchor_box` 的测试），谁都不许 import `SPAWNER_ICON_*`。
 
 理由是实的：那四个常量唯一的用处就是算那个包围盒，而唯一 import 它们的调用方**把算术手抄了一遍并漏掉 `max(0, ...)` 钳位**。规则实测过会咬人，报文件、行号、符号名和修法。
 
@@ -162,7 +196,8 @@ pixi run layering        # 8 条规则，只解析 import，不跑任何东西
 | 某把枪的槽位跟 catalogue 对不上 | `tools/probe_slot_boxes.py <weapon> --strip`（**刷出来的枪不是裸枪**） |
 | 拖拽 / 右键落不下去 | `tools/probe_equip_gesture.py` / `probe_unequip_gesture.py`——两个都读回验证，不看鼠标 |
 | 扔东西扔不掉 / 库存清不空 | `probe_drag_speed.py --panel`（**扫描循环里绝不能有 `look()`**，间隔会掩盖被测变量）；跟真人比对用 `probe_human_drag.py`。两个悬崖的实测值在 `control/CLAUDE.md` |
-| 「category colN_rowM does not exist」 | `pixi run panel-state`；再看 `probe_submenu_hover.py`（光标停在类别行会吃掉第一项） |
+| 「category colN_rowM does not exist」/「would not expand」 | **先看视角朝哪。** 面板半透明，对着天空时读回会在全折叠的面板上报假状态——2026-08-04 修掉了驱动路径上的识别，但 `read()` / `find_menu` 本身仍然如此，诊断用它们时要记得。然后 `pixi run panel-state`、`probe_submenu_hover.py`（光标停在类别行会吃掉第一项） |
+| 面板坐标要重新量 | `tools/scrape_spawner.py`。**条目几何也是常量**（`SUBMENU_ENTRY_DY/PITCH/CLICK_DX`），2026-08-04 拿 42 张展开图验到 3.1 px 以内；游戏更新后连它一起重量 |
 | 游戏更新后面板坐标全错 | `tools/scrape_spawner.py` 重采 → `docs/spawner/layout.json` → `pixi run spawner-plan` 会红出差在哪 |
 | 检测器整体还活着吗 | `pixi run smoke`；改完检测器 `python tools/regression_check.py --compare` |
 | DXGI 抓帧突然全黑 / 尺寸不对 | `tools/probe_capture_recovery.py`（不需要游戏） |

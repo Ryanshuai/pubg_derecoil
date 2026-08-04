@@ -68,11 +68,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import cv2
 import numpy as np
 
-from detector.attachment_catalog import ROSTER, ATTACHMENTS, is_live
+from detector.attachment_catalog import ROSTER, ATTACHMENTS
 from detector.spawner_detector import SpawnerDetector
 from detector.cropper import capture_screen
 from detector.spawner_layout import (CHANGE_MIN, COLUMN_ROWS, LAYOUT_SCREEN,
-                                     PARK_XY, bright_mask, column_boxes,
+                                     PANEL_Y0, PANEL_Y1, PARK_XY,
+                                     SUBMENU_ENTRY_DY, SUBMENU_ENTRY_PITCH,
+                                     bright_mask, column_boxes,
                                      entry_point, expansions, find_menu,
                                      find_submenu_items, known_layout)
 from press.pico_mouse import HID_KEY_2, HID_KEY_COMMA
@@ -275,13 +277,18 @@ def weapon_position(key):
     entry = ROSTER.get(key)
     if entry is None:
         raise KeyError(f'unknown weapon {key!r}')
-    if not is_live(key):
-        raise ValueError(f'{key} is vaulted and no longer in the spawner')
     cls = entry[0]
     if cls not in CATEGORY_OF_CLASS:
         raise ValueError(f'{key} is class {cls}, which has no mapped category '
                          f'(only {", ".join(CATEGORY_OF_CLASS)} are catalogued)')
-    peers = [k for k, v in ROSTER.items() if v[0] == cls and is_live(k)]
+    # ROSTER order IS the spawner's row order within a category, so this index
+    # is a screen coordinate in disguise. A weapon the game no longer offers
+    # must be absent from ROSTER rather than filtered out here: left in, it
+    # shifts every classmate below it by one row, and the click lands on the
+    # wrong gun instead of failing. There used to be an is_live() gate on this
+    # line for exactly that reason; the vaulted names are gone from ROSTER now,
+    # which is the stronger version of the same guarantee.
+    peers = [k for k, v in ROSTER.items() if v[0] == cls]
     return CATEGORY_OF_CLASS[cls], peers.index(key) + 1, len(peers)
 
 
@@ -480,7 +487,7 @@ def check_against_run(run_dir):
     _, boxes = known_layout()
 
     wanted = [(f'{cls:<9}', cat, len([k for k, v in ROSTER.items()
-                                      if v[0] == cls and is_live(k)]))
+                                      if v[0] == cls]))
               for cls, cat in CATEGORY_OF_CLASS.items()]
     wanted += [(f'{slot:<9}', cat,
                 len([k for k, v in ATTACHMENTS.items() if v['slot'] == slot])
@@ -1082,53 +1089,98 @@ class SpawnerControl:
     def _spawn(self, col, row, index, times=1, expect=None, leave_open=False):
         """Click entry #index (1-based) of a category, `times` times.
 
-        Re-locates the entry before every click, so it does not matter whether
-        the game leaves the submenu open after a spawn.
+        EVERY COORDINATE HERE IS A MEASURED CONSTANT. Nothing on this path
+        recognises anything: the category row comes from the layout table, and
+        the submenu entry from entry_point(), which is cat_y + 44.25 + 50.70
+        per index. The only screen read left is the three-glyph check that says
+        the panel is up at all, and that one is robust — it is why
+        spawner_detector identifies its screen from icons rather than text.
 
-        `expect` is how many entries the catalogue says this category has. A
-        mismatch means the game's list moved under the catalogue and every
-        index derived from it is suspect — that fails rather than clicking
-        whatever now happens to sit at that position.
+        WHY THIS STOPPED READING THE ENTRIES, measured 2026-08-04. It used to
+        call _goto(), take the DETECTED entry list, gate on its length against
+        the catalogue, and click entries[index-1]. Three screen-derived things
+        on the path to one click, and all three fail together, because the
+        panel is translucent — blend is blur(bg)*0.49, so against bright sky
+        the row bands stop separating. It does not fail loudly:
 
-        `leave_open=True` skips the collapse at the end. That is where the
-        saving is when several things are being spawned in a row — see
-        give_many(), which is the reason this parameter exists. It defaults to
-        False because a caller that is about to press a key or read the HUD
-        wants the panel out of the way.
+            view at the SKY     read() says `col1_row02 expanded, 2 entries`
+                                on a panel that is verifiably ALL COLLAPSED
+                                (screenshot), and click_category(1,3) is
+                                followed by a readback of []
+            view at the GROUND  `all collapsed`, then [(1, 3, 7)] — DMR, and
+                                DMR really does hold 7
+
+        Same code, same coordinates, same click. The cost was a whole
+        collection: `collect_templates --all` lost 8 of 12 rounds to
+        `never clicked: sks`, and the trigger was another script leaving the
+        view pointed at the sky.
+
+        The constants are not a guess and they are not new. spawner_layout has
+        carried SUBMENU_ENTRY_DY/PITCH/CLICK_DX since it was written, with the
+        note "that is why the spawner does not need a screenshot per click" —
+        this is the caller finally taking it. Re-measured 2026-08-04 across all
+        42 stored category expansions in docs/spawner/runs/: every entry in
+        every category of every column fits cat_y + 44 + k*50.72 to within
+        3.1 px, and the entry centre x is column_left + 252.7 for all three.
+
+        THE INVARIANT THAT MAKES cat_y CONSTANT: a category's own y does not
+        move when it expands — only the rows BELOW it do. So the same point
+        both opens and closes it, and the layout table is valid as long as
+        nothing above it in the same column is left open. This method
+        therefore always closes what it opened, and plan() already sorts
+        categories bottom-up within a column for the same reason.
+
+        `expect` is the catalogue's entry count. It is no longer a gate — it
+        cannot be, because the only thing that could check it is the readback
+        that lies. A stale catalogue is a slow fact (it moves on game updates,
+        not during a run) and tools/scrape_spawner.py is what re-measures it;
+        `--verify-catalogue` is the check, run deliberately, on a panel whose
+        background is known good.
+
+        `leave_open=True` skips the closing click, for a caller spawning
+        several things out of the SAME category — give_many() groups by
+        category, so the saving is per category rather than per item.
         """
         if self.menu is None:
             self.menu, self.boxes = builtin_layout()
+        if not self._panel_up():
+            return {'ok': False, 'clicked': 0,
+                    'error': 'not on the item-spawner screen'}
 
-        clicked, err = 0, None
+        item = self._category(col, row)
+        xy = entry_point(self.boxes[col], item.y, index)
+        if expect is not None and not 1 <= index <= expect:
+            return {'ok': False, 'clicked': 0,
+                    'error': f'entry {index} is outside the {expect} the '
+                             f'catalogue lists for col{col}_row{row:02d}'}
+
+        # Open, click, close. The middle line is the whole method; the two
+        # around it are what keep the invariant above true for the next call.
+        self._click_category(col, row)
+        clicked = 0
         for _ in range(times):
-            # goto() short-circuits to zero clicks when the category is
-            # already the one showing, so the second copy of an item costs a
-            # screenshot rather than a collapse-and-reopen. It also reads the
-            # panel first, which is what refuses to click when the spawner is
-            # not on screen -- there is no separate sync() gate here.
-            rec = self._goto(col, row)
-            if not rec['ok']:
-                err = rec['error']
-                break
-            entries = rec['entries']
-            if expect is not None and len(entries) != expect:
-                err = (f'category shows {len(entries)} entries, the catalogue '
-                       f'says {expect} — indices are stale, re-scrape before '
-                       f'trusting them')
-                break
-            if not 1 <= index <= len(entries):
-                err = (f'entry {index} out of range, category has '
-                       f'{len(entries)}')
-                break
-            self._click_entry(entries[index - 1])
+            self.pointer.click_at(*xy)
+            time.sleep(SPAWN_WAIT)
             clicked += 1
-
-        ok = err is None
         if not leave_open:
-            closed = self._collapse_all()
-            if ok and not closed:
-                ok, err = False, 'stuck expanded'
-        return {'ok': ok, 'clicked': clicked, 'error': err}
+            self._click_category(col, row)
+        return {'ok': True, 'clicked': clicked, 'error': None, 'xy': xy}
+
+    def _panel_up(self, retries=1):
+        """Is the spawner panel on screen. -> bool
+
+        The three button glyphs, and deliberately nothing else. This is the
+        one screen read the spawner still trusts on a driving path, because it
+        is the one that survives the background: icons rather than text, and
+        measured at 0.989-1.000 on 24 positives against 0.000 on negatives.
+        The row-band recognition next door has no such margin — see _spawn.
+        """
+        for attempt in range(retries + 1):
+            if self.screen.classify(shoot_parked(settle=0.10)):
+                return True
+            if attempt < retries:
+                time.sleep(0.3)
+        return False
 
     def switch_to_slot2(self):
         """Press 2. Selects whatever now sits in the second weapon slot."""
@@ -1229,44 +1281,62 @@ class SpawnerControl:
                           self.menu, self.boxes)
 
     def _open_category(self, mv):
-        """Click a category open and prove it opened. -> error string or None."""
-        col, row = mv['category']
-        if mv['blind']:
-            # Gear. Nothing to recognise here (see give_gear): the proof is
-            # that the column changed between two frames, which the scene
-            # behind a translucent panel does not do on its own.
-            before = bright_mask(shoot_parked(settle=0.15))
-            self.pointer.click_at(*mv['xy'])
-            time.sleep(OPEN_WAIT)
-            after = bright_mask(shoot_parked(settle=0.15))
-            x0, x1 = self.boxes[col]
-            y0, y1 = GEAR_BOX_Y
-            changed = int(np.count_nonzero(
-                before[y0:y1, x0:x1] != after[y0:y1, x0:x1]))
-            if changed < CHANGE_MIN:
-                return (f'col{col}_row{row:02d} did not open ({changed} px '
-                        f'changed, need {CHANGE_MIN}) — is the panel up and '
-                        f'collapsed?')
-            return None
+        """Click a category open and prove it opened. -> error string or None.
 
-        # One look, to confirm the category really opened and that the
-        # catalogue still agrees about how many entries it has.
-        st = self._click_await(col, row,
-                               lambda s: s.entries_for(col, row))
-        ents = st.entries_for(col, row)
-        if not ents:
-            return f'col{col}_row{row:02d} would not expand ({st!r})'
-        # entries_for, not st.entries. This guard is the thing that stops a
-        # stale layout clicking whatever happens to sit at the old
-        # coordinates, and with two columns open `st.entries` is the FIRST
-        # column's list -- so it would have compared column 1's entry count
-        # against column 2's expectation and refused a perfectly good panel,
-        # or, with matching counts, passed while pointing at the wrong list.
-        expect = mv.get('expect')
-        if expect is not None and len(ents) != expect:
-            return (f'col{col}_row{row:02d} shows {len(ents)} entries, '
-                    f'the catalogue says {expect} — indices are stale, '
-                    f're-scrape before trusting them')
+        THE PROOF IS THAT THE COLUMN CHANGED, not that anything was recognised
+        in it. A submenu sliding open rewrites several hundred pixels of that
+        column; the scene behind a translucent panel does not, because the
+        cursor is parked and the character is standing still.
+
+        This used to be two different proofs. Gear went through the frame
+        difference below — "nothing to recognise here" — and every other
+        category went through _click_await() polling read() until it listed
+        entries. The second one is not background-independent and does not say
+        so: the panel is blur(bg)*0.49, and against bright sky the row bands
+        stop separating, so read() returns a confidently wrong state instead of
+        an error. Measured 2026-08-04, same code and same coordinates, only the
+        view moved:
+
+            view at the SKY     `col1_row03 would not expand (<panel open, all
+                                collapsed>)` — forever, and the panel was up
+                                and collapsed and the click was correct
+            view at the GROUND  opens first try
+
+        It cost `collect_templates --all` 8 of its 12 rounds, silently, and the
+        run that pointed the view at the sky was a different script entirely.
+        So the gear proof is now everyone's proof. It is also cheaper: two
+        frames and a count, against a poll that could take OPEN_TIMEOUT.
+
+        `expect` (the catalogue's entry count) is no longer checked here. It
+        never could be without the readback that lies — and a stale catalogue
+        is a slow fact that moves on game updates rather than mid-run, so it
+        belongs in tools/scrape_spawner.py, deliberately, on a panel whose
+        background is known good. Silently trusting a lie is worse than
+        checking late.
+        """
+        col, row = mv['category']
+        # Where the change will show. Gear draws into a fixed band; a category
+        # pushes its submenu in directly below its own row, so the window is
+        # the rows it is about to occupy, clipped to the panel.
+        x0, x1 = self.boxes[col]
+        if mv['blind']:
+            y0, y1 = GEAR_BOX_Y
+        else:
+            top = self._category(col, row).y + SUBMENU_ENTRY_DY
+            n = max(mv.get('expect') or 3, 3)
+            y0 = int(max(PANEL_Y0, top - 30))
+            y1 = int(min(PANEL_Y1, top + SUBMENU_ENTRY_PITCH * n))
+
+        before = bright_mask(shoot_parked(settle=0.15))
+        self.pointer.click_at(*mv['xy'])
+        time.sleep(OPEN_WAIT)
+        after = bright_mask(shoot_parked(settle=0.15))
+        changed = int(np.count_nonzero(
+            before[y0:y1, x0:x1] != after[y0:y1, x0:x1]))
+        if changed < CHANGE_MIN:
+            return (f'col{col}_row{row:02d} did not open ({changed} px '
+                    f'changed in y {y0}..{y1}, need {CHANGE_MIN}) — is the '
+                    f'panel up and collapsed?')
         return None
 
     def give_many(self, keys, switch=True, weapon_times=1):
@@ -1311,6 +1381,34 @@ class SpawnerControl:
         if not self.sync(need_cols=need):
             return {'ok': False, 'steps': [], 'clicks': 0,
                     'error': 'not synced'}
+
+        # START FROM THE ROOT, because click_plan's script assumes it. The
+        # script is computed from the catalogue, not from the screen: it says
+        # "open col1_row03, click entry 2" on the belief that nothing is
+        # expanded. With col1_row02 already open, row03's row is covered by
+        # row02's submenu and the open click lands inside that submenu instead
+        # — `goto()` knows about this case (its closed-blocker / via-root
+        # paths) but a precomputed script cannot.
+        #
+        # MEASURED, and it is a between-ROUNDS failure, which is why nothing
+        # offline sees it: 2026-08-03's plate collection lost 3 of 4 rounds to
+        # `col1_row03 would not expand (<panel open, col1_row02 expanded, 6
+        # entries>)`, and the first round was always fine. `pixi run
+        # panel-state` stays green because it reads stored frames and has no
+        # round before the one it is looking at.
+        #
+        # This contradicts the note further down that closing the panel resets
+        # the expansion on its own. That note is kept because it is still the
+        # reason there is no collapse at the END; whatever it measured, an
+        # expanded category demonstrably survived into a later round.
+        #
+        # Safe here in a way it was not at the end: _collapse_all() READS
+        # before it clicks and returns early when nothing is expanded, so the
+        # cost when the panel is already at the root is one screenshot — and
+        # the panel is known to be up, because ensure_panel(True) just said so.
+        # At the end the panel is deliberately down, and a click at a panel
+        # coordinate with no panel there reaches the game and fires the gun.
+        self._collapse_all()
 
         # Off THIS instance's table, not off the constants directly: a
         # recalibrated or overridden layout has to move the entry clicks too,
@@ -1437,7 +1535,7 @@ def main():
 
     if args.list:
         for cls, cat in CATEGORY_OF_CLASS.items():
-            peers = [k for k, v in ROSTER.items() if v[0] == cls and is_live(k)]
+            peers = [k for k, v in ROSTER.items() if v[0] == cls]
             print(f'{cls}  col{cat[0]}_row{cat[1]:02d}')
             for i, k in enumerate(peers, 1):
                 print(f'   {i:2d}. {k:<10} {ROSTER[k][1]}')

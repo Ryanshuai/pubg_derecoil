@@ -164,6 +164,141 @@ def check_ledger(offenders):
     return out
 
 
+# ════════════════════════════════════════════════════════════
+# Rule 9's ledger — same two kinds, same ratchet, as rule 6's above
+# ════════════════════════════════════════════════════════════
+#
+# READY_EXEMPT  the reason is the CODE's. It does not expire.
+# READY_DEBT    the reason is the SCHEDULE's. It is meant to leave this list,
+#               and check_ready_ledger() fails the run when an entry has been
+#               paid but not deleted — otherwise the list rots into a
+#               permanent amnesty exactly as rule 6's would.
+#
+# The debt was seeded, not invented: 31 live probes predate control/session.py
+# and every one of them opens with a bare ensure_focus. Retrofitting them is
+# real work with a live game attached, and doing it in a hurry is how a probe
+# starts requiring a match it is supposed to be measuring the way out of. What
+# matters is that NEW scripts are covered from the first line, which they are.
+
+READY_EXEMPT = {
+    'tools/focus_trace.py':
+        'the subject under test IS taking the foreground. Routing it through '
+        'the gate that takes it would be reporting the driver to itself.',
+    'tools/probe_lobby_transition.py':
+        'drives the lobby<->match transition on purpose, so it cannot open by '
+        'requiring a match — that is the thing it is measuring.',
+    'tools/probe_tab_watch_live.py':
+        'watches the Tab screen go up and down; ensure_ready shuts it.',
+    'tools/snap_on_key.py':
+        'a shutter. It photographs whatever is on screen ON PURPOSE, '
+        'including the lobby and the menus, and putting the game into a known '
+        'state first would destroy the only shots that need taking.',
+}
+
+READY_DEBT = {
+    'tools/drive_screen.py': 'pre-dates control/session.py',
+    'tools/dump_state.py': 'pre-dates control/session.py',
+    'tools/probe_ammo_during_fire.py': 'pre-dates control/session.py',
+    'tools/probe_autofit.py': 'pre-dates control/session.py',
+    'tools/probe_backpack_depth.py': 'pre-dates control/session.py',
+    'tools/probe_click_speed.py': 'pre-dates control/session.py',
+    'tools/probe_drag_speed.py': 'pre-dates control/session.py',
+    'tools/probe_drop_to_ground.py': 'pre-dates control/session.py',
+    'tools/probe_drop_weapon.py': 'pre-dates control/session.py',
+    'tools/probe_equip_gesture.py': 'pre-dates control/session.py',
+    'tools/probe_fit_smoke.py': 'pre-dates control/session.py',
+    'tools/probe_gun_grab.py': 'pre-dates control/session.py',
+    'tools/probe_impulse_ab.py': 'pre-dates control/session.py',
+    'tools/probe_impulse_align.py': 'pre-dates control/session.py',
+    'tools/probe_input_latency.py': 'pre-dates control/session.py',
+    'tools/probe_kick_profile.py': 'pre-dates control/session.py',
+    'tools/probe_rack_cycle.py': 'pre-dates control/session.py',
+    'tools/probe_recenter.py': 'pre-dates control/session.py',
+    'tools/probe_shot_latency.py': 'pre-dates control/session.py',
+    'tools/probe_slot_boxes.py': 'pre-dates control/session.py',
+    'tools/probe_spawn_wait.py': 'pre-dates control/session.py',
+    'tools/probe_spawner_layers.py': 'pre-dates control/session.py',
+    'tools/probe_spawner_layout.py': 'pre-dates control/session.py',
+    'tools/probe_submenu_hover.py': 'pre-dates control/session.py',
+    'tools/probe_toggle_latency.py': 'pre-dates control/session.py',
+    'tools/probe_transfer.py': 'pre-dates control/session.py',
+    'tools/probe_unequip_gesture.py': 'pre-dates control/session.py',
+    'tools/probe_unequip_where.py': 'pre-dates control/session.py',
+    'tools/verify_kit.py': 'pre-dates control/session.py',
+    'tools/verify_refactor.py': 'pre-dates control/session.py',
+}
+
+READY_LEDGER = {**READY_EXEMPT, **READY_DEBT}
+
+
+def check_ready_ledger(offenders):
+    """The rule 9 ratchet. -> [(path, message)]
+
+    `offenders` is every tools/ file that would be flagged right now, ledger
+    entries included.
+    """
+    out = []
+    for rel in sorted(READY_DEBT):
+        if rel in offenders:
+            continue
+        if not (ROOT / rel).exists():
+            out.append((rel, 'listed as ensure_ready debt but the file is '
+                             'gone — delete the entry'))
+        else:
+            out.append((rel, 'now opens with ensure_ready (or no longer takes '
+                             'the foreground) — the debt is PAID. Delete its '
+                             'entry so rule 9 starts covering this file '
+                             'again.'))
+    return out
+
+
+def check_ready(path, rel, imps):
+    """A tools/ script that takes the foreground must open with ensure_ready().
+
+    THE PREDICATE IS `ensure_focus`, NOT "imports control". Importing control
+    is not driving the game — half of tools/ is offline regressions that read
+    a constant or replay a stored PNG, and an earlier draft of this rule
+    flagged 48 files, most of which never touch the game. Taking the
+    FOREGROUND is the honest declaration of intent: nothing does that except
+    to drive, and the moment a script has it, every driver it calls will
+    report success against whatever screen happens to be up.
+
+    Which is the failure. It does not look like one: focus is granted, the
+    state machines run, the readbacks come back empty, and the script reports
+    the game's behaviour instead of its own. probe_pitch_range.py drove three
+    postures into the LOBBY SCREEN that way and printed 'posture unreadable'
+    three times — a true statement about a screen with no posture icon,
+    because it had no HUD at all.
+
+    ensure_ready() calls ensure_focus() itself, so the fix is a substitution,
+    not an addition. See control/session.py for the four checks and for why
+    skipping one to turn a red run green rebuilds exactly this.
+    """
+    if rel.parts[0] != 'tools':
+        return None
+    try:
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+    except (SyntaxError, UnicodeDecodeError):
+        return None
+    called = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call):
+            f = n.func
+            name = f.attr if isinstance(f, ast.Attribute) else getattr(
+                f, 'id', None)
+            if name:
+                called.add(name)
+    if 'ensure_ready' in called or 'ensure_focus' not in called:
+        return None
+    return ('takes the game foreground (ensure_focus) but never calls '
+            'control.session.ensure_ready(). Focus is not playability: the '
+            'window title matches in the lobby, on the loading screen and in '
+            'the ESC menu, all of which swallow input while every driver '
+            'reports success. ensure_ready() wraps ensure_focus, so this is a '
+            'substitution. Or add a READY_EXEMPT entry with a reason about '
+            'the code.')
+
+
 def imports_of(path):
     """(module, lineno) for every import, including function-local ones.
 
@@ -189,6 +324,8 @@ def imports_of(path):
 def main():
     violations = []
     offenders = set()
+    unready = []
+    not_ready = set()
     checked = 0
     for f in sorted(ROOT.rglob('*.py')):
         rel = f.relative_to(ROOT)
@@ -205,10 +342,15 @@ def main():
             for mod, lineno in imps:
                 if forbidden(mod):
                     violations.append((name, rel.as_posix(), lineno, mod, why))
+        why = check_ready(f, rel, imps)
+        if why:
+            not_ready.add(rel.as_posix())
+            if rel.as_posix() not in READY_LEDGER:
+                unready.append((rel.as_posix(), why))
 
-    stale = check_ledger(offenders)
+    stale = check_ledger(offenders) + check_ready_ledger(not_ready)
 
-    print(f'checked {checked} files against {len(RULES)} rules')
+    print(f'checked {checked} files against {len(RULES) + 1} rules')
     if DEBT:
         # Printed on every green run ON PURPOSE. This list IS the remaining
         # work in docs/refactor_plan.md section 5, derived from the code
@@ -221,8 +363,17 @@ def main():
             if rel in paid:
                 continue
             print(f'  {rel:34s} {DEBT[rel].split(" — ")[0]}')
+    if READY_DEBT:
+        # Same reason rule 6's list is printed on every green run: this IS the
+        # remaining work, derived from the code rather than from a table
+        # someone has to remember to update.
+        paid = {r for r, _ in stale}
+        left = [r for r in sorted(READY_DEBT) if r not in paid]
+        print(f'\n{len(left)} tools/ probe(s) still opening with a bare '
+              f'ensure_focus (rule 9 debt) — swap in '
+              f'control.session.ensure_ready')
 
-    if not violations and not stale:
+    if not violations and not stale and not unready:
         print('\nlayering holds')
         return 0
 
@@ -233,7 +384,12 @@ def main():
     for rel, msg in stale:
         print(f'\n  {rel}  (tools/check_layering.py ledger)')
         print(f'    {msg}')
-    print(f'\n{len(violations) + len(stale)} violation(s)')
+    for rel, msg in unready:
+        print(f'\n  {rel}')
+        print('    rule: a tools/ script that drives the game opens with '
+              'ensure_ready()')
+        print(f'    why:  {msg}')
+    print(f'\n{len(violations) + len(stale) + len(unready)} violation(s)')
     return 1
 
 

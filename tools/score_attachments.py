@@ -263,6 +263,127 @@ def read(det, s):
     return KEY_OF.get(name, name), margin
 
 
+def no_template(corpus):
+    """What each part reads as when its own template is TAKEN AWAY. -> code
+
+    THE QUESTION THIS ANSWERS is not "is the bank complete". It is what
+    happens on the day it is not: a part the game added, or one no ROSTER
+    weapon can wear so it can never be captured (choke, duckbill,
+    bullet_loops), or one whose art drifted past recognition in an update.
+
+    A MISSING TEMPLATE DOES NOT READ AS NOTHING. It reads as the nearest
+    neighbour, confidently and in-catalogue, which is the single most
+    expensive failure mode in this directory — `variable` read as `scope_6x`
+    10 times out of 10 before it had one, and a drifted `Lower_ThumbGrip_C`
+    made Mk12's grip read as `laser`, in-catalogue, high-margin, wrong. The
+    detector has one absolute MSE gate and REPORTS the margin without gating
+    on it (attachment_detector.classify), so whether a stranger is refused
+    depends entirely on whether its nearest neighbour happens to land under
+    the ceiling.
+
+    So: drop one key from the bank, feed it its own ground-truth crops, and
+    count how often the answer is silence. `unknown` is the good column. Every
+    crop in the `named as` column is a part the detector would have invented.
+
+    This is a different experiment from --holdout, which removes a RUN and
+    asks whether a template merely memorised its own captures. This removes a
+    TEMPLATE and asks what the rest of the bank does with a stranger.
+    """
+    keys = sorted({s['key'] for s in corpus})
+    print(f'\n{"=" * 78}\nWITH ITS OWN TEMPLATE REMOVED — what a stranger '
+          f'reads as')
+    print(f'{"key":<16}{"crops":>6}{"unknown":>9}{"named as":>10}   '
+          f'impostor (count)')
+    dangerous = []
+    for key in keys:
+        mine = [s for s in corpus if s['key'] == key]
+        det = ad.AttachmentDetector()
+        name = ASSET.get(key)
+        if not name:
+            continue
+        det._templates.pop(name, None)
+        for names in det._slot_index.values():
+            if name in names:
+                names.remove(name)
+        # The solved variants are stored under the same asset name, so popping
+        # it takes them too — verified by the count below never exceeding the
+        # crops fed in.
+        seen = defaultdict(int)
+        silent = 0
+        for s in mine:
+            got, _ = read(det, s)
+            if got:
+                seen[got] += 1
+            else:
+                silent += 1
+        named = len(mine) - silent
+        top = ', '.join(f'{k} ({v})' for k, v in
+                        sorted(seen.items(), key=lambda kv: -kv[1])[:3])
+        print(f'{key:<16}{len(mine):>6}{silent:>9}{named:>10}   {top}')
+        if named:
+            dangerous.append((key, named, len(mine)))
+    print(f'\n  `unknown` is the SAFE answer. {len(dangerous)} of {len(keys)} '
+          f'parts would be given a wrong name rather than none if their '
+          f'template\n  went missing, which is what an unrecognised part does '
+          f'today.')
+    print('  The three that can never be captured — choke, duckbill, '
+          'bullet_loops — are\n  the standing case: no ROSTER weapon wears '
+          'them, so they only ever have\n  shipped art, and if that art '
+          'drifts this table is what happens.')
+    return 0
+
+
+def margin_gate(corpus):
+    """What a margin floor would cost and what it would buy. -> code
+
+    no_template() above says 28 of 35 parts get INVENTED rather than refused
+    when their template is gone. The obvious fix is to make
+    attachment_detector.classify refuse a thin margin instead of merely
+    reporting it. This measures both sides of that before anyone changes it,
+    because the two are not independent: the families that produce confident
+    impostors (three grey suppressor tubes, three magazine shapes, six
+    reticles) are the same families whose CORRECT reads are thin —
+    supp_ar sits at margin 1.09 today.
+
+    So a gate that refuses strangers also refuses real parts, and the only
+    honest way to choose one is to see both columns at every threshold.
+    """
+    full = ad.AttachmentDetector()
+    right = [m for s, got, m in collect(full, corpus) if got == s['key']]
+
+    strangers = []
+    for key in sorted({s['key'] for s in corpus}):
+        name = ASSET.get(key)
+        if not name:
+            continue
+        det = ad.AttachmentDetector()
+        det._templates.pop(name, None)
+        for names in det._slot_index.values():
+            if name in names:
+                names.remove(name)
+        for s in (x for x in corpus if x['key'] == key):
+            got, m = read(det, s)
+            if got:
+                strangers.append(m)
+
+    print(f'\n{"=" * 78}\nA MARGIN FLOOR: what it costs, what it buys')
+    print(f'  {len(right)} correct reads and {len(strangers)} confident '
+          f'impostors to separate\n')
+    print(f'{"floor":>7}{"correct kept":>14}{"impostors refused":>19}')
+    for t in (1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0):
+        kept = sum(1 for m in right if m >= t)
+        refused = sum(1 for m in strangers if m < t)
+        print(f'{t:>7.2f}{kept:>8} / {len(right):<4}{refused:>13} / '
+              f'{len(strangers):<4}'
+              f'   ({100 * kept / max(len(right), 1):.1f}% / '
+              f'{100 * refused / max(len(strangers), 1):.1f}%)')
+    print('\n  Read it as a trade, not a threshold to pick off the table: '
+          'every row\n  below 100% in the left column is a part the detector '
+          'would stop naming\n  correctly in exchange for the refusals on the '
+          'right.')
+    return 0
+
+
 # Which targets count towards the verdict. `rows` is scored and printed but
 # excluded: see the module docstring — its labels are contradicted by the
 # pixels, and averaging a broken corpus into a good one hides both.
@@ -379,6 +500,13 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--write', action='store_true',
                     help='rebuild the .solved templates from every run first')
+    ap.add_argument('--no-template', action='store_true',
+                    help='drop each part from the bank and report what its '
+                         'own crops read as. Answers what an UNRECOGNISED '
+                         'part does, which is not nothing.')
+    ap.add_argument('--margin-gate', action='store_true',
+                    help='what a margin floor in classify() would cost in '
+                         'correct reads and buy in refused impostors')
     ap.add_argument('--holdout', action='store_true',
                     help='score each run against a bank solved WITHOUT it')
     args = ap.parse_args()
@@ -400,6 +528,11 @@ def main():
     print(f'{len(corpus)} ground-truth crops from {len(runs)} run(s), '
           f'{len(set(s["key"] for s in corpus))} attachment(s)')
     corpus += reference_rows()
+
+    if args.no_template:
+        return no_template([s for s in corpus if s['target'] != 'rows'])
+    if args.margin_gate:
+        return margin_gate([s for s in corpus if s['target'] != 'rows'])
 
     got = score(collect(ad.AttachmentDetector(), corpus),
                 'AS THE DETECTOR LOADS IT')
