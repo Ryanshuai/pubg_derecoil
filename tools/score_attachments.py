@@ -108,6 +108,32 @@ REF_ROWS = ['scope_2x', 'scope_4x', 'red_dot', 'holo', 'ext_sr', 'quickext_sr',
 
 # ── the corpus ──
 
+# Runs whose LABELS do not describe their own pixels. Excluded from the corpus
+# entirely, not merely from the headline — a wrong label is not a hard sample,
+# it is a wrong answer key, and averaging it in penalises the detector for
+# being right.
+#
+# 20260803_103108's rows have been known bad since 2026-08-03 (the collector
+# assumed the newest 库存 row was the last one; the game inserts into its own
+# sort order). Its SLOTS were left in, and they are bad the same way. All six
+# of its slot crops are labelled scope_2x and score:
+#
+#     against Upper_Aimpoint_C (2x)   mse 1050 .. 1236
+#     against Upper_Scope6x_C  (6x)   mse    5 ..   15
+#
+# A hundredfold gap is not a confusion, it is a photograph of a 6x scope with
+# `scope_2x` written on it. Those six crops were the ENTIRE basis for
+# "scope_2x 20/26, eaten by scope_6x", which this file recorded as a ceiling
+# the detector could not reach and which does not exist: the two icons differ
+# on 81% of their common opaque pixels and 26.5% of their silhouette, and no
+# other run has ever confused them. Per-run slot accuracy is 0.968-1.000
+# everywhere else and 280/280 on the largest.
+BAD_RUNS = {
+    '20260803_103108': 'labels do not match the pixels — rows are row-shifted '
+                       'and all six slot crops labelled scope_2x are 6x',
+}
+
+
 def samples():
     """Every ground-truth attachment crop on disk. -> [(run, sample), ...]
 
@@ -120,6 +146,8 @@ def samples():
     out = []
     for d in sorted(glob.glob(os.path.join(RUNS, '*'))):
         if not os.path.exists(os.path.join(d, 'manifest.json')):
+            continue
+        if os.path.basename(d) in BAD_RUNS:
             continue
         run = CaptureRun.load_dir(d)
         for e, lab, path in run.labelled():
@@ -340,6 +368,53 @@ def no_template(corpus):
     return 0
 
 
+def confusion(corpus):
+    """Who each part's RUNNER-UP is, and how close it got. -> code
+
+    The hit rate says nothing about this. With the bank complete the slot
+    corpus has no misidentifications left at all — every miss is an under-read
+    — so "who does it confuse" has no answer in the results table. The answer
+    that exists is the one below: for every crop, who came second, and by how
+    much. A part whose runner-up is always the same neighbour at a margin of
+    1.1 is not currently wrong; it is one game update away from being wrong,
+    and it is the first thing a margin floor will refuse.
+
+    Reported per (part, runner-up) pair with the WORST margin, because the
+    worst is what a threshold has to clear. The median is there to show
+    whether that worst case is the shape of the distribution or its tail.
+    """
+    det = ad.AttachmentDetector()
+    pairs = defaultdict(list)
+    for s in corpus:
+        crop = crop_of(s)
+        if crop is None or not det.drawn(crop):
+            continue
+        names = (det.candidates(s['slot'], s['weapon'])
+                 if s['target'] == 'slots' else list(det._templates))
+        if len(names) < 2:
+            continue
+        crop_f = crop.astype(np.float32)
+        scored = sorted((det.score(crop_f, n), n) for n in names)
+        (m1, n1), (m2, n2) = scored[0], scored[1]
+        if KEY_OF.get(n1, n1) != s['key']:
+            continue                      # a miss; the results table has it
+        pairs[(s['key'], KEY_OF.get(n2, n2))].append(m2 / max(m1, 1e-6))
+
+    print(f'\n{"=" * 78}\nRUNNER-UP: who is second, and how close\n')
+    print(f'{"part":<16}{"runner-up":<16}{"n":>5}{"worst":>9}{"median":>9}')
+    rows = sorted(pairs.items(), key=lambda kv: min(kv[1]))
+    for (key, rival), ms in rows:
+        if min(ms) >= 4.0:
+            continue
+        print(f'{key:<16}{rival:<16}{len(ms):>5}{min(ms):>9.2f}'
+              f'{sorted(ms)[len(ms) // 2]:>9.2f}')
+    tight = [k for k, v in pairs.items() if min(v) < 2.0]
+    print(f'\n  {len(rows)} (part, runner-up) pairs; {len(tight)} ever come '
+          f'within 2x. Pairs whose worst margin is 4x or better are not '
+          f'printed.')
+    return 0
+
+
 def margin_gate(corpus):
     """What a margin floor would cost and what it would buy. -> code
 
@@ -399,35 +474,29 @@ COUNTED = ('slots', 'reference rows')
 # A RATCHET, NOT A TARGET. Full marks are not reachable today and pretending
 # otherwise would make this task permanently red, which is how a check stops
 # being read. What is not reachable, re-measured 2026-08-04 after the 14-round
-# collection (docs/attachments/runs/20260804_131708) which nearly doubled the
-# corpus, 760 crops -> 1393:
+# collection reached every attachment and after BAD_RUNS quarantined the one
+# whose labels lie:
 #
-#   scope_2x             20 of 26, still eaten by scope_6x, and no longer for
-#                        the reason recorded before. scope_6x's solve was
-#                        "the weakest in the bank, from the only run that has
-#                        it"; it now has 40 samples and a margin of 5.57 and
-#                        scope_2x did not improve. The two reticle icons
-#                        differ in little more than a number.
-#   6 stray <nothing>    one each of angled_grip, cheek_pad, ext_ar,
-#                        half_grip, holo, scope_4x, and two of supp_smg
-#   thumb_grip           2 reference rows. The solved icon is a SLOT-scale
-#                        picture and a list row renders the art smaller —
-#                        solve_template.py --rows now recovers row-scale
-#                        icons, but nothing consumes them yet.
+#   8 stray <nothing>    one each of angled_grip, cheek_pad, ext_ar,
+#                        half_grip, holo, scope_4x and two supp_smg. All are
+#                        UNDER-reads — the crop scored above MSE_EMPTY_TH and
+#                        was refused — not misidentifications. There is no
+#                        confident wrong answer left in the slot corpus.
+#   thumb_grip           2 reference rows, and supp_ar 12. The solved icons
+#                        are SLOT-scale pictures and a list row renders the
+#                        art smaller; solve_template.py --rows recovers
+#                        row-scale icons now but nothing consumes them yet.
 #
-# What DID move, and why the numbers below are not the old ones: the 2026-08-04
-# collection reached every attachment for the first time. choke and
-# bullet_loops went from uncollectable (SLOTS had no shotgun or bolt-action
-# entry, so fits() said no weapon could wear them) to 10/10 at margins 37.9
-# and inf; light_grip, tactical_stock, quickext_smg and scope_8x went from
-# art-only to 16/16, 10/10, 14/14 and 10/10.
-#
-# HELD OUT IS IDENTICAL TO DIRECT, 1379/1393 both ways. That is the number
-# that cannot be flattered: no template scored a run it was solved from.
+# WHAT CAME OFF THIS LIST, and it is worth keeping the correction visible:
+# "scope_2x 20 of 26, eaten by scope_6x" was recorded here twice as a ceiling
+# the detector could not reach. It was six crops from one run, labelled
+# scope_2x, photographing a 6x — see BAD_RUNS. scope_2x is 20/20 at a margin
+# of 36.4. The detector has never confused those two icons and could not: they
+# differ on 81% of their common opaque pixels.
 #
 # Going ABOVE the baseline fails too, on purpose: it means one of the above
 # was fixed and this comment is now a lie. Re-measure, then raise the numbers.
-BASELINE = {'slots': (1379, 1393), 'reference rows': (10, 12)}
+BASELINE = {'slots': (1379, 1387), 'reference rows': (10, 12)}
 
 
 def score(rows, title):
@@ -527,6 +596,8 @@ def main():
                     help='drop each part from the bank and report what its '
                          'own crops read as. Answers what an UNRECOGNISED '
                          'part does, which is not nothing.')
+    ap.add_argument('--confusion', action='store_true',
+                    help="who each part's runner-up is and how close it got")
     ap.add_argument('--margin-gate', action='store_true',
                     help='what a margin floor in classify() would cost in '
                          'correct reads and buy in refused impostors')
@@ -554,6 +625,8 @@ def main():
 
     if args.no_template:
         return no_template([s for s in corpus if s['target'] != 'rows'])
+    if args.confusion:
+        return confusion(corpus)
     if args.margin_gate:
         return margin_gate([s for s in corpus if s['target'] != 'rows'])
 
