@@ -56,6 +56,56 @@ OFFSET_Y = 8
 OFFSET_X = 8
 MSE_EMPTY_TH = 450
 
+# ── the third answer ──
+#
+# A slot can be EMPTY, hold a part this bank can name, or hold something the
+# bank cannot separate from its neighbour. Until 2026-08-04 the third case did
+# not exist here: the margin was computed, returned, and never acted on, so a
+# 1.02x call and a 30x call came back identically and a caller had no way to
+# tell them apart without inspecting the score it was handed.
+#
+# WHY THAT IS NOT THE SAME AS RETURNING None. None means the slot is EMPTY,
+# and control/inventory.py's ensure_kit reads an empty slot as "the drag did
+# not land" and retries. Collapsing "I cannot name this" into it would make an
+# ambiguous read look like a failed fit — a wrong action rather than a missing
+# answer. detector/slot_detector.py learned the same lesson on the tile side
+# and its docstring says it outright: do not let `unknown` collapse into
+# `absent`.
+#
+# THE FLOOR, and what it costs, measured over 1387 ground-truth crops with the
+# bank complete (tools/score_attachments.py --margin-gate):
+#
+#     floor   correct kept    impostors refused
+#      1.05   100.0%            6.6%
+#      1.10    99.1%           13.3%
+#      1.25    98.3%           27.6%
+#      2.50    94.9%           83.7%
+#      5.00    92.0%           92.1%   <- refusals stop rising here
+#
+# "Impostors" are from --no-template: drop a part from the bank, feed it its
+# own crops, and count how often the rest of the bank invents a name for it
+# instead of refusing. 31 of 41 parts do.
+#
+# 1.25 is chosen, and the reasoning is that the bank is now COMPLETE — every
+# collectable attachment has a screen-solved template as of the 14-round
+# collection — so a stranger arrives only from a game update or from icon
+# drift, not from a known gap. Buying refusals at the price of correct reads
+# is the wrong trade in that world. Above 5.0 nothing is bought at all.
+#
+# EVERY CORRECT READ THIS COSTS IS supp_ar. Not "mostly": all 24 of them, and
+# all 13 that a 1.10 floor would cost. The AR suppressor sits at margin 1.07
+# worst / 1.12 median against the SR suppressor across all 32 samples — three
+# grey tubes, and the only structurally tight pair in the corpus (the rest of
+# the near-misses are single-sample tails; see --confusion). So this floor is
+# very nearly a single-part policy, and if it ever needs relaxing, that is the
+# part to look at rather than the number.
+MARGIN_MIN = 1.25
+
+# What a slot reads as when the bank cannot separate its top two. A sentinel
+# rather than a name, so `slot_matches` can never accidentally satisfy a
+# wanted part with it, and never '' — that is EMPTY.
+AMBIGUOUS = '?'
+
 # Is a slot drawn at all? A slot the weapon does not have is not rendered, and
 # an empty slot draws nothing either, so both show the blurred world behind the
 # panel. MSE alone does not reject that: on docs/tab_live_aug_vss.png, whose
@@ -244,7 +294,12 @@ class AttachmentDetector:
                     slots[slot] = None
                     continue
                 name, mse, margin = self.best_two(crop, names)
-                slots[slot] = None if mse > MSE_EMPTY_TH else (name, mse, margin)
+                if mse > MSE_EMPTY_TH:
+                    slots[slot] = None
+                elif margin < MARGIN_MIN:
+                    slots[slot] = (AMBIGUOUS, mse, margin)
+                else:
+                    slots[slot] = (name, mse, margin)
             out[gun] = slots
         return out
 

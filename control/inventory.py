@@ -84,7 +84,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import HUD_REGIONS
 from detector.attachment_catalog import ATTACHMENTS, ROSTER, fits, has_slot
-from detector.attachment_detector import AttachmentDetector, SLOT_NAMES
+from detector.attachment_detector import (AMBIGUOUS, AttachmentDetector,
+                                         SLOT_NAMES)
 from detector.slot_detector import (SlotDetector, ABSENT as SLOT_ABSENT,
                                     EMPTY as SLOT_EMPTY)
 from detector.cropper import capture_screen, win32_cap
@@ -751,6 +752,17 @@ def kit_faults(want, worn):
                             'why': f'reads {cur!r}, should be empty'})
             continue
         if slot_matches(cur, key):
+            continue
+        if cur == AMBIGUOUS:
+            # Occupied, and the bank cannot separate its top two candidates
+            # (AttachmentDetector.MARGIN_MIN). That is the same KIND of fault
+            # as a part with no template: the slot cannot be read as holding
+            # this, only as holding something. NOT verifiable, so ensure_kit
+            # reports it rather than treating it as a drag that missed and
+            # dragging again — a retry cannot improve a reading.
+            out.append({'slot': slot, 'key': key, 'verifiable': False,
+                        'why': f'holds something the templates cannot '
+                               f'separate; wanted {key}'})
             continue
         spec = ATTACHMENTS.get(key) or {}
         if spec.get('asset'):
