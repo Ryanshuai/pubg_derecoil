@@ -11,25 +11,54 @@ different confidence:
       spawner on 2026-08-01 (temp_debug/spawner_scrape/20260801_210656), which
       is by definition the live build's item list.
 
-  SLOTS                 — measured. All 30 live weapons scanned in game on
-      2026-08-02 by calibration/scan_compat.py: spawn, open Tab, read each
-      slot's tile with SlotDetector. Run and per-weapon captures in
-      docs/compat/runs/20260802_155222/, so any row can be rechecked offline.
+  SLOTS                 — measured, all 40. calibration/scan_compat.py:
+      spawn, open Tab, read each slot's tile with SlotDetector. Captures in
+      docs/compat/runs/20260802_155222/ (the first 30) and
+      docs/runs/slot_scan/20260804_131048 + _131534 (the rest), so any row can
+      be rechecked offline.
 
-      It overturned two wiki/guess entries, both of the dangerous kind —
-      a slot the table claimed and the weapon does not have, which makes a
-      drag silently drop the part on the floor:
+      The 2026-08-02 pass overturned two wiki/guess entries, both of the
+      dangerous kind — a slot the table claimed and the weapon does not have,
+      which makes a drag silently drop the part on the floor:
           ump45  had 'stock'   — no tile (ring 15.8 vs threshold 36)
           js9    had 'grip'    — no tile (ring 18.6)
-      The other 28 agreed exactly, including all six that unverified() had
-      flagged, and the AUG's slot list.
 
-      ⚠ THE 'scope' ENTRIES ARE STILL INFERRED. That slot draws no tile at
-      all, so presence is unreadable from a capture — an empty scope and an
-      absent one are pixel-identical, and a weapon with an integral optic
-      (VSS) renders it as part of the weapon art. SlotDetector returns
-      'unknown' there and the scan cannot confirm or deny it. Resolve by
-      fitting a sight; see the calibrate-compat skill.
+      IT ALSO STOPPED AT 30 OF 40 AND WAS RECORDED AS COMPLETE. The ten it
+      skipped were every shotgun and every bolt-action rifle, and fits() gates
+      on SLOTS.get(weapon) — so those weapons rejected every attachment, and
+      the three parts that only they can wear (choke, duckbill, bullet_loops)
+      were reported by collect_templates as unwearable by anything alive. They
+      are, not by coincidence, the only three attachments in this repository
+      with no screen-solved template: the collector could not reach them. A
+      hole in a compatibility table reads as a fact about the game. Filled
+      2026-08-04.
+
+  'scope' — HALF MEASURED NOW, and the halves are worth telling apart.
+
+      SlotDetector cannot answer it for anyone: the scope position draws no
+      tile, so an empty scope and an absent one are pixel-identical, and a
+      weapon with an integral optic (VSS) renders it as weapon art. Every
+      'scope' among the first thirty is therefore INFERRED.
+
+      For the ten added on 2026-08-04 it was measured instead, and by letting
+      the game answer rather than by dragging anything: PUBG bolts whatever
+      the pack holds onto a gun the moment it spawns, so a sight sitting in
+      the scope slot afterwards is the game confirming the slot exists.
+      AttachmentDetector reads the CONTENT of that slot correctly even though
+      SlotDetector cannot read its presence — it reads VSS's fixed PSO-1 as
+      empty — so the whole check ran offline against the scan's stored Tab
+      frames, at no cost in game time:
+
+          kar98k m24 awm lynx   scope_6x mounted   mse 83   margin 8.3-9.1
+          s12k dbs              red_dot mounted    mse 51   margin 15
+          win94 s686 s1897 o12  nothing mounted    mse ~1900  margin 1.0
+
+      The first six are settled. The last four are NOT settled as absent —
+      "the game did not fit one" is weaker than "there is nowhere to fit one",
+      because the pack may have run out of sights the weapon would take. They
+      are left without 'scope', which refuses an optic there; that is the safe
+      direction, since the other one drops the part on the floor. Settle them
+      by spawning each with a known sight in the pack.
 
   EXCLUDE / ONLY /      — inferred, still. Which attachments a PRESENT slot
   GRIP_ONLY               accepts cannot be read off a tile: Tommy Gun's
@@ -347,19 +376,23 @@ SLOTS = {
     # back, per the calibrate-compat skill — until then a caller wanting to
     # mount an optic on one of these will be refused, which is the safe
     # direction: the unsafe one drops the part on the floor.
-    'kar98k':   {'slots': ('muzzle', 'stock'), 'conf': 'measured'},
-    'm24':      {'slots': ('muzzle', 'magazine', 'stock'), 'conf': 'measured'},
-    'awm':      {'slots': ('muzzle', 'magazine', 'stock'), 'conf': 'measured'},
-    # Integrated 2.7x, and the scan found no muzzle or magazine tile either.
-    'win94':    {'slots': ('stock',), 'conf': 'measured'},
-    # No tile anywhere but the scope position. Same shape as mg3.
-    'lynx':     {'slots': (), 'conf': 'measured'},
+    'kar98k':   {'slots': ('scope', 'muzzle', 'stock'), 'conf': 'measured'},
+    'm24':      {'slots': ('scope', 'muzzle', 'magazine', 'stock'),
+                 'conf': 'measured'},
+    'awm':      {'slots': ('scope', 'muzzle', 'magazine', 'stock'),
+                 'conf': 'measured'},
+    # Integrated 2.7x. No muzzle or magazine tile either, and it declined a
+    # sight the pack was holding — see the scope note above.
+    'win94':    {'slots': (), 'conf': 'measured'},
+    # Nothing but the optic. Same shape as mg3, reached the other way round:
+    # mg3's scope is inferred, this one was watched being mounted.
+    'lynx':     {'slots': ('scope',), 'conf': 'measured'},
     's686':     {'slots': ('muzzle', 'stock'), 'conf': 'measured'},
-    's12k':     {'slots': ('muzzle', 'magazine'), 'conf': 'measured'},
+    's12k':     {'slots': ('scope', 'muzzle', 'magazine'), 'conf': 'measured'},
     's1897':    {'slots': ('muzzle', 'stock'), 'conf': 'measured'},
     # grip, which no other shotgun has; the magazine tile read EMPTY rather
     # than filled, and an empty tile proves the slot exists just as well.
-    'dbs':      {'slots': ('grip', 'magazine'), 'conf': 'measured'},
+    'dbs':      {'slots': ('scope', 'grip', 'magazine'), 'conf': 'measured'},
     # Scanned separately (run 20260804_131534) — the first attempt died on a
     # Tab that would not open, and a guess was written in its place for about
     # four minutes before the re-scan refuted it. No tile anywhere.
