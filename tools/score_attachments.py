@@ -40,22 +40,39 @@ TWO WAYS TO FLATTER A TEMPLATE, both refused here:
                                                    because in the field it is
                                                    one
 
-THE 库存 ROWS ARE REPORTED SEPARATELY AND THE REASON IS NOT SYMMETRY. Their
-run labels do not survive inspection. Take docs/attachments/runs/20260803_103108,
-one part per round, one row each:
+THE 库存 ROWS COUNT NOW, and they did not for most of this file's life. The
+history is worth keeping because the shape recurs: for months the row corpus
+scored 87/350 and was excluded from the verdict as "labels contradicted",
+which was true and was also hiding two different problems behind one excuse.
 
-    row  label says     templates read     mse   margin
-      2  cheek_pad      ext_ar              12    10.5
-      7  comp_ar        ext_ar              20     6.7
-     11  variable       vert_grip           13     9.1
+    the labels        Capture names left the ROUND out, then left the PART
+                      out. Rounds overwrote each other, then parts within a
+                      round did — each part is staged alone into an empty
+                      库存, so each lands at row 0 and every part of round 1
+                      wrote row00__sks__r1__lbg0.png. Fixed in the collector;
+                      CaptureRun.add() now refuses a repeated name outright,
+                      and the two runs whose labels cannot be recovered are in
+                      BAD_RUNS with the evidence.
+    the templates     A row is 80x80 of art that the slot draws at 63x63. The
+                      bank held only the slot rendering, resized, which
+                      carries a systematic offset — thumb_grip landed FIRST in
+                      the reference rows at a margin of 1.44 and still failed,
+                      because its MSE was 175 against a gate of 150. Being
+                      right and failing an absolute threshold is what a scale
+                      error looks like. solve_template.py --rows recovers the
+                      row rendering; those are the `.row` variants.
 
-An MSE of 12 at ten times its runner-up is what a correct match looks like —
-the slot corpus scores 7..17 — so those crops are not pictures of what the
-label says. Nor is it a constant shift that could be undone: the game inserts
-a new part into its OWN sort order, and the collector had assumed the newest
-row was the last one (fixed since, in ff047bc). So the row corpus is scored
-and printed, never deleted, and never added into the headline number. The
-trustworthy row truth is the twelve hand-read rows of docs/tab_inventory.png.
+Neither could be seen past the other. With no template able to read a row, a
+wrong label looked like a hard sample; with the labels contradicted, a working
+template could not be told from a lucky one.
+
+    87/350 = 0.249  ->  421/510 = 0.825, and no confident wrong answer left.
+
+Every remaining row miss is an UNDER-read. That is why the target is in
+COUNTED now: a corpus whose failures are all refusals is one the ratchet can
+hold. docs/tab_inventory.png's twelve hand-read rows stay as `reference rows`,
+scored separately — they are the only row truth in the repository that no
+collector produced.
 """
 import argparse
 import glob
@@ -108,29 +125,38 @@ REF_ROWS = ['scope_2x', 'scope_4x', 'red_dot', 'holo', 'ext_sr', 'quickext_sr',
 
 # ── the corpus ──
 
-# Runs whose LABELS do not describe their own pixels. Excluded from the corpus
-# entirely, not merely from the headline — a wrong label is not a hard sample,
-# it is a wrong answer key, and averaging it in penalises the detector for
-# being right.
+# Runs whose LABELS do not describe their own pixels, per target. Excluded
+# from the corpus entirely rather than merely from the headline — a wrong
+# label is not a hard sample, it is a wrong answer key, and averaging it in
+# penalises the detector for being right.
 #
-# 20260803_103108's rows have been known bad since 2026-08-03 (the collector
-# assumed the newest 库存 row was the last one; the game inserts into its own
-# sort order). Its SLOTS were left in, and they are bad the same way. All six
-# of its slot crops are labelled scope_2x and score:
+# `None` means every target; a tuple names the bad ones and leaves the rest.
+# 20260803_130905's SLOTS are 18/18 and its rows are 0/18, so dropping the run
+# whole would throw away good data to escape bad.
 #
-#     against Upper_Aimpoint_C (2x)   mse 1050 .. 1236
-#     against Upper_Scope6x_C  (6x)   mse    5 ..   15
+# 20260803_103108 — all six of its slot crops are labelled scope_2x and score
+# mse 1050..1236 against the 2x template, 5..15 against the 6x. A hundredfold
+# gap is not a confusion, it is a photograph of a 6x with `scope_2x` written on
+# it. Its rows are row-shifted the same way. Those six crops were the ENTIRE
+# basis for "scope_2x 20/26, eaten by scope_6x", a ceiling this file recorded
+# twice and which does not exist: the icons differ on 81% of their common
+# opaque pixels.
 #
-# A hundredfold gap is not a confusion, it is a photograph of a 6x scope with
-# `scope_2x` written on it. Those six crops were the ENTIRE basis for
-# "scope_2x 20/26, eaten by scope_6x", which this file recorded as a ceiling
-# the detector could not reach and which does not exist: the two icons differ
-# on 81% of their common opaque pixels and 26.5% of their silhouette, and no
-# other run has ever confused them. Per-run slot accuracy is 0.968-1.000
-# everywhere else and 280/280 on the largest.
+# 20260803_130905 — every row reads the same answer regardless of which row it
+# is: rows 01..06 all read brake_ar, rows 08..09 all read comp_smg. The run
+# pre-dates the round in the capture name, so its rounds overwrote each other
+# and the surviving pixels are the last round's part under every earlier
+# round's label. CaptureRun.conflicts() cannot see this one — each round used
+# a DIFFERENT row index, so no two entries share a capture and there is no
+# contradiction to find. It took the row templates landing to expose it: with
+# nothing able to read a row correctly, a wrong label looked like a hard
+# sample.
 BAD_RUNS = {
-    '20260803_103108': 'labels do not match the pixels — rows are row-shifted '
-                       'and all six slot crops labelled scope_2x are 6x',
+    '20260803_103108': ('labels do not match the pixels — rows are row-shifted '
+                        'and all six slot crops labelled scope_2x are 6x', None),
+    '20260803_130905': ('every row reads the last round of the run under an '
+                        'earlier round label; pre-dates the round in the '
+                        'capture name', ('rows',)),
 }
 
 
@@ -147,12 +173,15 @@ def samples():
     for d in sorted(glob.glob(os.path.join(RUNS, '*'))):
         if not os.path.exists(os.path.join(d, 'manifest.json')):
             continue
-        if os.path.basename(d) in BAD_RUNS:
+        bad = BAD_RUNS.get(os.path.basename(d))
+        if bad and bad[1] is None:
             continue
         run = CaptureRun.load_dir(d)
         for e, lab, path in run.labelled():
             target = e.get('target')
             if target not in ('slots', 'rows'):
+                continue
+            if bad and target in bad[1]:
                 continue
             slot = (lab['slot'] if target == 'slots'
                     else ATTACHMENTS.get(lab['asset'], {}).get('slot'))
@@ -469,7 +498,7 @@ def margin_gate(corpus):
 # Which targets count towards the verdict. `rows` is scored and printed but
 # excluded: see the module docstring — its labels are contradicted by the
 # pixels, and averaging a broken corpus into a good one hides both.
-COUNTED = ('slots', 'reference rows')
+COUNTED = ('slots', 'reference rows', 'rows')
 
 # A RATCHET, NOT A TARGET. Full marks are not reachable today and pretending
 # otherwise would make this task permanently red, which is how a check stops
@@ -496,7 +525,8 @@ COUNTED = ('slots', 'reference rows')
 #
 # Going ABOVE the baseline fails too, on purpose: it means one of the above
 # was fixed and this comment is now a lie. Re-measure, then raise the numbers.
-BASELINE = {'slots': (1399, 1407), 'reference rows': (10, 12)}
+BASELINE = {'slots': (1653, 1664), 'reference rows': (10, 12),
+            'rows': (421, 510)}
 
 
 def score(rows, title):
@@ -525,7 +555,7 @@ def score(rows, title):
                f'blind against every template, MSE < {ROW_MSE_MAX} and '
                f'margin > {ROW_MARGIN_MIN}')
         note = ('' if target in COUNTED else
-                '  NOT COUNTED — labels contradicted, see the module docstring')
+                '')
         print(f'\n{target}  {h}/{t} = {h / t:.3f}   ({how}){note}')
         print(f'  {"key":<15}{"hit":>9}{"margin min":>12}   read instead')
         for key in sorted(per):
