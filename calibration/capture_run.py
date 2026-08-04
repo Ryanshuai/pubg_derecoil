@@ -343,6 +343,31 @@ class CaptureRun:
             raise FileNotFoundError(f'no runs of kind {kind}')
         return cls.load(stamps[-1], kind)
 
+    def conflicts(self):
+        """Captures that two entries name differently. -> {(capture, slot): {asset}}
+
+        A capture file may be referenced by more than one entry, which is fine
+        while they agree. When they do not, at most one of them describes the
+        pixels on disk and the file says nothing about which — so the run
+        holds a contradiction, not a fact.
+
+        THIS IS NOT HYPOTHETICAL. collect_templates named its 库存 row crops
+        `row00__sks__lbg0.png`, with no round in the name, so every round of a
+        multi-part run overwrote the previous round's file while its manifest
+        entry stayed. Seven runs on disk carry it: 130 captures each claimed by
+        up to twelve different attachments, 580 row labels in total. The
+        crops are real captures of real rows — only the pairing was lost — so
+        nothing is deleted and `entries` still shows every one of them.
+        """
+        seen = {}
+        for e in self.entries:
+            for lab in e.get('labels', ()):
+                if lab.get('source') != LABEL_REQUESTED:
+                    continue
+                seen.setdefault((e['capture'], lab.get('slot')),
+                                set()).add(lab.get('asset'))
+        return {k: v for k, v in seen.items() if len(v) > 1}
+
     def labelled(self, asset=None):
         """Ground-truth samples only. -> [(entry, label, capture_path)]
 
@@ -350,13 +375,21 @@ class CaptureRun:
         reading cannot serve as truth for the detector being calibrated, and
         making that a property of the API rather than a warning is the point
         of this format.
+
+        Nor does it return a label the run contradicts elsewhere — see
+        `conflicts`. Same rule one step further out: the format cannot tell
+        which of two answers describes the file, so it must not offer either.
+        A caller that wants to see the wreckage reads `entries`.
         """
+        bad = self.conflicts()
         out = []
         for e in self.entries:
             for lab in e.get('labels', ()):
                 if lab.get('source') != LABEL_REQUESTED:
                     continue
                 if asset and lab.get('asset') != asset:
+                    continue
+                if (e['capture'], lab.get('slot')) in bad:
                     continue
                 out.append((e, lab, os.path.join(self.path, e['capture'])))
         return out

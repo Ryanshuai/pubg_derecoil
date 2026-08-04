@@ -122,37 +122,54 @@ class AttachmentDetector:
 
     # ── scoring ──
 
+    def _variant(self, crop_f, name, i, shifts):
+        tmpl_vals, ys, xs = self._templates[name][i]
+        h, w = crop_f.shape[:2]
+        cy, cx = ys + OFFSET_Y, xs + OFFSET_X
+        best = None
+        for sy, sx in shifts:
+            ny = np.clip(cy + sy, 0, h - 1)
+            nx = np.clip(cx + sx, 0, w - 1)
+            se = ((crop_f[ny, nx] - tmpl_vals) ** 2).sum(axis=1)
+            best = se if best is None else np.minimum(best, se)
+        return float(best.mean() / 3)
+
     def score(self, crop_f, name, shifts=_SHIFTS):
         """One asset against one float32 crop. -> mean squared error.
 
         The best of the asset's variants, because they are pictures of the
-        same thing and the question asked of them is the same. A variant that
-        matches nothing costs a score and changes no answer.
+        same thing and the question asked of them is the same.
 
         `crop_f` is float32 already: converting once per crop rather than once
         per template is worth ~15% on its own.
         """
-        h, w = crop_f.shape[:2]
-        out = None
-        for tmpl_vals, ys, xs in self._templates[name]:
-            cy, cx = ys + OFFSET_Y, xs + OFFSET_X
-            best = None
-            for sy, sx in shifts:
-                ny = np.clip(cy + sy, 0, h - 1)
-                nx = np.clip(cx + sx, 0, w - 1)
-                se = ((crop_f[ny, nx] - tmpl_vals) ** 2).sum(axis=1)
-                best = se if best is None else np.minimum(best, se)
-            mse = float(best.mean() / 3)
-            out = mse if out is None else min(out, mse)
-        return out
+        return min(self._variant(crop_f, name, i, shifts)
+                   for i in range(len(self._templates[name])))
 
     def best_two(self, crop, names, shortlist=SHORTLIST):
-        """-> (name, mse, margin). Two-stage; see SHORTLIST."""
+        """-> (name, mse, margin). Two-stage; see SHORTLIST.
+
+        THE SHORTLIST PASS RANKS ON ONE VARIANT, THE FINE PASS SCORES THEM
+        ALL. Ranking is only deciding who gets looked at properly, and it is
+        the pass paid for by every template in the bank, so it runs once per
+        asset — on variant 0, the untagged file, since _load_templates walks
+        the directory sorted and `X.png` precedes `X.<tag>.png`. The shortlist
+        is then re-scored across every variant with the nine shifts. A full
+        detect costs 123 ms this way against 80 ms with no variants at all,
+        where scoring every variant in both passes cost 191.
+
+        Choosing the variant in the RANKING pass instead was tried and is
+        wrong: it drops two of the twelve reference rows. Un-shifted, the
+        recovered icon and the shipped art trade places on a list row, and the
+        shift the fine pass adds is exactly what separates them. Same lesson
+        as SHORTLIST — a cheap pass may order candidates, it may not pick
+        between them.
+        """
         crop_f = crop.astype(np.float32)
-        coarse = sorted(((self.score(crop_f, n, shifts=((0, 0),)), n)
-                         for n in names))
-        top = [n for _, n in coarse[:shortlist]]
-        fine = sorted(((self.score(crop_f, n), n) for n in top))
+        coarse = sorted((self._variant(crop_f, n, 0, ((0, 0),)), n)
+                        for n in names)
+        fine = sorted((self.score(crop_f, n), n)
+                      for _, n in coarse[:shortlist])
         m1, n1 = fine[0]
         m2 = fine[1][0] if len(fine) > 1 else float('inf')
         return n1, m1, (m2 / m1 if m1 > 0 else float('inf'))

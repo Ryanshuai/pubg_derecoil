@@ -39,6 +39,23 @@ TWO WAYS TO FLATTER A TEMPLATE, both refused here:
                                                    template counts as a miss,
                                                    because in the field it is
                                                    one
+
+THE 库存 ROWS ARE REPORTED SEPARATELY AND THE REASON IS NOT SYMMETRY. Their
+run labels do not survive inspection. Take docs/attachments/runs/20260803_103108,
+one part per round, one row each:
+
+    row  label says     templates read     mse   margin
+      2  cheek_pad      ext_ar              12    10.5
+      7  comp_ar        ext_ar              20     6.7
+     11  variable       vert_grip           13     9.1
+
+An MSE of 12 at ten times its runner-up is what a correct match looks like —
+the slot corpus scores 7..17 — so those crops are not pictures of what the
+label says. Nor is it a constant shift that could be undone: the game inserts
+a new part into its OWN sort order, and the collector had assumed the newest
+row was the last one (fixed since, in ff047bc). So the row corpus is scored
+and printed, never deleted, and never added into the headline number. The
+trustworthy row truth is the twelve hand-read rows of docs/tab_inventory.png.
 """
 import argparse
 import glob
@@ -56,6 +73,7 @@ from calibration.capture_run import CaptureRun
 from detector.attachment_catalog import ATTACHMENTS
 import detector.attachment_detector as ad
 from detector.tab_items import ROW_MSE_MAX, ROW_MARGIN_MIN
+from detector.tab_layout import icon_box
 from tools.solve_template import solve
 
 RUNS = os.path.join(ROOT, 'docs', 'attachments', 'runs')
@@ -78,6 +96,14 @@ CUT = (ad.OFFSET_Y, ad.OFFSET_Y + ad.TMPL_SIZE,
 
 ASSET = {k: v['asset'] for k, v in ATTACHMENTS.items() if v.get('asset')}
 KEY_OF = {v: k for k, v in ASSET.items()}
+
+# docs/tab_inventory.png, read off the screenshot by eye — the only 库存 truth
+# in the repository that no collector produced and no template touched. Two
+# rows hold the same part, which is a fact about the screenshot.
+REF_SHOT = os.path.join(ROOT, 'docs', 'tab_inventory.png')
+REF_ROWS = ['scope_2x', 'scope_4x', 'red_dot', 'holo', 'ext_sr', 'quickext_sr',
+            'flash_sr', 'laser', 'thumb_grip', 'thumb_grip', 'flash_smg',
+            'duckbill']
 
 
 # ── the corpus ──
@@ -112,11 +138,25 @@ def samples():
     return out
 
 
+def reference_rows():
+    """The hand-read 库存 rows. -> [sample] with the crop already cut."""
+    frame = cv2.imread(REF_SHOT)
+    if frame is None:
+        return []
+    out = []
+    for i, key in enumerate(REF_ROWS):
+        x0, y0, x1, y1 = icon_box(i, 'inventory')
+        out.append({'run': 'tab_inventory.png', 'target': 'reference rows',
+                    'path': None, 'crop': frame[y0:y1, x0:x1], 'key': key,
+                    'slot': ATTACHMENTS[key]['slot'], 'weapon': None})
+    return out
+
+
 def crop_of(s):
-    img = cv2.imread(s['path'])
+    img = s['crop'] if s.get('crop') is not None else cv2.imread(s['path'])
     if img is None:
         return None
-    if s['target'] == 'rows':
+    if s['target'] != 'slots':
         img = cv2.resize(img, (63, 63), interpolation=cv2.INTER_AREA)
     return img
 
@@ -209,7 +249,7 @@ def read(det, s):
         return '', 0.0
     if not det.drawn(crop):
         return '', 0.0
-    if s['target'] == 'rows':
+    if s['target'] != 'slots':
         name, mse, margin = det.best_two(crop, list(det._templates))
         if mse > ROW_MSE_MAX or margin < ROW_MARGIN_MIN:
             return '', margin
@@ -223,11 +263,34 @@ def read(det, s):
     return KEY_OF.get(name, name), margin
 
 
+# Which targets count towards the verdict. `rows` is scored and printed but
+# excluded: see the module docstring — its labels are contradicted by the
+# pixels, and averaging a broken corpus into a good one hides both.
+COUNTED = ('slots', 'reference rows')
+
+# A RATCHET, NOT A TARGET. Full marks are not reachable today and pretending
+# otherwise would make this task permanently red, which is how a check stops
+# being read. What is not reachable, measured 2026-08-03:
+#
+#   scope_2x             6 of 16, eaten by scope_6x. scope_6x's own solve is
+#                        the weakest in the bank (recon 2.06, from the only
+#                        run that has it) and the two reticle icons differ in
+#                        little more than a number.
+#   thumb_grip           2 reference rows: the solved icon is a SLOT-scale
+#                        picture and a list row renders the art smaller
+#   5 stray <nothing>    one each of angled_grip, cheek_pad, half_grip, holo,
+#                        supp_smg
+#
+# Going ABOVE the baseline fails too, on purpose: it means one of the above
+# was fixed and this comment is now a lie. Re-measure, then raise the numbers.
+BASELINE = {'slots': (749, 760), 'reference rows': (10, 12)}
+
+
 def score(rows, title):
-    """-> (hits, total). Prints one per-key table per target."""
+    """-> {target: (hits, total)}. Prints one per-key table per target."""
     print(f'\n{"=" * 78}\n{title}')
-    hits = total = 0
-    for target in ('slots', 'rows'):
+    totals = {}
+    for target in ('slots', 'reference rows', 'rows'):
         mine = [r for r in rows if r[0]['target'] == target]
         if not mine:
             continue
@@ -243,12 +306,14 @@ def score(rows, title):
                 p['as'][got or '<nothing>'] += 1
         h = sum(p['ok'] for p in per.values())
         t = sum(p['n'] for p in per.values())
-        hits, total = hits + h, total + t
+        totals[target] = (h, t)
         how = ('slot known, weapon narrows the bank, MSE < '
                f'{ad.MSE_EMPTY_TH}' if target == 'slots' else
                f'blind against every template, MSE < {ROW_MSE_MAX} and '
                f'margin > {ROW_MARGIN_MIN}')
-        print(f'\n{target}  {h}/{t} = {h / t:.3f}   ({how})')
+        note = ('' if target in COUNTED else
+                '  NOT COUNTED — labels contradicted, see the module docstring')
+        print(f'\n{target}  {h}/{t} = {h / t:.3f}   ({how}){note}')
         print(f'  {"key":<15}{"hit":>9}{"margin min":>12}   read instead')
         for key in sorted(per):
             p = per[key]
@@ -256,7 +321,29 @@ def score(rows, title):
             wrong = ', '.join(f'{k}x{n}' if n > 1 else k
                               for k, n in sorted(p['as'].items()))
             print(f'  {key:<15}{p["ok"]:>4}/{p["n"]:<4}{m:>12}   {wrong}')
-    return hits, total
+    return totals
+
+
+def verdict(totals):
+    """Compare against the ratchet. -> exit code"""
+    bad = []
+    print()
+    for target, (want, n) in BASELINE.items():
+        h, t = totals.get(target, (0, 0))
+        if t != n:
+            bad.append(f'{target}: corpus is {t} crops, the baseline was '
+                       f'measured on {n} — re-measure before reading the hits')
+        elif h < want:
+            bad.append(f'{target}: {h}/{t}, DOWN from {want}/{n} — a template '
+                       f'regressed')
+        elif h > want:
+            bad.append(f'{target}: {h}/{t}, UP from {want}/{n} — raise the '
+                       f'baseline and rewrite what it says is unreachable')
+        else:
+            print(f'  OK   {target}  {h}/{t}, at the baseline')
+    for line in bad:
+        print(f'  [!]  {line}')
+    return 1 if bad else 0
 
 
 def collect(det, corpus):
@@ -312,9 +399,10 @@ def main():
     runs = sorted({s['run'] for s in corpus})
     print(f'{len(corpus)} ground-truth crops from {len(runs)} run(s), '
           f'{len(set(s["key"] for s in corpus))} attachment(s)')
+    corpus += reference_rows()
 
-    hits, total = score(collect(ad.AttachmentDetector(), corpus),
-                        'AS THE DETECTOR LOADS IT')
+    got = score(collect(ad.AttachmentDetector(), corpus),
+                'AS THE DETECTOR LOADS IT')
 
     if args.holdout:
         rows = []
@@ -322,15 +410,17 @@ def main():
             mine = [s for s in corpus if s['run'] == run]
             det = detector_with(bank(exclude=(run,)))
             rows += collect(det, mine)
-        h, t = score(rows, 'HELD OUT — no template solved from the run it scores')
+        # The reference rows belong to no run, so nothing about them is held
+        # out and re-scoring them would only repeat the pass above.
+        got = score(rows, 'HELD OUT — no template solved from the run it '
+                          'scores') | {k: v for k, v in got.items()
+                                       if k == 'reference rows'}
         print('\n  The held-out number is the one a solved template cannot '
               'flatter.\n  A gap between the two means a template is '
               'reproducing its own\n  captures rather than the icon behind '
               'them.')
-        hits, total = h, t
 
-    print()
-    return 0 if hits == total else 1
+    return verdict(got)
 
 
 if __name__ == '__main__':

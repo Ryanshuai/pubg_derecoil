@@ -76,6 +76,12 @@ tab-watch = "python tools/test_tab_watch.py"
 # whether recoil compensation runs at all.
 tab-open = "python tools/test_tab_open.py"
 name-plates = "python tools/test_name_plates.py"
+# Every attachment template against every ground-truth crop, with the margin.
+# Offline. A drifted icon does not read as nothing -- it reads as its nearest
+# neighbour, confidently, which is how Lower_ThumbGrip_C spent an unknown
+# number of runs reporting `laser`. --write rebuilds the .solved variants out
+# of the paired captures first.
+attachments = "python tools/score_attachments.py"
 # control/inventory.py's address vocabulary. Pure tuples, pure functions, no game.
 # Exists because at_gun() shipped with a grab point and a drop_weapon() while
 # _reject() had never heard of it, so every gun drop was refused.

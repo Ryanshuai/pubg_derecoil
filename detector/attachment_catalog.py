@@ -99,18 +99,22 @@ ROSTER = {
     'o12':      ('SG',  'O12'),
 }
 
-# Permanently removed in the June 2026 update (42.1). Kept as a named set
-# rather than deleted outright so the recoil curves measured for dp28/pp19 are
-# not lost if Krafton brings them back through an event mode — nothing should
-# ever *select* one, which is what `is_live()` is for.
-VAULTED = {
-    'dp28':   'LMG, removed 2026-06 (U42.1)',
-    'pp19':   'SMG, removed 2026-06 (U42.1)',
-    'qbu':    'DMR, removed 2026-06 (U42.1)',
-    'mosin':  'SR,  removed 2026-06 (U42.1)',
-    'r45':    'handgun, removed 2026-06 (U42.1)',
-    'p1911':  'handgun, removed 2026-06 (U42.1)',
-}
+# DP-28, PP-19 Bizon, QBU, Mosin, R45 and P1911 were removed from the game in
+# the June 2026 update (42.1). They used to live here in a VAULTED set beside
+# their measured curves, gated by an is_live() that every selector called.
+#
+# All of it is gone as of 2026-08-04, on the reading that a half-present
+# weapon misleads more than an absent one: ROSTER is what everything expands
+# and plans against, so a name in this file reads as "the spawner can produce
+# this" no matter what a second table says about it, and the second table is
+# the part a reader skips. The curves went with them — they describe a gun
+# that cannot be spawned, so nothing can check them and nothing can use them.
+#
+# ROSTER IS THE SPAWNER'S ROW ORDER, not just a list of names, which is the
+# reason the deletion has to be all-or-nothing: control/spawner.py works out
+# which row to click from a weapon's index among its LIVE classmates. A dead
+# name left in here shifts every gun below it in that category by one row, and
+# a mis-clicked row spawns the wrong gun rather than failing.
 
 # ════════════════════════════════════════════════════════════
 # Attachments currently in the game
@@ -119,6 +123,19 @@ VAULTED = {
 # spawner order. `asset` is the AttachmentDetector template stem, so a drag can
 # be verified by classifying the slot afterwards; None means this repo has no
 # template yet and the slot can only be checked as non-empty.
+#
+# A FEW STEMS ARE OURS, NOT THE GAME'S, and they are marked `# recovered`. The
+# game added these attachments after the art dump this repo unpacked, so there
+# is no shipped file to name them after — the only picture of them is the one
+# tools/solve_template.py recovers off the screen. The stem still has to start
+# with the slot's prefix, because AttachmentDetector.SLOT_PREFIXES routes on it.
+#
+# THE ALTERNATIVE WAS LEAVING THEM None, AND None IS NOT NEUTRAL. A key with no
+# asset is invisible to the template bank, so the icon does not read as unknown
+# — the nearest neighbour wins instead, confidently: every 多倍率混合瞄具 in the
+# corpus reads `scope_6x`, 10 for 10. Worse, `None` also blocked the repair:
+# score_attachments builds its files by asset stem, so the three parts most in
+# need of a recovered picture were the three it silently skipped.
 #
 # `classes` is the weapon-class list the game itself prints in the item name —
 # e.g. 消焰器 (突击步枪、精确射手步枪、O12、S12K). That parenthesis is the
@@ -193,11 +210,13 @@ ATTACHMENTS = {
                        'asset': 'Muzzle_Suppressor_SniperRifle_C', 'classes': ('DMR', 'SR')},
     # Added after this repo's template pack was built — no icon to match against.
     'brake_ar':       {'slot': 'muzzle', 'zh': '枪口制退器 (突击步枪、精确射手步枪、O12)',
-                       'asset': None, 'classes': ('AR', 'DMR')},
+                       'asset': 'Muzzle_Brake_Large_C',   # recovered
+                       'classes': ('AR', 'DMR')},
 
     # ── 枪托 (stock) ──
     'heavy_stock':    {'slot': 'stock', 'zh': '重型枪托 (冲锋枪, 突击步枪, M249)',
-                       'asset': None, 'classes': ('SMG', 'AR', 'LMG')},
+                       'asset': 'Stock_Heavy_C',          # recovered
+                       'classes': ('SMG', 'AR', 'LMG')},
     'tactical_stock': {'slot': 'stock', 'zh': '战术枪托 (冲锋枪, 突击步枪, M249)',
                        'asset': 'Stock_AR_Composite_C', 'classes': ('SMG', 'AR', 'LMG')},
     'bullet_loops':   {'slot': 'stock', 'zh': '子弹袋 (霰弹枪, 狙击步枪, Win94)',
@@ -225,7 +244,11 @@ ATTACHMENTS = {
     'scope_15x':      {'slot': 'scope', 'zh': '15倍瞄准镜',
                        'asset': 'Upper_PM2_01_C', 'classes': ('DMR', 'SR')},
     'variable':       {'slot': 'scope', 'zh': '多倍率混合瞄具',
-                       'asset': None, 'classes': ('AR', 'DMR', 'SMG', 'LMG', 'SR')},
+                       'asset': 'Upper_Variable_C',       # recovered, NOT YET
+                       # CAPTURED — the stem reserves the name so a run can
+                       # fill it; until then there is no file and this key
+                       # still reads as scope_6x.
+                       'classes': ('AR', 'DMR', 'SMG', 'LMG', 'SR')},
 }
 
 # ════════════════════════════════════════════════════════════
@@ -329,11 +352,6 @@ GRIP_ONLY = {
 # Queries
 # ════════════════════════════════════════════════════════════
 
-def is_live(weapon):
-    """False for weapons removed from the game."""
-    return weapon in ROSTER and weapon not in VAULTED
-
-
 def weapon_class(weapon):
     entry = ROSTER.get(weapon)
     return entry[0] if entry else None
@@ -352,7 +370,7 @@ def fits(weapon, att_key):
     exclusions.
     """
     att = ATTACHMENTS.get(att_key)
-    if not att or not is_live(weapon):
+    if not att or weapon not in ROSTER:
         return False
     if not has_slot(weapon, att['slot']):
         return False
@@ -386,11 +404,9 @@ def unverified():
 
 
 if __name__ == '__main__':
-    live = [w for w in ROSTER if is_live(w)]
-    print(f'{len(live)} live weapons, {len(ATTACHMENTS)} attachments, '
-          f'{len(VAULTED)} vaulted')
+    print(f'{len(ROSTER)} weapons, {len(ATTACHMENTS)} attachments')
     print(f'unverified slot lists: {", ".join(unverified())}')
-    for w in live:
+    for w in ROSTER:
         c = compatible(w)
         n = sum(len(v) for v in c.values())
         print(f'  {w:9s} {weapon_class(w):3s} {n:3d} fits  '

@@ -226,10 +226,22 @@ check('a slot that should be empty is not', [x['slot'] for x in f], ['grip'])
 f = kit_faults({'muzzle': 'comp_ar'}, worn(muzzle='supp_ar'))
 check('a slot holding the wrong thing', [x['key'] for x in f], ['comp_ar'])
 check('  which is a real fault', f[0]['verifiable'], True)
-# brake_ar has no icon template: the slot can be read as occupied, never as
-# holding a brake. "Cannot be proven" is a different verdict from "is wrong".
-f = kit_faults({'muzzle': 'brake_ar'}, worn(muzzle='comp_ar'))
+# A part with no icon template: the slot can be read as occupied, never as
+# holding that part. "Cannot be proven" is a different verdict from "is wrong".
+#
+# THE KEY IS SYNTHETIC ON PURPOSE. This used to name brake_ar, and it went red
+# the day brake_ar got a template — the assertion was riding on which
+# attachments happened to be uncovered rather than on the branch it meant to
+# cover, and today every entry in ATTACHMENTS has an asset. The branch is not
+# dead: it is what the next attachment the game adds will land in.
+ATTACHMENTS['__untemplated__'] = {'slot': 'muzzle', 'zh': 'x',
+                                  'asset': None, 'classes': ('AR',)}
+f = kit_faults({'muzzle': '__untemplated__'}, worn(muzzle='comp_ar'))
 check('an untemplated part cannot be verified', f[0]['verifiable'], False)
+check('  and every real attachment now HAS a template',
+      [k for k, v in ATTACHMENTS.items()
+       if not v.get('asset') and not k.startswith('__')], [])
+del ATTACHMENTS['__untemplated__']
 
 
 # ════════════════════════════════════════════════════════════

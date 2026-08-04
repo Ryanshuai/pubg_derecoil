@@ -78,6 +78,8 @@ self.ac.pointer.drag(src, dst)       # ✗ 绕过了 _reject()
 
 `CaptureRun.load_dir(<目录>)` 读得了三种形状：现行 `manifest.json`、旧 ADS run 的 `index.jsonl`+`meta.json`、旧模板 run 的 `index.json`。旧 run 是**只读**的，`save()` 直接抛——在 867 帧不可再生的数据旁边再写一份索引就是第二个真值来源。
 
+`labelled()` 还会挡掉**自相矛盾**的标签（`conflicts()`）：同一个截图文件被两条 entry 说成不同的东西时，至多一条描述的是磁盘上的像素，而文件本身分不出是哪条。这不是假想——`collect_templates` 的库存行图叫 `row00__sks__lbg0.png`，名字里没有轮次，于是多轮 run 的后一轮直接覆盖前一轮的文件，两条 entry 却都留着。7 个 run、130 个文件、**580 条标签**，有一个文件被 12 个配件同时声称。文件名已经加上轮次了；存量的图一张没删，`entries` 照样列出来，只是 `labelled()` 不再把它们当真值发出去。
+
 ## 三个反复踩的坑
 
 **一、`pixi run <task>`，别裸 `python`。** 裸 `python` 会被一个坏掉的 nsight-compute bat 劫持。

@@ -83,8 +83,7 @@ import numpy as np
 from capture_run import CaptureRun, LABEL_REQUESTED
 from config import (HUD_REGIONS, TAB_PIXEL_THRESH, TAB_COUNT_MIN,
                     TAB_COUNT_MAX)
-from detector.attachment_catalog import (ATTACHMENTS, ROSTER, SLOTS, fits,
-                                         is_live)
+from detector.attachment_catalog import ATTACHMENTS, ROSTER, SLOTS, fits
 from detector.cropper import win32_cap
 from detector.tab_detector import TabTypeDetector
 from detector.attachment_detector import SLOT_DETAIL_MIN, SLOT_NAMES
@@ -197,8 +196,6 @@ def hosts_for(keys):
     while remaining:
         best, cover, rank = None, (), -1
         for w in ROSTER:
-            if not is_live(w):
-                continue
             cov = tuple(k for k in remaining if fits(w, k))
             r = 0 if SLOTS.get(w, {}).get('conf') == 'guess' else 1
             if (len(cov), r) > (len(cover), rank):
@@ -900,11 +897,19 @@ class Collector:
                 item = found[row] if row < len(found) else None
                 # No key in the name and no label: at this moment nobody knows
                 # which part sits in this row, and the game's own sort is why.
-                # relabel() fills both in once the fits have said. The row and
-                # the round are in the name so it can find them again.
+                # relabel() fills both in once the fits have said.
+                #
+                # THE ROUND IS IN THE NAME BECAUSE ROW 0 IS NOT ONE THING. Each
+                # round racks a different part, so `row00 at lbg0` names a
+                # different picture every round. Without `r{n}` the second
+                # round overwrote the first round's file and left its manifest
+                # entry pointing at the new pixels under the old key — silently,
+                # since both are real row crops of real parts. Seven runs on
+                # disk carry the damage; CaptureRun.conflicts() finds it and
+                # labelled() refuses to hand any of it out.
                 shots.append(self._shot(
                     frame[y0:y1, x0:x1],
-                    f'row{row:02d}__{wname}__{tag}.png',
+                    f'row{row:02d}__{wname}__r{tag_n}__{tag}.png',
                     'rows', None, (y0, x0, y1 - y0, x1 - x0),
                     (item.key or '') if item else '', False, row=row))
 
@@ -1540,10 +1545,10 @@ def main():
 
     weapons = [w.strip() for w in (args.weapon or '').split(',') if w.strip()]
     if args.plates and not weapons:
-        weapons = [w for w in ROSTER if is_live(w)]
-    dead = [w for w in weapons if not is_live(w)]
+        weapons = list(ROSTER)
+    dead = [w for w in weapons if w not in ROSTER]
     if dead:
-        ap.error(f'not a live weapon: {", ".join(dead)}')
+        ap.error(f'the spawner cannot produce: {", ".join(dead)}')
 
     if args.as_is:
         if not args.label:
@@ -1662,9 +1667,17 @@ def main():
                           f"— {rec.get('error')}")
                 elif rec:
                     print('    库存 emptied to the floor')
+            # THE BACKPACK IS ASKED FOR EVERY ROUND THAT SPAWNS PARTS, not
+            # only the first. An attachment with no backpack does not refuse
+            # to spawn — it goes somewhere else, the 库存 rows shift under the
+            # drag targets, and every step afterwards reads back a part nobody
+            # asked for (control/spawner.py says the same thing about harvest).
+            # `give_many` folds a backpack that is already worn into nothing,
+            # so asking again is a no-op, while assuming it survived N rounds
+            # of dropping things on the floor is a guess that costs a whole
+            # round when it is wrong.
             got = col.round(weapon, ks, fit, args.angles, i,
-                            spawn=not args.as_is,
-                            backpack=(i == 1 or re_entered) and bool(ks))
+                            spawn=not args.as_is, backpack=bool(ks))
             if got is None:
                 print(f'    [!] round {i} produced nothing; carrying on')
                 continue

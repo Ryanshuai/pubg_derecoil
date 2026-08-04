@@ -89,9 +89,43 @@ control/spawner.py / control/inventory.py / control/lobby.py。
 
 这条是 2026-08-01 端到端验证时偶然撞见的，不是任何机制报出来的。**游戏每次更新都会产生这类漂移**，所以：
 
-- 改完检测器，跑参考截图对比，别信"看起来没问题"
+- 改完检测器，跑 `pixi run attachments`（全量真值 + margin），别信"看起来没问题"
 - 报告准确率时必须说明用的是哪个样本集，以及集里有没有难例
 - 发现漂移 → 见下方「坏了找谁」
+
+### 配件图标：装的是「屏幕上的样子」，不是游戏美术资源
+
+`training_data/pubg_assets/Item/Attachment/` 现在有两种文件，**同一个 asset 的多个变体全部参与匹配，最好的那个代表它**（跟枪名板的多语言变体同一套机制，理由不同）：
+
+| | 哪来的 |
+|---|---|
+| `Item_Attach_Weapon_<Asset>.png` | 游戏解包美术 |
+| `Item_Attach_Weapon_<Asset>.solved.png` | 从屏幕反解出来的 |
+
+**为什么美术资源天生对不上**：游戏画一个图标要先缩放、加黑描边、再混进半透明面板（`blend_attachment`）。美术图是这条链的**输入**，检测器看到的是**输出**。`collect_templates.py` 的 `paired_sweep` 拍同一个槽的空/满两张，`solve_template.py` 逐像素最小二乘反解出 `icon` 和 `alpha`，那才是屏幕上的东西。
+
+实测（`pixi run attachments`，760 张 `LABEL_REQUESTED` 槽位样本，16 个 run）：
+
+| | 准确率 | margin 中位 | 修好的 |
+|---|---|---|---|
+| 只有美术图 | 659/734 = **0.898** | 3.9 | — |
+| 加 solved 变体 | 701/734 = **0.955** | 10.9 | `thumb_grip` 0/25→25/25、`angled_grip` 0/16→15/16、`comp_sr` 31/33→33/33 |
+| 再补上三个「没有美术图」的 | **749/760 = 0.986** | 11.2 | `brake_ar` 0/18→18/18、`heavy_stock` 0/10→10/10、`variable` 0/10→10/10 |
+
+**最后那一行的三个件，两个的数据早就在磁盘上躺着，是 `asset: None` 把它们锁住的。** 目录里 `asset` 为 None 表示「本仓库没有它的模板」，而建库代码按 asset 名给文件命名——于是最需要反解图标的三个件，恰好是建库时被静默跳过的三个。现在它们的 stem 是**我们自己起的**（`Muzzle_Brake_Large_C` / `Stock_Heavy_C` / `Upper_Variable_C`，目录里标着 `# recovered`），只要前缀对得上 `SLOT_PREFIXES` 就够——游戏在这套美术资源之后才加的件，本来就没有官方文件名可抄。
+
+`asset: None` 从来不是中性的：**没有模板的件不读成未知，读成最近邻**。`variable` 稳定读成 `scope_6x`，10/10。
+
+**hold-out 数字一模一样（701/734）**：`--holdout` 对每个 run 用「不含该 run 解出的模板」的库去评它自己的样本。两个数相等说明模板重建的是图标，不是它自己那批截图。另一条独立证据：193140 和 211051 两个 run 各自解出的同一个图标，在 alpha>0.5 的像素上逐点差 **0.08–0.18 灰阶**，alpha 差 0.006。
+
+还没做完的：
+
+- `scope_2x` 仍有 6/16 被 `scope_6x` 吃掉。`scope_6x` 的解是全库最弱的一个（recon 2.06，只有一个 run 有它），而两个镜子的图标差别几乎只有一个数字。
+- `bullet_loops` `choke` `duckbill` `light_grip` `quickext_smg` `scope_8x` `tactical_stock` 没进过配对采集，还在用美术图。前三个 ROSTER 里没有活枪能穿，采不了。
+
+`supp_ar` / `supp_sr` 的 margin 只有 1.09 / 1.68——同族三根灰管子，靠枪名收窄候选才分得开。**能传枪名就传**。
+
+**代价是一次 Tab 读取从 80 ms 涨到 123 ms**（`tab_items.detect`：10 个槽 + 两栏 24 行盲匹配；`read_slots` 单独是 15.5 → 29.5 ms）。模板数 55 → 85。两阶段匹配里**只有粗排省下来了**：粗排每个 asset 只跑无 tag 的那张，精排（9 偏移）才跑全部变体。**反过来不行**——让粗排挑变体会丢掉 12 行参考里的 2 行：无偏移时美术图和 solved 在列表行上会换位，而精排加的那一个像素偏移正是分开它们的东西。跟 `SHORTLIST` 是同一条教训：便宜的那一趟可以排序，不可以定案。
 
 ## 第二铁律：几何声明要端到端验证
 
@@ -102,6 +136,11 @@ control/spawner.py / control/inventory.py / control/lobby.py。
 ---
 
 ## 踩过的坑（都有实测数字）
+
+**库存行的模板还是老的一套，槽位的改进没跟过去。**
+行图标是同一份美术在**另一个尺寸和内边距**下渲染的（`temp_debug/calib_inv_icon.py` 标的就是这个几何），而 solved 模板是从**槽位**的混合里解出来的等效图标，换个尺度就带系统偏差。实测 `docs/tab_inventory.png` 12 行人工真值：solved 变体把 `thumb_grip` 从 MSE 441 压到 175（row9 已经是第一名，margin 1.44），但 `ROW_MSE_MAX=150` 正好卡在外面，所以那两行仍然读不出来，**10/12**。
+
+要补齐得从**行**的捕获里解，而不是把槽位模板拿去缩放。行捕获没有配对的空行，但一行在 10 个背景下拍过——跨背景不动的像素就是不透明像素，这条路不需要配对。前提是重采一轮：见下面那条 rows 真值的坑。
 
 **列表行位置：用图标，别用文字带。**
 标签会折行，且折行时**不在行内垂直居中**。用文字带测「附近」栏读出 15px 偏差和一个假的 66px pitch；用图标块测得到真值：首行 y=199，pitch 81.55，两个面板共用。
@@ -245,6 +284,7 @@ ammo.read(crop)['glyphs']     # 每个字形的 digit / iou / margin，排错用
 | `training_data/highlight_eval/` | 260 高亮 + 439 非高亮，带标签 | `temp_debug/eval_highlight_jitter.py` 配对评测。`errors_v4/` 是空的——**这个集里没有难例** |
 | `docs/spawner/runs/` | spawner 全部分类的菜单截图 | 游戏当前物品清单的事实来源 |
 | `docs/compat/runs/<stamp>/` | 30 把枪各一张全屏 + `summary.json` | 槽位几何回归（`scan_compat.py --report <stamp>`）。**不是模板真值集**：枪上装的是 PUBG 自动配的，没人指定过，只能靠被测检测器认——拿它标模板是循环论证 |
+| `docs/attachments/runs/<stamp>/` | 配件采集：槽位配对图（空/满同角度）、库存行图、枪名板 | 配件模板的真值集，`pixi run attachments` 吃它。**槽位那半可信，库存行那半不可信**——见下 |
 | `docs/lobby/*.png` | 5 张：大厅 / 训练场 / 训练场+Tab / 正式局结算 / ESC 菜单 | 在不在局内的回归，`tools/verify_lobby_detector.py` 五条全过。每张的 `bar_max`/`ping_frac` 实测值见 `docs/lobby/README.md` |
 | `docs/ads/runs/**/*.jpg` | 610 张全屏帧（本为 ADS 采集） | 顺带是弹药数字的离线回归集：`tools/probe_ammo_ocr.py` 在 921 张里读出 869，其余 52 张确实没数字 |
 | `docs/ads/runs/*/index.jsonl` | 每帧标了 scope / state / t_ms / 槽位实读 asset | 开镜检测评测集，492 帧。**别照 `state` 当真值**：`20260801_222936` 的 `state=ads` 其实是按住右键的肩瞄、从未开镜；`20260802_015545` 整轮在错的槽位上。两个 run 的 `meta.json` 里都写了原因，`calibration/fit_ads_detector.py` 顶部的 `NOT_SCOPED` / `SCOPED` 是修正后的真值。**用 `CaptureRun.load_dir()` 读就不会踩**：旧 run 的标签一律降级为 `LABEL_DETECTED`，`labelled()` 对它们返回空，`state` 只作为「采集过程干了什么」的事实存在，不冒充「屏幕上是什么」 |
@@ -268,8 +308,14 @@ ammo.read(crop)['glyphs']     # 每个字形的 digit / iou / margin，排错用
 - `ammo_detector` 的十个字模全部采自**三位数**（150..121）。两位、一位实测逐个读对，但它们从没被单独重采过；哪天游戏改成按位数用不同字号，会先在这里翻车，重跑一次 `--verify` 就能看出来。
 - `ads_detector` 的 492 帧全部来自 **Kar98k、同一片场地、全程未开火**。没验过的：开火时后坐力抖动会不会糊掉准星（最可能翻车的一条，压枪场景恰恰全程在开火）、其他枪的腰射准星是否同形、载具/趴姿等会改准星的状态、以及 4 倍以下的其他红点变体。要上压枪主循环，先补一组**开火中**的帧
 - `lobby_detector` 的六态里，**加载页一张样本都没有**——`FULLBLEED` 现在被结算页和退出确认框覆盖，它对加载页的判定仍是照定义推的（活体转移里观测到了，没存图）。另外 **正式局的 ESC 菜单**没采过，`leave_entry_confirmed()` 届时会失配、拒绝点击，所以**正式局现在退不出来**（训练场可以）。补齐跑 `pixi run python tools/probe_lobby_transition.py`，全程截图落 `docs/lobby/runs/<n>/`。`control/lobby.py` 顶部的 `OBSERVED DURATIONS` 三项也还是空的
-- `Lower_ThumbGrip_C`、`Stock_UZI_C` 已漂移
-- 枪口制退器、重型枪托、多倍率混合瞄具**没有模板**（游戏后加的）
+- ~~`Lower_ThumbGrip_C`、`Stock_UZI_C` 已漂移~~ 两个都有 solved 变体了，槽位上 25/25 和 10/10。**`thumb_grip` 在库存行里仍然读不出来**（上面那条）。
+- ~~枪口制退器、重型枪托、多倍率混合瞄具没有模板~~ 三个都有了，槽位上 18/18、10/10、10/10。
+- **`control/spawner.py` 在连续多轮里会点错类别行。** 2026-08-03 那轮采集 4 轮废了 3 轮：`col1_row03 would not expand (<panel open, col1_row02 expanded, 6 entries>)`——上一轮展开的类别没收回，下一轮仍按全折叠坐标去点，落在了错的行上。第一轮总是好的。离线 `pixi run panel-state` 是绿的，因为它喂的是存图，看不见跨轮的状态残留。
+- **背包清不空的时候，往后每一轮都会连带废掉。** 同一轮日志里 `库存 still holds 12 row(s) — the drops are not landing`，然后三轮 `no bare host gun`。往 附近 栏扔东西的释放点是固定 y（`DROP_XY`，落在第 4、5 行之间），列表一长就落在已有物品上。`control/inventory.py` 的注释里记着这件事的来龙去脉，那个文件 2026-08-03 深夜正在被改。
+- **库存行（`rows`）的真值集是坏的，一共 930 条里没有一条能用。** 两个独立的原因：
+  - 文件名 `row00__sks__lbg0.png` 不含轮次，多轮 run 里后一轮直接覆盖前一轮的文件，而两轮的 manifest 条目都还在。7 个 run、130 个文件、**580 条标签**，其中一个文件被 12 个不同配件同时声称。`CaptureRun.conflicts()` 现在能查出来，`labelled()` 不再发出这类标签；采集端的文件名已加轮次。
+  - 剩下的 350 条是**行号错位**：游戏把新件插进它自己的排序，采集器当时假设最新的在最后（ff047bc 修的）。证据是拿已验证 0.955 的模板库去读——`row2` 标 `cheek_pad` 读出 `ext_ar` MSE=12 margin=10.5，`row11` 标 `variable` 读出 `vert_grip` MSE=13 margin=9.1。MSE 12 配 10 倍 margin 是正确匹配的样子，不是巧合。**不是统一偏移，改不回来，只能重采。**
+  - 这批图**没删也不会删**，`pixi run attachments` 照样打印它们的得分，只是不计入总数。现在唯一可信的行真值是 `docs/tab_inventory.png` 那 12 行（人工读的）。
 - `attachment_catalog.SLOTS` 的 **`scope` 那一项仍是推断**。2026-08-02 全量扫过 30 把枪（`calibration/scan_compat.py`，run 在 `docs/compat/runs/20260802_155222/`），另外四个槽全部实测，`unverified()` 已清空；但 scope 槽**不画 tile**，存在性读不出来，`SlotDetector` 在那里返回 `unknown`。要确认得靠装一个瞄具。
 - `EXCLUDE` / `ONLY` / `GRIP_ONLY` **一条都没实测**。「某个槽只收部分配件」（汤姆逊枪口只收消音）读不出来——收与不收留下的是同一个空 tile，只能逐个拖。
 
