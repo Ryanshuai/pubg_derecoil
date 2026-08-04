@@ -1424,6 +1424,54 @@ class InventoryControl:
                      f'{rows} row(s) still on the ground after {passes} passes',
                      rows_left=rows or 0)
 
+    def clear_inventory(self, retries=1, passes=4):
+        """Put everything in 库存 on the floor. -> BATCH record.
+
+        The mirror of clear_ground(), and it exists because a FULL 库存 stops
+        the spawner delivering anything at all. That failure is silent from the
+        outside: the spawner reports a successful click (it only ever means the
+        cursor reached the right entry), the item never arrives, and every read
+        afterwards describes a screen nothing happened on. A template collector
+        spent three runs photographing an empty rack that way.
+
+        Same shape as clear_ground for the same measured reason: the panel is a
+        12-row WINDOW, not the pack, so rows below scroll up as the ones above
+        leave and "the count went down" is not a stop condition. "The visible
+        rows did not change" is. Always drags the TOP row, which is the only
+        index that stays valid without re-reading between gestures.
+
+        Whether the drop lands is read back by the row count, not by watching
+        the cursor -- 'the drag missed' and 'it landed and the window refilled
+        from below' look identical mid-gesture.
+        """
+        out = []
+        rows = None
+        for _ in range(passes):
+            view = self.look()
+            rows = view.rows('inventory')
+            if not rows:
+                break
+            before = tuple((getattr(i, 'key', None) or '?') if i is not None
+                           else '-' for i in view.inventory)
+            for _ in range(rows):
+                rec = self.discard(at_inv(0), retries=retries)
+                out.append(rec)
+                if not rec['ok']:
+                    break
+            after = self.look()
+            rows = after.rows('inventory')
+            if not rows:
+                break
+            cur = tuple((getattr(i, 'key', None) or '?') if i is not None
+                        else '-' for i in after.inventory)
+            if cur == before:
+                return batch(out, error=f'{rows} row(s) left and the panel did '
+                                        f'not change — the drops are not '
+                                        f'landing', rows_left=rows)
+        return batch(out, error=None if not rows else
+                     f'{rows} row(s) still in 库存 after {passes} passes',
+                     rows_left=rows or 0)
+
     def transfer(self, src_gun, dst_gun, slots=None, retries=1):
         """Move src_gun's attachments onto dst_gun. -> BATCH record.
 
