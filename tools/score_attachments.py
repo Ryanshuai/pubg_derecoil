@@ -267,9 +267,13 @@ def no_template(corpus):
     """What each part reads as when its own template is TAKEN AWAY. -> code
 
     THE QUESTION THIS ANSWERS is not "is the bank complete". It is what
-    happens on the day it is not: a part the game added, or one no ROSTER
-    weapon can wear so it can never be captured (choke, duckbill,
-    bullet_loops), or one whose art drifted past recognition in an update.
+    happens on the day it is not: a part the game adds, one whose art drifts
+    past recognition in an update, or one the collector cannot reach. That
+    last class used to be choke, duckbill and bullet_loops — not because the
+    game refuses them but because SLOTS had no entry for any shotgun or
+    bolt-action rifle, so fits() answered "no weapon can wear these" and the
+    collector believed it. Two of the three are collected now; duckbill is
+    not, and something will always be in that position.
 
     A MISSING TEMPLATE DOES NOT READ AS NOTHING. It reads as the nearest
     neighbour, confidently and in-catalogue, which is the single most
@@ -326,10 +330,13 @@ def no_template(corpus):
           f'parts would be given a wrong name rather than none if their '
           f'template\n  went missing, which is what an unrecognised part does '
           f'today.')
-    print('  The three that can never be captured — choke, duckbill, '
-          'bullet_loops — are\n  the standing case: no ROSTER weapon wears '
-          'them, so they only ever have\n  shipped art, and if that art '
-          'drifts this table is what happens.')
+    print('  Being SAFE here is not the same as being checked. cheek_pad, '
+          'half_grip,\n  red_dot, scope_6x, uzi_stock, vert_grip and the '
+          'newly-collectable choke and\n  bullet_loops refuse a stranger '
+          'because their shape has no near neighbour,\n  not because anything '
+          'tested the margin. The ones that fail are the families\n  that look '
+          'alike: three grey suppressor tubes, three magazine outlines '
+          'across\n  three calibres, and every reticle against scope_6x.')
     return 0
 
 
