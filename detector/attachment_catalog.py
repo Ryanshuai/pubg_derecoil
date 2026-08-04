@@ -322,6 +322,48 @@ SLOTS = {
     # lists omit.
     'm249':     {'slots': ('scope', 'magazine', 'stock'), 'conf': 'measured'},
     'mg3':      {'slots': ('scope',), 'conf': 'measured'},
+
+    # ── SR and SG ──
+    #
+    # THESE TEN WERE MISSING ENTIRELY until 2026-08-04, and the absence was not
+    # neutral. fits() gates on SLOTS.get(weapon), so with no entry every part
+    # read as incompatible with every shotgun and every bolt-action rifle —
+    # which is precisely the set of weapons that can wear `choke`, `duckbill`
+    # and `bullet_loops`. collect_templates concluded "no live weapon in ROSTER
+    # can wear them" and skipped all three, so the three parts with no
+    # screen-solved template were the three the collector could not reach. A
+    # hole in a compatibility table reads as a fact about the game.
+    #
+    # 2026-08-02's scan covered 30 weapons; ROSTER has 40. Scanned the rest
+    # 2026-08-04 (calibration/scan_compat.py --only ..., run
+    # docs/runs/slot_scan/20260804_131048, 147s).
+    #
+    # `scope` IS DELIBERATELY ABSENT FROM EVERY ENTRY BELOW, and that is not
+    # the same as "no sight fits". SlotDetector returns `unknown` there for
+    # anyone: the scope position draws no tile at all, so an empty slot and an
+    # absent one are pixel-identical (see detector/CLAUDE.md). The entries
+    # above carry 'scope' on inference, from before this was understood; these
+    # carry only what was measured. Settling it needs a sight fitted and read
+    # back, per the calibrate-compat skill — until then a caller wanting to
+    # mount an optic on one of these will be refused, which is the safe
+    # direction: the unsafe one drops the part on the floor.
+    'kar98k':   {'slots': ('muzzle', 'stock'), 'conf': 'measured'},
+    'm24':      {'slots': ('muzzle', 'magazine', 'stock'), 'conf': 'measured'},
+    'awm':      {'slots': ('muzzle', 'magazine', 'stock'), 'conf': 'measured'},
+    # Integrated 2.7x, and the scan found no muzzle or magazine tile either.
+    'win94':    {'slots': ('stock',), 'conf': 'measured'},
+    # No tile anywhere but the scope position. Same shape as mg3.
+    'lynx':     {'slots': (), 'conf': 'measured'},
+    's686':     {'slots': ('muzzle', 'stock'), 'conf': 'measured'},
+    's12k':     {'slots': ('muzzle', 'magazine'), 'conf': 'measured'},
+    's1897':    {'slots': ('muzzle', 'stock'), 'conf': 'measured'},
+    # grip, which no other shotgun has; the magazine tile read EMPTY rather
+    # than filled, and an empty tile proves the slot exists just as well.
+    'dbs':      {'slots': ('grip', 'magazine'), 'conf': 'measured'},
+    # Scanned separately (run 20260804_131534) — the first attempt died on a
+    # Tab that would not open, and a guess was written in its place for about
+    # four minutes before the re-scan refuted it. No tile anywhere.
+    'o12':      {'slots': (), 'conf': 'measured'},
 }
 
 # Per-weapon attachments that its class allows but this weapon rejects.
