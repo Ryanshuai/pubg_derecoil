@@ -53,12 +53,19 @@ different confidence:
           s12k dbs              red_dot mounted    mse 51   margin 15
           win94 s686 s1897 o12  nothing mounted    mse ~1900  margin 1.0
 
-      The first six are settled. The last four are NOT settled as absent —
-      "the game did not fit one" is weaker than "there is nowhere to fit one",
-      because the pack may have run out of sights the weapon would take. They
-      are left without 'scope', which refuses an optic there; that is the safe
-      direction, since the other one drops the part on the floor. Settle them
-      by spawning each with a known sight in the pack.
+      The remaining four were settled the same day by making it a CONTROLLED
+      test rather than an opportunistic one: four red dots put in the pack
+      first, then each weapon spawned. o12 mounted one (mse 38, margin 17.2)
+      and has the slot. win94, s686 and s1897 declined a sight that was
+      demonstrably available — o12 came last and still found one — so for
+      those three "no scope slot" is now a measurement and not an absence of
+      evidence.
+
+          o12                   red_dot mounted    mse   38   margin 17.2
+          win94 s686 s1897      declined it        mse ~1800  margin  1.0
+
+      win94 therefore has NO attachment slots at all, which is a real answer
+      for a rifle with an integrated 2.7x.
 
   EXCLUDE / ONLY /      — inferred, still. Which attachments a PRESENT slot
   GRIP_ONLY               accepts cannot be read off a tile: Tommy Gun's
@@ -395,8 +402,10 @@ SLOTS = {
     'dbs':      {'slots': ('scope', 'grip', 'magazine'), 'conf': 'measured'},
     # Scanned separately (run 20260804_131534) — the first attempt died on a
     # Tab that would not open, and a guess was written in its place for about
-    # four minutes before the re-scan refuted it. No tile anywhere.
-    'o12':      {'slots': (), 'conf': 'measured'},
+    # four minutes before the re-scan refuted it. No tile anywhere, and then
+    # a red dot mounted itself on it (mse 38, margin 17.2), so it has the one
+    # slot that draws no tile and nothing else.
+    'o12':      {'slots': ('scope',), 'conf': 'measured'},
 }
 
 # Per-weapon attachments that its class allows but this weapon rejects.
@@ -406,6 +415,24 @@ SLOTS = {
 # the recoil scales were calibrated. Left permissive here (no exclusion) and
 # flagged by unverified() — one drag settles it.
 EXCLUDE = {
+    # MEASURED 2026-08-04, and the first entry in this table that ever was.
+    # S686's muzzle slot is PRESENT and EMPTY (SlotDetector ring 61.1, edges
+    # 0), a choke fits it 10 times out of 10 — and a duckbill spawned into the
+    # backpack instead of onto the gun. The collector's own diagnosis is the
+    # useful part: "per the autofit rule that means the slot was not empty
+    # when it arrived. But the slot reads empty, so the autofit rule is what
+    # does not hold here." The same duckbill fits an S12K 10/10, so it is the
+    # WEAPON refusing the PART — which is exactly what this table is for, and
+    # what none of it had been measured against.
+    #
+    # It also means PUBG's autofit is a usable compatibility ORACLE: a part
+    # that lands on the gun proves the pairing, a part that goes to the pack
+    # with the slot empty disproves it. That is one spawn per (weapon, part)
+    # and no dragging, against the drag matrix this table's docstring assumes.
+    #
+    # s1897 is untested. Its attempt died on a rack-slot mix-up rather than a
+    # refusal, and an inconclusive run is not a fact.
+    's686':  {'duckbill'},
     'groza': {'comp_ar', 'flash_ar', 'brake_ar'},   # suppressor is its only muzzle
     'tommy': {'comp_smg', 'flash_smg'},             # suppressor only
 }
