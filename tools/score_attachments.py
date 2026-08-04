@@ -391,20 +391,36 @@ COUNTED = ('slots', 'reference rows')
 
 # A RATCHET, NOT A TARGET. Full marks are not reachable today and pretending
 # otherwise would make this task permanently red, which is how a check stops
-# being read. What is not reachable, measured 2026-08-03:
+# being read. What is not reachable, re-measured 2026-08-04 after the 14-round
+# collection (docs/attachments/runs/20260804_131708) which nearly doubled the
+# corpus, 760 crops -> 1393:
 #
-#   scope_2x             6 of 16, eaten by scope_6x. scope_6x's own solve is
-#                        the weakest in the bank (recon 2.06, from the only
-#                        run that has it) and the two reticle icons differ in
-#                        little more than a number.
-#   thumb_grip           2 reference rows: the solved icon is a SLOT-scale
-#                        picture and a list row renders the art smaller
-#   5 stray <nothing>    one each of angled_grip, cheek_pad, half_grip, holo,
-#                        supp_smg
+#   scope_2x             20 of 26, still eaten by scope_6x, and no longer for
+#                        the reason recorded before. scope_6x's solve was
+#                        "the weakest in the bank, from the only run that has
+#                        it"; it now has 40 samples and a margin of 5.57 and
+#                        scope_2x did not improve. The two reticle icons
+#                        differ in little more than a number.
+#   6 stray <nothing>    one each of angled_grip, cheek_pad, ext_ar,
+#                        half_grip, holo, scope_4x, and two of supp_smg
+#   thumb_grip           2 reference rows. The solved icon is a SLOT-scale
+#                        picture and a list row renders the art smaller —
+#                        solve_template.py --rows now recovers row-scale
+#                        icons, but nothing consumes them yet.
+#
+# What DID move, and why the numbers below are not the old ones: the 2026-08-04
+# collection reached every attachment for the first time. choke and
+# bullet_loops went from uncollectable (SLOTS had no shotgun or bolt-action
+# entry, so fits() said no weapon could wear them) to 10/10 at margins 37.9
+# and inf; light_grip, tactical_stock, quickext_smg and scope_8x went from
+# art-only to 16/16, 10/10, 14/14 and 10/10.
+#
+# HELD OUT IS IDENTICAL TO DIRECT, 1379/1393 both ways. That is the number
+# that cannot be flattered: no template scored a run it was solved from.
 #
 # Going ABOVE the baseline fails too, on purpose: it means one of the above
 # was fixed and this comment is now a lie. Re-measure, then raise the numbers.
-BASELINE = {'slots': (749, 760), 'reference rows': (10, 12)}
+BASELINE = {'slots': (1379, 1393), 'reference rows': (10, 12)}
 
 
 def score(rows, title):
