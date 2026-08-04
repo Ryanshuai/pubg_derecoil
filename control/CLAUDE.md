@@ -256,3 +256,4 @@ from press.pico_mouse import other_agents
 
 - ~~**Tab 界面还没有对应的 control。**~~ **✅ 2026-08-02 完成**：`calibration/attach_control.py` → `control/inventory.py`，`AttachControl` → `InventoryControl`。它本来就只依赖 detector/press/control，搬过来 `pixi run layering` 一次通过。标定用的批量流程（`build` / `run_plan` / `plan_equip`）跟着一起走了——它们是纯函数，跟驱动放一起比拆开更好用。
 - **`goto()` 的 `path` 字段还在攒数据。** 它不预设这个菜单是手风琴还是多开——直接点目标再读回，`path='direct'` 说明是手风琴（1 击），`path='cleared-first'` 说明不是（3 击）。跑够了把结论写进 `docs/game_quirks.md`。
+- **`unequip` 的新读回没有实机跑过**（2026-08-04 加的，见上面「面板到面板的拖拽」）。它现在除了验源槽空，还要求**目标列表多一行**——比以前严，所以**可能把本来通过的卸载判成失败**。离线回归全绿，但那证明不了游戏会怎么反应。跑之前先验一次：刷 `backpack3` + 一把枪 + 一个配件，装上再卸，看 `ok` 和 `checks`。两个已知边界：两个列表都满 12 行时判据失效（有退路，会打印一行说明并降级为不验证）；地面栏本来就长的时候，`panel_rows` 数的是**窗口**不是背包。当时要测撞上游戏掉回大厅，没测成。

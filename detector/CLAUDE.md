@@ -316,6 +316,16 @@ ammo.read(crop)['glyphs']     # 每个字形的 digit / iou / margin，排错用
   - 文件名 `row00__sks__lbg0.png` 不含轮次，多轮 run 里后一轮直接覆盖前一轮的文件，而两轮的 manifest 条目都还在。7 个 run、130 个文件、**580 条标签**，其中一个文件被 12 个不同配件同时声称。`CaptureRun.conflicts()` 现在能查出来，`labelled()` 不再发出这类标签；采集端的文件名已加轮次。
   - 剩下的 350 条是**行号错位**：游戏把新件插进它自己的排序，采集器当时假设最新的在最后（ff047bc 修的）。证据是拿已验证 0.955 的模板库去读——`row2` 标 `cheek_pad` 读出 `ext_ar` MSE=12 margin=10.5，`row11` 标 `variable` 读出 `vert_grip` MSE=13 margin=9.1。MSE 12 配 10 倍 margin 是正确匹配的样子，不是巧合。**不是统一偏移，改不回来，只能重采。**
   - 这批图**没删也不会删**，`pixi run attachments` 照样打印它们的得分，只是不计入总数。现在唯一可信的行真值是 `docs/tab_inventory.png` 那 12 行（人工读的）。
+  - **重采就能补齐，命令是一条**（12 轮 / 38 个件 / 约 40–50 分钟，占游戏前跟用户说一声）：
+
+    ```
+    pixi run python calibration/collect_templates.py --all --targets slots,rows
+    pixi run python tools/score_attachments.py --write     # 反解 + 重建 + 评分
+    pixi run attachments --holdout                          # 留一验收
+    ```
+
+    `bullet_loops` / `choke` / `duckbill` 会被跳过——ROSTER 里没有活枪能穿，`--plan` 会直接说。**采完 baseline 会变**（`score_attachments.py: BASELINE` 是棘轮，变好也会红），按它打印的数字更新，并把那段「够不着的清单」改成新的事实。
+  - 行模板本身还是从**槽位**尺度解出来的，换到列表尺度带系统偏差（`thumb_grip` 在行里 MSE 175，卡在 `ROW_MSE_MAX=150` 外面）。重采之后可以从**行**的捕获直接解：行没有配对的空行，但同一行拍了 10 个背景，**跨背景不动的像素就是不透明像素**，这条路不需要配对。
 - `attachment_catalog.SLOTS` 的 **`scope` 那一项仍是推断**。2026-08-02 全量扫过 30 把枪（`calibration/scan_compat.py`，run 在 `docs/compat/runs/20260802_155222/`），另外四个槽全部实测，`unverified()` 已清空；但 scope 槽**不画 tile**，存在性读不出来，`SlotDetector` 在那里返回 `unknown`。要确认得靠装一个瞄具。
 - `EXCLUDE` / `ONLY` / `GRIP_ONLY` **一条都没实测**。「某个槽只收部分配件」（汤姆逊枪口只收消音）读不出来——收与不收留下的是同一个空 tile，只能逐个拖。
 
