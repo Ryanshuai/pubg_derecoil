@@ -1,6 +1,7 @@
 """How fast can the Tab screen be dragged and still land? Needs the game.
 
     pixi run python tools/probe_drag_speed.py --reps 6
+    pixi run python tools/probe_drag_speed.py --panel --reps 6
 
 Every calibration run fits attachments through InventoryControl, so the drag
 gesture's timing is on all of their critical paths. The numbers in
@@ -16,6 +17,19 @@ from, or onto the floor, and nothing downstream notices.
 
 Reports, per setting: landed / attempted, and the median seconds per drag. A
 setting is only usable if it landed every time.
+
+TWO GESTURES, AND THE SECOND ONE IS WHERE THE BUGS WERE. `--panel` sweeps
+库存 -> 附近 instead: destination is a whole list, not a slot. That path had no
+readback at all until 2026-08-04, so it could fail every single time while
+reporting success, and it is the path clear_inventory / discard / drop_weapon
+all take.
+
+⚠ A SWEEP LOOP MUST NOT READ THE SCREEN BETWEEN GESTURES. A detection pass is
+~123 ms during which the cursor sits still, which is precisely what `drop`
+controls — put one in the loop and every value looks equally good. Two
+separate measurements were ruined this way in one evening. `panel_cycle` has
+none; `one_cycle`'s is outside the timer AND its cost is what makes the slot
+sweep insensitive to `drop`, so read that number with the same suspicion.
 """
 import argparse
 import os
@@ -31,7 +45,7 @@ try:
 except (AttributeError, OSError):
     pass
 
-from control.inventory import InventoryControl
+from control.inventory import InventoryControl, at_inv, at_ground
 from control.focus import ensure_focus, focus_keeper
 from control.spawner import SpawnerControl
 from press.pico_mouse import get_mouse
@@ -43,6 +57,7 @@ SWEEPS = [
     ('grab',   [0.12, 0.06, 0.03, 0.01]),   # button down -> first move
     ('steps',  [10, 6, 3, 2]),              # interpolated positions on the way
     ('hover',  [0.14, 0.07, 0.03, 0.01]),   # at target -> button up
+    ('drop',   [0.25, 0.15, 0.10, 0.05, 0.0]),   # button up -> cursor may move
 ]
 
 GUN = 'm416'
@@ -51,6 +66,29 @@ SLOT = 'muzzle'
 GUN_SLOT = 2            # the spawner always lands a weapon in slot 2
 
 
+
+
+def panel_cycle(ac):
+    """Drop the top 库存 row on the floor. -> (ok, seconds, err)
+
+    The OTHER drag, and the one the slot cycle above cannot stand in for:
+    its destination is a panel, so until 2026-08-04 nothing read it back and
+    it could fail silently forever. clear_inventory / clear_ground / discard
+    are all this shape, and a 库存 that will not empty fills up, at which
+    point the spawner silently stops delivering.
+
+    NO look() HERE, DELIBERATELY. The slot cycle can afford one outside its
+    timer; this one cannot afford one at all, because the gap it opens is the
+    quantity `drop` controls. A sweep whose loop reads the screen between
+    gestures measures its own read, and reports every value as equally good —
+    that mistake produced a confident "drop can go to 0.0" on the very
+    evening the missing settle was found.
+    """
+    if not ac.look().rows('inventory'):
+        return False, 0.0, '库存 is empty — spawn parts first'
+    t0 = time.perf_counter()
+    rec = ac.drag(at_inv(0), at_ground(), retries=0)
+    return bool(rec['ok']), time.perf_counter() - t0, rec.get('error')
 
 
 def one_cycle(ac):
@@ -82,6 +120,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--reps', type=int, default=6)
+    ap.add_argument('--panel', action='store_true',
+                    help='sweep the 库存 -> 附近 drop instead of the '
+                         'slot fit/unfit cycle. Different code path, '
+                         'and the one that used to go unverified')
     ap.add_argument('--countdown', type=int, default=6)
     args = ap.parse_args()
 
@@ -99,6 +141,7 @@ def main():
     sc.ensure_panel(False)
     time.sleep(0.5)
 
+    cycle = panel_cycle if args.panel else one_cycle
     mouse = get_mouse()
     ac = InventoryControl(verbose=False)
     if not ac.ensure_tab(True):
@@ -114,7 +157,7 @@ def main():
     print(f'\n=== baseline ({args.reps} cycles, shipped timing) ===')
     base_ok, base_t = 0, []
     for i in range(args.reps):
-        ok, dt, err = one_cycle(ac)
+        ok, dt, err = cycle(ac)
         base_ok += ok
         base_t.append(dt)
         print(f'  {i}: {"ok " if ok else "FAIL"} {dt:.2f}s'
@@ -136,7 +179,7 @@ def main():
             ac.timing[name] = v
             ok_n, times = 0, []
             for _ in range(args.reps):
-                ok, dt, _err = one_cycle(ac)
+                ok, dt, _err = cycle(ac)
                 ok_n += ok
                 times.append(dt)
             med = statistics.median(times)
@@ -158,7 +201,7 @@ def main():
     print(f'\n=== combined, {args.reps} cycles ===')
     ok_n, times = 0, []
     for i in range(args.reps):
-        ok, dt, err = one_cycle(ac)
+        ok, dt, err = cycle(ac)
         ok_n += ok
         times.append(dt)
         print(f'  {i}: {"ok " if ok else "FAIL"} {dt:.2f}s'

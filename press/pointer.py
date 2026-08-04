@@ -46,12 +46,45 @@ CLICK_AFTER_S = 0.035  # after the release, before returning (was 0.09)
 # every DRAG_REARM_S (each re-arm pushes inject_end_ms out, with no release in
 # between), and the release is a CMD_CLICK of duration 0, which expires on the
 # firmware's very next report.
-DRAG_GRAB_WAIT = 0.12   # button down -> first move: the UI has to latch the
+# THE TWO WAITS WERE GUESSES AND THEY DOMINATED THE GESTURE. 120 ms before the
+# first move and 140 ms before the release is 260 ms of the old 420, and the
+# hand measurement says the game wants neither: a real drag moves 3-20 ms after
+# the button goes down and releases 2-5 ms after the last move. These are those
+# numbers with room, not the numbers themselves.
+DRAG_GRAB_WAIT = 0.04   # button down -> first move: the UI has to latch the
                         # item under the cursor before it will follow
-DRAG_STEPS = 10         # interpolated positions. A single jump gets read as a
-                        # click, and the target slot never lights up.
-DRAG_STEP_WAIT = 0.016  # >= one frame at 144 Hz per step
-DRAG_HOVER_WAIT = 0.14  # at the target, before the button comes up
+#
+# THE STEP IS A DISTANCE, NOT A COUNT, and the count is what it used to be.
+# DRAG_STEPS = 10 interpolated positions is fine over a slot-to-slot hop and
+# absurd over the 1600 px from 库存 to 附近: 160 px per update, which the game
+# reads as the cursor leaving rather than as a drag, and the item is let go
+# somewhere in the middle. `the drops are not landing`, from the outside.
+#
+# MEASURED AGAINST A HAND (temp_debug/record_human_drag.py, 34 real drags of
+# 390-464 px, cursor sampled at 1 kHz): median 18-25 px per position update,
+# max 51, arriving every 7.7 ms. So a step of 24 px every 8 ms IS the human
+# gesture, and the same 1600 px now takes ~67 updates instead of 10.
+# THE CLIFF IS MEASURED. 104 px 库存 -> 附近, three drags per step size, each
+# one read back off the screen before the next (2026-08-04):
+#
+#     15 px/step  3/3        52 px/step  1/3
+#     21 px/step  3/3       104 px/step  0/3   (one jump)
+#     35 px/step  3/3
+#
+# So the game accepts up to ~35 px between positions and starts dropping the
+# item past that — which lands exactly where the hand does: 34 recorded human
+# drags moved a median of 18-25 px per update and never more than 51.
+#
+# 32 sits under the cliff with room. It is also why the old DRAG_STEPS=10 was
+# not merely slow but WRONG: ten steps over the 1600 px crossing is 160 px
+# each, three times past the cliff, so that drag could never have worked.
+DRAG_STEP_PX = 32       # px per interpolated position
+DRAG_STEPS_MIN = 4      # 4 x 26 px covers the 104 px hop and stays under it
+DRAG_STEPS_MAX = 120    # ~3800 px, longer than any drag on a 3440-wide screen
+DRAG_STEP_WAIT = 0.008  # measured: a real mouse reports every ~7.7 ms, and the
+                        # game renders at 144 Hz (6.9 ms), so sending faster
+                        # than this cannot put more positions on screen
+DRAG_HOVER_WAIT = 0.04  # at the target, before the button comes up
 DRAG_DROP_WAIT = 0.25   # after release, before the screen is read back
 DRAG_HOLD_MS = 400      # Pico hold per arm; must exceed DRAG_REARM_S by a lot
 DRAG_REARM_S = 0.15     # so a dropped CDC packet still leaves 250 ms of hold
@@ -265,10 +298,14 @@ class Pointer:
         else:
             ctypes.windll.user32.mouse_event(_MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
 
-    def drag(self, src, dst, settle=MOVE_WAIT, steps=DRAG_STEPS,
+    def drag(self, src, dst, settle=MOVE_WAIT, steps=None,
              grab=DRAG_GRAB_WAIT, hover=DRAG_HOVER_WAIT,
              drop=DRAG_DROP_WAIT, buttons=0x01):
         """Press at `src`, travel to `dst`, release there.
+
+        `steps` defaults to one interpolated position every DRAG_STEP_PX, so a
+        long drag is not a sequence of jumps — see that constant, which was
+        measured off a human hand rather than chosen.
 
         False means the cursor did not go where it was told — another process
         moved it, or the coordinate is off-screen. The button is always
@@ -280,6 +317,10 @@ class Pointer:
         """
         sx, sy = int(src[0]), int(src[1])
         tx, ty = int(dst[0]), int(dst[1])
+        if steps is None:
+            dist = ((tx - sx) ** 2 + (ty - sy) ** 2) ** 0.5
+            steps = int(min(DRAG_STEPS_MAX,
+                            max(DRAG_STEPS_MIN, dist / DRAG_STEP_PX)))
 
         self.move_to(sx, sy)
         time.sleep(settle)

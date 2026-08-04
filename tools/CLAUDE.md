@@ -117,7 +117,9 @@ pixi run layering        # 8 条规则，只解析 import，不跑任何东西
 
 **离线回归**（改完代码就跑）
 
-`analysis` · `abs-offset` · `fire` · `frames` · `harness` · `kit` · `locations` · `lobby-detector` · `panel-state` · `recenter` · `runs` · `snaps` · `spawner-plan` · `stocktake-test` · `tab-open` · `tab-watch`
+`analysis` · `abs-offset` · `attachments` · `fire` · `frames` · `harness` · `kit` · `locations` · `lobby-detector` · `panel-state` · `recenter` · `runs` · `snaps` · `spawner-plan` · `stocktake-test` · `tab-open` · `tab-watch`
+
+`attachments` 是 2026-08-03 补的：每一个配件模板 vs 每一张真值裁图，**报 margin 不只报命中**。`--write` 先从配对捕获反解模板再评分，`--holdout` 用「不含该 run 解出的模板」的库去评该 run 的样本——两个数相等才说明模板重建的是图标而不是它自己那批截图。
 
 ⚠ **仍然没有 task 的一个**：`regression_check.py`。它不是不该有，是现在会红——baseline 存的是 52 帧而 `docs/` 下现在有 177 帧全屏图，而 `collect()` 里的 `ViewTracker` 跨帧持有 `prev_patches`，所以新帧插进排序序列会改掉每一帧的前序帧。420 条差异**全部**落在 `view_tracker/` 下，其余检测器逐字段一致——这是语料变了，不是行为漂了。要么重存 baseline，要么让 tracker 每帧独立，在那之前它不该进 task 假装绿。
 
@@ -128,7 +130,7 @@ pixi run layering        # 8 条规则，只解析 import，不跑任何东西
 | 主题 | 脚本 |
 |---|---|
 | 后坐力 / 时序 | `probe_recenter` `probe_kick_profile` `probe_impulse_align` `probe_impulse_ab` `probe_shot_latency` `probe_input_latency` `probe_pitch_range` `probe_ammo_during_fire` |
-| Tab / 配件 | `probe_click_speed` `probe_drag_speed` `probe_equip_gesture` `probe_unequip_gesture` `probe_drop_weapon` `probe_gun_grab` `probe_rack_cycle` `probe_slot_boxes` `probe_tab_watch_live` `probe_toggle_latency` `probe_transfer` |
+| Tab / 配件 | `probe_click_speed` `probe_drag_speed`（`--panel` 测面板到面板那条）`probe_human_drag`（录真人拖拽，不碰鼠标） `probe_equip_gesture` `probe_unequip_gesture` `probe_drop_weapon` `probe_gun_grab` `probe_rack_cycle` `probe_slot_boxes` `probe_tab_watch_live` `probe_toggle_latency` `probe_transfer` |
 | 刷新器 | `probe_spawn_wait` `probe_spawner_layers` `probe_spawner_layout` `probe_submenu_hover` `scrape_spawner` |
 | 大厅 | `probe_lobby_transition` |
 | 采集 / 验收 | `collect_ammo_digits` · `verify_kit` · `verify_refactor` |
@@ -156,8 +158,10 @@ pixi run layering        # 8 条规则，只解析 import，不跑任何东西
 | 压枪偏了但残差看起来正常 | `pixi run impulse-ab` / `tools/probe_impulse_align.py` |
 | 弹药数读不出来或读错 | `tools/probe_ammo_ocr.py` + `--confusion`；重建模板 `tools/collect_ammo_digits.py --write` |
 | 枪名认不出来（中文客户端） | `tools/probe_gun_name_ocr.py --variants` |
+| 配件认不出来或认错 | `pixi run attachments`（全量真值 + margin）；重建模板 `tools/score_attachments.py --write`，单个 run 看解算质量 `tools/solve_template.py <run>` |
 | 某把枪的槽位跟 catalogue 对不上 | `tools/probe_slot_boxes.py <weapon> --strip`（**刷出来的枪不是裸枪**） |
 | 拖拽 / 右键落不下去 | `tools/probe_equip_gesture.py` / `probe_unequip_gesture.py`——两个都读回验证，不看鼠标 |
+| 扔东西扔不掉 / 库存清不空 | `probe_drag_speed.py --panel`（**扫描循环里绝不能有 `look()`**，间隔会掩盖被测变量）；跟真人比对用 `probe_human_drag.py`。两个悬崖的实测值在 `control/CLAUDE.md` |
 | 「category colN_rowM does not exist」 | `pixi run panel-state`；再看 `probe_submenu_hover.py`（光标停在类别行会吃掉第一项） |
 | 游戏更新后面板坐标全错 | `tools/scrape_spawner.py` 重采 → `docs/spawner/layout.json` → `pixi run spawner-plan` 会红出差在哪 |
 | 检测器整体还活着吗 | `pixi run smoke`；改完检测器 `python tools/regression_check.py --compare` |

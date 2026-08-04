@@ -83,13 +83,13 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import HUD_REGIONS
-from detector.attachment_catalog import ATTACHMENTS, ROSTER, fits, has_slot, is_live
+from detector.attachment_catalog import ATTACHMENTS, ROSTER, fits, has_slot
 from detector.attachment_detector import AttachmentDetector, SLOT_NAMES
 from detector.slot_detector import (SlotDetector, ABSENT as SLOT_ABSENT,
                                     EMPTY as SLOT_EMPTY)
-from detector.cropper import win32_cap
+from detector.cropper import capture_screen, win32_cap
 from detector.tab_detector import TabTypeDetector
-from detector.tab_items import TabGrabber, TabItemDetector
+from detector.tab_items import TabGrabber, TabItemDetector, panel_rows
 from detector.tab_layout import (DROP_XY, INV_ROWS, PARK_XY, att_slot_point,
                                  gun_tag_point, row_point)
 from detector.weapon_template_detector import TabWeaponDetector
@@ -98,6 +98,34 @@ from press.pointer import Pointer
 from control.focus import game_focused, ensure_focus
 
 PANEL_KINDS = ('nearby', 'inventory')
+
+
+def panel_counts(src, dst):
+    """Which lists can be counted to see whether this drag landed.
+
+    -> (source panel or None, destination panel) | None
+
+    `dst` with no row means "anywhere in this list", and a list fills from the
+    top with no gaps, so its row count answers "did something arrive". That is
+    the ONLY reading available for a drop into a panel, and it is available
+    whatever the source is — which matters, because the source tells you much
+    less than it appears to:
+
+        unequip() releases a slot onto the floor and verifies the SLOT IS
+        EMPTY. It is empty either way. docs/game_quirks.md has the record: the
+        part reached the floor instead of the backpack and the slot check
+        passed, for months.
+
+    So the source is returned only when it is itself a list row (then its
+    departure is a second, independent signal), and the destination always.
+    """
+    if is_slot(dst) or is_gun(dst) or dst[0] not in PANEL_KINDS:
+        return None
+    if len(dst) > 1 and dst[1] is not None:
+        return None
+    src_panel = (src[0] if src[0] in PANEL_KINDS and len(src) > 1
+                 and src[1] is not None else None)
+    return (src_panel, dst[0])
 GUNS = (1, 2)
 
 # Verification targets.
@@ -235,12 +263,75 @@ def batch(steps, error=None, ok=None, **extra):
     rec.update(extra)
     return rec
 
-# Dropping is verified by polling, so the drag itself does not also sit out a
-# fixed settle after releasing the button — DROP_WAIT below is what used to be
-# press/pointer.py's DRAG_DROP_WAIT of 0.25 s on every single drag, spent
-# before the first look rather than instead of it. The window is unchanged:
-# VERIFY_TIMEOUT absorbed it.
-DROP_WAIT = 0.0
+# THE GAME NEEDS TIME AFTER THE BUTTON COMES UP, and this is that time.
+#
+# It was 0.0 for a while, on the reasoning that a drop is verified by polling
+# so the gesture need not also sit out a fixed settle — the wait was "spent
+# before the first look rather than instead of it", absorbed by
+# VERIFY_TIMEOUT. That reasoning has a hole and the hole is the common case:
+#
+#   A drag whose destination is a PANEL rather than a slot has nothing to
+#   read back. drag() returns `dragged (unverified)` the instant the button
+#   is up, and the next gesture starts hauling the cursor away before the
+#   game has taken the item. Every such drop is lost, and every one of them
+#   reports success.
+#
+# THE FIX WAS THE READBACK, NOT THIS NUMBER — and that is the useful part.
+# Once a panel drop is verified (see is_panel_drop / _await_panel), the poll
+# itself holds the cursor still while it grabs frames, which is exactly what
+# the settle was for. Swept again with retries=0, six drags per value, so a
+# retry could not hide anything (temp_debug/floor_drag_params.py):
+#
+#     0.00  6/6    0.10  6/6    0.20  6/6
+#     0.05  5/6    0.15  6/6    0.25  5/6
+#
+# Flat — AND THAT SWEEP WAS WRONG, in a way worth keeping because it is the
+# second time the same mistake produced a confident number. Its loop called
+# look() before each drag to check 库存 was not empty, and look() is a ~123 ms
+# full detection pass during which the cursor does not move. It fed the very
+# quantity it was varying back in as a constant.
+#
+# The honest measurement is the real caller, where nothing separates one drag
+# from the next. clear_inventory over six attachments, counting RETRIES (each
+# one is a first attempt that did not land):
+#
+#     drop = 0.10    5 retries on 6 drags
+#     drop = 0.25    1 retry  on 6 drags
+#
+# So 0.25 it is. The readback is what makes the gesture correct — it retries
+# until the row is gone — but the wait is what makes it correct on the FIRST
+# try, and a retry costs a full second.
+#
+# MEASURED 2026-08-04, twelve attachments in 库存, clear_inventory() on each:
+#
+#     drop = 0.0     库存 12 -> 12,  附近 0 -> 0     nothing landed, 0/12
+#     drop = 0.25    库存 12 ->  0,  附近 0 -> 12    everything landed, 12/12
+#
+# and swept, three consecutive drags per value with no read between them,
+# which is the only arrangement that fails — a screenshot between two drags
+# IS the wait:
+#
+#     0.00  1/3     0.10  2/3     0.20  3/3
+#     0.05  2/3     0.15  2/3     (temp_debug/sweep_drop_wait.py)
+#
+# 0.20 is the floor and this is one run on one machine, so 0.25 is the value.
+#
+# The symptom is `N row(s) left and the panel did not change — the drops are
+# not landing`, and it is worth knowing what it costs upstream: a 库存 that
+# will not empty is a 库存 that fills, and a FULL 库存 makes the spawner
+# silently deliver nothing. Three template-collection rounds were lost to it
+# before anyone looked at the drag itself.
+#
+# NOT FIXED BY A SHORTER PATH. DROP_XY['nearby'] is 437 px from 库存 row 0,
+# and releasing straight left instead — same y, 230 px — is what a human does
+# (34 recorded drags, horizontal to within 10-33 px). Swept the same way it
+# was no better at any wait and worse at 0.20 (2/3 against 3/3), so the fixed
+# point stays. The distance was never the problem; the missing readback was.
+DROP_WAIT = 0.25
+
+# 附近 ends at x=880 and 库存 starts at 907, so this is the first column
+# inside the target panel: crossing the divider is the whole requirement.
+NEARBY_DROP_X = 870
 
 # Gesture timing handed to Pointer.drag. Defaults are press/pointer.py's, i.e.
 # what shipped before anyone measured them; probe_drag_speed.py is what says
@@ -639,11 +730,16 @@ def kit_faults(want, worn):
 
     -> [{'slot', 'key', 'why', 'verifiable'}, ...]
 
-    `verifiable` is False when the wanted part has no icon template
-    (brake_ar, heavy_stock, variable): the slot cannot be read as holding it,
-    only as holding *something*, so the fault means "cannot be proven" rather
-    than "is wrong". Both are reasons not to record a measurement, but only
-    one of them is a reason to go looking for a failed drag.
+    `verifiable` is False when the wanted part has no icon template: the slot
+    cannot be read as holding it, only as holding *something*, so the fault
+    means "cannot be proven" rather than "is wrong". Both are reasons not to
+    record a measurement, but only one of them is a reason to go looking for a
+    failed drag.
+
+    As of 2026-08-03 no attachment in the catalogue is in that state — the
+    three that were (brake_ar, heavy_stock, variable, all added to the game
+    after this repo's art dump) now carry icons recovered off the screen by
+    tools/solve_template.py. The branch stays for the next one the game adds.
     """
     out = []
     for slot in _slot_order(want):
@@ -699,6 +795,11 @@ class InventoryControl:
         # are worth measuring rather than guessing; tools/probe_drag_speed.py
         # sweeps them and reports the fastest setting that still lands.
         self.timing = dict(DRAG_TIMING)
+        # Built on first failure only: ensure_tab succeeds nearly
+        # always, and loading three templates for a diagnosis that
+        # never runs is pure start-up cost.
+        self._spawner_screen = None
+        self._lobby_screen = None
 
     def _log(self, msg):
         if self.verbose:
@@ -949,18 +1050,74 @@ class InventoryControl:
         # anything, and a retry is only safe while nothing has changed.
         before = self._slot_states(self._frame()) if checks else None
 
-        rec = {'ok': False, 'verified': bool(checks), 'src': src, 'dst': dst,
-               'checks': [], 'attempts': 0, 'error': None}
-        p0, p1 = self.point_of(src), self.point_of(dst)
+        # A PANEL DESTINATION IS READ BACK TOO, by counting rows.
+        #
+        # This branch used to return `dragged (unverified)` the moment the
+        # button came up — the one path in this layer that reported success
+        # without looking, and therefore the one place where a broken gesture
+        # could not be noticed. It hid a drag that landed NOTHING for as long
+        # as it existed: 12 attachments, 12 `dragged`, 0 items moved.
+        #
+        # There is no slot to classify here, but there is a fact that settles
+        # it: lists fill from the top with no gaps, so the source list loses a
+        # row or the destination gains one. panel_rows() reads that off the
+        # ink alone, ~1 ms, no template — which also means it works while
+        # photographing an attachment this repo cannot yet name.
+        #
+        # Deliberately EITHER side: a 12-row window over a fuller pack does
+        # not shrink when one item leaves (rows scroll up), and a full
+        # destination does not grow. One of the two moves in every case that
+        # is not both at once.
+        panels = panel_counts(src, dst)
+        rec = {'ok': False, 'verified': bool(checks) or panels is not None,
+               'src': src, 'dst': dst, 'checks': [], 'attempts': 0,
+               'error': None}
+        p0 = self.point_of(src)
+        p1 = self.point_of(dst, from_y=p0[1])
 
         for attempt in range(retries + 1):
             rec['attempts'] = attempt + 1
+            if panels is not None:
+                f = self._frame()
+                n_src0 = panel_rows(f, panels[0]) if panels[0] else 0
+                n_dst0 = panel_rows(f, panels[1])
+                # BOTH LISTS FULL: the count cannot answer. A panel is a
+                # 12-row WINDOW over a longer pack, so a full destination does
+                # not grow when something arrives and a full source does not
+                # shrink when something leaves. Rather than fail a drag that
+                # probably worked, drop back to reporting the gesture — the
+                # same weaker claim this branch made before it could count,
+                # and it says so out loud instead of returning a wrong verdict.
+                if n_dst0 >= INV_ROWS and (not panels[0]
+                                           or n_src0 >= INV_ROWS):
+                    self._log(f'{loc_str(src)} -> {loc_str(dst)}: both lists '
+                              f'are full at {INV_ROWS} rows — the row count '
+                              f'cannot see this drag, not verifying it')
+                    panels = None
+                    rec['verified'] = bool(checks)
             if not self.pointer.drag(p0, p1, **self.timing):
                 rec['error'] = 'cursor placement failed'
                 return rec
+            if panels is not None:
+                # Runs BEFORE the slot checks and gates them, because "the
+                # slot emptied" is true whether the part reached the panel or
+                # the floor, and only this can tell those apart.
+                moved = self._await_panel(panels, n_src0, n_dst0)
+                rec['checks'] = [{'panel': panels, 'from': (n_src0, n_dst0),
+                                  'ok': moved}]
+                if not moved:
+                    rec['error'] = 'nothing arrived in the target list'
+                    if attempt >= retries:
+                        break
+                    self._log(f'{loc_str(src)} -> {loc_str(dst)}: nothing '
+                              f'arrived, retry {attempt + 2}/{retries + 1}')
+                    continue
+                if not checks:
+                    rec['ok'] = True
+                    self._log(f'{loc_str(src)} -> {loc_str(dst)}: moved')
+                    return rec
             if not checks:
-                # Nothing on the right-hand side to read back. The gesture is
-                # all this module can honestly report on.
+                # Neither a slot nor two panels — nothing this module can read.
                 rec['ok'] = True
                 self._log(f'{loc_str(src)} -> {loc_str(dst)}: dragged '
                           f'(unverified)')
@@ -1133,8 +1290,63 @@ class InventoryControl:
             mouse.key(HID_KEY_TAB, 60)
             if self.await_tab(want):
                 return True
+            # A THIRD FAILURE, AND PRESSING AGAIN CANNOT FIX IT: something
+            # else owns the screen. The item-spawner panel is a menu, and
+            # while it is up the game does not act on Tab at all -- so the
+            # loop above will spend all its tries and report "swallowed",
+            # which reads as a timing problem and is not one. Ask what is
+            # actually there before pressing a fourth time.
+            blocker = self._blocking_screen()
+            if blocker:
+                self._log(f'Tab did not register — {blocker}')
+                return False
             self._log(f'Tab press swallowed; retrying')
         return bool(self.tab_open()) == want
+
+    def _blocking_screen(self):
+        """What is on screen instead of the inventory. -> str | None
+
+        Only screens that SWALLOW Tab belong here. It is a diagnosis, not a
+        repair: getting back into a match is LobbyControl's job and closing the
+        spawner panel is SpawnerControl's, and doing either from here would be
+        a second copy of that driver. Naming the cause in the log is what turns
+        a twenty-minute hunt into one line.
+
+        THE TWO CAUSES, most common first:
+
+          not in a match   the game drops to the lobby on its own -- an idle
+                           kick, a disconnect, a training round ending -- and
+                           every key after that goes to a menu. Found exactly
+                           this way: three runs of "Tab press swallowed" while
+                           the screen showed the lobby with a BEGINNER
+                           TRAINING popup over it.
+          spawner panel    comma opens a menu the game does not act on Tab
+                           beneath. Pressing Tab again cannot help.
+
+        Both read as "swallowed" from inside the retry loop, which is what
+        made them expensive: a timing word for a state problem.
+        """
+        frame = capture_screen()
+        if frame is None:
+            return None
+        if self._lobby_screen is None:
+            from detector.lobby_detector import LobbyDetector
+            self._lobby_screen = LobbyDetector()
+        try:
+            st = self._lobby_screen.state()
+            if not getattr(st, 'playable', True):
+                return (f'the game is not in a match ({st.name}); every '
+                        f'key goes to a menu. control.lobby.LobbyControl.'
+                        f'ensure_in_match() walks back in.')
+        except Exception:
+            pass
+        if self._spawner_screen is None:
+            from detector.spawner_detector import SpawnerDetector
+            self._spawner_screen = SpawnerDetector()
+        if self._spawner_screen.ready and self._spawner_screen.classify(frame):
+            return ('the item-spawner panel is up and the game does not '
+                    'act on Tab beneath it. SpawnerControl.ensure_panel(False).')
+        return None
 
     def hold(self, gun, settle=0.6):
         """Put weapon `gun` in hand, so right-click equips onto it.
@@ -1910,8 +2122,13 @@ class InventoryControl:
 
     # ── Geometry ──
 
-    def point_of(self, loc):
-        """Where to press or release for a location."""
+    def point_of(self, loc, from_y=None):
+        """Where to press or release for a location.
+
+        `from_y` is the y of the point the gesture STARTS at, used only for a
+        panel release: 附近 takes the item anywhere past the divider, so the
+        shortest gesture is straight left at the height it was grabbed.
+        """
         loc = as_loc(loc)
         if is_gun(loc):
             return gun_tag_point(loc[1])
@@ -1926,20 +2143,33 @@ class InventoryControl:
             # row there put the item on the FLOOR instead of in the pack --
             # twice, cleanly reproduced -- and DROP_XY exists because of it.
             #
-            # For 附近 the same objection does not apply, because THE WHOLE
-            # PANEL IS THE FLOOR. "It ended up on the floor" is not a failure
-            # there, it is the request. So the release can go to the FIRST
-            # EMPTY ROW, which is strictly safer than a fixed y: the constant
-            # sits between rows 4 and 5 and therefore lands on top of whatever
-            # is already in the list once the list is that long.
+            # 附近 IS DIFFERENT AND THE DIFFERENCE IS ONLY IN X. The panel is
+            # the floor, so anywhere past the divider is the request; a release
+            # only has to CROSS it. 附近 ends at 880 and 库存 starts at 907, so
+            # 870 is the first column inside, and the gesture from 库存 row 0
+            # is 104 px instead of DROP_XY's 437 — a quarter of the travel on a
+            # drag clear_inventory performs twelve times in a row.
             #
-            # set_rows() and its docstring have described this behaviour since
-            # they were written, and look() has been filling `self.rows` on
-            # every detection pass. Nothing read it. This is that mechanism
-            # connected, not a new one.
-            n = self.rows.get(kind)
-            if kind == 'nearby' and n is not None and 0 <= n < INV_ROWS:
-                return row_point(n, kind)
+            # Y IS FREE, which took three wrong answers to establish. Measured
+            # in game 2026-08-04, always reading back after every single drag:
+            #
+            #   (870, y of the grabbed row) onto an OCCUPIED 附近 row   5/5
+            #   (870, y of the first EMPTY row)                        6/6
+            #   (744, 570) the old fixed point                        21/21
+            #
+            # An earlier sweep had "release on an occupied row" failing 1 in 3
+            # and a whole theory was built on it. The theory was an artefact of
+            # how it was measured: those drags were fired CONSECUTIVELY with
+            # one read at the end, and consecutive drags fail for a reason that
+            # has nothing to do with where they land — see DROP_WAIT. Same
+            # points, read back one at a time, land every time.
+            #
+            # So this returns the row's own y, which is what a person does:
+            # 34 recorded human drags were horizontal to within 10-33 px, and
+            # not one of them was aimed at an empty row.
+            if kind == 'nearby':
+                return (NEARBY_DROP_X, from_y if from_y is not None
+                        else DROP_XY[kind][1])
             return DROP_XY[kind]
         return row_point(row, kind)
 
@@ -2010,8 +2240,7 @@ class InventoryControl:
             y, x, h, w = HUD_REGIONS[key]
             crops[key] = frame[y:y + h, x:x + w]
         names = self.name_template.classify(crops)
-        return {g: (n if n in ROSTER and is_live(n) else None)
-                for g, n in zip(GUNS, names)}
+        return {g: (n if n in ROSTER else None) for g, n in zip(GUNS, names)}
 
     def _slot_states(self, frame):
         """{1: {slot: template name}, 2: {...}}, '' for an empty slot."""
@@ -2019,6 +2248,25 @@ class InventoryControl:
         return {g: {s: (it.asset if it is not None else '')
                     for s, it in slots.items()}
                 for g, slots in worn.items()}
+
+    def _await_panel(self, panels, n_src0, n_dst0, timeout=VERIFY_TIMEOUT):
+        """Poll until a row leaves the source list or arrives in the target.
+
+        Either direction counts; see the comment in drag(). Polling rather
+        than one sleep for the same reason every other check here polls: the
+        item animates, and the worst case is much longer than the usual one.
+        """
+        src_p, dst_p = panels
+        end = time.time() + timeout
+        while True:
+            f = self._frame()
+            if panel_rows(f, dst_p) > n_dst0:
+                return True
+            if src_p is not None and panel_rows(f, src_p) < n_src0:
+                return True
+            if time.time() >= end:
+                return False
+            time.sleep(VERIFY_POLL)
 
     def _await(self, checks, before, timeout=VERIFY_TIMEOUT):
         """Poll the weapon slots until every check passes, or time runs out.
@@ -2046,6 +2294,11 @@ class InventoryControl:
     def _checks_str(checks):
         out = []
         for c in checks:
+            # Two shapes: a slot readback, and the row count of a panel drop.
+            if 'panel' in c:
+                src, dst = c['panel']
+                out.append(f'{src}/{dst} rows were {c["from"]}')
+                continue
             line = f'gun{c["gun"]}.{c["slot"]}={c["seen"] or "<empty>"}'
             if not c['ok']:
                 line += f' (wanted {c["want"] or "<empty>"})'

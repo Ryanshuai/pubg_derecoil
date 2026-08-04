@@ -256,6 +256,36 @@ def row_icons(frame, n, panel='inventory'):
     return out
 
 
+def panel_rows(frame, panel='inventory'):
+    """How many rows of a list hold something. -> int
+
+    The occupancy half of _read_row and nothing else: the Laplacian test that
+    separates an icon from the blurred world behind the panel, with no
+    template match on top. Two reasons that matters, and they are the same
+    reason from both ends —
+
+      it is ~1 ms rather than ~40, so a drag can afford to read it back
+      it answers for an item this repo has NO icon for, which is exactly the
+      case a template-collection run is in
+
+    Lists fill from the top with no gaps, so this is also where the next drop
+    lands. Same value TabView.rows() reports, arrived at without naming
+    anything.
+    """
+    n = 0
+    for i in range(INV_ROWS):
+        x0, y0, x1, y1 = icon_box(i, panel)
+        if y1 > frame.shape[0] or x1 > frame.shape[1]:
+            break
+        cell = frame[y0:y1, x0:x1]
+        if cell.size == 0:
+            break
+        gray = cv2.cvtColor(cell, cv2.COLOR_BGR2GRAY)
+        if float(cv2.Laplacian(gray, cv2.CV_32F).var()) >= ROW_DETAIL_MIN:
+            n = i + 1
+    return n
+
+
 def inserted_row(before, after, change_min=6.0):
     """Which row is NEW between two readings of a panel. -> index | None
 
