@@ -1163,24 +1163,43 @@ def stock_parts(sc, kit, keys, also=(), loose_only=False):
                    loose_only=loose_only)
 
 
-def load_done(path):
-    """Cells already in the log, as (weapon, config, posture).
+def load_done(path, want_mags=0):
+    """Cells already in the log AND worth keeping. -> {(weapon, config, posture)}
 
     The posture belongs in the key. Without it, one recorded posture marked
     the whole config done and --resume skipped the other two silently -- a
     stale two-magazine m416/bare/standing cell from an earlier day cost the
     bare arm of a posture factorial, and nothing said so.
+
+    `want_mags` is the same bug one level up, and it cost a cell the same day
+    this argument was added. A cell is logged whenever ANY magazine survived,
+    and magazines are discarded for real reasons -- the ADS gate, an outlier
+    residual, a fire rate that drifted. So a cell asked for 6 and kept 1 lands
+    in the log looking exactly like a cell that kept 6, and --resume then
+    refuses to redo it. Measured on ortho8_0805: mp5k/grip+stock kept ONE
+    magazine (sd 0.0, "no spread"), mp5k/stock kept 5 at cv 34%, and the
+    factor that came out of the second carried +-0.12 against an AR's +-0.005.
+    A resume that skips those is not resuming, it is ratifying them.
+
+    Deliberately NOT a quality gate -- it does not look at cv or sigma. Whether
+    a spread is acceptable is a question for the analysis, which can see every
+    cell at once; all this decides is whether the run got what it asked for.
     """
     done = set()
-    if os.path.exists(path):
-        for line in open(path, encoding='utf-8'):
-            try:
-                r = json.loads(line)
-            except Exception:
-                continue
-            if r.get('type') == 'cell':
-                done.add((r['weapon'], r['config'],
-                          r.get('posture', 'standing')))
+    if not os.path.exists(path):
+        return done
+    for line in open(path, encoding='utf-8'):
+        try:
+            r = json.loads(line)
+        except Exception:
+            continue
+        if r.get('type') != 'cell':
+            continue
+        # Older logs predate n_mags; treat a missing count as satisfying, so
+        # this never silently re-fires an archive it cannot judge.
+        if r.get('n_mags', want_mags) < want_mags:
+            continue
+        done.add((r['weapon'], r['config'], r.get('posture', 'standing')))
     return done
 
 
@@ -1396,7 +1415,10 @@ def main():
     out = args.out or os.path.join(
         RUNS, f"harvest_{args.sight}_{datetime.now().strftime('%m%d_%H%M')}.jsonl")
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
-    done = load_done(out) if args.resume else set()
+    done = load_done(out, args.mags) if args.resume else set()
+    if args.resume and done:
+        print(f"resume   : {len(done)} cell(s) already have {args.mags} "
+              f"magazine(s); anything short of that will be re-fired")
 
     # What each gun will actually be measured wearing. Printed before anything
     # spawns, because the answer is not "what you asked for": half the roster
