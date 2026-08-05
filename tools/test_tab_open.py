@@ -58,7 +58,7 @@ import cv2
 import numpy as np
 
 from config import (HUD_REGIONS, TAB_PIXEL_THRESH, TAB_COUNT_MIN,
-                    TAB_COUNT_MAX, TAB_DARK_FLOOR_MAX)
+                    TAB_COUNT_MAX, TAB_DARK_FLOOR_MAX, TAB_TYPE_SAT_MAX)
 from detector.tab_detector import TabTypeDetector
 
 Y, X, H, W = HUD_REGIONS['type']
@@ -75,6 +75,20 @@ BLANK_FRAME_MEAN = 20.0
 def truth(path):
     """Was the Tab screen up when this was taken? None = do not know."""
     p = path.replace('\\', '/')
+    # THE TREE. Captured 2026-08-05 at one viewpoint, both states, because the
+    # shut frames beat the open one on both of the old predicate's features
+    # (count 299/301 against 204, identical floors) and 970 stored shots
+    # contained nothing like them. A corpus can only refute what it contains,
+    # so the case that broke it lives in the corpus now.
+    if '/tab_tree_' in p:
+        return 'open' in os.path.basename(p)
+    # Twelve verified open/shut pairs across twelve backdrops, taken the same
+    # day for the same reason: the stored Tab-up frames were 36 near-identical
+    # captures of ONE rendering, which is why a template built from them
+    # scored 0.097 on a held-out rendering. Every pair here had its open frame
+    # checked for ink before it was written.
+    if '/tab_type/bg' in p:
+        return p.endswith('_open.png')
     if '/ads/runs/' in p:
         return False                       # gameplay frames, Tab shut
     if '/compat/runs/' in p or '/docs/runs/' in p:
@@ -182,9 +196,29 @@ def main():
     gap = min(floors_sky) - max(floors_up)
     print(f'  floor gap {max(floors_up)}..{min(floors_sky)} '
           f'({gap} wide), threshold {TAB_DARK_FLOOR_MAX}')
-    if not max(floors_up) < TAB_DARK_FLOOR_MAX < min(floors_sky):
-        print('  FAIL TAB_DARK_FLOOR_MAX is no longer inside the gap')
+    # The floor is a PRE-FILTER now, not a separator, and the tree is why: a
+    # trunk gives a shut frame a floor of 59 where the panel reads 60. So this
+    # no longer asserts a gap — it reports where the threshold sits among the
+    # SKY frames it was actually added for, and leaves the verdict to the
+    # saturation margin below.
+    if not max(floors_up) < TAB_DARK_FLOOR_MAX:
+        print('  FAIL TAB_DARK_FLOOR_MAX now rejects a real open panel')
         ok = False
+
+    # THE ONE THAT DECIDES, and the only margin worth quoting. Reported from
+    # both sides, because a gate is worth exactly the distance between them.
+    sats = {}
+    for tag, keep in (('up', True), ('shut', False)):
+        vals = [TabTypeDetector.saturation(c) for w, c, _ in rows if w is keep]
+        sats[tag] = [v for v in vals if v is not None]
+    if sats['up'] and sats['shut']:
+        hi_up, lo_shut = max(sats['up']), min(sats['shut'])
+        print(f'  saturation   open {min(sats["up"]):.3f}..{hi_up:.3f}   '
+              f'shut {lo_shut:.3f}..{max(sats["shut"]):.3f}   '
+              f'threshold {TAB_TYPE_SAT_MAX}')
+        if not hi_up < TAB_TYPE_SAT_MAX < lo_shut:
+            print('  FAIL TAB_TYPE_SAT_MAX is no longer between the classes')
+            ok = False
 
     return 0 if ok else 1
 

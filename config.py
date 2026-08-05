@@ -633,6 +633,29 @@ TAB_COUNT_MAX = 400
 # not alternatives. Scored by tools/test_tab_open.py (`pixi run tab-open`).
 TAB_DARK_FLOOR_MAX = 150
 
+# What DECIDES, with the two above demoted to a pre-filter: the median HSV
+# saturation of the BRIGHT pixels. The glyphs are pure white; the world is not.
+#
+# WHY THE COUNTS ARE NOT ENOUGH. One live viewpoint on 2026-08-05, Tab
+# genuinely SHUT, the window over a tree against sky, read count 299 / floor 59
+# where the real panel reads count 204 / floor 60 — the false case beating the
+# true one on the very feature meant to catch it. The trunk supplies the dark
+# floor and the sky between the branches supplies the bright count.
+#
+# TWO OTHER FEATURES WERE MEASURED FIRST AND BOTH FAILED ON THAT TREE, which is
+# why this constant is a saturation and not something cleverer:
+#
+#   glyph template   held-out Tab-up scored 0.097 where shut reached 0.203 —
+#                    a mask built at one backdrop does not transfer (the label
+#                    carries 210 ink at one and 249 at another, 19% thicker)
+#   Laplacian var    open 7615..25524, tree 13735..14275 — dead centre
+#   median saturation  open 0.000 (all 48), shut 0.030..0.310, tree 0.089
+#
+# Measured over 48 Tab-up and 880 Tab-shut stored frames. The gate sits in an
+# empty band: every open frame is EXACTLY 0.000 and no shut frame is under
+# 0.030. Rerun `pixi run tab-open` after touching it.
+TAB_TYPE_SAT_MAX = 0.015
+
 # ── Tab anchor: is the inventory actually up? ─────────────────────────────
 # The ink window above is NOT a safe answer to that on its own. It looks
 # perfect on hand-picked negatives — lobby, results, ESC menu and plain
