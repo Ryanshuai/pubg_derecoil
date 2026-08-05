@@ -474,6 +474,15 @@ def calibrate_combo(rig, weapon, posture, mags, log):
     if rig.use_homing:
         rig.goto_pitch_centre()
     rig.set_reference()
+    # Magazine 0 has no `tracking_lost` to protect it, and set_reference()
+    # takes its reference wherever the view happens to be — including against
+    # the pitch clamp, where the view does not move and the recoil reads near
+    # zero. See calibration/harvest.py's copy of this check for what that cost
+    # on the vss.
+    if not rig.tracking_confirmed():
+        print("    [!] the view does not respond to a test move — at the "
+              "pitch clamp, or the correlator has lost it. Refusing the cell.")
+        return None
 
     rows = []
     for i in range(mags):

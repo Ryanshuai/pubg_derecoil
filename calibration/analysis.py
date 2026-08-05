@@ -42,6 +42,30 @@ ROUNDS_TOL = 2
 # is a broken measurement rather than a large correction. Kept generous: the
 # first magazines of an uncalibrated gun are legitimately 35% out.
 Z_MAX = 4.0
+# Implied recoil = curve + residual, which IS what the gun kicked, so it is a
+# physical quantity and a floor on it is a physical claim rather than a
+# tolerance. "Not negative" was the only floor and it is far too loose.
+#
+# It catches the failure it exists for: a magazine fired at the PITCH CLAMP,
+# where the view cannot move and the recoil therefore reads near zero. That
+# produced `true recoil 32.1 counts over 22 rounds` on a vss — 1.5 per bullet
+# — which cleared the not-negative floor, was absorbed by the EMA at --apply,
+# and sent the next pass to a residual of -85.7%. docs/recoil/curves/ still
+# carries vss_att.0802_BROKEN_negative.bak.json from the same loop at -307.
+#
+# ⚠ THE FLOOR IS SET FROM THE CORPUS, NOT FROM PHYSICS, and the first attempt
+# got that wrong. 5.0 looked safe against the four weapons then to hand — mp5k
+# 24.1, vector 24.7, m416 37.0, vss 48.1 per bullet — and `pixi run analysis`
+# refused it: LMGs fire far longer magazines and their per-bullet figure is a
+# different regime entirely. m249 measures 4.7 and mg3 2.5..2.7 in magazines
+# the gates have always accepted.
+#
+# So 2.0 sits under everything in the corpus and over the clamp reading, and
+# the margin is THIN — 2.5 against 1.5. It is a backstop for a cause that is
+# already guarded upstream (harvest and sweep confirm the view still tracks
+# before magazine 0), not a discriminator to lean on. Widening the basis with
+# more LMG data is what would let it tighten.
+IMPLIED_PER_BULLET_MIN = 2.0
 
 
 def interval_from_span(first_shot_ts, last_change_ts, mag_size):
@@ -293,11 +317,18 @@ def magazine_fault(a, pattern_counts, mag_size, ads_frac, seen):
     if a['n_out_of_range'] / nf > OOR_FRAC_MAX:
         return (f"{a['n_out_of_range']}/{nf} frames out of range — the "
                 f"correlator lost the view")
-    # The gun cannot have negative recoil. Compensation plus residual is what
-    # it actually kicked, and a negative answer means the analysis, not the gun.
-    if pattern_counts + a['cum_counts'] <= 0:
-        return (f"implied recoil {pattern_counts + a['cum_counts']:.0f} counts "
-                f"is not positive")
+    # The gun cannot have negative recoil, and it cannot have almost none
+    # either. Compensation plus residual is what it actually kicked, so this is
+    # a physical quantity — see IMPLIED_PER_BULLET_MIN for why the floor is a
+    # rate and not just a sign.
+    implied = pattern_counts + a['cum_counts']
+    if implied <= 0:
+        return f"implied recoil {implied:.0f} counts is not positive"
+    if n and implied / n < IMPLIED_PER_BULLET_MIN:
+        return (f"implied recoil {implied:.0f} counts over {n} rounds is "
+                f"{implied / n:.1f} per bullet — no weapon measures under "
+                f"{IMPLIED_PER_BULLET_MIN}; the view was probably at the "
+                f"pitch clamp")
     # Robust scale, once there is one. MAD rather than sd so that the outlier
     # being tested cannot inflate the threshold that is supposed to catch it.
     if len(seen) >= 3:

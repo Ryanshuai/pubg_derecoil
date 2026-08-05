@@ -222,7 +222,16 @@ print('\n=== magazine_fault: the gates, against every magazine ever logged ===')
 #     swing +477, -525, -589, -364, +125 between magazines of one cell.
 #   g36c/muzzle+grip mag 4, aug/muzzle+grip mag 3 -- 5.3 and 7.0 sigma from
 #     their own cell. Both logged before the z-gate existed.
+#   vss/bare mag 0 (vss_seed_0805) -- fired AT THE PITCH CLAMP, where the view
+#     cannot move and the recoil therefore reads near zero: 32 counts over 22
+#     rounds, 1.5 per bullet, on a gun that really kicks ~1058. It cleared
+#     every gate that existed when it was logged, was absorbed by the EMA at
+#     --apply, and sent the next pass to a residual of -85.7%. This is the
+#     magazine IMPLIED_PER_BULLET_MIN was added for, and the run that produced
+#     it is the reason harvest and sweep now call tracking_confirmed() before
+#     magazine 0.
 KNOWN_BAD = {
+    ('vss_seed_0805.jsonl', 'vss', 'bare', 0),
     ('all_p1.jsonl', 'vss', 'bare', 1),
     ('all_p1.jsonl', 'vss', 'bare', 2),
     ('all_p1.jsonl', 'vss', 'bare', 3),

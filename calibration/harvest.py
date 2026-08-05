@@ -616,6 +616,30 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want,
         if not rig.goto_level(posture):
             rig.goto_pitch_centre()
     rig.set_reference()
+    # THE VIEW HAS TO BE ABLE TO MOVE BEFORE ANY OF THIS MEANS ANYTHING.
+    # `tracking_lost` guards magazines 1..n but nothing guarded magazine 0,
+    # and set_reference() takes its reference WHEREVER THE VIEW IS — including
+    # against the pitch clamp, where the view does not move and the recoil
+    # therefore reads near zero.
+    #
+    # That is not a small error, it is an inverted one, and with --apply it is
+    # written into the curve. Measured 2026-08-05 on the vss: a cell walked
+    # into the clamp and was correctly abandoned, then the NEXT harvest
+    # invocation started fresh (tracking_lost resets with the process), took
+    # its reference at the clamp, and measured `true recoil 32.1 counts` on a
+    # gun that really recoils ~1058. The EMA absorbed it, and the run after
+    # that measured a residual of -85.7%. docs/recoil/curves/ still holds
+    # vss_att.0802_BROKEN_negative.bak.json from the same loop reaching -307.
+    #
+    # tracking_confirmed() is the only thing in the loop that can tell
+    # "centred" from "lost": it moves the view a known amount and asks whether
+    # the reading followed. A large wrong reading can be refused on its
+    # magnitude; a small wrong one looks exactly like success.
+    if not rig.tracking_confirmed():
+        print("    [!] the view does not respond to a test move — at the "
+              "pitch clamp, or the correlator has lost it. Refusing the cell "
+              "rather than measuring a recoil of nearly zero.")
+        return None
 
     # Everything rebuild() reads except `mags` and `pattern_counts`, which
     # change with every EMA step.
