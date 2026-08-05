@@ -113,6 +113,29 @@ RECOIL_PATCH = 128             # width. Sets nothing about range: recoil is
 # patch edge at y=+-128 is off by 0.55%, ~0.2% averaged over the patch —
 # negligible against the 5% effects being measured.
 RECOIL_PATCH_H = 256
+# HEIGHT IS RANGE. measure_pair calls a reading out of range when it lands more
+# than half a patch height from the prediction, so 256 buys +-128 px per frame
+# pair. That is ample at 1x and it is NOT ample through a scope: the sight
+# magnifies the picture, so one bullet's kick covers 2-4x the pixels, and the
+# correlator starts refusing readings it should have made.
+#
+# Measured 2026-08-04, one bare magazine each, mp5k/m416 standing:
+#
+#     profile     patches   rejected/frame   mean_mad
+#     red_dot        7        3.5-11.3%       0.3-0.9   (19 cells)
+#     4x             5           21.8%          1.87
+#     2x             3           22.0%          0.78
+#     3x             3           25.1%          2.39
+#     vss_pso1       3          ~25%             --     (long recorded unusable)
+#
+# The split is NOT the patch count — 4x has five and fails like 2x's three.
+# It tracks MAGNIFICATION, which is what the range argument predicts. The VSS
+# has been "unusable" in this repository for its own reasons for weeks; it is
+# mag=4, and three other mag>=2 profiles reproduce its number exactly.
+#
+# So the magnified profiles get their own height. Per profile rather than
+# globally: a taller patch costs correlation time and moves the band, and 1x
+# has nineteen cells of evidence that it does not need it.
 RECOIL_BAND_Y = SCREEN_H // 2 - RECOIL_PATCH_H // 2
 RECOIL_KEEPOUT = 330           # half-width of the crosshair exclusion
 RECOIL_PATCH_XS = (980, 1120, 1260, 2050, 2240, 2430, 2620)  # odd count: an
@@ -180,9 +203,11 @@ RECOIL_SIGHT_PROFILES = {
     'red_dot': {'K': 1.5474, 'mag': 1, 'keepout': 330,
                 'patch_xs': (980, 1120, 1260, 2050, 2240, 2430, 2620)},
     '2x':      {'K': 1.8254, 'mag': 2, 'keepout': 60,
-                'patch_xs': (1390, 1530, 1850)},
+                'patch_xs': (1390, 1530, 1850),
+                'patch_h': 384},
     '3x':      {'K': 1.8802, 'mag': 3, 'keepout': 70,
-                'patch_xs': (1380, 1520, 1820)},
+                'patch_xs': (1380, 1520, 1820),
+                'patch_h': 384},
     '4x':      {'K': 1.885,  'mag': 4, 'keepout': 70,
                 'patch_xs': (1250, 1390, 1520, 1800, 1930)},
     # VSS's fixed PSO-1 measures the same as a standard 4x (1.8855 / 1.8636 on
@@ -202,6 +227,91 @@ RECOIL_SIGHT_PROFILES = {
     # patch=96 would give three clean non-overlapping ones at 1262/1362/1995
     # (range 3P/8=36px vs 5.6px/frame needed), but ViewTracker takes one
     # global patch size, so that needs a per-profile override first.
+    #
+    # NONE OF THIS IS WHY THE VSS NEVER PRODUCED A CELL, and the wrong guess is
+    # recorded because these coordinates are the obvious suspect and are not
+    # the culprit. Measured 2026-08-04: four VSS magazines, `0 tracked samples`
+    # on every one. Not "few" — zero, so no patch was ever read and no property
+    # of these columns could have mattered.
+    #
+    # The cause was in calibration/sweep.py: FireDriver took the tracker BY
+    # VALUE at construction and set_sight() never updated it, so a stale
+    # 7-patch tracker asked a freshly-rebuilt 3-region frame for recoil_3..6,
+    # slice_frame() returned None and MagazineRecorder.push() dropped every
+    # frame. Only this profile has a different patch COUNT, so only the VSS
+    # broke. Fixed there; these coordinates were never exercised.
+    #
+    # THEY HAVE NOW BEEN READ, AND THEY LOOK FINE. The first VSS run after
+    # that fix (docs/recoil/runs/vss_after_fix_0804b.jsonl, 14 magazines)
+    # reports mean_mad 0.4-2.2 with n_low_gate 1 and n_out_of_range 1 across
+    # the lot. mean_mad is how far the three patches disagree WITH EACH OTHER,
+    # so bad placement — a patch on the scope tube, or two seeing the same
+    # pixels — is precisely what it would show, and it does not.
+    #
+    # THE COUNT IS THE PROBLEM, NOT THE PLACEMENT, and that makes the
+    # patch-size override above the FIX rather than the optimisation it is
+    # written as. measure_pair rejects a patch by distance from the MEDIAN of
+    # the patches (view_tracker.py: `np.abs(dys_a - med) > thresh`), and a
+    # median over three is not robust — least of all when two of the three
+    # overlap by 63 px and therefore vote together. The odd one out loses even
+    # when it is the correct one.
+    #
+    # Measured across every weapon fired on 2026-08-04, as the share of
+    # individual patch readings thrown away (n_rejected is per PATCH, so it
+    # divides by the profile's patch count):
+    #
+    #     vss      3 patches   27%      <- this profile
+    #     vector   7           14%
+    #     ump45/aug/mp5k 7     6-7%
+    #     m416     7            2.4%
+    #     akm      7            1.7%
+    #
+    # Eleven times the m416. What survives is too sparse to be stable:
+    # cum_counts over one cell's magazines ran 760/906/808 in the best case and
+    # 740/141/-273 in the worst.
+    #
+    # So: three non-overlapping 96 px patches at 1262/1362/1995, which needs
+    # ViewTracker to take the size per profile instead of globally. Until then
+    # the VSS records data and none of it is trustworthy.
+    # ⚠ THE 96px NON-OVERLAPPING VERSION WAS TRIED AND DOES NOT HELP. The
+    # paragraph above proposes it and the reasoning is appealing — 1265/1330
+    # overlap by 63 px, so they vote together in the median measure_pair
+    # rejects outliers against, and the third patch loses every disagreement.
+    # Measured 2026-08-04 with patch=96 at (1262, 1362, 1995), three disjoint
+    # windows still clear of the PSO-1 line:
+    #
+    #                       rejected/patch   mean_mad   low_gate
+    #     128px overlapping     27.5%          1.37         1
+    #      96px disjoint        24.4%          1.62         9
+    #
+    # Rejection barely moved, patch disagreement got slightly worse, and the
+    # narrower windows fall under the texture gate nine times as often. The
+    # magazines stayed just as wild (cum_counts 770 / 37 / -148 in one cell).
+    # Reverted; ViewTracker still takes `patch` per profile, which is worth
+    # keeping — the plumbing was missing and now is not.
+    #
+    # WHAT DOES TRACK IT IS HOW FAR THE VIEW MOVES BETWEEN FRAMES. Rejection
+    # rate against median px/frame (cum_px / n_frames, both recorded per
+    # magazine), over every weapon fired on 2026-08-04:
+    #
+    #     vss     26.5%   4.48 px/frame        mp5k/mg3/m249  5-6%   0.1-0.5
+    #     vector  13.5%   1.11                 ace32/m416/akm 2-3%   0.3-1.0
+    #     ump45/aug 7%    0.6-0.8
+    #
+    #     r = +0.91 across ten weapons
+    #
+    # The VSS is the extreme on BOTH axes, at four times the next worst, and it
+    # is the only 4x profile — the same view rotation drags the world four
+    # times further across the screen. That is consistent with all three
+    # geometry theories failing: where the patches sit was never the variable.
+    #
+    # NOT YET A MECHANISM. Inter-frame displacement is what correlates; why it
+    # makes patches DISAGREE (the rejection test is |dy - median| > thresh, and
+    # a pure rotation should move them all alike) is unexplained. Motion blur
+    # scaling with magnification is the obvious guess and is exactly the kind
+    # of guess this weapon has already killed three of. The same axis is worth
+    # checking against the magazines lost to fire-rate disagreement — vector is
+    # second worst on both.
     'vss_pso1': {'K': 1.875, 'mag': 4, 'keepout': 200,
                  'patch_xs': (1265, 1330, 2010)},
 }

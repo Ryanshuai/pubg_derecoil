@@ -137,6 +137,33 @@ RPM_TOL = 0.02
 # the compensation has to scale with it and the measurement's own K changes
 # with it too (RECOIL_SIGHT_PROFILES). Mixing that into an attachment factorial
 # would confound the two. Red dot is 1x, where counts and pixels agree.
+#
+# PINNED, BUT NO LONGER A CONSTANT. The paragraph above is still the reason
+# the sight is not one of TEST_SLOTS — it belongs to a different axis and
+# mixing it into an attachment factorial confounds two things. What it is not
+# a reason for is being unable to measure that axis at all, and until
+# 2026-08-04 this was a literal, so `--sight 4x` changed the MEASUREMENT
+# profile (K, patch columns, keepout) while the gun kept wearing a red dot.
+# Every number that came out of such a run was the 4x's K applied to the red
+# dot's picture.
+#
+# The two now move together: --sight picks the profile, SIGHT_SCOPE picks the
+# part, and --scope overrides only for someone who means to break the pairing.
+#
+# WHAT THE PAIR IS FOR. Whether a sight changes the WEAPON's recoil has never
+# been measured — calibrate_k.py measured the geometry (counts to pixels),
+# which is a different question. Run the same bare/muzzle pair at two sights
+# and compare the FACTORS: the sight cancels in each ratio, so equal factors
+# mean the sight is orthogonal to the muzzle, and unequal ones mean it is not.
+SIGHT_SCOPE = {
+    'red_dot': 'red_dot',
+    '2x': 'scope_2x',
+    '3x': 'scope_3x',
+    '4x': 'scope_4x',
+    # Carried by the weapon, not fitted. VSS has no sight slot at all.
+    'vss_pso1': None,
+    'hipfire': None,
+}
 SCOPE_PART = 'red_dot'
 
 # Weapons that cannot wear the pinned sight because they carry their own.
@@ -1264,6 +1291,7 @@ def report(rows):
 
 
 def main():
+    global SCOPE_PART      # paired to --sight below
     # Item names are Chinese and the spawner logs them. Redirected to a file
     # or a pipe, Windows hands Python cp1252 rather than the console's own
     # code page, and the first 突击步枪 kills the run several minutes in --
@@ -1279,6 +1307,11 @@ def main():
     ap.add_argument('--configs', default='bare,both')
     ap.add_argument('--postures', default='standing')
     ap.add_argument('--sight', default='red_dot')
+    ap.add_argument('--scope', default='',
+                    help='the sight actually FITTED. Defaults to whatever '
+                         'SIGHT_SCOPE pairs with --sight, which is what keeps '
+                         'the measurement profile and the gun in agreement. '
+                         'Pass it only to break that pairing deliberately.')
     ap.add_argument('--parts', default='',
                     help='swap which part fills a slot, e.g. '
                          'muzzle=brake_ar,grip=angled_grip. This is how a '
@@ -1397,6 +1430,26 @@ def main():
     print("\n" + ("[EMA] each cell updates its own curve in place, "
                   "backups kept.\n" if args.apply else
                   "[SHADOW MODE] nothing is written back to any curve.\n"))
+
+    # PAIR THE FITTED SIGHT TO THE MEASUREMENT PROFILE, and do it before
+    # `parts` is built below — that set is what restock puts in the pack,
+    # and reading SCOPE_PART after it meant the run wore a red dot while
+    # measuring through the 4x's K. Every count would have been wrong by
+    # that ratio, and the log said `wearing 'scope_4x'` while it happened.
+    # A mismatch is not a subtle error: it applies one sight's K to another
+    # sight's picture, and every count in the run is wrong by that ratio.
+    if args.scope:
+        SCOPE_PART = args.scope or None
+        if SIGHT_SCOPE.get(args.sight, SCOPE_PART) != SCOPE_PART:
+            print(f"  [!] --sight {args.sight} normally wears "
+                  f"{SIGHT_SCOPE.get(args.sight)!r}; you asked for "
+                  f"{SCOPE_PART!r}. The K and the picture will not match.")
+    elif args.sight in SIGHT_SCOPE:
+        SCOPE_PART = SIGHT_SCOPE[args.sight]
+    else:
+        print(f"  [!] no sight part known for profile {args.sight!r} — "
+              f"leaving the scope slot to {SCOPE_PART!r}")
+    print(f"  sight profile {args.sight}, wearing {SCOPE_PART!r}")
 
     # What the run needs on hand, and — just as importantly — what it does
     # not: anything else nameable in 库存 is surplus from an earlier run, and

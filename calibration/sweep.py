@@ -95,7 +95,14 @@ class Rig:
         prof = RECOIL_SIGHT_PROFILES.get(sight, {})
         self.sight = sight
         self.K = prof.get('K', RECOIL_K_DEFAULT_SCOPED)
-        self.tracker = ViewTracker(patch_xs=prof.get('patch_xs'))
+        # `patch` as well as the columns: a profile squeezed for space needs
+        # narrower patches to fit non-overlapping ones, and overlapping patches
+        # vote together in the median that measure_pair rejects outliers
+        # against. ViewTracker has taken the width since it was written; only
+        # this line and its twin in set_sight never passed it on.
+        self.tracker = ViewTracker(patch_xs=prof.get('patch_xs'),
+                                   patch=prof.get('patch'),
+                                   patch_h=prof.get('patch_h'))
         self.mouse = get_mouse()
         self.att_det = AttachmentDetector()
         self.gun_det = TabWeaponDetector()
@@ -238,8 +245,35 @@ class Rig:
     def ensure_ads(self, tries=3):
         return self.gun.ensure_ads(tries)
 
+    # How far to tilt when the posture icon cannot be read. Big enough to put
+    # different scenery behind a 66 px HUD crop, small enough to stay well
+    # inside the measurable band -- goto_pitch_centre lands in the middle of
+    # it, and calibrate_pitch measures the band in the thousands of counts.
+    POSTURE_NUDGE_COUNTS = 300
+
+    def nudge_view(self):
+        """Move what is BEHIND the HUD, for a detector that cannot read it.
+
+        ViewDriver.turn() is the named entry point for exactly this -- "moves
+        in order to CHANGE WHAT IS BEHIND THE PANEL", where the landing place
+        is not merely unchecked but irrelevant. Its own warning ("does not
+        update pending_pitch, so a recenter() afterwards is measuring from a
+        belief this call already invalidated") is the same constraint as the
+        one below, reached from the other side.
+
+        Only ever passed to ensure_posture when homing is on, and that is the
+        whole safety argument: this destroys the running total the view driver
+        keeps, and homing does not use one -- goto_pitch_centre returns to the
+        pitch clamp, a hard stop, immediately afterwards. With homing off the
+        cell measures against a reference this would silently invalidate, so
+        no nudge is offered and the cell fails honestly instead.
+        """
+        self.view.turn(0, -self.POSTURE_NUDGE_COUNTS, settle_s=0.25)
+
     def ensure_posture(self, target, tries=4):
-        return self.gun.ensure_posture(target, tries)
+        return self.gun.ensure_posture(
+            target, tries,
+            nudge=self.nudge_view if self.use_homing else None)
 
     def ensure_fire_mode(self, weapon, tries=6):
         return self.gun.ensure_fire_mode(weapon, tries)
@@ -351,13 +385,33 @@ class Rig:
             return False
         self.sight = sight
         self.K = prof.get('K', RECOIL_K_DEFAULT_SCOPED)
-        self.tracker = ViewTracker(patch_xs=prof.get('patch_xs'))
+        self.tracker = ViewTracker(patch_xs=prof.get('patch_xs'),
+                                   patch=prof.get('patch'),
+                                   patch_h=prof.get('patch_h'))
         # The regions move with the patches; set_regions swaps them without
         # dropping the buffer or reopening a capture backend.
         self.frames.set_regions(self._regions())
         # The view driver holds the old optic's tracker, K and reference, and
         # all three are wrong now: a 4x buys 3.3x the rotation per count.
         self.view.retune(self.tracker, self.K, sight)
+        # AND SO DOES THE FIRE DRIVER, which took its tracker by value in
+        # __init__ and had nothing to update it. That omission is why the VSS
+        # has never produced a single cell.
+        #
+        # The names are positional -- ViewTracker.names() is
+        # [f'recoil_{i}' for i in range(len(self.xs))] -- so a stale 7-patch
+        # tracker reading a freshly-rebuilt 3-region frame asks for recoil_3
+        # through recoil_6, slice_frame() gets None from frame.get(), and
+        # MagazineRecorder.push() drops EVERY frame. Measured 2026-08-04:
+        # four VSS magazines, `0 tracked samples` on all four, analyse()
+        # refusing at its first gate.
+        #
+        # It is invisible on every other weapon because vss_pso1 is the only
+        # profile with a different patch COUNT: switching back to red_dot
+        # restores seven and the stale reference happens to match again. So
+        # the bug presents as "the VSS cannot be measured" rather than as
+        # anything about sights.
+        self.fire.tracker = self.tracker
         print(f"  sight -> {sight}  K={self.K:.4f}  "
               f"{len(self.tracker.xs)} patches")
         return True
