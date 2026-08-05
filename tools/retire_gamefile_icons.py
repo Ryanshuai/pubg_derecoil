@@ -25,8 +25,22 @@ BASELINE ratchet.
 
 NOTHING IS DELETED. Files move to a subdirectory, which the loader does not
 walk (os.listdir, no recursion), so they are out of the bank and still on disk.
-An asset with NO photograph is left alone and named -- removing its only
-picture would blind the reader to that part entirely.
+
+⚠ AN ASSET NEEDS BOTH PHOTOGRAPHS BEFORE ITS ART CAN GO, and that rule was
+learned the expensive way. Retiring on `.solved` alone scored better on the
+corpus and then BROKE THE COLLECTOR: a uzi's own quick-draw magazine measured
+175 against a solved-only template, over SlotDetector's gate of 150, so the slot
+read `empty`, `strip` skipped it, the magazine stayed on the gun, and every
+magazine part that round was bounced into 库存 under "the slot reads empty, so
+the autofit rule is what does not hold here". Four parts died that way in one
+run (docs/attachments/runs/20260804_224201).
+
+That is a circle -- the weak templates can only be replaced by running the
+collector, and the collector cannot run with them. The way out is ordered: keep
+the art, collect BOTH `.solved` and `.row`, then retire and re-measure.
+
+An asset with NO photograph at all is left alone for the same reason one step
+further along: removing its only picture blinds the reader to that part.
 """
 import argparse
 import os
@@ -53,9 +67,10 @@ def survey():
                 break
         else:
             stems.add(f[:-4])
-    movable = sorted(s for s in stems if s in shots)
+    movable = sorted(s for s in stems if len(shots.get(s, ())) == len(VARIANTS))
+    thin = sorted(s for s in stems if 0 < len(shots.get(s, ())) < len(VARIANTS))
     orphans = sorted(s for s in stems if s not in shots)
-    return movable, orphans, shots
+    return movable, thin, orphans, shots
 
 
 def main():
@@ -75,20 +90,21 @@ def main():
         print(f'restored {len(back)} game-file icon(s) to the bank')
         return 0
 
-    movable, orphans, shots = survey()
-    print(f'{len(movable)} asset(s) have a photograph and would give up their '
-          f'game-file icon')
-    if orphans:
-        print(f'\n{len(orphans)} asset(s) have NO photograph — LEFT IN, since '
-              f'the extract is their only picture:')
-        for s in orphans:
-            print(f'  {s}')
-    thin = [s for s in movable if len(shots[s]) == 1]
+    movable, thin, orphans, shots = survey()
+    print(f'{len(movable)} asset(s) have BOTH photographs and would give up '
+          f'their game-file icon')
     if thin:
-        print(f'\n{len(thin)} would be left with a SINGLE photograph '
-              f'({", ".join(sorted(set(v for s in thin for v in shots[s])))}):')
-        for s in thin:
-            print(f'  {s:<52} {shots[s][0]}')
+        print(f'\n{len(thin)} have only ONE — LEFT IN. Collect the missing '
+              f'variant first; the docstring says what a thin template did to '
+              f'the collector:')
+        for st in thin:
+            miss = [v for v in VARIANTS if v not in shots[st]]
+            print(f'  {st:<52} has {shots[st][0]:<12} needs {miss[0]}')
+    if orphans:
+        print(f'\n{len(orphans)} have NO photograph — LEFT IN, the extract is '
+              f'their only picture:')
+        for st in orphans:
+            print(f'  {st}')
 
     if not args.apply:
         print(f'\n--apply to move them to {os.path.basename(RETIRED)}/, then '

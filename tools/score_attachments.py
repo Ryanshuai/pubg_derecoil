@@ -546,8 +546,8 @@ COUNTED = ('slots', 'reference rows', 'rows')
 #
 # `prefer=` (rank on the context's own variant) landed with it and moved
 # nothing — the loss is in the fine pass, not the ranking.
-BASELINE = {'slots': (1659, 1687), 'reference rows': (9, 12),
-            'rows': (502, 540)}
+BASELINE = {'slots': (1685, 1697), 'reference rows': (12, 12),
+            'rows': (519, 550)}
 
 
 def score(rows, title):
