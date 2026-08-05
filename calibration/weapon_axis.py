@@ -9,9 +9,9 @@ attachment does to it -- and it pays for the second on every cell of the
 first: strip the old gun, plan drags, fit each part, read it back, retry the
 ones that silently did nothing.
 
-The attachment question is answered. Measured on the m416 2x2x2 factorial
-(calibration/ortho_0802*.jsonl, analysed by analyse_factors.py), the slots
-MULTIPLY:
+The attachment question is answered ON THE M416. Measured on its 2x2x2
+factorial (docs/recoil/runs/ortho_0802d.jsonl, analysed by
+analyse_factors.py), the slots MULTIPLY:
 
     grip+stock          predicted 0.7392  measured 0.7428   +0.2 sigma
     muzzle+grip                   0.5772           0.5908   +0.9
@@ -21,6 +21,45 @@ MULTIPLY:
 so N slots cost N numbers, not 2^N curves, and a weapon measured at one fixed
 kit converts to any other kit by multiplying. Which means the weapon axis
 never has to change a kit -- it only has to KNOW the one it measured.
+
+IT IS AN AR RESULT AND IT DOES NOT GENERALISE. This file's design rests on
+"any kit converts by multiplying", so the refutation belongs here rather than
+in a note somewhere: docs/recoil/runs/ortho_0804.jsonl ran the same
+bare/muzzle/grip/muzzle+grip factorial on four weapons, six magazines into
+every bare cell, and
+
+    m416    AR    predicted 0.6033  measured 0.6076   +0.7%    +0.4 sigma
+    vector  SMG             0.5763           0.6216   +7.9%    +4.3
+    mp5k    SMG             0.4294           0.4775  +11.2%   +12.8
+    ump45   SMG (0802)      0.5241           0.5986  +14.2%    +2.8
+
+THREE SMGs, THREE REFUTATIONS, ALL THE SAME SIGN. Two slots together always
+help LESS than the product of their parts predicts. The AR sits on zero.
+
+The second assumption fails on the same data. A part is not one number:
+
+    comp_smg    mp5k 0.5848   vector 0.7073                  10.2 sigma apart
+    vert_grip   m416 0.7730   mp5k 0.7342   vector 0.8148     8.4 sigma
+
+vert_grip had READ AS WEAPON-INDEPENDENT (0.2 sigma) on the earlier two-weapon
+comparison, m416 0.765 against ump45 0.772. That agreement was the error bars,
+not the game: three-magazine bare cells gave +-0.034 where six give +-0.008.
+
+What survives for this file: a kit still has to be RECORDED rather than
+chosen, which is what it does. What does not survive is converting an AR's
+measurement to another kit by multiplying on an SMG, or reusing one weapon's
+part factor on another.
+
+The whole model -- all four multipliers in detector/weapon.py's set_seq, and
+which of their independence assumptions have been measured -- is written up in
+docs/recoil/factor_model.md. Read that before adding a fifth.
+
+One more thing the 0802 data hid, and the reason --bare-mags exists. The
+m416's factorial was run twice with opposite-signed answers -- ortho_0802c
+gave -6.0/-6.2/-5.6/-9.9% where 0802d gave +0.5/+2.2/-0.8/+5.9%. Every gap
+flipped together, because both runs divide by the same bare cell and c's read
+8% low. The verdicts agreed (all "multiplicative") only because c's error bars
+were three times wider.
 
 And knowing it is free: PUBG auto-fits whatever the backpack holds onto a gun
 the moment it arrives. So the loop is spawn, read back what the game put on,
@@ -169,7 +208,12 @@ def finish_pair(rig, ac):
         fit_mags(ac, STOCK_MAG)
         drops = ac.clear_rack()
     rig.ensure_inventory_closed()
-    return drops
+    # The per-gun records, not the batch wrapper. clear_rack returns a batch
+    # ({'ok', 'steps', 'error', 'dropped'}) and the caller walks the result
+    # reading d['was'] -- over the wrapper that iterates its KEYS and indexes
+    # a string with a string. Crashed posture_axis.py, which had copied this
+    # function, on its first completed batch.
+    return drops['steps']
 
 
 def spawn_pair(sc, pair):

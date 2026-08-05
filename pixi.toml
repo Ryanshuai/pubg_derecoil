@@ -91,6 +91,9 @@ locations = "python tools/test_locations.py"
 # magazine ever logged — a logged one was accepted when it ran, so one that is
 # refused today means a gate moved.
 analysis = "python tools/test_analysis.py"
+# Reads the newest run under docs/recoil/runs/ with no arguments, so "what
+# did that run say" is one word. Name files with --jsonl to pool them.
+factors = "python calibration/analyse_factors.py"
 # The fire loop's exception path: a lost foreground raises through the middle
 # of a burst, and the button it was holding has to come back up. Offline —
 # proving it on the real game is the one run that would leave the trigger down

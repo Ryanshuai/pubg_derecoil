@@ -116,7 +116,21 @@ def open_tab(ac, label='the backpack'):
     unexplained "could not reach config".
     """
     if not ac.ensure_tab(True):
-        print(f"      [!] inventory would not open for {label}")
+        # NAMED HERE TOO, which is the point the paragraph above makes and
+        # this branch used to skip. The foreground is the common failure and
+        # ensure_tab cannot see it: it presses Tab three times and polls the
+        # screen, and a key sent to a window that is not frontmost changes
+        # nothing that a poll can distinguish from a key the game ignored.
+        # The check only existed one line further down, in sync(), which never
+        # runs when this branch is taken.
+        #
+        # Measured 2026-08-04: the ace32 lost three of four configs to a bare
+        # "inventory would not open for kitting" with nothing to act on, in a
+        # run whose other three weapons kitted normally.
+        print(f"      [!] inventory would not open for {label}: "
+              f"focused={game_focused()}, "
+              f"screen reads tab_open={ac.tab_open()}, "
+              f"pico={'yes' if ac.pointer.pico else 'NO — Tab cannot be sent'}")
         return False
     if not ac.sync():
         print(f"      [!] the Tab screen would not sync: "

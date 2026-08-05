@@ -23,6 +23,7 @@ becomes a product of N numbers. If they do not, it is 2^N curves per weapon
 and the whole approach has to change.
 """
 import argparse
+import glob
 import json
 import math
 import os
@@ -31,6 +32,12 @@ from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# The only import outside the standard library, and it is a lookup table of
+# strings — this file stays runnable with no game, no hardware and no torch,
+# which is the property that makes it usable on a laptop against a copied
+# JSONL. See analysis.py's "numpy and nothing else" for the same rule.
+from detector.attachment_catalog import ROSTER            # noqa: E402
 
 TEST_SLOTS = ('muzzle', 'grip', 'stock')
 
@@ -43,14 +50,59 @@ def parse_config(name):
     return frozenset(p for p in name.split('+') if p)
 
 
-def load(path):
-    """(weapon, config) -> list of per-magazine true-recoil counts.
+# HOW FAR APART TWO MEASUREMENTS OF THE SAME CELL LAND IN DIFFERENT RUNS,
+# over and above the magazine-to-magazine spread inside one. MEASURED on the
+# m416's bare standing cell, the one every ratio in a factorial divides by,
+# across the four runs that hold it at a full magazine:
+#
+#   ortho_0802b 1469 (sem 3.4%)   ortho_0802d   1564 (sem 1.6%)
+#   ortho_0802c 1443 (sem 5.9%)   posture_0802  1564 (sem 1.9%)
+#
+#   spread of the four means 4.2%, mean within-cell sem 3.2%
+#   -> sqrt(4.2^2 - 3.2^2) = 2.7% that belongs to the RUN, not the magazines
+#
+# It does not shrink with more magazines, so it is a floor: two cells measured
+# in different sittings cannot be compared more finely than this however long
+# either one is fired. Anything below ~5% needs the comparison to live inside
+# one run instead.
+#
+# MOST OF IT IS THE REFERENCE METHOD, NOT THE GAME, which is worth knowing
+# before spending magazines to beat it. The four runs above all returned each
+# magazine to the cell's own remembered reference. Two runs an hour apart that
+# HOMED instead (posture_axis_0804 / 0804b, --home, back to the pitch clamp)
+# reproduce the same cell far tighter:
+#
+#   m416 standing 865 / 863   0.3%      m249 crouching  677 / 682   0.7%
+#   mp5k standing 458 / 460   0.5%      m249 standing  1191 /1171   1.7%
+#   ump45 crouching 437 / 427 2.3%      m416 crouching  729 / 750   2.9%
+#
+#   six of seven pairs within 2.9%, mean 1.4%
+#
+# The seventh, ump45 prone, disagrees by 13.1% (363 vs 414) and is independently
+# suspect: its residual was 42% of the reconstructed truth and it puts that
+# weapon's prone/crouch at 0.970 against 0.83-0.89 in three other runs. That is
+# the shape to expect -- homed runs do not carry a blanket floor, they carry
+# occasional cells that are individually identifiable as wrong.
+#
+# The value stays at the non-homed 0.027 because it is the conservative one and
+# the archive is mostly non-homed. A run that homes throughout can be compared
+# more finely than this says.
+BETWEEN_RUN_REL = 0.027
+
+
+def load(path, run=None):
+    """(weapon, config, posture) -> one cell's per-magazine true recoils.
 
     A magazine is the unit of measurement, not a cell: the spread between
     magazines IS the game's randomness, and it is the only estimate of it
     available. Later cells win, so a --resume rerun replaces rather than
     doubles.
+
+    `run` is carried on every cell because a ratio between two of them is only
+    as good as the sitting they share -- see BETWEEN_RUN_REL, and `comparable`
+    for what is done about it.
     """
+    run = run or os.path.basename(path)
     cells = {}
     for line in open(path, encoding='utf-8'):
         try:
@@ -65,10 +117,53 @@ def load(path):
             cells[(r['weapon'], r['config'], r.get('posture', 'standing'))] = {
                 'samples': samples, 'want': r.get('want', {}),
                 'fired': r.get('bullets_fired'),
+                'run': run,
                 'uncovered': r.get('bullets_uncompensated', 0),
                 'oor': sum(m.get('n_out_of_range', 0) for m in r['mags']),
             }
     return cells
+
+
+def comparable(a, b):
+    """Why these two cells must not be ratioed, or None if they may be.
+
+    TWO CELLS OF DIFFERENT LENGTHS ARE NOT TWO MEASUREMENTS OF THE SAME THING.
+    Recoil accumulates over the magazine, so a cell cut short measures less of
+    the curve, not less recoil per bullet. ortho_0802.jsonl holds an m416 bare
+    standing cell that fired 16 rounds where its siblings fired 42; taken as a
+    denominator it puts the crouching factor at 2.29, and nothing about the
+    number says it came from a truncated magazine.
+
+    Different runs are allowed but not free -- the caller widens the error by
+    BETWEEN_RUN_REL instead. Different lengths are refused outright, because
+    there is no widening that makes them mean the same thing.
+    """
+    if a['fired'] is not None and b['fired'] is not None:
+        if abs(a['fired'] - b['fired']) > 1:
+            return f"{a['fired']} rounds vs {b['fired']}"
+    return None
+
+
+def ratio(cell, base):
+    """(factor, relative error, note) for cell/base, or None if incomparable.
+
+    The note is empty for the clean case and names the reason the error bar
+    was widened otherwise, so a row that carries one is visibly weaker rather
+    than quietly weaker.
+    """
+    why = comparable(cell, base)
+    if why:
+        return None
+    m, _, sem = stats(cell['samples'])
+    b, _, bsem = stats(base['samples'])
+    if not b:
+        return None
+    rel = math.hypot(log_sem(m, sem), log_sem(b, bsem))
+    note = ''
+    if cell['run'] != base['run']:
+        rel = math.hypot(rel, BETWEEN_RUN_REL)
+        note = 'cross-run'
+    return m / b, rel, note
 
 
 def stats(xs):
@@ -114,15 +209,18 @@ def posture_check(cells, base_posture):
             base = cells.get((w, c, base_posture))
             if not base:
                 continue
-            m, _, sem = stats(cell['samples'])
-            bm, _, bsem = stats(base['samples'])
-            rel = math.hypot(log_sem(m, sem), log_sem(bm, bsem))
-            rows.append((w, c, m / bm, rel))
+            got = ratio(cell, base)
+            if got is None:
+                print(f'    {w:<9}{c:<20}skipped — {comparable(cell, base)}')
+                continue
+            r, rel, note = got
+            rows.append((w, c, r, rel, note))
         if len(rows) < 2:
             continue
         print(f'\n  {p}:')
-        for w, c, r, rel in sorted(rows):
-            print(f'    {w:<9}{c:<20}{r:>8.4f}  +-{r*rel:.4f}')
+        for w, c, r, rel, note in sorted(rows):
+            print(f'    {w:<9}{c:<20}{r:>8.4f}  +-{r*rel:.4f}  {note}')
+        rows = [(w, c, r, rel) for w, c, r, rel, _ in rows]
 
         # Two different questions live in these rows and pooling them answers
         # neither. Spread across CONFIGS within one weapon is the interaction
@@ -162,17 +260,84 @@ def posture_check(cells, base_posture):
             print(f'    -> weapon spread at {c}: {w1} {r1:.4f} vs {w2} '
                   f'{r2:.4f} ({sig:.1f} sigma)')
 
+        # ── does a CLASS share one factor? ──
+        #
+        # The shipped model already assumes it does: detector/weapon.py keys
+        # _POSTURE_DEFAULTS by weapon TYPE, so every AR without a per-weapon
+        # override fires on the same number. Nothing had ever tested it -- the
+        # 0802 data had one AR and one SMG, which can say the classes differ
+        # and cannot say anything about the guns inside one.
+        #
+        # Reported per class rather than pooled into a single verdict: the
+        # classes are already known to disagree with each other (prone reads
+        # ~0.51 on the m416, ~0.64 on the ump45, ~0.24 on the mg3), so a pooled
+        # spread would be dominated by that and would say nothing about the
+        # question here.
+        by_cls = defaultdict(list)
+        for w, c, r, rel in rows:
+            cls = (ROSTER.get(w) or ('?', None))[0]
+            by_cls[cls].append((w, r, rel))
+        multi = {k: v for k, v in by_cls.items() if len(v) > 1}
+        if multi:
+            print(f'\n    does a CLASS share one {p} factor?')
+        for cls, group in sorted(multi.items()):
+            ws = [(math.log(r), 1 / rel ** 2) for _, r, rel in group if rel]
+            if not ws:
+                continue
+            mu = sum(l * wt for l, wt in ws) / sum(wt for _, wt in ws)
+            print(f'      {cls}: pooled {math.exp(mu):.4f}')
+            for w, r, rel in sorted(group):
+                dev = (math.log(r) - mu) / rel if rel else float('inf')
+                print(f'        {w:<9}{r:>8.4f}   {dev:+5.1f} sigma')
+            worst = max(abs((math.log(r) - mu) / rel)
+                        for _, r, rel in group if rel)
+            print(f'        -> {"one factor fits the class" if worst < 2 else "PER-WEAPON, not per-class"}'
+                  f' (worst {worst:.1f} sigma, n={len(group)})')
+        for cls, group in sorted(by_cls.items()):
+            if len(group) == 1:
+                print(f'      {cls}: only {group[0][0]} ({group[0][1]:.4f}) — '
+                      f'one weapon cannot answer this')
+
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--jsonl', required=True, nargs='+')
+    ap.add_argument('--jsonl', nargs='+',
+                    help='run logs to read. Defaults to the most recently '
+                         'written one under docs/recoil/runs/, which is the '
+                         'question this is nearly always asked — "what did '
+                         'the run I just finished say". Naming several pools '
+                         'them; see BETWEEN_RUN_REL for what that costs.')
     ap.add_argument('--posture', default='standing')
     args = ap.parse_args()
 
+    paths = args.jsonl
+    if not paths:
+        runs = sorted(glob.glob(os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'docs', 'recoil', 'runs', '*.jsonl')), key=os.path.getmtime)
+        if not runs:
+            print('[!] no run logs under docs/recoil/runs/ — name one with '
+                  '--jsonl')
+            return 1
+        paths = [runs[-1]]
+        print(f'reading the newest run: {os.path.relpath(paths[0])}\n')
+
     cells = {}
-    for p in args.jsonl:
-        cells.update(load(p))
+    for p in paths:
+        # LATER FILES OVERWRITE EARLIER ONES for the same cell, which is what
+        # --resume wants and is a trap everywhere else: pooling two runs of
+        # one factorial silently keeps the second and reports it as though the
+        # first had never been fired. Said out loud rather than fixed, because
+        # merging them is also wrong -- two sittings are two measurements, not
+        # six magazines (BETWEEN_RUN_REL).
+        fresh = load(p)
+        clash = [k for k in fresh if k in cells]
+        if clash:
+            print(f'[!] {os.path.basename(p)} replaces {len(clash)} cell(s) '
+                  f'already read: {", ".join(f"{w}/{c}/{po}" for w, c, po in sorted(clash)[:4])}'
+                  + (' ...' if len(clash) > 4 else ''))
+        cells.update(fresh)
     all_cells = dict(cells)
     cells = {k: v for k, v in cells.items() if k[2] == args.posture}
     if not cells:
@@ -218,17 +383,19 @@ def main():
             print(f'{w:<9} no bare cell — every ratio for this weapon is '
                   f'unavailable')
             continue
-        bm, _, bsem = stats(bare['samples'])
         for s in TEST_SLOTS:
             cell = cells.get((w, s, args.posture))
             if not cell:
                 continue
-            m, _, sem = stats(cell['samples'])
-            r = m / bm
-            rel = math.hypot(log_sem(m, sem), log_sem(bm, bsem))
             part = (cell.get('want') or {}).get(s) or s
+            got = ratio(cell, bare)
+            if got is None:
+                print(f'{w:<9}{s:<10}{part:<16}   skipped — '
+                      f'{comparable(cell, bare)}')
+                continue
+            r, rel, note = got
             fac[(w, s)] = (r, rel, part)
-            print(f'{w:<9}{s:<10}{part:<16}{r:>9.4f}{r*rel:>8.4f}')
+            print(f'{w:<9}{s:<10}{part:<16}{r:>9.4f}{r*rel:>8.4f}  {note}')
 
     # ── is a factor the same on every weapon? ──
     # Grouped by PART, not by slot. The classes fit different hardware in the
@@ -282,19 +449,50 @@ def main():
             cell = cells.get((w, c, args.posture))
             if not cell or any((w, s) not in fac for s in slots):
                 continue
+            got = ratio(cell, bare)
+            if got is None:
+                print(f'{w:<9}{c:<20}   skipped — {comparable(cell, bare)}')
+                continue
             any_combo = True
-            m, _, sem = stats(cell['samples'])
-            meas = m / bm
+            meas, _, note = got
             pred = 1.0
             for s in slots:
                 pred *= fac[(w, s)][0]
             # log(meas/pred) = log m_C - sum log m_s + (n-1) log m_bare
+            #
+            # THE BARE CELL ENTERS WITH WEIGHT (n-1) AND IT IS COMMON-MODE.
+            # Every combo in a run divides by the same bare, so an error there
+            # does not average out across the rows -- it slides all of them the
+            # same way, and the spread AMONG the rows cannot see it. Measured:
+            # ortho_0802c and 0802d are the same m416 factorial run twice, and
+            # all four gaps flipped sign together, -6.0/-6.2/-5.6/-9.9% against
+            # +0.5/+2.2/-0.8/+5.9%. c's bare cell read 8% low with a 5.9% sem;
+            # that one cell is the whole difference.
+            #
+            # So: fire more magazines into `bare` than into anything else, and
+            # measure it again at the end of the run as a control.
+            # RAW CELL ERRORS, NOT RATIO ERRORS. The identity above already
+            # accounts for bare exactly once per term plus (n-1) at the end;
+            # feeding it ratio() errors instead double-counts it, because each
+            # ratio carries bare's error inside it. That mistake made the
+            # variance too big and every sigma too small -- ump45's
+            # muzzle+grip moved from 2.8 ("NOT multiplicative") to 1.5
+            # ("multiplicative") on unchanged data, which is a verdict flipped
+            # by an accounting error rather than by a measurement.
+            m, _, sem = stats(cell['samples'])
             var = log_sem(m, sem) ** 2
             for s in slots:
                 cs = cells[(w, s, args.posture)]
                 sm, _, ssem = stats(cs['samples'])
                 var += log_sem(sm, ssem) ** 2
+                if cs['run'] != bare['run']:
+                    note = note or 'cross-run'
             var += ((len(slots) - 1) * b_rel) ** 2
+            # Once, not once per cell: the runs are what differ, so pooling
+            # cells from two sittings costs one BETWEEN_RUN_REL however many
+            # of them crossed.
+            if note == 'cross-run':
+                var += BETWEEN_RUN_REL ** 2
             sig = math.sqrt(var)
             delta = math.log(meas) - math.log(pred)
             gap = 100 * math.expm1(delta)
@@ -302,7 +500,7 @@ def main():
             verdict = ('multiplicative' if abs(nsig) < 2 else
                        'NOT multiplicative')
             print(f'{w:<9}{c:<20}{pred:>8.4f}{meas:>8.4f}{gap:>7.1f}%'
-                  f'{nsig:>+8.1f}   {verdict}')
+                  f'{nsig:>+8.1f}   {verdict} {note}')
     if not any_combo:
         print('  no combination cells with all their single-slot cells present')
 

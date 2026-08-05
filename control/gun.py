@@ -109,17 +109,30 @@ class GunDriver:
 
     def dump(self, tag):
         """Save the crops behind a failed decision, so a human can see what
-        the detector saw instead of guessing from a one-line error."""
+        the detector saw instead of guessing from a one-line error.
+
+        NUMBERED, because the failures worth diagnosing are the ones that
+        REPEAT and a fixed filename keeps only the last of them. The 2026-08-04
+        posture axis failed 'posture unreadable' on six cells across four
+        weapons and left one frame: the icon is white and low-saturation, the
+        training range's pale wood passes the same gate, and the two merge into
+        one blob under the dilations (46% of the crop, IoU 0.268 against prone
+        where the threshold is 0.32). One frame cannot say whether the fix
+        generalises -- and the labelled set that says this detector is 99% has
+        1714 samples with not one of this background in it.
+        """
         if not self.dump_dir:
             return
         try:
             os.makedirs(self.dump_dir, exist_ok=True)
+            self._dumps = getattr(self, '_dumps', 0) + 1
             frame = self.grab()
             for k in ('posture', 'type', 'ammo'):
                 if k in frame:
-                    cv2.imwrite(os.path.join(self.dump_dir, f'fail_{tag}_{k}.png'),
+                    cv2.imwrite(os.path.join(self.dump_dir,
+                                             f'fail_{tag}_{self._dumps:03d}_{k}.png'),
                                 frame[k])
-            print(f"      [dbg] wrote fail_{tag}_*.png")
+            print(f"      [dbg] wrote fail_{tag}_{self._dumps:03d}_*.png")
         except Exception as e:
             print(f"      [dbg] dump failed: {e}")
 
@@ -249,12 +262,33 @@ class GunDriver:
                 return None
             time.sleep(gap_s)
 
-    def ensure_posture(self, target, tries=4):
+    def ensure_posture(self, target, tries=4, nudge=None):
         """Toggle until the icon detector agrees. Keypresses alone are not
         trusted: one dropped toggle would mislabel an entire run.
 
         Requires ADS (the icon does not render from the hip) and a closed
-        inventory (which hides the icon and swallows C/Z)."""
+        inventory (which hides the icon and swallows C/Z).
+
+        `nudge` IS A LAST RESORT AGAINST THE BACKGROUND, not against timing.
+        The icon is white and low-saturation and the detector's gate is
+        absolute (V>180, S<80), so pale scenery behind it — the training
+        range's wood — passes the same gate, merges with the glyph under the
+        dilations and takes the largest-component pick with it. Measured
+        2026-08-04: 46% of the crop passing the gate, one 1403 px blob, best
+        IoU 0.268 against prone where the threshold is 0.32. The character WAS
+        prone; only the reading failed, and the cell was discarded.
+
+        The icon sits at a fixed place on the HUD, so the only thing that
+        changes what is behind it is where the view points. A caller that can
+        safely re-point hands one in; this calls it once and re-reads.
+
+        SAFELY IS THE WHOLE CONDITION, and it is the caller's to judge. Moving
+        the view invalidates any running total the caller holds, so this is
+        only sound when what follows re-establishes the view from a hard stop
+        — which is exactly the homing path (`--home`), where goto_pitch_centre
+        runs after this and homes to the pitch clamp. With homing off there is
+        no nudge to pass, and none is.
+        """
         if not self.ensure_inventory_closed():
             print("      [!] inventory stuck open — C/Z would be swallowed")
             self.dump('inventory')
@@ -264,6 +298,16 @@ class GunDriver:
                   "agree) — cannot verify posture")
             self.dump('ads')
             return False
+        # Every posture the icon showed while this ran. It separates two
+        # failures that print the same line otherwise, and they have opposite
+        # fixes: a state that NEVER MOVED means the key never reached the game
+        # or the game refused it (prone is blocked against some geometry), so
+        # pressing harder is pointless; a state that moved and came back is a
+        # toggle read mid-animation and re-pressed, which more settle time
+        # does fix. 2026-08-04's posture axis lost the m416's prone cell with
+        # "gave up at 'crouching'" and there was no way to tell which.
+        seen = []
+        nudged = False
         for _ in range(tries):
             cur = self.read_posture(timeout_s=POSTURE_WATCH_S)
             if cur is None and self.ensure_ads(tries=2):
@@ -273,12 +317,28 @@ class GunDriver:
                 cur = self.read_posture(timeout_s=POSTURE_WATCH_S)
             if cur == target:
                 return True
+            if cur is None and nudge and not nudged:
+                # Not a retry — the same read at the same place gives the same
+                # answer. This moves what is BEHIND the icon and then asks
+                # again. Once: if a second background cannot be read either,
+                # the fault is not the scenery.
+                nudged = True
+                nudge()
+                cur = self.read_posture(timeout_s=POSTURE_WATCH_S)
+                if cur is not None:
+                    print(f"      posture readable after moving the view "
+                          f"(read {cur!r}) — the icon was over scenery the "
+                          f"detector's brightness gate lets through")
             if cur is None:
                 # Never toggle on an unknown state — a blind C/Z here is how an
                 # unattended run ends up measuring a posture nobody asked for.
-                print(f"      [!] posture unreadable (want {target})")
+                print(f"      [!] posture unreadable (want {target})"
+                      + ('' if nudge else ' — no nudge available (homing is '
+                         'off, so moving the view would invalidate the '
+                         'reference this cell measures against)'))
                 self.dump('posture')
                 return False
+            seen.append(cur)
             print(f"      posture {cur} -> {target}")
             if target == 'prone':
                 self.mouse.key(HID_KEY_Z, 60)
@@ -290,7 +350,16 @@ class GunDriver:
             time.sleep(POSTURE_SETTLE_S)
         cur = self.read_posture(timeout_s=POSTURE_WATCH_S)
         if cur != target:
-            print(f"      [!] gave up at {cur!r}, wanted {target}")
+            seen.append(cur)
+            moved = len({s for s in seen if s is not None}) > 1
+            print(f"      [!] gave up at {cur!r}, wanted {target} — saw "
+                  f"{' -> '.join(str(s) for s in seen)}; "
+                  + ('the state moved, so the keys ARE arriving and a read '
+                     'landed mid-animation: raise POSTURE_SETTLE_S'
+                     if moved else
+                     f'the state never moved across {len(seen) - 1} press(es), '
+                     f'so the key is being swallowed or the game refuses '
+                     f'{target} here — more tries will not help'))
             self.dump('posture')
         return cur == target
 
