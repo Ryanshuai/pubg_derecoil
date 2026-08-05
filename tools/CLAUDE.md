@@ -72,7 +72,7 @@ if not ensure_ready(label='the pitch probe')['ok']:
 | 截图时避开 hover 高亮 | 自己 `move_cursor` + sleep | `control.spawner.shoot_parked(settle=…)` |
 | 读弹药数 | 自己二值化 + 连通域 | `detector.ammo_detector.AmmoDetector`（**`None` 不是 0**） |
 | 读枪名 / 配件 | 自己 `matchTemplate` | `detector.tab_items.detect(frame, {1: 'g36c'})`——**能传枪名就传** |
-| 判某枪有没有某个槽 | 拖一次看掉不掉 | `detector.slot_detector.SlotDetector`（`scope` 恒 `unknown`，别塌成 `absent`） |
+| 判某枪有没有某个槽 | 拖一次看掉不掉 | `detector.slot_detector.SlotDetector`（**占用判据是模板识别，不是边缘计数**；`scope` 位不画 tile，存在性仍不可读） |
 | 判某枪能不能装某件 | 抄 wiki | `attachment_catalog.fits(weapon, key)` / `compatible(weapon)` |
 | 库存盘点 / 补货 | 自己数行 | `control.stock.restock(ac, sc, want)` |
 | 查有没有别的 agent 占 Pico | `tasklist` / 直接开串口 | `press.pico_mouse.other_agents()` |

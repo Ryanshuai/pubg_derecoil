@@ -88,32 +88,15 @@ self.ac.pointer.drag(src, dst)       # ✗ 绕过了 _reject()
 
 **三、多个 agent 共用一个 Pico 串口和一个游戏窗口。** 跑之前查有没有别的 python 进程占着（`press.pico_mouse.other_agents`），**别杀别人的**。
 
-## ⚠ 未解决：`the gun left rack slot N during "<step>"`，plate=0
+## `the gun left rack slot N during "<step>"` — 已解决 2026-08-04
 
-**采集器现在最大的单一失效来源**，2026-08-04 统计：**11 个 run、74 次**。它不是静默的（`facts.misses` 每次都记了原因和现场图），但它一次废掉一个件，严重的时候废掉整轮——`20260803_191649` 一轮里 31 个件全灭。
+采集器最大的单一失效来源，11 个 run、74 次，一次废掉一个件。**根因是读数器，不是拖拽**：
 
-### 事实
+AKM 自己的弹匣画在它的 magazine 贴片框里，裸枪也有 395 个 Canny 边缘（阈值 120），所以那个槽**永远读 `filled`**。`strip` 于是对着已经空了的槽再拉一次，而空槽上的手势会打到底下的武器行，把整枪扔地上。
 
-```
-plate ink = 0        74/74 次，无一例外
-按步骤          hold 52   clear the slot 14   take_off 5   strip 3
-最近的例子      docs/attachments/runs/20260804_164135/miss_00_holo_shot.png
-```
+三个假设先后被自己的数据否掉（重试打空槽、空槽画水印、内容读回能拦），最后是人眼盯屏看出来的：**配件依次落地之后，又拉了一遍，把枪拉下去了。**
 
-那张现场图**证明至少有一次是真的**：AKM 出现在**左边的地面/库存栏**里，而枪架那块（x≈2237）是空的。枪确实离开了枪架，`plate_ink=0` 不是误读。
-
-### 已排除
-
-- **不是「右键点空槽把枪扔了」**（`docs/game_quirks.md` 那条）。`strip` 选的是 `slot_states()=='filled'` 的**贴片**、不是模板读数，`unequip` 本身也拒绝空槽。那条路已经堵上了。
-- **不是刷新器**。这 74 次跟 `never clicked` / `would not expand` 是两组不同的失败，2026-08-04 刷新器改常量之后后者归零，这个照旧。
-
-### 没验过的（留给你看）
-
-**52 次发生在 `hold`，而 `hold()` 要关一次 Tab**（数字键在 Tab 开着时被吞，`InventoryControl.hold` 的注释写了）。如果检查在那个关闭窗口里读了名字板，读到的是游戏画面不是面板，ink 自然是 0——**这会让「枪掉了」和「读早了」长得一模一样**，而 74/74 全是 0 这个整齐度更像后者。
-
-分辨方法：失败时同时存一张**全屏**（现在存的是带状抓取，Tab 开没开看不出来），或者在读 plate 前先过一次 `tab_open()`。
-
-关口在 `collect_templates.py` 的 `ink = self.ac.plate_ink(g, self.frame(flush=2))`。
+判据换成**正向识别配件**（`detector/slot_detector.py` 有数字和取舍），`scope` 位也一起接上——它以前恒 `unknown` 而 `unequip` 放行 `unknown`，是同一条路径的另一半。
 
 ## 待办
 

@@ -981,38 +981,50 @@ class InventoryControl:
         return self.name_template.ink(frame[y:y + h, x:x + w])
 
     def slot_states(self, gun, frame=None):
-        """{slot: absent|empty|filled|unknown} for `gun`, from TILE GEOMETRY.
+        """{slot: absent|empty|filled|unknown} for `gun`. IS THERE A PART HERE.
 
-        The other slot reader on this class, read_slots(), matches icon
-        TEMPLATES and answers a different question -- WHICH part is in there.
-        Both are needed and they fail differently, which is the point:
+        The other slot reader on this class, read_slots(), answers WHICH part.
+        Both go through the same template bank now; they still differ in what
+        they will say, and the difference is the point:
 
-          read_slots   drifts silently when the game re-draws an icon, and
-                       cannot see a part with no template at all. It has named
-                       four attachments on a rack holding no gun.
-          slot_states  never looks at an icon, so a missing or stale template
-                       cannot touch it. It cannot say WHICH part, and it
-                       returns `unknown` for `scope` forever (no tile is drawn
-                       there).
+          read_slots   names it, so it can be wrong about WHICH -- and reports
+                       AMBIGUOUS when two templates are within MARGIN_MIN.
+          slot_states  only ever says whether ANY part is there, and adds the
+                       tile's border ring on top: a slot the weapon does not
+                       have reads `absent` rather than `empty`.
 
         Anything asking "is it safe to send a gesture at this slot" wants THIS
         one. See unequip() for what the wrong answer costs.
+
+        ⚠ IT USED TO READ TILE GEOMETRY ONLY, which cost 74 guns, and a part
+        with no template now reads `empty`. Both in slot_detector's docstring.
         """
         if self._slots is None:
             self._slots = SlotDetector()
-        return self._slots.classify(self._frame() if frame is None else frame,
-                                    gun)
+        frame = self._frame() if frame is None else frame
+        # The weapon narrows the bank to what it can physically hold, which is
+        # what stops an SMG suppressor being read onto an SKS. `self.guns` is
+        # whatever the last look() cached and None is a legitimate answer --
+        # candidates() treats an unknown key as no key and tries the whole
+        # slot, which is looser in one direction only.
+        return self._slots.classify(frame, gun, (self.guns or {}).get(gun))
 
     def slot_state(self, gun, slot, frame=None):
         """One slot's tile state. -> absent|empty|filled|unknown"""
         return self.slot_states(gun, frame).get(slot)
 
-    def read_slots(self, gun=None):
+    def read_slots(self, gun=None, frame=None):
         """What the guns are wearing, as template names ('' when empty).
 
         gun=None -> {1: {slot: name}, 2: {slot: name}}; gun=1|2 -> {slot: name}.
+
+        `frame` for the reason look() takes one: a caller holding a frame and
+        asking this to grab its own gets an answer about a different instant.
+        It matters most when this is read ALONGSIDE slot_states(), which has
+        taken a frame all along — the two readers are only worth comparing
+        when they are describing the same screen.
         """
-        out = self._slot_states(self._frame())
+        out = self._slot_states(self._frame() if frame is None else frame)
         return out if gun is None else out[gun]
 
     # ── The primitive ──
@@ -1599,11 +1611,16 @@ class InventoryControl:
         `worn` still reports the NAMES, from read_slots, because that is what
         a caller wants in the record. What is acted on is the tile.
         """
-        states = self.slot_states(gun)
-        named = self.read_slots(gun)
-        # `unknown` is scope, where no tile is drawn. Pull it when a template
-        # can see something there -- that is the one slot where read_slots is
-        # the better of the two readers, having any answer at all.
+        # ONE FRAME FOR BOTH READERS. They used to grab their own, so `states`
+        # and `named` could describe different instants -- which is exactly the
+        # pair whose disagreement decides whether a gesture goes out.
+        frame = self._frame()
+        states = self.slot_states(gun, frame)
+        named = self.read_slots(gun, frame)
+        # `unknown` no longer means scope: that position is read like every
+        # other slot now (slot_detector). It survives as the answer nothing
+        # here should turn into a gesture, so the second branch is kept for a
+        # reader that genuinely cannot tell and a template that can.
         had = [s for s in SLOT_NAMES
                if states.get(s) == 'filled'
                or (states.get(s) == 'unknown' and named.get(s))]

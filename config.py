@@ -716,7 +716,20 @@ TAB_SLOT_NO_TILE = ('scope',)
 # OCCUPANCY — Canny edges inside the interior. The tile is flat, an icon is
 # not.  empty 0 (muzzle/grip/stock), 17 (magazine), 71 (scope: weapon render
 # showing through); filled 202..885. Threshold 120 sits in that gap.
+#
+# ⚠ REPORTED, NOT JUDGED. "71 (scope: weapon render showing through)" above is
+# the reason: on an AKM's MAGAZINE the same effect measures 395 with the gun
+# stripped bare. slot_detector's docstring has what that cost.
 TAB_SLOT_FILLED_EDGES = 120
+
+# OCCUPANCY: the best template MSE in the tile. Filled means A PART IS
+# RECOGNISED; the weapon's own render and the scenery behind the panel are then
+# one case, "not a part", which needs a model of neither.
+#
+#   fitted tiles   p50 15.2   p90 40.3   p99 89.2     1685 captures
+#   bare AKM mag        346.6                         run 20260804_211054
+#   empty tiles    min 891    p50 2750                24 measurable of 281
+TAB_SLOT_MATCH_MAX = 150
 
 # Mismatch polling (ms)
 MISMATCH_POLL_INTERVAL = 500   # ms between mismatch polls
