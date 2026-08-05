@@ -84,7 +84,7 @@ from capture_run import CaptureRun, LABEL_REQUESTED
 from config import (HUD_REGIONS, TAB_PIXEL_THRESH, TAB_COUNT_MIN,
                     TAB_COUNT_MAX)
 from detector.attachment_catalog import ATTACHMENTS, ROSTER, SLOTS, fits
-from detector.cropper import win32_cap
+from detector.cropper import capture_screen, win32_cap
 from detector.tab_detector import TabTypeDetector
 from detector.attachment_detector import SLOT_DETAIL_MIN, SLOT_NAMES
 from detector.slot_detector import SlotDetector
@@ -1174,17 +1174,38 @@ class Collector:
         # The first version did exactly that and reported 22 phantom losses in
         # one run, 14 of them straight after hold(). gun_slot() carries the
         # same watch for the same reason; this is that lesson, repeated.
-        def still_here(step, timeout=GUN_WATCH_S):
+        def still_here(step, timeout=GUN_WATCH_S, **extra):
             deadline = time.perf_counter() + timeout
             while True:
                 ink = self.ac.plate_ink(self.gun, self.frame(flush=2))
                 if ink >= PLATE_INK_MIN:
                     return True
                 if time.perf_counter() >= deadline:
+                    # WHICH of the three it is, recorded rather than guessed.
+                    # "plate reads 0" has been logged 74 times across 11 runs
+                    # and never once said whether the gun moved rack slots,
+                    # fell on the floor, or was simply not being looked at —
+                    # and the repairs are different for each. The poll above
+                    # already rules out the fade-in, so the answer is one of:
+                    #
+                    #   other slot has ink  -> self.gun is stale, not a loss
+                    #   Tab is shut         -> the plate region is game world
+                    #   neither             -> the gun really is gone, and the
+                    #                          full screen shows where to
+                    #
+                    # The full screen matters: frame() is a banded grab, so
+                    # whether the Tab panel was even up is invisible in it.
+                    f = self.frame(flush=2)
+                    both = {g: self.ac.plate_ink(g, f) for g in (1, 2)}
+                    try:
+                        tab = bool(self.ac.tab_open())
+                    except Exception as e:
+                        tab = f'unreadable: {e}'
                     self.miss(key,
                               f'the gun left rack slot {self.gun} during '
-                              f'"{step}"', frame=self.frame(), plate=ink,
-                              step=step, watched_s=timeout)
+                              f'"{step}"', frame=capture_screen(), plate=ink,
+                              step=step, watched_s=timeout,
+                              plate_both=both, tab_open=tab, **extra)
                     return False
                 time.sleep(FIT_POLL_S)
 
@@ -1201,8 +1222,13 @@ class Collector:
         # The floor and not 库存: a part sitting in the list would be a second
         # row, and the identity of everything below rests on there being
         # exactly one.
-        self.ac.strip(self.gun, to=at_ground())
-        if not still_here('strip'):
+        # The record is KEPT, not discarded. `strip` loses the host gun often
+        # enough to be the collector's largest single failure (74 across 11
+        # runs, 2026-08-04) and every one of those misses said only "the gun
+        # left rack slot N" — which slot's unequip preceded it, what gesture
+        # it used and what it read back were all thrown away here.
+        strip_rec = self.ac.strip(self.gun, to=at_ground())
+        if not still_here('strip', strip=strip_rec):
             return None
         # NOTHING TOUCHES A SLOT THAT DOES NOT READ `filled` -- in ANY gesture.
         #

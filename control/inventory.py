@@ -1089,6 +1089,52 @@ class InventoryControl:
 
         for attempt in range(retries + 1):
             rec['attempts'] = attempt + 1
+            # A RETRY IS ONLY SAFE WHILE NOTHING HAS CHANGED. The note above
+            # this loop has said so since it was written and nothing enforced
+            # it: `before` and `p0` are computed once, outside, and every
+            # retry re-sends the same gesture at the same point without asking
+            # whether that point still holds what it held.
+            #
+            # For a WEAPON SLOT source that is not a wasted click, it is a lost
+            # gun. The first attempt empties the slot; the readback misses it
+            # (a panel row count that could not see the arrival); the retry
+            # then puts a gesture on an EMPTY slot, which reaches the weapon
+            # row underneath, and both of the weapon row's gestures throw the
+            # whole gun on the floor — right click 1/1, drag-left 1/1, both
+            # measured. unequip() guards exactly this and its guard runs ONCE,
+            # before this call, so the retry walks around it.
+            #
+            # Measured 2026-08-04: 74 occurrences across 11 runs of
+            # collect_templates, one part lost each time and a whole round of
+            # 31 in the worst. The screen at the failure shows the three
+            # attachments strip() removed sitting in 附近 with the AKM listed
+            # right after them — three drags that worked, and the gun taken by
+            # the retry of the last one.
+            #
+            # THE CHECK IS ON THE GRAB, NOT THE RELEASE, and that is not a
+            # detail: a right click has no release point and drops the gun
+            # just the same. What makes the gesture dangerous is where it
+            # STARTS.
+            #
+            # Costs nothing on the path that works — retries are already the
+            # exception, and the first attempt is covered by unequip's guard.
+            if attempt and is_slot(src):
+                now = self.slot_state(src[1], src[2])
+                if now in (SLOT_EMPTY, SLOT_ABSENT):
+                    # The slot emptied, so the previous attempt DID move the
+                    # part. Reported as ok: what the caller asked for has
+                    # happened. `source_emptied` says the destination was
+                    # never confirmed, for a caller that needs to know.
+                    rec['ok'] = True
+                    rec['source_emptied'] = True
+                    rec['error'] = (f'{loc_str(src)} is {now} — the previous '
+                                    f'attempt moved it and the readback missed '
+                                    f'it. Not dragging again: a gesture on an '
+                                    f'empty slot drops the gun.')
+                    self._log(f'{loc_str(src)} -> {loc_str(dst)}: source is '
+                              f'{now} after attempt {attempt}, so it moved; '
+                              f'not retrying into the weapon row')
+                    return rec
             if panels is not None:
                 f = self._frame()
                 n_src0 = panel_rows(f, panels[0]) if panels[0] else 0
@@ -1447,6 +1493,42 @@ class InventoryControl:
                       f'drops the gun')
             return step(at_slot(gun, slot), dst, ok=False, verified=True,
                         error=f'slot reads {state}', slot_state=state)
+        # THE TILE IS NOT THE ONLY READER, and on the state that costs a gun it
+        # is the WEAKER one. Reproduced 2026-08-04 on an AKM, same slot, one
+        # unequip apart:
+        #
+        #     real ext. quickdraw mag   tile filled   content mse  32.2  margin 3.38
+        #     whatever is there after   tile filled   content mse 346.4  margin 1.14
+        #
+        # The tile cannot separate those — edges 413 against a 120 threshold,
+        # max brightness 157 against a corpus where filled starts at 143 — so
+        # the driver gestured again, the gesture landed on a slot holding
+        # nothing it could name, and the whole gun went on the floor. That path
+        # is 74 lost parts across 11 collector runs.
+        #
+        # The CONTENT reader can separate them, and only since MARGIN_MIN
+        # existed: 346/1.14 is refused as AMBIGUOUS, where before it would have
+        # been named `Magazine_Extended_Large_C` — a different part, stated
+        # confidently.
+        #
+        # THREE STATES, NOT TWO, and the middle row is the one that must not be
+        # lost:
+        #     tile filled + a name        act
+        #     tile filled + reads empty   act — a part with no template is
+        #                                 invisible to the matcher, and six
+        #                                 grips once stayed on a gun for
+        #                                 exactly that reason. The tile wins.
+        #     tile filled + AMBIGUOUS     refuse. Something is drawn there and
+        #                                 nothing knows what; a gesture aimed
+        #                                 by that belief costs the weapon.
+        worn = self.read_slots(gun)
+        if worn.get(slot) == AMBIGUOUS:
+            self._log(f'gun{gun}.{slot}: the tile says filled but the '
+                      f'templates cannot name what is in it — not gesturing. '
+                      f'That is the state that drops the gun.')
+            return step(at_slot(gun, slot), dst, ok=False, verified=True,
+                        error='slot content is unreadable (ambiguous)',
+                        slot_state=state, content=AMBIGUOUS)
         if gesture in ('auto', 'click') and dst[0] == 'inventory':
             rec = self.right_click_unequip(gun, slot, retries=retries)
             if rec['ok'] or gesture == 'click':

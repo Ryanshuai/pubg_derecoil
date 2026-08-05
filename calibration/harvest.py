@@ -74,13 +74,29 @@ RUNS = os.path.join(os.path.dirname(HERE), 'docs', 'recoil', 'runs')
 #
 # Overridable per slot with --parts muzzle=brake_ar,grip=angled_grip, which is
 # how a second part in the same slot gets measured against the first.
+# THE STOCK SLOT USED TO NAME tactical_stock AND THAT MEASURED NOTHING.
+# Three cells across two weapons: 0.9942±0.0080, 1.0113±0.0120, 1.0025±0.0078.
+# An identity part, so the whole stock axis was measuring a part that does not
+# move the number — and it did that while the game's own wiki claims -20.00%
+# Recoil Pattern Scale for it, a ~25 sigma disagreement nobody had looked at.
+#
+# heavy_stock, which had never been measured at all, is 0.8346 +- 0.0100 on
+# mp5k against a bare cell of 1009.9 +- 2.1 (5 magazines, cv 0.5%). Sixteen
+# sigma from 1.0. So the SLOT is real and it was the PART that was inert, and
+# the representative had to be the one that moves.
+#
+# It also multiplies, which is not something the other slots can be assumed to
+# do: on this same mp5k, muzzle x stock came out pred 0.4952 / meas 0.5143,
+# +1.4 sigma — multiplicative — while muzzle x grip on the same weapon is
+# 8.5-12.8 sigma from multiplicative. "The slots do not multiply" is a
+# property of the muzzle-grip edge, not of the model.
 PART_FOR_CLASS = {
-    'AR':  {'muzzle': 'comp_ar',  'grip': 'vert_grip', 'stock': 'tactical_stock'},
-    'DMR': {'muzzle': 'comp_ar',  'grip': 'vert_grip', 'stock': 'tactical_stock'},
-    'SMG': {'muzzle': 'comp_smg', 'grip': 'vert_grip', 'stock': 'tactical_stock'},
+    'AR':  {'muzzle': 'comp_ar',  'grip': 'vert_grip', 'stock': 'heavy_stock'},
+    'DMR': {'muzzle': 'comp_ar',  'grip': 'vert_grip', 'stock': 'heavy_stock'},
+    'SMG': {'muzzle': 'comp_smg', 'grip': 'vert_grip', 'stock': 'heavy_stock'},
     # The M249 takes the AR magazine and a stock, but no compensator — the
     # AR comp lists 突击步枪/精确射手步枪/O12/S12K and not the M249.
-    'LMG': {'muzzle': None,       'grip': 'vert_grip', 'stock': 'tactical_stock'},
+    'LMG': {'muzzle': None,       'grip': 'vert_grip', 'stock': 'heavy_stock'},
 }
 
 # Every slot this tool controls. A config names the ones to FILL; the rest are
@@ -653,9 +669,40 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want,
         # climb away, declared the view's position unknown, and abandoned the
         # cell -- one magazine after correctly discovering the AUG fires at 720
         # rpm rather than the table's 680.
-        a = analyse(rec.finish(), rig.K, w.bullet_interval_s, fire_end,
+        # NOT `trace` — that name is taken sixty lines up by the AMMO trace,
+        # and shadowing it here fed a MagazineResult to the list comprehension
+        # that builds ammo_trace for the cell record. It only fires on the
+        # re-timing branch, so three factorials passed and the VSS crashed on
+        # the first magazine that disagreed about its rate.
+        view_trace = rec.finish()
+        a = analyse(view_trace, rig.K, w.bullet_interval_s, fire_end,
                     n_bullets=mag_size, first_shot_ts=first_shot)
         if a is None:
+            # SAID OUT LOUD. This was the one discard path that printed
+            # nothing, and it is the one that swallows a whole weapon: the VSS
+            # produced 0 of 9 cells on 2026-08-04 with three magazines fired
+            # per cell, every posture reached, the rack read, the sight
+            # switched -- and not one line between "magazine holds 22 rounds"
+            # and "nothing measured". A run that fires for a minute and
+            # reports nothing at all is indistinguishable from one that never
+            # tried.
+            #
+            # THE TRACE LENGTH IS THE DIAGNOSIS, so it is printed. analyse()
+            # gives up immediately on `len(ts) < 2` (calibration/analysis.py),
+            # i.e. the view tracker returned almost nothing -- which is a
+            # completely different fault from "the trace is there but the shot
+            # times could not be fitted", and the two want opposite fixes.
+            #
+            # The VSS is the standing suspect for the first. It is the only
+            # weapon on a 3-patch sight profile, and two of those three columns
+            # (1265, 1330) sit 65 px apart where the red dot's seven are
+            # 140-190 apart -- so it is nearer two independent looks at the
+            # world than three. Its integral PSO-1 is what squeezed them.
+            print(f"        [!] analyse() could not read this magazine "
+                  f"({steps} rounds, {fire_s:.2f}s, "
+                  f"{len(rig.tracker.xs)} patch columns, "
+                  f"{len(getattr(view_trace, 'ts', ()))} tracked samples) "
+                  f"— discarded")
             discarded.append('analyse() returned nothing')
             continue
         rig.pending_pitch += a['view_drift_counts']
@@ -936,7 +983,7 @@ def note_fits(facts, weapon, want):
 
 def harvest_weapon(rig, kit, sc, weapon, configs, postures, mags,
                    slot, log, done, want_parts=(), facts=None,
-                   apply_ema=False, base_sight='red_dot'):
+                   apply_ema=False, base_sight='red_dot', bare_mags=0):
     cls = ROSTER.get(weapon, (None,))[0]
     parts = PART_FOR_CLASS.get(cls, {})
 
@@ -1041,8 +1088,26 @@ def harvest_weapon(rig, kit, sc, weapon, configs, postures, mags,
             if (weapon, cfg, posture) in done:
                 print(f"      posture {posture}: already in the log, skipping")
                 continue
-            print(f"      posture {posture}")
-            r = measure_cell(rig, weapon, posture, mags, kit.slot, log, cfg,
+            # THE BARE CELL IS WORTH MORE MAGAZINES THAN ANY OTHER, because
+            # its error is COMMON-MODE. Every single-slot factor divides by
+            # it, and the multiplicativity test multiplies by it with weight
+            # (n-1), so an error there slides every verdict in the run the
+            # same way -- and the spread AMONG the verdicts cannot see it.
+            #
+            # Measured: ortho_0802c and 0802d are the same m416 factorial run
+            # twice. All four multiplicativity gaps flipped sign together,
+            # -6.0/-6.2/-5.6/-9.9% against +0.5/+2.2/-0.8/+5.9%. c's bare cell
+            # read 8% low with a 5.9% sem while d's had 1.6%; that single cell
+            # is the entire difference between the two verdicts.
+            #
+            # Splitting magazines evenly across cells is therefore the wrong
+            # allocation, not a neutral one. --bare-mags buys the whole run's
+            # precision in one place.
+            n = bare_mags if (cfg == 'bare' and bare_mags) else mags
+            print(f"      posture {posture}"
+                  + (f'  ({n} magazines — this is the cell every ratio '
+                     f'divides by)' if n != mags else ''))
+            r = measure_cell(rig, weapon, posture, n, kit.slot, log, cfg,
                              want, apply_ema=apply_ema)
             if r:
                 out.append(r)
@@ -1234,6 +1299,16 @@ def main():
                     help='include semi-auto and burst weapons, which have no '
                          'full-auto curve to measure')
     ap.add_argument('--mags', type=int, default=3)
+    ap.add_argument('--bare-mags', type=int, default=0,
+                    help='magazines for the BARE cell only (default: same as '
+                         '--mags). Worth raising whenever the run computes '
+                         'factors: bare is the denominator of every one of '
+                         'them and enters the multiplicativity test with '
+                         'weight (n-1), so its error is common-mode — it '
+                         'slides every verdict the same way and the spread '
+                         'among the verdicts cannot see it. Two runs of the '
+                         'same m416 factorial had all four gaps flip sign '
+                         'together on the strength of one noisy bare cell.')
     ap.add_argument('--slot', type=int, default=2,
                     help='rack slot to start from. Only a starting guess — '
                          'the slot the gun actually landed in is read back '
@@ -1434,7 +1509,8 @@ def main():
                                        postures, args.mags, args.slot, log,
                                        done, want_parts=parts, facts=facts,
                                        apply_ema=args.apply,
-                                       base_sight=args.sight))
+                                       base_sight=args.sight,
+                                       bare_mags=args.bare_mags))
     except KeyboardInterrupt:
         print("\ninterrupted")
     finally:
