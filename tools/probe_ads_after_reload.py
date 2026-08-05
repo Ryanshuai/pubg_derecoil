@@ -29,18 +29,24 @@ it started while every read says "not scoped". `ensure_ads`'s own docstring
 already names this loop — "clicking again while the animation is still playing
 just toggles back out".
 
-THE DISCRIMINATOR IS WHETHER THE SCREEN MOVES, not whether it arrives.
-`AdsDetector.score_crop` is continuous — how strongly a crosshair is present —
-so this samples it right through the reload and the clicks:
+⚠ "DID THE SCORE MOVE AFTER THE CLICK" IS NOT THE DISCRIMINATOR, and the
+first version of this probe used it and reported nonsense: 16 of 16 clicks
+"registered". THE RELOAD ANIMATION MOVES THE SCORE BY ITSELF — measured, the
+crosshair score climbs 60.8 -> 111.2 at a steady +7 per frame over the first
+187 ms, with no input at all. A test that asks whether the screen changed
+cannot separate the click from the animation it is competing with.
 
-    score moves after a click, then settles wrong   -> the click REGISTERED
-                                                       (B, or the toggle race)
-    score does not move at all after a click        -> the click was EATEN (A)
+WHAT DOES WORK IS THE TOGGLE'S OWN ARITHMETIC. Right click toggles, so with
+four clicks and a known start the end states are forced: if every click
+registers the sequence must ALTERNATE. Anything else counts the misses.
 
-That is the same shape as the posture trace: ask a signal the thing under test
-cannot reach, and let it say which of two stories happened. Here the signal is
-the crosshair itself, which is present-or-absent rather than a
-readiness-to-act, so it cannot be fooled by the button state.
+    every click registers   True, False, True, False
+    measured, all 4 mags    False, False, True, False
+                            ^^^^^^^^^^^^ two eaten, then it takes
+
+So the state AFTER each click is the signal, and the arithmetic — not the
+motion — is what makes it readable. Same shape as the posture trace: ask
+something the thing under test cannot reach.
 
 Output: docs/ads/reload/<stamp>/{trace.jsonl, summary}
 """
@@ -125,22 +131,29 @@ class Trace:
 
 
 def verdict(rows):
-    """Did each click move the screen? -> [(click_ms, moved, settle_ms)]
+    """Did each click TAKE? -> [(click_ms, took, latency_ms, scoped_after)]
 
-    `moved` is the question this probe exists to answer. `settle_ms` is when
-    the score stopped changing afterwards, which is the number a watch timeout
-    would have to clear IF the click registered at all.
+    `took` is the toggle's arithmetic, not the screen's motion: the state
+    after the click differs from the state before it. That is the only reading
+    the reload animation cannot forge — see the module docstring for the probe
+    version that asked about motion and answered 16/16.
+
+    `latency_ms` is how long after the click the state actually flipped, and
+    it is the number a watch timeout has to clear. It is only meaningful for a
+    click that took; for one that did not, no timeout would have helped.
     """
     out = []
     clicks = [r for r in rows if r['click'] is not None]
     for i, c in enumerate(clicks):
         end = clicks[i + 1]['ms'] if i + 1 < len(clicks) else rows[-1]['ms']
         after = [r for r in rows if c['ms'] <= r['ms'] < end]
-        moved = [r for r in after
-                 if r['d'] is not None and abs(r['d']) >= MOVE_MIN]
-        settle = moved[-1]['ms'] - c['ms'] if moved else None
-        out.append((c['ms'], bool(moved), settle,
-                    after[-1]['scoped'] if after else None))
+        if not after:
+            continue
+        before = c['scoped']
+        flip = next((r for r in after if r['scoped'] != before), None)
+        out.append((c['ms'], flip is not None,
+                    (flip['ms'] - c['ms']) if flip else None,
+                    after[-1]['scoped']))
     return out
 
 
@@ -149,7 +162,13 @@ def main():
     ap.add_argument('--weapon', default='m416')
     ap.add_argument('--sight', default='red_dot')
     ap.add_argument('--mags', type=int, default=4)
+    ap.add_argument('--click-at', dest='click_at', default='',
+                    help='comma-separated seconds after the magazine empties. '
+                         'Defaults to CLICK_AT, which is spread wide enough '
+                         'to FIND the crossover; pass a narrow set to pin it.')
     a = ap.parse_args()
+    click_at = (tuple(float(x) for x in a.click_at.split(','))
+                if a.click_at else CLICK_AT)
 
     busy = other_agents()
     if busy:
@@ -189,7 +208,7 @@ def main():
                 break
             print(f'  [{i}] firing a magazine dry')
             rig.fire.fire_magazine()
-            rows = tr.watch(WATCH_S, clicks=CLICK_AT, mouse=m,
+            rows = tr.watch(WATCH_S, clicks=click_at, mouse=m,
                             label=f'mag{i}')
             print(f'      {"click@ms":>9} {"moved":>6} {"settle":>7} {"scoped":>7}')
             for ms, moved, settle, scoped in verdict(rows):

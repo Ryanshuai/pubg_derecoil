@@ -643,6 +643,18 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want,
         if not focus_keeper().ok(f'mag {i}'):
             break
         if i > 0:
+            # The reload has to FINISH before the button means anything — the
+            # game ignores right click while it plays, and ensure_ads used to
+            # spend all three clicks inside that window. Measured on an m416,
+            # four magazines: a click 2000 ms after the counter stopped
+            # falling took 0/4, at 2300 ms 3/4, at 2400 ms 4/4; and a click
+            # that takes puts the sight up in 102..104 ms against a 2.5 s
+            # watch. See calibration/sweep.py's copy of this loop for the full
+            # table, and tools/probe_ads_after_reload.py for the trace.
+            if rig.wait_reload() is None:
+                print("      [!] the reload never finished — not clicking "
+                      "into it")
+                break
             if not rig.ensure_ads():
                 print("      [!] could not re-enter ADS after reload")
                 break

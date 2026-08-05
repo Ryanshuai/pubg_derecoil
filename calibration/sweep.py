@@ -480,6 +480,30 @@ def calibrate_combo(rig, weapon, posture, mags, log):
         if not focus_keeper().ok(f'{weapon}/{posture} mag {i}'):
             break
         if i > 0:                    # auto-reload drops us to the hip
+            # WAIT THE RELOAD OUT BEFORE CLICKING. The game does not act on
+            # the right button while it is reloading, and ensure_ads used to
+            # spend all three of its clicks inside that window. Measured
+            # 2026-08-05 on an m416, four magazines, clicking at fixed offsets
+            # after the counter stopped falling (tools/probe_ads_after_reload):
+            #
+            #   clicked  300 ms   0/4 took       clicked 2000 ms   0/4
+            #   clicked 1400 ms   0/4            clicked 2300 ms   3/4
+            #   clicked 1700 ms   0/4            clicked 2400 ms   4/4
+            #
+            # and when a click DOES take, the sight is up 102..104 ms later —
+            # against an ADS_WATCH_S of 2.5 s. So the watch was never short;
+            # it was waiting for a state change that had not been requested.
+            # Worse, right click is a toggle, so the clicks that DID land
+            # after the window paired up and cancelled.
+            #
+            # Not a constant, because reload length is per weapon: wait_reload
+            # polls the ammo counter until it climbs back and settles. It was
+            # already used at three other points in this file and in
+            # harvest.py — just not in the loop that needed it.
+            if rig.wait_reload() is None:
+                print("      [!] the reload never finished — not clicking "
+                      "into it")
+                break
             if not rig.ensure_ads():
                 print("      [!] could not re-enter ADS after reload")
                 break
