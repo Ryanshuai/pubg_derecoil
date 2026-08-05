@@ -185,7 +185,24 @@ class TabItemDetector:
         occupied = float(cv2.Laplacian(gray, cv2.CV_32F).var()) >= ROW_DETAIL_MIN
         if not occupied:
             return None, False
-        cell = cv2.resize(cell, (63, 63), interpolation=cv2.INTER_AREA)
+        # AT 80x80, ITS OWN SIZE. This used to resize to 63x63 so the row would
+        # fit the slot geometry the whole bank was once read with, and that
+        # became wrong the moment row pictures were stored at 80x80: an 80x80
+        # template does not fit a 63x63 crop, so `_variant` correctly skipped
+        # every one of them and the row was judged by the SLOT rendering of a
+        # squashed picture. Measured on a live 库存 holding 10 known items
+        # (2026-08-05, temp_debug/tab_now.png):
+        #
+        #             correct   MSE (gate 150)   margin (gate 1.25)
+        #   63x63       0/10        255..1147          1.03..2.07
+        #   80x80      10/10          1.3..68.5        2.57..205
+        #
+        # Nothing was wrong with the templates. `pixi run attachments` scored
+        # rows 930/1050 all the way through, because tools/score_attachments.py
+        # HAD been moved to 80x80 and this reader had not — so the ratchet was
+        # green on a path the game never takes. If this line comes back, that
+        # gate will not notice.
+        #
         # prefer='row': this cell is an inventory ROW, and the bank holds a
         # picture taken as one. See _rank_variant.
         name, mse, margin = self._det.best_two(cell, self._all, prefer='row')

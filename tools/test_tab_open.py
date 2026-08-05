@@ -64,6 +64,13 @@ from detector.tab_detector import TabTypeDetector
 Y, X, H, W = HUD_REGIONS['type']
 SHOT = (1440, 3440)          # the coordinates above assume this and only this
 
+# Below this whole-frame mean, AND with an all-zero crop, a shot is a failed
+# grab rather than a picture. A real 3440x1440 capture of this game averages
+# ~52; the seven damaged ones found on 2026-08-05 averaged 5.6..7.7. Both
+# conditions are required: a legitimately dark NIGHT frame would clear the
+# first and fail the second.
+BLANK_FRAME_MEAN = 20.0
+
 
 def truth(path):
     """Was the Tab screen up when this was taken? None = do not know."""
@@ -80,8 +87,26 @@ def truth(path):
 
 
 def corpus():
-    """[(tab_was_up, crop, relative path)] for every shot with a known answer."""
-    rows = []
+    """-> ([(tab_was_up, crop, rel)], [(rel, frame_mean)]) — rows, and the
+    shots that carry no evidence at all.
+
+    A BLACK CAPTURE IS NOT A FAILED PREDICTION. The grab can come back all
+    zeros — DXGI hands back an empty surface when the game is not presenting —
+    and such a frame has nothing in it to read. Counted as an ordinary Tab-up
+    shot it reads `count 0`, scores as a false-shut, and prints a line blaming
+    the count band; the band is fine and the file is empty.
+
+    That is not hypothetical. 2026-08-05 this gate went red on 7 shots, all
+    from docs/runs/bare_tiles/ (2026-08-04), every one a whole frame averaging
+    5.6..7.7 where a real capture averages 52. The diagnosis on screen pointed
+    at a threshold nobody had touched.
+
+    So they are separated rather than dropped: excluded from scoring, LISTED,
+    and the count reported. Silently skipping them would turn a damaged
+    collection into a green gate, which is the more expensive of the two
+    mistakes — those runs are somebody's ground truth elsewhere too.
+    """
+    rows, blank = [], []
     pats = ['docs/**/*.jpg', 'docs/**/*.png']
     for path in sorted(sum((glob.glob(os.path.join(ROOT, p), recursive=True)
                             for p in pats), [])):
@@ -91,13 +116,20 @@ def corpus():
         img = cv2.imread(path)
         if img is None or img.ndim != 3 or img.shape[:2] != SHOT:
             continue
-        rows.append((want, img[Y:Y + H, X:X + W].copy(),
-                     os.path.relpath(path, ROOT)))
-    return rows
+        rel = os.path.relpath(path, ROOT)
+        crop = img[Y:Y + H, X:X + W].copy()
+        # The WHOLE frame, not the crop: a legitimately dark crop is normal
+        # (the region sits over scenery), an all-dark 3440x1440 frame is not.
+        mean = float(img.mean())
+        if mean < BLANK_FRAME_MEAN and not crop.any():
+            blank.append((rel, mean))
+            continue
+        rows.append((want, crop, rel))
+    return rows, blank
 
 
 def main():
-    rows = corpus()
+    rows, blank = corpus()
     if not rows:
         raise SystemExit('no stored 3440x1440 shots under docs/')
 
@@ -105,6 +137,13 @@ def main():
     n_up = sum(r[0] for r in rows)
     print(f'{len(rows)} shots at {SHOT[1]}x{SHOT[0]}: '
           f'{n_up} Tab up, {len(rows) - n_up} Tab shut')
+    if blank:
+        print(f'  {len(blank)} BLANK capture(s) excluded — the grab came back '
+              f'empty, so there is nothing in them to read either way:')
+        for rel, mean in blank:
+            print(f'    {rel}  whole-frame mean {mean:.1f}')
+        print('  (not a detector failure. Those runs are ground truth '
+              'elsewhere too, so re-capture them rather than trusting them.)')
 
     bad = []
     for want, crop, rel in rows:

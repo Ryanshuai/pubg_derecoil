@@ -174,11 +174,17 @@ BAD_RUNS = {
 def samples():
     """Every ground-truth attachment crop on disk. -> [(run, sample), ...]
 
-    `rows` crops come from the 库存 list and are 80x80; the detector's own
-    reader resizes them to the slot size, so they arrive here the same way.
-    Both are collected because the same artwork at two sizes is two different
-    matches: Stock_SniperRifle_CheekPad_C has passed in a slot while failing
-    in a row.
+    `rows` crops come from the 库存 list and are 80x80, and are scored at that
+    size — see crop_of. Both targets are collected because the same artwork at
+    two sizes is two different matches: Stock_SniperRifle_CheekPad_C has passed
+    in a slot while failing in a row.
+
+    ⚠ This sentence used to read "the detector's own reader resizes them to
+    the slot size, so they arrive here the same way", and it stopped being
+    true when crop_of dropped the resize while tab_items._read_row kept it.
+    For that window the gate scored 930/1050 on a geometry the game never
+    used, and the live reader named 0 of 10 rows. If this file and _read_row
+    ever disagree about the size again, this number stops meaning anything.
     """
     out = []
     for d in sorted(glob.glob(os.path.join(RUNS, '*'))):
