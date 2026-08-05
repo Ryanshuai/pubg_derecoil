@@ -242,14 +242,58 @@ class Dispatcher:
             if entry.get('_mismatch'):
                 self.mismatch.run_scheduled(target_ts, entry)
             else:
-                self._run_detect(target_ts, entry)
+                again = self._run_detect(target_ts, entry)
+                # Into `remaining`, NOT self._pending: this loop rebuilds the
+                # queue and replaces it below, so anything appended to the old
+                # one is dropped on the floor.
+                if again is not None:
+                    remaining.append(again)
                 ran = True
         self._pending = remaining
         if ran:
             self.state.print_status()
 
+    def _retry(self, target_ts, entry):
+        """Re-queue an entry whose detector could not read. -> pending|None
+
+        WHY AN UNREADABLE RESULT IS NOT THE SAME AS A FAILURE. Some HUD
+        elements are only DRAWN in some states, so `None` frequently means
+        "ask again in a moment", not "this cannot be read". The posture icon
+        renders only while the sight is up (docs/game_quirks.md), and all three
+        of its triggers fire when it usually is not: `c` and `z` are pressed
+        before aiming, and 350 ms after a right-button release the sight is
+        often already down. A one-shot read there returns None, `set_posture`
+        discards it, THE STALE POSTURE SURVIVES, and compensation runs on a
+        factor wrong by up to 2x — standing 1.0 against prone 0.50.
+
+        The delays were never the problem, which is worth stating because they
+        were the obvious suspect. Measured 2026-08-05 over six backdrops
+        (tools/probe_posture_trace.py, docs/posture/traces/20260805_094215):
+        with the sight ALREADY UP, the icon follows a posture key in 34..68 ms
+        and was readable in 3786 of 3787 samples. With the sight down it was
+        readable in none, across a full 2000 ms window, in every round. So the
+        200 ms delay clears the real latency three times over; what it cannot
+        clear is a frame where the icon is not painted at all.
+
+        Bounded on purpose. If the sight has not come up within `retry_ms *
+        retries` of a stance change, the stance does not matter yet — nothing
+        is being aimed — and the next right-button event schedules its own
+        read. An unbounded retry would instead keep a stale entry alive
+        forever and re-read it into state long after the key that caused it.
+        """
+        every = entry.get('retry_ms')
+        left = entry.get('_retries_left', entry.get('retries', 0))
+        if not every or left <= 0:
+            return None
+        return (target_ts + every / 1000.0,
+                {**entry, '_retries_left': left - 1})
+
     def _run_detect(self, target_ts, entry):
-        """Find frame at target_ts, run detector, write result to state."""
+        """Find frame at target_ts, run detector, write result to state.
+
+        Returns a (ts, entry) to re-queue when the read came back empty and
+        the entry asks for retries, else None. See `_retry`.
+        """
         # The condition is checked twice: once when this was scheduled, and
         # again now, because state may have moved in between.
         #
@@ -259,20 +303,20 @@ class Dispatcher:
         # have been asking the wrong question. There are no negative delays
         # left; control/tab_watch.py replaced the two that existed.
         if not self._cond_met(entry.get('cond')):
-            return
+            return None
         regions = entry['regions']
         crops = self.capture.get_crops(target_ts, regions)
         if crops is None:
-            return
+            return self._retry(target_ts, entry)
 
         detect_name = entry['detect']
         detector = self._detectors.get(detect_name)
         if detector is None:
-            return
+            return None
 
         result = detector.classify(crops)
         if result is None:
-            return
+            return self._retry(target_ts, entry)
 
         # Write result to state — direct attribute assignment
         result_field = entry.get('result')
@@ -297,6 +341,7 @@ class Dispatcher:
                     self.mismatch.check_attachment(gun_id, att, crops)
                     self.state.set_attachments(gun_id, att)
                 self._apply_hw(['upload_pattern'])
+        return None
 
     # ════════════════════════════════════════════════════════════
     # Shutdown

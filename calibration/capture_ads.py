@@ -353,25 +353,23 @@ class SlotNotFound(RuntimeError):
     """Neither HUD weapon slot looks like the weapon that was asked for."""
 
 
-def _icon_mask(icon_key):
-    """A weapon's HUD silhouette as an alpha mask, at HUD icon height."""
-    if icon_key not in _icon_cache:
-        from detector.highlight_detector import (ASSET_DIR, ICON_H,
-                                                 WEAPON_ICON_MAP)
-        fname = next((f for f, k in WEAPON_ICON_MAP.items() if k == icon_key),
-                     None)
-        mask = None
-        if fname:
-            bgra = cv2.imread(os.path.join(ASSET_DIR, fname),
-                              cv2.IMREAD_UNCHANGED)
-            if bgra is not None and bgra.shape[2] == 4:
-                h, w = bgra.shape[:2]
-                mask = cv2.resize(bgra[:, :, 3],
-                                  (max(1, int(w * ICON_H / h)), ICON_H),
-                                  interpolation=cv2.INTER_AREA)
-                mask = mask.astype(np.float32) / 255.0
-        _icon_cache[icon_key] = mask
-    return _icon_cache[icon_key]
+def _hud_reader():
+    """The shared WeaponHudDetector. Built once; the bank is 2.9 MB."""
+    if 'det' not in _icon_cache:
+        from detector.weapon_hud_detector import WeaponHudDetector
+        _icon_cache['det'] = WeaponHudDetector()
+    return _icon_cache['det']
+
+
+def _known(icon_key):
+    """Can the HUD reader answer about this weapon at all?
+
+    It only knows weapons it has reference captures of, so this is a real
+    question and not a formality -- dbs, o12 and win94 are on the roster with
+    no frames at all.
+    """
+    det = _hud_reader()
+    return det.ready and icon_key in det.codes
 
 
 def _hud_slot(frame, slot):
@@ -387,25 +385,17 @@ def _zscore(a):
 def hud_match(frame, icon_key):
     """How well each HUD weapon slot matches one weapon. -> {1: s, 2: s}
 
-    The HUD draws the weapon as a white silhouette over the game world, so
-    dewhite pulls the overlay off the scene and the icon's alpha channel is
-    the shape to look for. Correlation, not template MSE: the silhouette is
-    the same shape whether the slot is the held one (bright) or the stowed one
-    (dim), and normalising is what makes those two comparable.
+    Cosine to that weapon's nearest reference capture, via the shared
+    WeaponHudDetector. It used to correlate against the game's extracted art
+    instead; that art is the INPUT to the game's compositing and this code
+    only ever sees the output, which measured 0.489 against 0.975 for real
+    captures. Higher is better either way, so callers did not change.
     """
-    from dl_models.icon_merging import dewhite
-    mask = _icon_mask(icon_key)
-    if mask is None:
-        raise SlotNotFound(f'no HUD icon template for {icon_key!r}')
-    out = {}
-    for slot in (1, 2):
-        crop = _zscore(dewhite(_hud_slot(frame, slot)))
-        if mask.shape[1] > crop.shape[1]:
-            out[slot] = 0.0
-            continue
-        out[slot] = float(cv2.matchTemplate(crop, _zscore(mask),
-                                            cv2.TM_CCOEFF_NORMED).max())
-    return out
+    det = _hud_reader()
+    if not _known(icon_key):
+        raise SlotNotFound(f'no HUD reference captures for {icon_key!r}')
+    return {slot: det.scores(_hud_slot(frame, slot)).get(icon_key, 0.0)
+            for slot in (1, 2)}
 
 
 def hud_highlight(frame):
@@ -447,11 +437,10 @@ def dump_slot_debug(frame, out_dir, top=4):
     path = os.path.join(out_dir, 'slot_debug.jpg')
     cv2.imwrite(path, np.vstack(tiles), [cv2.IMWRITE_JPEG_QUALITY, 95])
 
-    from detector.highlight_detector import WEAPON_ICON_MAP
-    keys = sorted(set(WEAPON_ICON_MAP.values()))
+    keys = sorted(_hud_reader().codes) if _hud_reader().ready else []
     for slot in (1, 2):
-        ranked = sorted(((hud_match(frame, k)[slot], k) for k in keys
-                         if _icon_mask(k) is not None), reverse=True)
+        ranked = sorted(((hud_match(frame, k)[slot], k) for k in keys),
+                        reverse=True)
         print(f'[slot] weapon_{slot} looks most like: '
               + ', '.join(f'{k} {s:.2f}' for s, k in ranked[:top]))
     print(f'[slot] wrote {path}')

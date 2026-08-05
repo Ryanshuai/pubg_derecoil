@@ -56,6 +56,27 @@ OFFSET_Y = 8
 OFFSET_X = 8
 MSE_EMPTY_TH = 450
 
+# WHERE A TEMPLATE OF A GIVEN SIZE SITS IN THE CROP IT IS READ AGAINST, and
+# nothing is resized to make it fit. Resizing a template is not free and it is
+# not neutral: it interpolates away exactly the antialiasing that separates
+# two grey tubes, and it is silent about it.
+#
+# Two renderings exist and they are not one picture at two sizes:
+#
+#   48 in a 63 crop    the weapon tile. The icon fills the tile edge to edge;
+#                      offset 8 is measured, not (63-48)//2 = 7.
+#   80 in an 80 crop   the 库存 row. The icon is drawn inside padding, so the
+#                      picture IS the whole cell and the offset is 0.
+#
+# Installing row solves under the slot geometry cost the whole row corpus:
+# every margin fell to the 1.25 gate at once, 0.861 -> 0.473, spread evenly
+# over parts whose templates had just been rebuilt from their own captures.
+# Uniformly worse is what a geometry error looks like — a bad solve would
+# have hurt some parts and spared others.
+#
+# An unlisted size is centred, which is a guess; the two that matter are here.
+TMPL_OFFSETS = {48: (OFFSET_Y, OFFSET_X), 80: (0, 0)}
+
 # ── the third answer ──
 #
 # A slot can be EMPTY, hold a part this bank can name, or hold something the
@@ -175,20 +196,25 @@ class AttachmentDetector:
             # asset. Asset names carry no dot, so the first field is the key.
             stem = fname[:-len('.png')].replace('Item_Attach_Weapon_', '')
             name = stem.split('.')[0]
-            resized = (img if img.shape[:2] == (TMPL_SIZE, TMPL_SIZE) else
-                       cv2.resize(img, (TMPL_SIZE, TMPL_SIZE),
-                                  interpolation=cv2.INTER_AREA))
-            mask = resized[:, :, 3] > ALPHA_TH
+            # KEPT AT ITS OWN SIZE. This used to resize every template to
+            # 48x48 so one geometry could serve everything, which is the same
+            # mistake in the other direction: a row picture squeezed into the
+            # slot frame loses a quarter of its scale and lands 6-8 px off.
+            # A variant is read against the crop it was photographed from —
+            # see TMPL_OFFSETS — and one that does not fit is skipped rather
+            # than stretched.
+            mask = img[:, :, 3] > ALPHA_TH
             if int(mask.sum()) < 30:
                 continue
-            tmpl_bgr = resized[:, :, :3].astype(np.float32)
+            tmpl_bgr = img[:, :, :3].astype(np.float32)
             ys, xs = np.where(mask)
             if name not in self._templates:
                 for slot_name, prefixes in SLOT_PREFIXES.items():
                     if any(name.startswith(p) for p in prefixes):
                         self._slot_index.setdefault(slot_name, []).append(name)
             self._templates.setdefault(name, []).append((tmpl_bgr[ys, xs],
-                                                         ys, xs))
+                                                         ys, xs,
+                                                         img.shape[:2]))
             # WHICH RENDERING this variant is: '' for the untagged file, else
             # the tag ('solved' = photographed in a weapon's slot tile, 'row' =
             # photographed as an inventory row). best_two ranks on ONE of them
@@ -200,9 +226,19 @@ class AttachmentDetector:
     # ── scoring ──
 
     def _variant(self, crop_f, name, i, shifts):
-        tmpl_vals, ys, xs = self._templates[name][i]
+        """One variant against one crop, at the variant's OWN scale.
+
+        A variant taller or wider than the crop cannot be read against it and
+        returns inf rather than being squeezed to fit — that is how a slot
+        crop ignores the row pictures and a row crop ignores the slot ones,
+        without either caller having to know which is which.
+        """
+        tmpl_vals, ys, xs, (th, tw) = self._templates[name][i]
         h, w = crop_f.shape[:2]
-        cy, cx = ys + OFFSET_Y, xs + OFFSET_X
+        if th > h or tw > w:
+            return float('inf')
+        oy, ox = TMPL_OFFSETS.get(th, ((h - th) // 2, (w - tw) // 2))
+        cy, cx = ys + oy, xs + ox
         best = None
         for sy, sx in shifts:
             ny = np.clip(cy + sy, 0, h - 1)

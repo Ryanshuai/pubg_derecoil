@@ -151,7 +151,25 @@ pixi run layering        # 9 条规则
 
 **离线回归**（改完代码就跑）
 
-`analysis` · `abs-offset` · `attachments` · `fire` · `frames` · `harness` · `kit` · `locations` · `lobby-detector` · `panel-state` · `recenter` · `runs` · `snaps` · `spawner-plan` · `stocktake-test` · `tab-open` · `tab-watch`
+`analysis` · `abs-offset` · `attachments` · `drag-log` · `fire` · `frames` · `harness` · `kit` · `locations` · `lobby-detector` · `panel-state` · `recenter` · `runs` · `snaps` · `spawner-plan` · `stocktake-test` · `tab-open` · `tab-watch`
+
+`drag-log` 读的是 `control/inventory.py` 每次**手势**都追加的 `docs/drag/journal.jsonl`（**常开**，几百字节一次）。它把三类候选原因写在同一行里——手势（定位重放次数、抓/放点偏差）、状态（两栏行数 + 轮询序列 / 槽位读回 / 枪名板墨迹）、时序（距上次手势多久）——因为「有时候扔不到地上」是关于**差异**的问题，布尔量答不了。
+
+**2026-08-05 之前只记拖拽，而那是错的一半。** 会赔掉一把枪的是**右键**：打在空槽（或光标漂走了的槽）上会穿到下面的武器行，整枪掉地上——11 轮采集赔了 74 件，一行日志都没留，因为 `right_click_equip` / `right_click_unequip` / `auto_equip` / `drop_weapon` 全都直接调 Pointer。现在六种都写，靠 `kind` 分：
+
+| `kind` | 什么 |
+|---|---|
+| `drag` | 按下-移动-松手，原来那条 |
+| `click` | 右键：装、卸、以及采集器的 `auto_equip` |
+| `drop` | 主动把整枪扔出机架 |
+| `refused` | 这一层**拒绝发出**的手势 + 是哪道闸拦的。没发生的失败也是证据 |
+| `tab` / `hold` | 开关 Tab、切枪——**手势之间发生的事**，只记拖拽的日志永远看不到 |
+
+**要 grep 的词是 `gun_lost`。** 右键卸配件之后槽位读回是空的——**枪掉了也是空的**，两者从调用方看一模一样，只有枪名板墨迹（`plate`，前后两个数）能分开。汇总会把这类单独提到最前面。
+
+每行带 `pid` / `proc` / `t`（墙钟）：这个文件是**多个 agent 共用**的，没有 pid 就没法分段，而 `gap_s` 是进程内的 `perf_counter` 差，跨进程读是废话。`--pid` / `--kind` / `--guns` 三个过滤器就是为这个加的。汇总按 landed/missed 对比三类原因、按突发内序号统计（gap > 5 s 断段、**按 pid 分组**），并列出「每次失手前的两个手势」——那正是 `control/CLAUDE.md` 里那条未破案线索缺的一半。
+
+⚠ `tools/drag_log.py` **一个项目内模块都不 import**，是故意的：要调试的那次运行往往正是死在 import 上的。代价是它自带一份 `PLATE_INK_MIN`，由 `pixi run locations` 钉住不许漂。
 
 `attachments` 是 2026-08-03 补的：每一个配件模板 vs 每一张真值裁图，**报 margin 不只报命中**。`--write` 先从配对捕获反解模板再评分，`--holdout` 用「不含该 run 解出的模板」的库去评该 run 的样本——两个数相等才说明模板重建的是图标而不是它自己那批截图。
 
@@ -164,7 +182,7 @@ pixi run layering        # 9 条规则
 | 主题 | 脚本 |
 |---|---|
 | 后坐力 / 时序 | `probe_recenter` `probe_kick_profile` `probe_impulse_align` `probe_impulse_ab` `probe_shot_latency` `probe_input_latency` `probe_pitch_range` `probe_ammo_during_fire` |
-| Tab / 配件 | `probe_click_speed` `probe_drag_speed`（`--panel` 测面板到面板那条）`probe_human_drag`（录真人拖拽，不碰鼠标） `probe_equip_gesture` `probe_unequip_gesture` `probe_drop_weapon` `probe_gun_grab` `probe_rack_cycle` `probe_slot_boxes` `probe_tab_watch_live` `probe_toggle_latency` `probe_transfer` |
+| Tab / 配件 | `probe_click_speed` `probe_drag_speed`（`--panel` 测面板到面板那条）`probe_human_drag`（录真人拖拽，不碰鼠标） `probe_drag_cursor`（光标为什么不待在放好的位置；A/B 段会按住左键） `probe_equip_gesture` `probe_unequip_gesture` `probe_drop_weapon` `probe_gun_grab` `probe_rack_cycle` `probe_slot_boxes` `probe_tab_watch_live` `probe_toggle_latency` `probe_transfer` |
 | 刷新器 | `probe_spawn_wait` `probe_spawner_layers` `probe_spawner_layout` `probe_submenu_hover` `scrape_spawner` |
 | 大厅 | `probe_lobby_transition` |
 | 采集 / 验收 | `collect_ammo_digits` · `verify_kit` · `verify_refactor` |
@@ -195,7 +213,10 @@ pixi run layering        # 9 条规则
 | 配件认不出来或认错 | `pixi run attachments`（全量真值 + margin）；重建模板 `tools/score_attachments.py --write`，单个 run 看解算质量 `tools/solve_template.py <run>` |
 | 某把枪的槽位跟 catalogue 对不上 | `tools/probe_slot_boxes.py <weapon> --strip`（**刷出来的枪不是裸枪**） |
 | 拖拽 / 右键落不下去 | `tools/probe_equip_gesture.py` / `probe_unequip_gesture.py`——两个都读回验证，不看鼠标 |
-| 扔东西扔不掉 / 库存清不空 | `probe_drag_speed.py --panel`（**扫描循环里绝不能有 `look()`**，间隔会掩盖被测变量）；跟真人比对用 `probe_human_drag.py`。两个悬崖的实测值在 `control/CLAUDE.md` |
+| 右键完枪没了 / 一轮采集颗粒无收 | **`pixi run drag-log --guns`**。右键卸配件之后槽位是空的、记录报成功，枪掉了长得一模一样——日志里 `plate` 从 679–901 掉到 0 就是枪走了，汇总会标 ⚠GUN LOST。同时看 `refused` 那几行：哪道闸拦下了同一个手势 |
+| 别的 agent 的运行挂了要查 | 同一个 `docs/drag/journal.jsonl`，**常开且带 pid**。`pixi run drag-log --pid <他的pid> --all`。别先去问他打了什么日志——静默失败的运行不会打日志 |
+| 扔东西扔不掉 / 库存清不空 | **先 `pixi run drag-log`**——每次手势都记了几何、行数、距上次多久，它会告诉你是「光标没到位」「松手落在原栏」还是「手势干净但游戏没接」，三类要三种修法。然后 `probe_drag_speed.py --panel`（**扫描循环里绝不能有 `look()`**，间隔会掩盖被测变量）；跟真人比对用 `probe_human_drag.py`。悬崖值和那条固件线索都在 `control/CLAUDE.md` |
+| 光标 SetCursorPos 之后跑掉了 | `tools/probe_drag_cursor.py`——三段分别排除「固件在注入」「click 报告带位移」「游戏在松手时归位」。答案是第三类的变种：Tab 开着时转视角的 raw counts 打在光标上 |
 | 「category colN_rowM does not exist」/「would not expand」 | **先看视角朝哪。** 面板半透明，对着天空时读回会在全折叠的面板上报假状态——2026-08-04 修掉了驱动路径上的识别，但 `read()` / `find_menu` 本身仍然如此，诊断用它们时要记得。然后 `pixi run panel-state`、`probe_submenu_hover.py`（光标停在类别行会吃掉第一项） |
 | 面板坐标要重新量 | `tools/scrape_spawner.py`。**条目几何也是常量**（`SUBMENU_ENTRY_DY/PITCH/CLICK_DX`），2026-08-04 拿 42 张展开图验到 3.1 px 以内；游戏更新后连它一起重量 |
 | 游戏更新后面板坐标全错 | `tools/scrape_spawner.py` 重采 → `docs/spawner/layout.json` → `pixi run spawner-plan` 会红出差在哪 |

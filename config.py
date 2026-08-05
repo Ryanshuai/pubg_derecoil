@@ -485,16 +485,37 @@ DETECT_TABLE = [
      'cond': '!tab_open && !stop_recoil', 'result': 'highlight_pred'},
 
     # ── Posture ──
+    # THE POSTURE ICON IS ONLY PAINTED WHILE THE SIGHT IS UP, and all three of
+    # these fire when it usually is not: c and z are pressed before aiming, and
+    # 350 ms after a right-button release the sight is often already down. A
+    # one-shot read there returns None, set_posture discards it, and the STALE
+    # posture survives into a compensation factor wrong by up to 2x (standing
+    # 1.0 against prone 0.50). That is the vertical wander mid-burst.
+    #
+    # The delays are NOT the problem, which is worth writing down because they
+    # were the obvious suspect and two rounds of work went at them. Measured
+    # 2026-08-05 over six random viewpoints (tools/probe_posture_trace.py,
+    # docs/posture/traces/20260805_094215) with a weapon out:
+    #
+    #   sight ALREADY up, key pressed at t=0   icon follows in  34..68 ms
+    #   sight already up, any sample           readable 3786/3787
+    #   sight DOWN, full 2000 ms window        readable       0, all 6 rounds
+    #
+    # So 200 ms clears the real latency three times over. What no delay can
+    # clear is a frame with no icon painted on it — hence `retries`, which
+    # re-reads until the sight comes up. Bounded: if it has not come up within
+    # 1.0 s of a stance change nothing is being aimed, the stance does not
+    # matter yet, and the next right-button event brings its own read.
     {'key': 'c', 'event': 'press', 'detect': 'posture',
-     'regions': ['posture'], 'delay': 200,
+     'regions': ['posture'], 'delay': 200, 'retry_ms': 100, 'retries': 10,
      'cond': '!tab_open', 'result': 'posture'},
 
     {'key': 'z', 'event': 'press', 'detect': 'posture',
-     'regions': ['posture'], 'delay': 200,
+     'regions': ['posture'], 'delay': 200, 'retry_ms': 100, 'retries': 10,
      'cond': '!tab_open', 'result': 'posture'},
 
     {'key': 'right', 'event': 'release', 'detect': 'posture',
-     'regions': ['posture'], 'delay': 350,
+     'regions': ['posture'], 'delay': 350, 'retry_ms': 100, 'retries': 10,
      'cond': '!tab_open', 'result': 'posture'},
 
     # ── Tab ──
@@ -804,7 +825,7 @@ LOBBY_PING_MIN_FRAC = 0.05
 # only the training range's ESC menu has been captured, so
 # leave_entry_confirmed() refuses to click LEAVE anywhere else.
 #
-# Tabs are found by projection, not hardcoded — see detector/lobby_nav.py.
+# Tabs are FOUND by projection and NAMED by template — see detector/lobby_nav.
 # The x windows below are the strips the projection runs over.
 
 # (y, x, h, w). Starts at y=38, BELOW the yellow "new content" dots that sit
@@ -815,6 +836,13 @@ LOBBY_TOP_BAR_ROI = (38, 1050, 30, 1100)
 # (y, x, h, w). Stops at x=2000 deliberately. Run it out to 2150 and a sixth
 # "tab" appears at (2128,146) with more ink than CUSTOM — that is the daily
 # BEGINNER TRAINING popup, whose left edge is x=1961.
+#
+# The top bar has the same problem and CANNOT be cropped out of it: on the
+# Chinese client the labels are narrow enough that the green event icon lands
+# at x 2091..2124, inside this ROI, and segments as an 8th run. Trimming the
+# ROI to exclude it would cut into 商店 in one language or STORE in the other.
+# That is why naming is by template now — an extra run matches nothing and is
+# dropped, instead of shifting every name after it.
 LOBBY_SUB_BAR_ROI = (125, 1300, 40, 700)
 
 # Two working points, and the gap between them IS the selected/unselected
@@ -833,6 +861,20 @@ LOBBY_TAB_MIN_W = 20           # a label is wider than this; specks are not
 # ink itself: 828..896x. A threshold of 5 is three orders of magnitude of
 # headroom, and exists to catch an ambiguous read, not to discriminate.
 LOBBY_TAB_MIN_MARGIN = 5.0
+
+# Naming gate: TM_CCOEFF_NORMED of a run's mask against the stored label masks
+# in training_data/pubg_assets/lobby/tabs/. Below it the run is nameless, which
+# is the correct answer for the event icon and for a label in a language this
+# repo has no template for. Measured by
+# `tools/build_lobby_tab_templates.py --verify`; set from that report, and
+# rerun it after touching the templates.
+LOBBY_TAB_TMPL_MIN = 0.55
+
+# Horizontal slack when cutting a run's window to match against. The selected
+# and unselected renderings of one label differ by a pixel or two in width
+# (TRAINING measured 1757..1844 selected, 1758..1843 unselected), and
+# matchTemplate needs the window to be at least as large as the template.
+LOBBY_TAB_TMPL_PAD = 6
 
 # HOVER LOOKS EXACTLY LIKE SELECTION. A tab under the cursor lights to the
 # same brightness the selected one does, so every capture feeding the probes
@@ -954,10 +996,11 @@ ALPHA_LO = 0.405    # non-highlighted weapon icon opacity
 # Training / assets
 # ════════════════════════════════════════════════════════════
 
+# Only fire_mode is left, because it is the only surviving synthetic-training
+# task. The 'weapon' entry pointed at a directory deleted on 2026-08-05 (see
+# detector/weapon_hud_detector.py on why extracted art cannot be a template
+# source), and 'attachment' / 'tab_detect' fed checkpoints nothing loaded.
 ASSET_DIR = {
-    'weapon':     'training_data/pubg_assets/Item/Weapon/Main',
-    'attachment': 'training_data/pubg_assets/Item/Attachment',
-    'tab_detect': 'training_data/pubg_assets/type',
     'fire_mode':  'training_data/pubg_assets/fire_mode',
 }
 

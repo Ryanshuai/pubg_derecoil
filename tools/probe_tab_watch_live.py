@@ -71,7 +71,7 @@ def main():
 
     mouse = get_mouse()
     state = GameState()
-    watch = TabWatch(state, {'tab_type': TabTypeDetector(None),
+    watch = TabWatch(state, {'tab_type': TabTypeDetector(),
                              'tab_weapon': TabWeaponDetector(),
                              'tab_attachment': AttachmentDetector()},
                      verbose=False)

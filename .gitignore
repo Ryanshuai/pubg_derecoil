@@ -21,14 +21,8 @@ docs
 # RT-DETR/YOLO weights, 189 MB each. Downloaded or trained, never edited.
 human_detection/*.pt
 
-# Checkpoints nothing loads. train.py writes all four; only two are ever read
-# back -- fire_mode.pth.tar and gun_name.pth.tar, by their detectors. These
-# two have no reader at all: detector/tab_detector.py decides on pixels and
-# says in its own docstring that the MobileNet which used to sit there "was
-# never consulted", and attachment_detector.py is template matching end to
-# end. They are rebuildable output, so they are product like everything above.
-dl_models/tab_detect.pth.tar
-dl_models/weapon_attachment.pth.tar
+# (weapon_hud_bank.npz needs no rule of its own — it lives under training_data/,
+#  which line 17 already covers. Rebuild it with tools/build_weapon_hud_bank.py.)
 
 
 .claude/settings.local.json
@@ -36,3 +30,6 @@ dl_models/weapon_attachment.pth.tar
 
 pico_firmware/.vscode
 
+
+# agent-refactor skill 的状态与产物（队列、可达图、扫描结果、差分 spec）
+.agent-refactor/

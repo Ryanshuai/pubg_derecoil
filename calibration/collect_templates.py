@@ -117,6 +117,9 @@ PITCH_STEPS = (0, -260, 260)    # sky, level, ground — the three that differ m
 SETTLE_S = 0.45
 SPAWN_SETTLE_S = 0.7
 FIT_TIMEOUT_S = 0.8             # the part animates into the slot
+CLEAR_TRIES = 3                 # 库存 clearings before a part is given up on;
+                                # clear_inventory already retries per row, so
+                                # this covers the list refilling from below
 FIT_POLL_S = 0.08
 
 # The CEILING on a name plate's ink. The floor lives in control/inventory.py
@@ -1411,6 +1414,71 @@ class Collector:
             shots += rows_shots
         return shots
 
+    def rows_only(self, keys, angles, tag_n, backpack=False):
+        """Photograph each part's 库存 row without ever fitting it. -> shots
+
+        WHY THIS IS NOT one_part's rows pass. That one reaches a row by
+        equipping the part and taking it back off, so every row it collects is
+        gated on SlotDetector naming what sits in the slot — and the parts
+        whose templates are too weak to be named are exactly the parts a row
+        capture is needed for. Run 20260805_005551 is the circle in one line:
+        quick_smg scored 192 against a gate of 150, so the uzi's magazine slot
+        read `empty` with the uzi's own magazine still in it, `strip` skipped
+        it, and the spawned part was bounced into 库存 and abandoned. 11 of 12
+        parts died that way, all of them parts with no row variant.
+
+        NOTHING HERE CONSULTS A TEMPLATE. `inv_rows` is Laplacian only, and
+        identity comes from having spawned exactly one thing into an empty
+        list — the same rule one_part rests on, minus the gun that made the
+        rule need a detector.
+
+        THE RACK IS EMPTIED TOO, not just 库存: the autofit rule puts a part
+        straight onto a racked gun whose slot is free (3/3, tools/probe_autofit
+        .py), which would leave 库存 empty and nothing to photograph.
+        """
+        shots = []
+        for k in keys:
+            if not self.tab():
+                print(f'    {k}: the inventory would not open')
+                continue
+            # AN EMPTY 库存 IS THE ENTIRE IDENTITY CLAIM, so it is verified
+            # rather than assumed. clear_inventory drags rows to the floor and
+            # a drag can fail to land; run 20260805_010546 lost its last five
+            # parts to exactly that, each arriving into a list that still held
+            # the previous one ("rows=2"). The drag itself is fixed (see
+            # Pointer.place), and this stays because the cost of checking is
+            # one Laplacian pass and the cost of not checking is a whole part.
+            self.ac.clear_rack()
+            for attempt in range(1, CLEAR_TRIES + 1):
+                self.ac.clear_inventory()
+                if inv_rows(self.frame(flush=2)) == 0:
+                    break
+                print(f'    {k}: 库存 did not empty (attempt {attempt})')
+            else:
+                self.miss(k, '库存 would not empty, so a spawned part cannot '
+                             'be named by being the only row in it')
+                continue
+            if not self.spawn(None, [k], backpack):
+                self.miss(k, 'the spawner would not produce it')
+                continue
+            if not self.tab():
+                print(f'    {k}: the inventory would not reopen after spawning')
+                continue
+            held = inv_rows(self.frame(flush=4))
+            # Exactly one, or the row cannot be named. Zero means it landed
+            # somewhere else (a gun left in the rack ate it); more than one
+            # means the list was not empty and the game's own sort decides
+            # which row is which — the guess that sent 228 crops out under the
+            # wrong names.
+            if held != 1:
+                self.miss(k, 'staging left something other than exactly one '
+                             'row in 库存, so no row can be named', rows=held)
+                continue
+            got = self.sweep(None, [], [0], angles, tag_n, 'l', row_key=k)
+            self.relabel(got, {0: k})
+            shots += got
+        return shots
+
     def round(self, weapon, keys, fit, angles, n, spawn=True, backpack=False):
         label = ', '.join(weapon) if isinstance(weapon, list) else weapon
         print(f'\n── round {n}: {label or "no weapon"} ── '
@@ -1436,7 +1504,12 @@ class Collector:
                 if not self.bare_host(weapon, backpack):
                     return self.miss(weapon, 'no bare host gun to hang this '
                                              'round\'s parts on')
-            elif not self.spawn(None, [] if fit else keys, backpack):
+            # rows_only stages one part at a time into a 库存 it empties first,
+            # so a bulk spawn here would defeat it exactly as it defeats the
+            # fitting path: several parts in the list at once and the row->key
+            # mapping becomes the game's sort order, which is not spawn order.
+            elif not self.spawn(None, [] if (fit or 'rows' in self.targets)
+                                else keys, backpack):
                 return self.miss(', '.join(keys),
                                  'the spawner would not produce this round')
 
@@ -1480,6 +1553,11 @@ class Collector:
                                  'empty', targets=sorted(self.targets))
                 shots += got
             return shots
+        # Rows without fitting. `rows` above is [] on this path and always was
+        # — the sweep below photographs nothing, which is why `--targets rows`
+        # on its own returned 0 crops for as long as it has existed.
+        if 'rows' in self.targets:
+            return shots + self.rows_only(keys, angles, n, backpack)
         return shots + self.sweep(weapon, keys, rows, angles, n, 'f')
 
 

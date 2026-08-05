@@ -56,6 +56,9 @@ sys.path.insert(0, ROOT)
 import cv2
 import numpy as np
 
+TMPL_DIR = os.path.join(ROOT, 'training_data', 'pubg_assets', 'Item',
+                        'Attachment')
+
 # Below this the pixel is treated as fully transparent and its colour is not
 # recovered. Measured against the shipped icons, whose alpha is a hard-edged
 # mask with a one-pixel feather, so a real edge pixel sits far above it.
@@ -107,6 +110,25 @@ def solve(backdrops, filled):
 # finds are two shades of the same icon.
 STABLE_FLOOR = 8.0
 
+# How much of a row crop an icon may plausibly claim as opaque. The icon sits
+# in a padded cell, so a real solve lands well under half; a solve claiming
+# most of the crop has split two shades of SCENERY, which is what the alpha
+# map looks like when the ten "different" backgrounds were not different —
+# a turn that failed to move the view (with Tab up a turn's counts go to the
+# cursor instead; see Pointer.place).
+#
+# Measured over the twelve parts of runs 20260805_010546 and _012155:
+#
+#     eleven clean solves     0.177 .. 0.332     alpha is a crisp glyph
+#     uzi_stock               0.794              alpha is a noisy cloud
+#
+# The gap 0.33 -> 0.79 is empty, so 0.5 separates them with room either side.
+# The previous ceiling was 0.9 and uzi_stock passed it. A bad solve that gets
+# installed is worse than no solve at all: a template nothing can beat is how
+# a wrong answer becomes a confident one.
+ROW_OPAQUE_MAX = 0.5
+ROW_OPAQUE_MIN = 0.02
+
 
 def solve_stable(crops):
     """Recover an icon with NO paired empty capture. -> (icon, alpha, spread)
@@ -148,7 +170,7 @@ def solve_stable(crops):
     return icon, alpha, spread
 
 
-def rows_mode(run, man, write, paired=None):
+def rows_mode(run, man, write, paired=None, install=False):
     """Solve every 库存 row in a run at ITS OWN scale. -> exit code
 
     `paired` is the slot-scale result for the same keys, and it is the only
@@ -207,7 +229,7 @@ def rows_mode(run, man, write, paired=None):
         os.makedirs(out, exist_ok=True)
     print(f'{"key":<16}{"shots":>6}{"opaque":>8}{"cut":>7}{"px":>7}'
           f'{"IoU vs slot":>13}')
-    bad = 0
+    bad, solved = 0, {}
     for key, files in sorted(by_key.items()):
         crops = [cv2.imread(os.path.join(run, f)) for f in files]
         crops = [c for c in crops if c is not None]
@@ -236,8 +258,9 @@ def rows_mode(run, man, write, paired=None):
             u = float((pa | mine).sum())
             iou = f'{(pa & mine).sum() / u:.3f}' if u else '—'
         # An icon that is almost all "opaque" means the split found two shades
-        # of scenery, not icon vs scene.
-        if frac > 0.9 or frac < 0.02:
+        # of scenery, not icon vs scene. See ROW_OPAQUE_MAX.
+        ok = ROW_OPAQUE_MIN <= frac <= ROW_OPAQUE_MAX
+        if not ok:
             bad += 1
             iou += '  [!] implausible'
         print(f'{key:<16}{len(crops):>6}{frac:>8.3f}'
@@ -248,6 +271,9 @@ def rows_mode(run, man, write, paired=None):
                                    (alpha * 255).astype(np.uint8)]))
             cv2.imwrite(os.path.join(out, f'{key}_alpha.png'),
                         (alpha * 255).astype(np.uint8))
+        if install and ok:
+            solved[key] = np.dstack([icon.astype(np.uint8),
+                                     (alpha * 255).astype(np.uint8)])
 
     print('\n  `opaque` is the fraction of the crop the scene could not move; '
           'that IS\n  the alpha mask. `cut` is the median spread the Otsu '
@@ -255,7 +281,47 @@ def rows_mode(run, man, write, paired=None):
           'solve found the icon, a\n  cloud means it found the scene.')
     if write:
         print(f'\n  -> {os.path.relpath(out, ROOT)}')
+    if install:
+        install_rows(solved)
     return 1 if bad else 0
+
+
+def install_rows(solved):
+    """Put solved row icons into the template bank as `.row` variants.
+
+    THE STEP THAT MAKES A SOLVE COUNT, and until now it was done by hand: the
+    twenty-nine `.row.png` that used to be in the bank had no command behind
+    them, which is why nothing could say which run any of them came from.
+
+    Named after the ASSET, like every other file in the bank, because that is
+    what AttachmentDetector keys on — the part of the filename before the
+    first dot is the asset, the rest is which rendering this picture is.
+
+    SAVED AT THE SIZE IT WAS SOLVED AT, which is the size of the cell it was
+    photographed in. Nothing here reframes or rescales it: the detector reads
+    each variant at its own scale (AttachmentDetector.TMPL_OFFSETS), so the
+    picture that reaches the comparison is the picture the screen drew.
+    """
+    from detector.attachment_catalog import ATTACHMENTS
+    n, skipped = 0, []
+    for key, bgra in sorted(solved.items()):
+        asset = ATTACHMENTS.get(key, {}).get('asset')
+        if not asset:
+            # No asset name means the catalogue has no file name to give this
+            # part, and inventing one here would put a template in the bank
+            # under a stem nothing else agrees on.
+            skipped.append(key)
+            continue
+        dst = os.path.join(TMPL_DIR, f'Item_Attach_Weapon_{asset}.row.png')
+        cv2.imwrite(dst, bgra)
+        print(f'  {key:<16} -> {os.path.basename(dst)}')
+        n += 1
+    print(f'\n  {n} row variant(s) installed into '
+          f'{os.path.relpath(TMPL_DIR, ROOT)}')
+    if skipped:
+        print(f'  no `asset` in the catalogue, not installed: '
+              f'{", ".join(skipped)}')
+    print('  Now re-score: pixi run attachments --holdout')
 
 
 def stability(run, pairs):
@@ -316,6 +382,12 @@ def main():
                     help='solve the 库存 list icons at THEIR OWN scale, from '
                          'the same row over many scenes. No paired empty '
                          'capture is needed or possible — see solve_stable.')
+    ap.add_argument('--install', action='store_true',
+                    help='--rows only: copy the plausible solves into the '
+                         'template bank as .row variants, which is the step '
+                         'that makes them count. Implies --write. A solve '
+                         'flagged implausible is written to the run but NOT '
+                         'installed.')
     ap.add_argument('--stability', action='store_true',
                     help='how many backgrounds the solve needs, measured by '
                          'HOLD-OUT: solve on k captures, predict one that was '
@@ -363,7 +435,8 @@ def main():
             fg = [cv2.imread(os.path.join(run, v['slots'])) for v in usable]
             if not any(x is None for x in bg + fg):
                 paired[key] = solve(bg, fg)[1]
-        return rows_mode(run, man, args.write, paired)
+        return rows_mode(run, man, args.write or args.install, paired,
+                         install=args.install)
 
     if args.stability:
         return stability(run, pairs)

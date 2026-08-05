@@ -302,7 +302,16 @@ def posture_check(cells, base_posture):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--jsonl', nargs='+',
+    # action='append' as well as nargs='+', so BOTH shapes work:
+    #     --jsonl a.jsonl b.jsonl        (one flag, several files)
+    #     --jsonl a.jsonl --jsonl b.jsonl
+    # Plain nargs='+' silently DISCARDS every repeat but the last, and this
+    # analysis is exactly where that is expensive: a repeated flag looks like
+    # pooling two runs and instead reports the second one alone, with the
+    # missing cells showing up as "no combination cells with all their
+    # single-slot cells present" rather than as an error. Cost one wrong
+    # write-up on 2026-08-05.
+    ap.add_argument('--jsonl', nargs='+', action='append',
                     help='run logs to read. Defaults to the most recently '
                          'written one under docs/recoil/runs/, which is the '
                          'question this is nearly always asked — "what did '
@@ -311,7 +320,8 @@ def main():
     ap.add_argument('--posture', default='standing')
     args = ap.parse_args()
 
-    paths = args.jsonl
+    # action='append' nests: [[a, b], [c]] -> [a, b, c]
+    paths = [p for group in (args.jsonl or []) for p in group]
     if not paths:
         runs = sorted(glob.glob(os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),

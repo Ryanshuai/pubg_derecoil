@@ -89,6 +89,58 @@ DRAG_DROP_WAIT = 0.25   # after release, before the screen is read back
 DRAG_HOLD_MS = 400      # Pico hold per arm; must exceed DRAG_REARM_S by a lot
 DRAG_REARM_S = 0.15     # so a dropped CDC packet still leaves 250 ms of hold
 
+# ── Making a placement stick ──────────────────────────────────────────────
+#
+# SetCursorPos wins against nothing else touching the mouse. It loses against
+# raw HID reports still in flight, which is the normal state right after a view
+# turn — see Pointer.place() for the measurement. Both limits are attempt
+# counts rather than deadlines so that a quiet cursor costs one read.
+PLACE_TRIES = 6         # free placement: 6 x MOVE_WAIT = 0.72 s worst case,
+                        # and the observed drift settles inside 1 s
+PLACE_TRIES_HELD = 3    # with a button down: 3 x DRAG_HOVER_WAIT = 0.12 s,
+                        # which must stay well under DRAG_HOLD_MS (0.4 s) or
+                        # the hold expires and the item drops in mid-travel
+PLACE_TOL = 2           # px; SetCursorPos is exact, so this only absorbs a
+                        # DPI-scaling rounding, not real motion
+
+# ── making the game SEE the drag ──────────────────────────────────────────
+#
+# The travel is SetCursorPos, which does not go through the Pico, and the
+# firmware only emits a HID report when something changed:
+#
+#   pico_firmware/src/main.c, send_hid_output()
+#   if (mx == 0 && my == 0 && rdx == 0 && rdy == 0 && !buttons_changed) return;
+#
+# So a whole drag reaches the game's raw input as exactly two reports — button
+# down, button up, no motion between them. From there it is a CLICK, not a
+# drag, and the item is never picked up. The UI cursor still tracks
+# SetCursorPos (hover highlights follow it, and the release point reads back
+# correct), which is why every gesture-level number looks perfect on a drag
+# that did nothing.
+#
+# Measured over 28 logged drags before this existed: 9 landed, 9 missed, and
+# the misses were "released clean, nothing arrived" every time — placement 1/1
+# and zero offset at both ends on all 18. Failures got worse deeper into a
+# burst (position 1: 5/8 landed, positions 3-4: 0/3), which is what an
+# accidental cause looks like: something else has to supply the motion report,
+# and back-to-back drags give it fewer chances.
+#
+# ⚠ TESTED AND IT IS NOT THE CAUSE. Default 0. The reasoning above is sound
+# and the mechanism is real — the reports genuinely are not sent — but the
+# game does not need them to accept a drag. A/B, alternating arms so burst
+# position could not confound it (tools/probe_drag_nudge.py):
+#
+#   one drag per staging      nudge=0  8/8      nudge=2  7/8
+#   six drags back to back    nudge=0  11/12    nudge=2  11/12
+#
+# Kept as a parameter, and kept documented, so that the next person to notice
+# that `send_hid_output` swallows the travel does not spend the evening on it
+# again. What the burst run DID show is where to look next: the misses are all
+# the FIRST drag of a burst, and only from the third burst onwards — by which
+# point the 附近 list has passed its 12-row window. Position in the burst and
+# the state of the destination list, not the reports.
+DRAG_NUDGE_COUNTS = 0
+
 # ── Getting hold of the device ────────────────────────────────────────────
 PICO_RETRIES = 3         # A brief retry only covers the CDC port still closing
 PICO_RETRY_S = 1.0       # behind a run of this tool. It is deliberately short:
@@ -160,6 +212,20 @@ class Pointer:
                         f'do not kill it. ({e})')
                 print(f'[pointer] no Pico ({e}); falling back to SendInput')
         self.backend = 'pico' if self.pico else 'sendinput'
+        # What the last placement, click and drag actually did. Read by
+        # InventoryControl's gesture journal; a gesture that "failed" and one
+        # that was never really sent look identical from outside, and these are
+        # the numbers that tell them apart.
+        #
+        # `last_click` was the missing one, and it is the expensive one: a
+        # right-click aimed at an attachment slot lands on the WEAPON ROW when
+        # the cursor is off, and that throws the whole gun on the floor. The
+        # drag path aborts on a bad placement and says so; the click path only
+        # printed a warning, so the one gesture that can lose a weapon was also
+        # the one that left no record of where it actually went.
+        self.last_place = {}
+        self.last_click = {}
+        self.last_drag = {}
         print(f'[pointer] click backend = {self.backend}')
 
     @classmethod
@@ -260,6 +326,46 @@ class Pointer:
         ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
         return pt.x, pt.y
 
+    def place(self, x, y, settle=MOVE_WAIT, tries=PLACE_TRIES):
+        """Put the system cursor at (x, y) and see that it STAYS. -> bool
+
+        SetCursorPos is instant; raw HID reports that arrive AFTER it are not,
+        and they move the cursor again. The Pico is a passthrough, so reports
+        keep arriving from whatever the firmware was last asked to send —
+        measured on the Tab screen (tools/probe_drag_cursor.py):
+
+            move(900,0) with Tab ALREADY up   ->  cursor drift (450, 0)
+            same move with Tab shut first     ->  cursor drift (0, 0)
+
+        With Tab up the game spends raw motion on the CURSOR; with Tab shut it
+        spends it on the view. `turn()` shuts Tab before moving for exactly
+        that reason, but the close can be swallowed (docs/game_quirks.md) and
+        then a turn's worth of counts lands on the cursor — arriving, crucially,
+        over the following second rather than at once.
+
+        That is why the FIRST drag of a sequence lands and the second does not:
+        the placement is checked once, 120 ms after it is made, and the counts
+        still in flight push the cursor off between the check and the press.
+        Run 20260805_010546 lost its last five parts that way, each one to
+        `drag aborted before press` or a release 76 px short of the target.
+
+        Re-placing until a read agrees drains what is in flight instead of
+        waiting a fixed time for it — a fixed sleep has to be longer than the
+        worst case to work at all, and this returns as soon as it is quiet.
+        """
+        for i in range(tries):
+            self.move_to(x, y)
+            time.sleep(settle)
+            gx, gy = self.cursor_pos()
+            off = (gx - x, gy - y)
+            if abs(off[0]) <= PLACE_TOL and abs(off[1]) <= PLACE_TOL:
+                self.last_place = {'want': (x, y), 'tries': i + 1, 'ok': True,
+                                   'off': off}
+                return True
+        self.last_place = {'want': (x, y), 'tries': tries, 'ok': False,
+                           'off': off}
+        return False
+
     def click_at(self, x, y, settle=CLICK_SETTLE, buttons=0x01,
                  hold_ms=CLICK_HOLD_MS, after=CLICK_AFTER_S):
         """Click at (x, y). buttons=0x02 is the right button.
@@ -267,17 +373,30 @@ class Pointer:
         Right-click is a real gesture on the Tab screen, not a curiosity: it
         equips the item under the cursor straight onto the gun, which is one
         click where a drag is a press-travel-release with a settle at each end.
+
+        Returns whether the cursor was where it was told to be when the button
+        went down. THE CLICK IS STILL SENT when it was not, which is a
+        deliberate difference from drag() — that one aborts before the press.
+        The asymmetry is not defended, it is merely undisturbed: a click at an
+        unverified position is how a gesture aimed at an attachment slot
+        reaches the weapon row underneath and drops the gun. What changed is
+        that the position is now RECORDED (`last_click`, and from there the
+        gesture journal), so a run that loses a weapon says where the cursor
+        was instead of leaving it to be re-derived.
         """
-        self.move_to(x, y)
-        time.sleep(settle)
-        got = self.cursor_pos()
-        if abs(got[0] - x) > 2 or abs(got[1] - y) > 2:
-            print(f'[pointer] warning: cursor landed at {got}, wanted {(x, y)}')
+        ok = self.place(x, y, settle)
+        self.last_click = {'want': (x, y), 'place': dict(self.last_place),
+                           'got': self.cursor_pos(), 'buttons': buttons,
+                           'ok': ok}
+        if not ok:
+            print(f'[pointer] warning: cursor landed at {self.cursor_pos()}, '
+                  f'wanted {(x, y)} — something is still moving it')
         # This is click() plus the placement. The old SendInput branch capped
         # its hold at 60 ms; no caller has ever passed hold_ms, so at the
         # 20 ms default the cap never applied and dropping it changes nothing
         # any measurement here was taken with.
         self.click(buttons, hold_ms, after=after)
+        return ok
 
     def right_click_at(self, x, y, **kw):
         """Right-click — on the Tab screen, "equip this"."""
@@ -300,7 +419,8 @@ class Pointer:
 
     def drag(self, src, dst, settle=MOVE_WAIT, steps=None,
              grab=DRAG_GRAB_WAIT, hover=DRAG_HOVER_WAIT,
-             drop=DRAG_DROP_WAIT, buttons=0x01):
+             drop=DRAG_DROP_WAIT, buttons=0x01,
+             nudge=DRAG_NUDGE_COUNTS):
         """Press at `src`, travel to `dst`, release there.
 
         `steps` defaults to one interpolated position every DRAG_STEP_PX, so a
@@ -322,13 +442,26 @@ class Pointer:
             steps = int(min(DRAG_STEPS_MAX,
                             max(DRAG_STEPS_MIN, dist / DRAG_STEP_PX)))
 
-        self.move_to(sx, sy)
-        time.sleep(settle)
-        got = self.cursor_pos()
-        if abs(got[0] - sx) > 2 or abs(got[1] - sy) > 2:
-            print(f'[pointer] drag aborted before press: cursor at {got}, '
-                  f'wanted {(sx, sy)}')
+        t_start = time.perf_counter()
+        self.last_drag = {'src': (sx, sy), 'dst': (tx, ty), 'steps': steps,
+                          'grab': None, 'held': None, 'release': None,
+                          'grab_place': None, 'dst_place': None, 'ok': False,
+                          'failed_at': None, 's': 0.0}
+
+        # Settle before the press, not merely wait: see place(). One check at a
+        # fixed delay is what let a turn's leftover counts push the cursor off
+        # between the check and the button going down.
+        if not self.place(sx, sy, settle):
+            self.last_drag.update(grab_place=dict(self.last_place),
+                                  grab=self.cursor_pos(),
+                                  failed_at='before press',
+                                  s=time.perf_counter() - t_start)
+            print(f'[pointer] drag aborted before press: cursor at '
+                  f'{self.cursor_pos()}, wanted {(sx, sy)} — it will not stay '
+                  f'put, so something is still sending motion')
             return False
+        self.last_drag.update(grab_place=dict(self.last_place),
+                              grab=self.cursor_pos())
 
         self._press(buttons)
         last_arm = time.perf_counter()
@@ -338,18 +471,38 @@ class Pointer:
                 f = i / steps
                 self.move_to(round(sx + (tx - sx) * f),
                              round(sy + (ty - sy) * f))
+                # A raw report so the game's input layer sees motion while the
+                # button is down. See DRAG_NUDGE_COUNTS — without it the whole
+                # travel is invisible to raw input and the gesture reads as a
+                # click. Alternating sign keeps the net displacement at zero.
+                if self.pico and nudge:
+                    self.pico.move(nudge if i % 2 else -nudge, 0)
                 time.sleep(DRAG_STEP_WAIT)
                 now = time.perf_counter()
                 if self.pico and now - last_arm >= DRAG_REARM_S:
                     self.pico.click(buttons, DRAG_HOLD_MS)
                     last_arm = now
+            # Hold the target the same way the source is held. A release 76 px
+            # short of the drop point puts the item back in the column it came
+            # from, and reads as "the drop did not land" rather than as a
+            # cursor problem. Re-arm first and keep the settle short: place()
+            # must not outlast DRAG_HOLD_MS or the button comes up mid-travel.
+            if self.pico:
+                self.pico.click(buttons, DRAG_HOLD_MS)
+                last_arm = time.perf_counter()
+            self.place(tx, ty, settle=hover, tries=PLACE_TRIES_HELD)
+            self.last_drag.update(dst_place=dict(self.last_place),
+                                  held=self.cursor_pos())
             time.sleep(hover)
         finally:
             self._release(buttons)
         time.sleep(drop)
 
         got = self.cursor_pos()
-        if abs(got[0] - tx) > 2 or abs(got[1] - ty) > 2:
+        self.last_drag.update(release=got, s=time.perf_counter() - t_start)
+        if abs(got[0] - tx) > PLACE_TOL or abs(got[1] - ty) > PLACE_TOL:
+            self.last_drag['failed_at'] = 'after release'
             print(f'[pointer] drag released at {got}, not {(tx, ty)}')
             return False
+        self.last_drag['ok'] = True
         return True

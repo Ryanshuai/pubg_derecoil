@@ -174,7 +174,7 @@ def collect():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     from detector.game_state import GameState
-    from detector.weapon_dl_detector import WeaponClassifier
+    from detector.weapon_hud_detector import WeaponHudDetector
     from detector.fire_mode_detector import FireModeDetector
     from detector.posture_detector import PostureDetector
     from detector.highlight_detector import HighlightDetector
@@ -185,11 +185,11 @@ def collect():
     from detector.view_tracker import ViewTracker
 
     state = GameState()
-    weapon_dl = WeaponClassifier(device)
+    weapon_hud = WeaponHudDetector()          # exemplar bank + PCA, no torch
     fire_mode = FireModeDetector(device)      # torch head + sklearn RF
     posture = PostureDetector()               # Canny / Sobel / connectedComponents
-    highlight = HighlightDetector(state)      # matchTemplate + alpha unmix
-    tab_type = TabTypeDetector(device)
+    highlight = HighlightDetector()           # dewhite + red-channel, no templates
+    tab_type = TabTypeDetector()
     tab_weapon = TabWeaponDetector()          # white-text mask + matchTemplate
     attachment = AttachmentDetector()
     spawner = SpawnerDetector()               # matchTemplate on binary masks
@@ -212,7 +212,7 @@ def collect():
             except Exception as e:
                 row[key] = f"ERROR {type(e).__name__}: {e}"
 
-        _run('weapon_dl', lambda: weapon_dl.classify(_crops(img, ['weapon_1', 'weapon_2'])))
+        _run('weapon_hud', lambda: weapon_hud.classify(_crops(img, ['weapon_1', 'weapon_2'])))
         _run('fire_mode', lambda: fire_mode.classify(_crops(img, ['fire_mode'])))
         _run('posture', lambda: posture.classify(_crops(img, ['posture'])))
         _run('highlight', lambda: highlight.classify(_crops(img, ['weapon_1', 'weapon_2'])))

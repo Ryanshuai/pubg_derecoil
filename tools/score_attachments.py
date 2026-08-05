@@ -20,14 +20,20 @@ WHAT --write BUILDS. calibration/collect_templates.py photographs each part
 over ten backgrounds AND photographs the empty slot behind it, and
 tools/solve_template.py inverts the compositing to recover the icon and its
 alpha. That recovered picture is what the screen actually draws, which the
-shipped game art is not: the art is scaled, outlined and blended into a
-translucent panel before a single pixel of it reaches the screen. The solve
-lands as a `.solved` variant beside the art rather than over it — the art
-still covers parts no run has reached.
+shipped game art was not: the art is scaled, outlined and blended into a
+translucent panel before a single pixel of it reaches the screen. Every
+extract has since been deleted from the tree — a rendering the reader never
+sees kept winning the fine pass on crops it described worse.
 
     training_data/pubg_assets/Item/Attachment/
-        Item_Attach_Weapon_Lower_Foregrip_C.png          the game's art
-        Item_Attach_Weapon_Lower_Foregrip_C.solved.png   recovered from screen
+        Item_Attach_Weapon_Lower_Foregrip_C.solved.png   48x48, weapon tile
+        Item_Attach_Weapon_Lower_Foregrip_C.row.png      80x80, 库存 list row
+
+TWO RENDERINGS, TWO GEOMETRIES, AND NO RESIZING BETWEEN THEM. The tile draws
+the icon edge to edge; the list draws it inside padding. Each variant is kept
+at the size it was photographed at and is skipped against a crop it does not
+fit, so the picture that reaches the comparison is the picture the screen
+drew. `solve_template.py --rows --install` produces and installs the row half.
 
 TWO WAYS TO FLATTER A TEMPLATE, both refused here:
 
@@ -67,6 +73,11 @@ wrong label looked like a hard sample; with the labels contradicted, a working
 template could not be told from a lucky one.
 
     87/350 = 0.249  ->  421/510 = 0.825, and no confident wrong answer left.
+
+The scale error above was then made TWICE more, in both directions, before it
+was understood — the row solves were squeezed into the slot frame, and the row
+crops stretched to meet them. Both are gone; see the 2026-08-05b note on
+BASELINE. 930/1040 = 0.894.
 
 Every remaining row miss is an UNDER-read. That is why the target is in
 COUNTED now: a corpus whose failures are all refusals is one the ratchet can
@@ -216,12 +227,16 @@ def reference_rows():
 
 
 def crop_of(s):
-    img = s['crop'] if s.get('crop') is not None else cv2.imread(s['path'])
-    if img is None:
-        return None
-    if s['target'] != 'slots':
-        img = cv2.resize(img, (63, 63), interpolation=cv2.INTER_AREA)
-    return img
+    """The sample exactly as it was captured — no resampling on either side.
+
+    A row crop used to be squeezed to 63x63 here so it would fit the slot
+    geometry the whole bank was read with. Both halves of that are gone: the
+    bank keeps every variant at its own size (AttachmentDetector.TMPL_OFFSETS)
+    and a row is read at 80x80 against the row picture. Interpolating a crop
+    is not neutral — it smooths away the antialiasing that separates the parts
+    that are hardest to separate.
+    """
+    return s['crop'] if s.get('crop') is not None else cv2.imread(s['path'])
 
 
 # ── the bank ──
@@ -532,22 +547,67 @@ COUNTED = ('slots', 'reference rows', 'rows')
 #
 # Going ABOVE the baseline fails too, on purpose: it means one of the above
 # was fixed and this comment is now a lie. Re-measure, then raise the numbers.
-# 2026-08-04, THE GAME-FILE ART LEFT THE BANK (tools/retire_gamefile_icons.py).
-# The reader only ever sees screen crops; the 2026-03-18 extracts are another
-# rendering, and they were winning the fine pass on crops they described worse.
+# 2026-08-05a, THE GAME-FILE ART IS GONE FROM THE TREE, not just from the bank.
+# Every 2026-03-18 extract was deleted. The reader only ever sees screen crops,
+# and the extracts are a different rendering that kept winning the fine pass on
+# crops they described worse.
 #
-#   light_grip  0/10 -> 8/10   comp_sr 0/10 -> 8/10   scope_15x 0/20 -> 20/20
-#   scope_6x   10/10 -> 0/10   uzi_stock 6/10 -> 0/10   rows 441 -> 502
+# 2026-08-05b, NOTHING IS RESIZED ANY MORE, on either side of the comparison.
+# Templates used to be squeezed to 48x48 on load and row crops stretched to
+# 63x63 here, so that one geometry could serve both renderings. It cannot:
+# the 库存 row draws the icon inside padding and the weapon tile draws it edge
+# to edge, so a row picture read under the slot frame arrives a quarter too
+# small and 6-8 px off. Each variant now keeps its own size and is skipped
+# against a crop it does not fit (AttachmentDetector.TMPL_OFFSETS).
 #
-# The three that read `<nothing>` on EVERY sample were stale art, not bad
-# labels. The casualties are assets left holding only `.solved`, so their 库存
-# rows have no row-scale template: `collect_templates --targets rows` for the
-# eleven that retire_gamefile_icons lists, and the ratchet goes back up.
+#   rows            502/570 -> 930/1040, and the margins come back with it:
+#                   under the shared geometry EVERY row margin sat between
+#                   1.25 and 2.4 (the gate is 1.25); now the medians are tens
+#                   to hundreds. Interpolation was removing exactly the
+#                   antialiasing that separates near neighbours.
+#   reference rows  9/12 -> 10/12
+#   slots           1689/1717 -> 1675/1717, and this one is a REAL loss that
+#                   is nonetheless correct. Row variants used to be resized to
+#                   48x48 and therefore also competed on slot crops; fourteen
+#                   slot reads were being carried by a picture of the wrong
+#                   rendering that happened to fit better than the right one.
+#                   They are not read by luck now, they are just not read.
+#                   THE FIX IS A BETTER `.solved`, i.e. capture, not code.
 #
-# `prefer=` (rank on the context's own variant) landed with it and moved
-# nothing — the loss is in the fine pass, not the ranking.
-BASELINE = {'slots': (1685, 1697), 'reference rows': (12, 12),
-            'rows': (519, 550)}
+# Still unread and why:
+#
+#   uzi_stock   0/50 rows, and re-collecting it AGAIN (20260805_021351) did
+#               not help: the second solve is the same cloud (opaque 0.794
+#               against a 0.5 ceiling). Ten "backgrounds" that barely move are
+#               not ten backgrounds, and the turn is what has to be fixed
+#               before another run is worth spending. Slots are fine, 40/40.
+#   variable    0/10 rows, scope_8x 0/10 rows: never collected at row scale.
+#               The 2026-08-05 attempt died before reaching them — see below.
+#   thumb_grip  9/20, quick_ar 18/40: collected, solved, still under-read.
+#
+# WHY THE SCOPES ARE STILL SHORT (scope_6x 30/43, scope_15x 40/50, scope_4x
+# 30/35). Re-collecting them needs an SLR, an SLR arrives wearing a 6x, and
+# stripping it needs the 6x template that the run exists to improve: the slot
+# scores mse 322 against SlotDetector's gate of 150, reads `empty`, `strip`
+# skips it, and the freshly spawned scope is bounced into 库存. Six parts, six
+# identical misses. THE CIRCLE IS REAL AND IT IS NOT A TEMPLATE PROBLEM: it
+# needs a host that does not arrive wearing the thing being collected, or a
+# strip that trusts `known_filled` over the reader.
+#
+# Raise these numbers when a capture lands; going above the baseline fails
+# too, which is what forces this comment to be rewritten rather than quietly
+# outgrown.
+#
+# The denominators then moved again, and NOT because of anything in this tree:
+# a collection run on 2026-08-05 (runs/20260805_005347, _005551) added 20 slot
+# and 20 row crops. That is the corpus check earning its keep -- the hit counts
+# alone would have read as a silent improvement. Re-measured on the 1717/570
+# corpus, the per-asset story above is unchanged.
+#
+# `prefer=` (rank on the context's own variant) moved nothing — the loss is in
+# the fine pass, not the ranking.
+BASELINE = {'slots': (1685, 1727), 'reference rows': (10, 12),
+            'rows': (930, 1050)}
 
 
 def score(rows, title):

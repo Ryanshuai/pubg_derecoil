@@ -71,7 +71,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 from detector.ammo_detector import AmmoDetector
 from detector.game_state import GameState
-from detector.weapon_dl_detector import WeaponClassifier
+from detector.weapon_hud_detector import WeaponHudDetector
 from detector.fire_mode_detector import FireModeDetector
 from detector.posture_detector import PostureDetector
 from detector.highlight_detector import HighlightDetector
@@ -84,11 +84,16 @@ from detector.view_tracker import ViewTracker
 
 state = GameState()
 _check('GameState', lambda: None)
-_check('WeaponClassifier', lambda: WeaponClassifier(device) and None)
+# `ready` is checked, not just construction: a missing bank file makes this
+# detector read '' for every weapon instead of raising, which is the right
+# runtime behaviour and exactly the failure a smoke check has to catch.
+_check('WeaponHudDetector', lambda: None if WeaponHudDetector().ready
+       else (_ for _ in ()).throw(RuntimeError('bank missing: '
+             'pixi run python tools/build_weapon_hud_bank.py')))
 _check('FireModeDetector', lambda: FireModeDetector(device) and None)
 _check('PostureDetector', lambda: PostureDetector() and None)
-_check('HighlightDetector', lambda: HighlightDetector(state) and None)
-_check('TabTypeDetector', lambda: TabTypeDetector(device) and None)
+_check('HighlightDetector', lambda: HighlightDetector() and None)
+_check('TabTypeDetector', lambda: TabTypeDetector() and None)
 _check('TabWeaponDetector', lambda: TabWeaponDetector() and None)
 _check('AttachmentDetector', lambda: AttachmentDetector() and None)
 _check('SpawnerDetector', lambda: SpawnerDetector() and None)

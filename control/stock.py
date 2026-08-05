@@ -48,6 +48,7 @@ WHAT THIS CANNOT SEE
 """
 import os
 import sys
+import time
 from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -513,6 +514,94 @@ def restock(ac, sc, want, backpack=BACKPACK,
     if verbose and n:
         print(f"      [stock] dropped {n}, backpack now {stock.summary()}")
     return True
+
+
+def weapon_in_hand(timeout_s=3.0):
+    """Is a weapon actually out? -> rounds in the magazine, or None.
+
+    ASK FOR SOMETHING PRESENT, NEVER FOR AN ABSENCE. The tempting test is
+    `AdsDetector.scoped()`, and it is wrong in the exact case that matters:
+    it answers "is the crosshair gone", and the crosshair is also gone in the
+    lobby, in a menu, and — the case here — when the character is EMPTY
+    HANDED. Two probes have now paid for that. `probe_pitch_range` read
+    `scoped=True` against the lobby screen and printed "posture unreadable"
+    three times; `probe_posture_trace` did the same on 2026-08-05 against an
+    empty-handed character in the range, reported `ADS up: True` for ten
+    transitions in which no button was ever pressed, and concluded the posture
+    icon is "NEVER readable" when the truth is there was no HUD to read.
+
+    The ammo counter is present-or-not: digits there mean a weapon is out and
+    the weapon HUD is drawn, which is the same condition the posture and fire
+    mode readers need.
+    """
+    from detector.ammo_detector import AmmoDetector
+    from detector.cropper import capture_screen
+    from config import HUD_REGIONS
+    det = AmmoDetector()
+    y, x, h, w = HUD_REGIONS['ammo']
+    t0 = time.perf_counter()
+    while True:
+        frame = capture_screen()
+        n = det.classify({'ammo': frame[y:y + h, x:x + w]})
+        if n is not None:
+            return n
+        if time.perf_counter() - t0 >= timeout_s:
+            return None
+        time.sleep(0.15)
+
+
+def ensure_weapon_in_hand(ac, sc, weapon='m416', slots=(1, 2), verbose=True):
+    """Put a gun in the rack if there is none, hold it, prove it. -> slot|None
+
+    Anything reading the weapon HUD — posture, fire mode, ammo, the gun name —
+    needs this first, and NONE of them report its absence as its absence: they
+    report their own thing as unreadable. So this exists to be called before
+    them rather than diagnosed after them.
+
+    Entering the training range EMPTIES THE RACK, and `ensure_ready()`
+    re-enters whenever it finds the game back in the lobby, so "there was a gun
+    a minute ago" is not a reason to skip the check.
+
+    `ac.hold()` rather than a bare 1/2 key press: those keys are swallowed
+    while Tab is up (docs/game_quirks.md) and hold() is what brackets them with
+    a close/open. The panel bracket around the spawner is not optional either —
+    `collapse_all()` on a CLOSED panel collapses nothing and reports nothing,
+    and give_many then clicks from a stale layout.
+    """
+    for slot in slots:
+        if ac.hold(slot) and weapon_in_hand() is not None:
+            if verbose:
+                print(f'      [stock] slot {slot} already in hand')
+            return slot
+
+    if verbose:
+        print(f'      [stock] rack reads empty — spawning {weapon}')
+    if not sc.ensure_panel(True):
+        if verbose:
+            print('      [stock] spawner panel would not open')
+        return None
+    try:
+        sc.sync()
+        sc.collapse_all()
+        r = sc.give_many([weapon], switch=False, weapon_times=1)
+        if not r['ok']:
+            if verbose:
+                print(f"      [stock] spawner: {r['error']}")
+            return None
+    finally:
+        sc.ensure_panel(False)
+
+    for slot in slots:
+        if ac.hold(slot):
+            n = weapon_in_hand()
+            if n is not None:
+                if verbose:
+                    print(f'      [stock] holding slot {slot}, {n} rounds')
+                return slot
+    if verbose:
+        print(f'      [stock] spawned {weapon} but no ammo counter in slots '
+              f'{list(slots)} — the gun did not reach the rack')
+    return None
 
 
 # ════════════════════════════════════════════════════════════

@@ -45,10 +45,13 @@ with LobbyControl() as lc:
 | `MENU` | 同上，但 SYSTEM MENU 标题匹配上了 | False |
 | `FULLBLEED` | 铺满但没 ping：加载页、或 ping 叠层被关了 | False |
 
-**两个能坑死人的地方：**
+**三个能坑死人的地方：**
 
 - **ESC 菜单的像素探针全都说「在局内」**。画面在渲染、ping 在、`TIME/JOINED` 也在，`bar_max=44` / `ping_frac=0.089` 跟正常局内没区别。不查 `SYSTEM MENU` 标题就会返回 `playable=True`，而按键全被菜单吃掉——`harvest.py` 撞上这个整轮静默作废。
 - **`LEAVE TRAINING` 正下方一个 pitch（85px）就是 `EXIT TO DESKTOP`**。所以 `click_leave()` 强制先跑 `leave_entry_confirmed()` 验字形，失配就拒绝点。正式局的菜单没采过，届时会失配、拒点——**这是故意的，不是 bug**，但意味着正式局现在退不出来。
+- **这些标题模板认的是语言，不是界面。** 六个大厅模板原来各只有一张英文图，而客户端跑的是中文——2026-08-05 一轮无人值守采集挂机被踢，弹出「错误 / 因长时间没有动作，您已被踢出游戏」，`dismiss_error()` 对它打 **0.087**（闸门 0.55），如实报告「没有对话框」，然后**每一条恢复路径都堵在这个框后面**，状态一直读成 `FULLBLEED`。
+  现在 `_load_template` 走**变体**（`<stem>.png` + `<stem>.<tag>.png`，best-of），跟枪名板同一套机制。补了 `error_title_mask.zh.png`，同一屏得分 **1.0**，状态正确报 `ERROR`。**另外五个标题的中文变体还没采**——`SYSTEM MENU` / `LEAVE TRAINING` / `EXIT TO LOBBY` / 退出确认 / `RECONNECT`，遇到时按同样办法从屏幕裁一张。
+  ⚠ 同一个病还有一处**没修**：`detector/lobby_nav.py` 的 `read_page` 在中文顶栏读不出来——它按亮像素分段、第 i 段就叫 `TOP_TABS[i]`，中文标签更窄使得「商店」右边那个绿色活动图标挤进了 `LOBBY_TOP_BAR_ROI`，于是分出 **8 段**而期望 7，`read_page` 返回 None，`ensure_mode` → `press_play` → `ensure_in_match` 整条链拒绝动作。`read_mode` 不受影响（子栏 5 段照旧，且子栏只在 PLAY 页绘制，所以它本身就能证明在哪一页）。
 
 **别用固定 `sleep` 等游戏。** 结算页自己走 ~18 秒、大厅→局内要过匹配+加载，时长都不是常数。`control/lobby.py` 全程轮询，`EXIT_TIMEOUT`/`ENTER_TIMEOUT` 是放弃阈值不是预期耗时。`Pointer` 懒构造，只读状态不会去占 Pico 串口。
 
@@ -56,30 +59,9 @@ with LobbyControl() as lc:
 
 ## 还要问：焦点在游戏上吗
 
-`control/focus.py`（**已有，别重造**）。
+`control/focus.py`（**已有，别重造**）：驱动任何东西之前 `ensure_focus()`，跑到一半用 `focus_keeper().ok()` 抢回来。
 
-从终端拉起的工具，t=0 时焦点在终端不在游戏，第一次 `game_focused()` 必然 False。`harvest.py` 靠 `--countdown` 让人手动切窗口——那就是那些 run 至今不能真正无人值守的原因。
-
-```python
-from control.focus import ensure_focus, focus_keeper
-if not ensure_focus(countdown_s=6):    # 抢→验→重试3次→倒计时兜底
-    return 1
-time.sleep(0.6)                        # 切前台后头几帧游戏不收输入
-...
-if not focus_keeper().ok('mag 3'):     # 跑到一半掉了就抢回来，上限 5 次
-    break
-```
-
-**倒计时是退路，不是手段。** 全项目已接：harvest / sweep / collect_templates /
-control/spawner.py / control/inventory.py / control/lobby.py。
-
-三个坑：
-
-- **裸 `SetForegroundWindow` 会被拒。** Windows 只允许当前前台进程交出焦点，别的进程调它只会让任务栏闪一下。`raise_game()` 用 `AttachThreadInput` 借前台线程的输入队列绕过去；不模拟 ALT 键，因为 ALT 在这游戏里是自由视角。
-- **调完必须再验一次 `game_focused()`。** 它可以不报错地失败。
-- **焦点不是拿到一次就固定的。** 终端会反复抢回去，期间发出的按键直接丢失，症状是「spawner 面板打不开」，而脚本第一行明明打印了 `focused=True`。关键操作要**每次重试前重新抢**，别只在开头抢一次。
-
-窗口有焦点 ≠ 游戏在收输入：标题匹配在大厅、加载页、结算页全都成立。焦点检查之外还要过上面那关 `control/lobby.py`。
+**三个坑（裸 `SetForegroundWindow` 会被拒、调完必须再验一次、焦点不是拿到一次就固定的）连同 settle 时间和最小化还原，写在 `control/CLAUDE.md` 的「先决条件：焦点，每次都要」。** 那是这条规则的唯一一份——focus 是 control 层的东西，这里只留指针，免得两份副本各自漂。
 
 ## 第一铁律：模板漂移是静默的
 
@@ -93,39 +75,43 @@ control/spawner.py / control/inventory.py / control/lobby.py。
 - 报告准确率时必须说明用的是哪个样本集，以及集里有没有难例
 - 发现漂移 → 见下方「坏了找谁」
 
-### 配件图标：装的是「屏幕上的样子」，不是游戏美术资源
+### 配件图标：两种渲染，两种几何，两边分开采、分开存、互不缩放
 
-`training_data/pubg_assets/Item/Attachment/` 现在有两种文件，**同一个 asset 的多个变体全部参与匹配，最好的那个代表它**（跟枪名板的多语言变体同一套机制，理由不同）：
+游戏画一个图标要先缩放、加黑描边、再混进半透明面板（`blend_attachment`）。美术图是这条链的**输入**，检测器看到的是**输出**——所以**全仓库的游戏美术图已于 2026-08-05 删除**，模板只能从屏幕来。
 
-| | 哪来的 |
-|---|---|
-| `Item_Attach_Weapon_<Asset>.png` | 游戏解包美术 |
-| `Item_Attach_Weapon_<Asset>.solved.png` | 从屏幕反解出来的 |
+而屏幕上同一个件被画了**两次，几何不同**：
 
-**为什么美术资源天生对不上**：游戏画一个图标要先缩放、加黑描边、再混进半透明面板（`blend_attachment`）。美术图是这条链的**输入**，检测器看到的是**输出**。`collect_templates.py` 的 `paired_sweep` 拍同一个槽的空/满两张，`solve_template.py` 逐像素最小二乘反解出 `icon` 和 `alpha`，那才是屏幕上的东西。
+| | `<Asset>.solved.png` | `<Asset>.row.png` |
+|---|---|---|
+| 画在哪 | 武器槽 tile | 库存列表行 |
+| 尺寸 | **48×48**，图标顶满 tile | **80×80**，图标周围有 padding |
+| 采集 | `--targets slots`：同一槽拍**空/满配对** | `--targets rows`：同一行拍 **10 个背景** |
+| 反解 | 有 backdrop，最小二乘直接出 icon + alpha | 无配对空行（列表会合拢），靠**跨背景不动 = 不透明** |
+| 代价 | — | 半透明像素的颜色解不出，标成透明，丢羽化边 |
 
-实测（`pixi run attachments`，760 张 `LABEL_REQUESTED` 槽位样本，16 个 run）：
+**这两张不是同一张图的两个尺寸，任何一方向的缩放都会毁掉匹配。** 2026-08-05 把这件事在两个方向上各犯了一次：
 
-| | 准确率 | margin 中位 | 修好的 |
-|---|---|---|---|
-| 只有美术图 | 659/734 = **0.898** | 3.9 | — |
-| 加 solved 变体 | 701/734 = **0.955** | 10.9 | `thumb_grip` 0/25→25/25、`angled_grip` 0/16→15/16、`comp_sr` 31/33→33/33 |
-| 再补上三个「没有美术图」的 | **749/760 = 0.986** | 11.2 | `brake_ar` 0/18→18/18、`heavy_stock` 0/10→10/10、`variable` 0/10→10/10 |
+| | rows | reference rows | slots | rows 的 margin |
+|---|---|---|---|---|
+| 旧：只有槽位解，缩到行尺度用 | 594/690 = 0.861 | 9/12 | 1689/1717 | — |
+| 错：行解压进槽位几何（48×48） | 492/1040 = **0.473** | 2/12 | 1701/1717 | **全部塌到 1.25–2.4**（闸门 1.25）|
+| 对：各存各的尺寸，零 resize | **930/1040 = 0.894** | **10/12** | 1675/1717 | 恢复到几十~几百 |
 
-**最后那一行的三个件，两个的数据早就在磁盘上躺着，是 `asset: None` 把它们锁住的。** 目录里 `asset` 为 None 表示「本仓库没有它的模板」，而建库代码按 asset 名给文件命名——于是最需要反解图标的三个件，恰好是建库时被静默跳过的三个。现在它们的 stem 是**我们自己起的**（`Muzzle_Brake_Large_C` / `Stock_Heavy_C` / `Upper_Variable_C`，目录里标着 `# recovered`），只要前缀对得上 `SLOT_PREFIXES` 就够——游戏在这套美术资源之后才加的件，本来就没有官方文件名可抄。
+**margin 的塌陷是判据。** 插值抹掉的正是分辨近邻所需的抗锯齿细节，而它的表现是**全体一起变差**——一个坏的**解**只会伤到部分件。`AttachmentDetector.TMPL_OFFSETS` 记着两种尺寸各自的偏移（48 在 63 的 crop 里偏 8，是实测不是 `(63-48)//2`；80 在 80 的 crop 里偏 0），装不下的变体直接跳过而不是拉伸。
 
-`asset: None` 从来不是中性的：**没有模板的件不读成未知，读成最近邻**。`variable` 稳定读成 `scope_6x`，10/10。
+⚠ **slots 从 1689 掉到 1675，那 14 个是诚实的损失**：以前 row 变体被压成 48×48 后**也参与槽位匹配**，那 14 个读数是靠「另一个尺度的图碰巧更像」蒙对的。修法是重采那些件的槽位配对，不是拿错尺度的图凑数。
 
-**hold-out 数字一模一样（701/734）**：`--holdout` 对每个 run 用「不含该 run 解出的模板」的库去评它自己的样本。两个数相等说明模板重建的是图标，不是它自己那批截图。另一条独立证据：193140 和 211051 两个 run 各自解出的同一个图标，在 alpha>0.5 的像素上逐点差 **0.08–0.18 灰阶**，alpha 差 0.006。
+还缺的：`uzi_stock`（行解是一团云，opaque 0.794 对闸门 0.5——那 10 个「不同背景」几乎没动，重采）、`variable`、`scope_8x`（从没在行尺度采过）。命令一条：
 
-还没做完的：
+```
+pixi run python calibration/collect_templates.py --targets rows --keys uzi_stock,variable,scope_8x
+pixi run python tools/solve_template.py docs/attachments/runs/<stamp> --rows --install
+pixi run attachments
+```
 
-- `scope_2x` 仍有 6/16 被 `scope_6x` 吃掉。`scope_6x` 的解是全库最弱的一个（recon 2.06，只有一个 run 有它），而两个镜子的图标差别几乎只有一个数字。
-- `bullet_loops` `choke` `duckbill` `light_grip` `quickext_smg` `scope_8x` `tactical_stock` 没进过配对采集，还在用美术图。前三个 ROSTER 里没有活枪能穿，采不了。
+`supp_ar` / `supp_sr` 在槽位上 margin 只有 1.05 / 1.69——同族三根灰管子，靠枪名收窄候选才分得开。**能传枪名就传**。
 
-`supp_ar` / `supp_sr` 的 margin 只有 1.09 / 1.68——同族三根灰管子，靠枪名收窄候选才分得开。**能传枪名就传**。
-
-**代价是一次 Tab 读取从 80 ms 涨到 123 ms**（`tab_items.detect`：10 个槽 + 两栏 24 行盲匹配；`read_slots` 单独是 15.5 → 29.5 ms）。模板数 55 → 85。两阶段匹配里**只有粗排省下来了**：粗排每个 asset 只跑无 tag 的那张，精排（9 偏移）才跑全部变体。**反过来不行**——让粗排挑变体会丢掉 12 行参考里的 2 行：无偏移时美术图和 solved 在列表行上会换位，而精排加的那一个像素偏移正是分开它们的东西。跟 `SHORTLIST` 是同一条教训：便宜的那一趟可以排序，不可以定案。
+**代价是一次 Tab 读取从 80 ms 涨到 123 ms**（`tab_items.detect`：10 个槽 + 两栏 24 行盲匹配；`read_slots` 单独是 15.5 → 29.5 ms）。两阶段匹配里**只有粗排省下来了**：粗排每个 asset 只跑一张变体，精排（9 偏移）才跑全部。**反过来不行**——让粗排挑变体会丢掉 12 行参考里的 2 行：无偏移时两种渲染在列表行上会换位，而精排加的那一个像素偏移正是分开它们的东西。跟 `SHORTLIST` 是同一条教训：便宜的那一趟可以排序，不可以定案。
 
 ## 第二铁律：几何声明要端到端验证
 
@@ -137,10 +123,8 @@ control/spawner.py / control/inventory.py / control/lobby.py。
 
 ## 踩过的坑（都有实测数字）
 
-**库存行的模板还是老的一套，槽位的改进没跟过去。**
-行图标是同一份美术在**另一个尺寸和内边距**下渲染的（`temp_debug/calib_inv_icon.py` 标的就是这个几何），而 solved 模板是从**槽位**的混合里解出来的等效图标，换个尺度就带系统偏差。实测 `docs/tab_inventory.png` 12 行人工真值：solved 变体把 `thumb_grip` 从 MSE 441 压到 175（row9 已经是第一名，margin 1.44），但 `ROW_MSE_MAX=150` 正好卡在外面，所以那两行仍然读不出来，**10/12**。
-
-要补齐得从**行**的捕获里解，而不是把槽位模板拿去缩放。行捕获没有配对的空行，但一行在 10 个背景下拍过——跨背景不动的像素就是不透明像素，这条路不需要配对。前提是重采一轮：见下面那条 rows 真值的坑。
+✅ **~~库存行的模板还是老的一套，槽位的改进没跟过去~~ —— 已修（2026-08-05），行模板从行捕获直接解。**
+症状是**「排第一却读不出来」**：`thumb_grip` 在 `docs/tab_inventory.png` 的 row9 已经是第一名、margin 1.44，MSE 却是 175，`ROW_MSE_MAX=150` 正好卡在外面。**排名对而绝对阈值不过，就是尺度错的样子**——正确的答案赢了，但赢得不够像。根因和修法见上面「两种渲染」那一节。
 
 **列表行位置：用图标，别用文字带。**
 标签会折行，且折行时**不在行内垂直居中**。用文字带测「附近」栏读出 15px 偏差和一个假的 66px pitch；用图标块测得到真值：首行 y=199，pitch 81.55，两个面板共用。
@@ -162,11 +146,6 @@ control/spawner.py / control/inventory.py / control/lobby.py。
 
 **`IMREAD_GRAYSCALE` 不保证是灰度。**
 ultralytics 会把 `cv2.imread` 换成自己默认 `IMREAD_COLOR` 的包装，进程里只要有人 import 过它，读模板就回来 3 通道，`findNonZero`/`boundingRect` 当场炸。`ammo_detector` 因此在 `smoke_check`（import ultralytics）里 FAIL，而单独跑的脚本一路绿灯。所有读模板的地方都要 `if img.ndim == 3: img = img[:, :, 0]`——`weapon_template_detector` 早就这么防了。
-
-**弹药数字：高度就是全部分割逻辑。**
-856 张全屏实测，数字**无一例外** 17-18 宽、**37 高**，顶边恒在 y=1323。同一条带里其它亮东西（弹匣图标条纹、HUD 下划线）最高 4px，所以一个高度窗口就把字形和家具分干净，不需要任何形态学。字形帧间逐像素一致，模板 IoU 在这里是精确解。
-
-**弹药数字是居中的，不是右对齐。** 中心恒在 x=1719（1 位、2 位实测同心）。三位数（100 发弹鼓）向两侧长到 1686..1752，仍在 `HUD_REGIONS['ammo']`(1670..1760) 内——按右边缘锚定的裁剪会切掉首位。
 
 **穷举搜索先证明它有用。**
 `highlight_detector._align` 曾套一个 5×5 jitter 循环 = 50 次 matchTemplate。在 254 对标注样本上 jitter=2/1/0 **准确率完全相同**，关掉快 2.6 倍。旋钮保留为 `ALIGN_JITTER`，理由和唯一该开启的场景写在常量注释里。
@@ -225,37 +204,23 @@ slots.present(frame, 2)      # 有槽位的集合（不含 unknown）
 | 判据 | 看哪 | absent | empty | filled |
 |---|---|---|---|---|
 | 存在性 Sobel p90 | tile **边框环** | 5.0–26.0 | 46.0–172.7 | 同 empty |
-| 有无内容 Canny | tile **内部** | — | 0–71 | 202–885 |
+| 有无内容 **模板 MSE** | tile **内部** | — | 891 起（语料里可测的 24 张） | p50 15.2 / p90 40.3 / p99 89.2（1685 张）|
 
-阈值 36（空档 20）/ 120。7 张已知真值的图上 **28/28 全对**。
+阈值 36（空档 20）/ **150**。7 张已知真值的图上 **28/28 全对**。
 
-三个坑，改之前先读：
+改这个检测器之前先读：
 
 - **只测边框，别测内部。** 内部是图标，跟「槽在不在」毫无关系，算进去会让判据随装了什么漂移。只取边框环之后，剥光的 M416 读 260/260/278/260，装满的读 260/260/318/260——几乎不动。
 - **用梯度，不用 Canny 判存在。** Canny 的滞后阈值在 VSS 的弹匣槽上读出**恰好 0**，而那是个真实存在的槽——tile 压在亮沙地上、跟背景几乎同亮度，边界被量化没了。Sobel 幅值读 46。**在真实存在的元素上读出硬 0 的判据不是保守，是坏了。**
-- 🔴 **采集器会在 `strip` 里把整把宿主枪丢到地上。根因未定，交给人盯屏。**（2026-08-04）
+- ✅ **~~采集器会在 `strip` 里把整把宿主枪丢到地上~~ —— 根因就在这个检测器里，已修（2026-08-04，实机验证过）。**
 
-  **代价**：`collect_templates` 11 个 run、**74 次**，一次废一个件，最惨一轮废 31 个。
+  **枪自己的画像画在贴片背后，有些枪伸进了贴片里。** 剥光的 AKM，它的弹匣仍然填满自己的 magazine 贴片，内部 **395 个 Canny 边缘**对着阈值 120——那个槽**永远读 `filled`**。`strip` 于是对着已经空了的槽再拉一次，而**空槽上的手势会打到底下的武器行**，整枪落地。代价：11 个 run、**74 次**，一次废一个件。
 
-  **已钉死的**：枪是真丢（两个架位 `plate_ink=0`、`tab_open=True`、AKM 出现在 `附近` 栏）；**每一次拖的都是 `magazine`**，muzzle 拖拽隔离测试 2/2 安全；坐标没问题（magazine 抓取点离武器行 358 px）；`strip` 报 `ok=True`——因为它验的是「源槽变空了」，而**整枪离开时这句话同样成立**，这个验证从原理上分不出两者。
+  **调阈值救不了**：那些边缘是真的，就是一个弹匣，只不过它属于枪不属于配件。亮度/背景模型也不行——面板半透明，贴片里还有风景。所以判据换成**正向识别配件**：`filled ⟺ 认出了一个件`，枪的画像和面板背后的风景于是落进同一类「不是配件」，两者都不需要建模。数字见 `slot_detector.py` 顶部。
 
-  **被自己的数据否掉的三条假设**（写下来是为了别再走一遍）：
+  scope 位是同一条路径的另一半：它以前恒 `unknown`，而 `unequip` 放行 `unknown`，所以一个空的镜位照样吃手势。现在也走模板。
 
-  | 假设 | 怎么否的 |
-  |---|---|
-  | `drag` 重试打在空槽上 | 加了「重试前重读源」的闸，**没触发**，照样丢 |
-  | 空槽画「自带弹匣」水印 | 语料 281 张空弹匣槽，`edges` **全是 0**，根本不画 |
-  | 内容读回能拦住 | 加了 AMBIGUOUS 闸，采集器那条路上**内容读得出来**，照样丢 |
-
-  唯一剩下的变量：**magazine 的拖拽和 muzzle 的拖拽差在哪**（同类起点、同一终点，只差 x）。三张静态帧之间发生了什么推不出来——按下时抓到的是什么、拖动中高亮了哪格、松手落在哪——**人盯一次屏就看见了**，复现极稳（`holo`/`scope_6x` 连续四次全中）。
-
-  ```
-  pixi run python calibration/collect_templates.py --keys holo --targets slots --countdown 8
-  ```
-
-  **两道已加的闸**（都不修根因，但把「读错一次」从丢枪降级成拒绝）：`InventoryControl.drag()` 重试前重读源；`unequip()` 在 `tile filled + 内容 AMBIGUOUS` 时不动手——那个状态实测 `mse 346 / margin 1.14`，真配件是 `32 / 3.38`，**是 `MARGIN_MIN` 让它可分的**。
-
-  ⚠ 三态不能塌成两态：`tile filled + 内容读成空` 要**照样动手**——没有模板的新件对模板不可见，六个握把曾因此留在枪上。
+  ⚠ **这个交换让出的东西**：**没有模板的件现在读成 `empty`**。这一类以前正是「缺模板碰不到」的判据，现在不是了。取它是因为两个失败方向不对等——认不出 → 拒绝手势、件留在枪上；老判据失败 → 手势打空槽、丢整枪。**但它是有代价的，实测过**：uzi 自带的快拉弹匣对着当时那张弱模板打 **175**（闸门 150）→ 槽读 `empty` → `strip` 跳过 → 那一轮四个件全被顶回库存（run `20260804_224201`）。所以**动模板库之前先跑 `pixi run attachments` 看棘轮**。刚装完东西、自己知道答案的调用方走 `known_filled=`（`collect_templates` 早就在用这条通道）。
 
 - **`scope` 位不画 tile，所以「有没有这个槽」读不出来，调参救不了。** M416 的空 scope 只有背景和枪身，而没有 scope 槽的 VSS 在同一位置画着它自带的固定 PSO-1（**枪的美术资源**）。存在性只能靠装一个瞄具确认。
   **「装没装」已经不再走边缘计数**（2026-08-04）：占用判据换成模板识别，所以 scope 位现在跟别的槽一样能答 filled/empty——VSS 空槽那 678 个内部边缘不再有任何作用。**别让 `unknown` 塌成 `absent`。**
@@ -299,6 +264,42 @@ ammo.read(crop)['glyphs']     # 每个字形的 digit / iou / margin，排错用
 
 **采集器踩过两个坑，都是「同一个读数被当成两个」：** 精确字节比对认不出同一数字（抗锯齿随背景变），要用 IoU + 容差（`SAME_IOU=0.92`，真匹配 0.98+，最近的异类 0.79）；HUD 换数字时会有一两帧只画出 1-2 个字形，得**按持续时间确认状态**（`MIN_STATE_S=15ms`，过渡帧约 2 ms，最短真实读数 80 ms）。这两个各自都能让 14 次点射报出 34 个状态，把之后每一个标签都推错一格。
 
+## HUD 认枪：用 `weapon_hud_detector`，别再自己造
+
+`detector/weapon_hud_detector.py` 回答「右下角这个槽里是哪把枪」，**0.6 ms、按键触发**：
+
+```python
+from detector.weapon_hud_detector import WeaponHudDetector
+det = WeaponHudDetector()
+det.classify({'weapon_1': c1, 'weapon_2': c2})   # ('aug', 'm416')
+det.read(crop)      # ('aug', 0.31)  名字 + margin
+det.scores(crop)    # {枪: 余弦}，问「是不是某把枪」时用这个
+```
+
+**2026-08-05 换掉了一个 CNN**（`gun_name.pth.tar`，已删）。它把 AUG 读成 JS9，存了 77 帧；两把都是犊牛式，剪影 IoU 0.549。而且它的类表已经和 ROSTER 漂开 8 个，还管 Kar98k 叫 `98k`——一个下游谁都不认的名字，却是最大的误判吸收池（162 次）。
+
+**做法和每一步的实测：**
+
+| | 准确率 |
+|---|---|
+| 游戏美术图 + 二值 IoU | 0.489 |
+| **语料反解模板** + 二值 IoU | 0.825 |
+| 语料反解 + MSE/9 偏移（照搬 `attachment_detector`） | 0.871 |
+| **实拍最近邻**，每类 48 张 | 0.962 |
+| **+ PCA 64 维** | **0.9748** |
+
+留出验证：前 48 张建库、最后 40 张测试，采集顺序上隔得很远（连拍帧几乎是重复样本，随机划分测的是记忆）。
+
+三条别踩：
+
+- **别用游戏美术图。** 它是游戏合成的**输入**，检测器看到的是**输出**。这条在两个面上各测了一次：配件 0.898→0.955，HUD 0.489→0.975。**全仓库的美术图已于 2026-08-05 全部删除**，新件的模板只能从屏幕来。
+- **别把实拍 median 成一张。** HUD 按 alpha 0.80（在手）/ 0.405（收着）两档画，背景是开阔世界。一张 median 模板 0.871，保留实拍 0.975——那些变化是游戏真实产生的信号，平均掉就没了。`attachment_detector` 的 variants 机制是同一思路的弱化版。
+- **PCA 不是省钱，是提精度。** 全维 0.962，64 维 0.9748——差的那部分是投影丢掉的噪声。顺带 53 MB → 2.9 MB，矩阵乘小 170 倍。
+
+⚠ **库里没有的枪读不出来，只会被自信地读成最近的邻居。** `dbs`/`o12`/`win94` 在册但**一帧语料都没有**。挡它的是 `MARGIN_MIN`：实测对的读数 margin 中位 0.198、错的 0.011（18 倍），没见过的枪倾向于和邻居打平，打平就返回 `''`。缺口由 `pixi run python tools/build_weapon_hud_bank.py` 开头打印。
+
+重建库：`pixi run python tools/build_weapon_hud_bank.py --eval`（`--eval` 跑留出验收）。
+
 ## 验证资产
 
 | 资产 | 内容 | 用途 |
@@ -309,7 +310,7 @@ ammo.read(crop)['glyphs']     # 每个字形的 digit / iou / margin，排错用
 | `training_data/highlight_eval/` | 260 高亮 + 439 非高亮，带标签 | `temp_debug/eval_highlight_jitter.py` 配对评测。`errors_v4/` 是空的——**这个集里没有难例** |
 | `docs/spawner/runs/` | spawner 全部分类的菜单截图 | 游戏当前物品清单的事实来源 |
 | `docs/compat/runs/<stamp>/` | 30 把枪各一张全屏 + `summary.json` | 槽位几何回归（`scan_compat.py --report <stamp>`）。**不是模板真值集**：枪上装的是 PUBG 自动配的，没人指定过，只能靠被测检测器认——拿它标模板是循环论证 |
-| `docs/attachments/runs/<stamp>/` | 配件采集：槽位配对图（空/满同角度）、库存行图、枪名板 | 配件模板的真值集，`pixi run attachments` 吃它。**槽位那半可信，库存行那半不可信**——见下 |
+| `docs/attachments/runs/<stamp>/` | 配件采集：槽位配对图（空/满同角度）、库存行图（同一行 10 个背景）、枪名板 | 配件模板的真值集，`pixi run attachments` 吃它。**两半都可信了**（2026-08-05 重采）；坏掉的旧行图还在盘上，但 `labelled()` 不发它们 |
 | `docs/lobby/*.png` | 5 张：大厅 / 训练场 / 训练场+Tab / 正式局结算 / ESC 菜单 | 在不在局内的回归，`tools/verify_lobby_detector.py` 五条全过。每张的 `bar_max`/`ping_frac` 实测值见 `docs/lobby/README.md` |
 | `docs/ads/runs/**/*.jpg` | 610 张全屏帧（本为 ADS 采集） | 顺带是弹药数字的离线回归集：`tools/probe_ammo_ocr.py` 在 921 张里读出 869，其余 52 张确实没数字 |
 | `docs/ads/runs/*/index.jsonl` | 每帧标了 scope / state / t_ms / 槽位实读 asset | 开镜检测评测集，492 帧。**别照 `state` 当真值**：`20260801_222936` 的 `state=ads` 其实是按住右键的肩瞄、从未开镜；`20260802_015545` 整轮在错的槽位上。两个 run 的 `meta.json` 里都写了原因，`calibration/fit_ads_detector.py` 顶部的 `NOT_SCOPED` / `SCOPED` 是修正后的真值。**用 `CaptureRun.load_dir()` 读就不会踩**：旧 run 的标签一律降级为 `LABEL_DETECTED`，`labelled()` 对它们返回空，`state` 只作为「采集过程干了什么」的事实存在，不冒充「屏幕上是什么」 |
@@ -330,24 +331,40 @@ ammo.read(crop)['glyphs']     # 每个字形的 digit / iou / margin，排错用
 
 ## 当前已知缺陷
 
-- **`posture_detector` 在浅色木质背景上读不出来，而它的标注集里一张这种背景都没有。** 判据是 `bright = (V > 180) & (S < 80)`——**绝对亮度加低饱和**，训练场那些浅木板两条全中。膨胀（Canny 5 / Sobel 3）再把板缝和图标连成**一个连通域**，于是 `argmax(sizes)` 挑中的是木头。实测那张裁图（`docs/posture/fail_0804/`）：
+- ⚠ **~~`posture_detector` 在浅色木质背景上读不出来~~ —— 这段诊断是假的，2026-08-05 逐像素复核后推翻。** 原文写着「46% 像素过闸、最大连通域 1403 px 是木头、三个模板 IoU 全低于阈值、判为读不出」。拿现行代码跑那张裁图（`docs/posture/fail_0804/`）：
 
-  | | |
+  | | 原文说 | 实测 |
+  |---|---|---|
+  | 掩膜大小 | 1403 px（木头） | **424 px，干净的人形，没有木头** |
+  | 读出什么 | `None`（读不出） | **`crouching`** |
+  | IoU | prone 0.268 最高 | **crouching 0.756** / standing 0.249 / prone 0.158 |
+
+  **把掩膜画出来就结束了**：图上是躯干直立、单膝屈、枪前伸——**那是蹲姿**，和 crouching 模板几乎重合。文件名里的 `prone` 是标错的。四个变体（换 dewhite 掩膜、换语料反解模板、两个都换）全读 crouching，因为画的就是 crouching。
+
+  识别本身没问题：1714 张实测 **0.993**，四个变体在 0.993–0.995 之间，谁也没赢。**别再往调阈值/换掩膜的方向走了。**
+
+  ✅ **~~真正的缺陷在触发时机~~ —— 已测已修（2026-08-05）。缺陷是「读不到就丢弃」，不是延迟太短。**
+
+  `tools/probe_posture_trace.py`，一把 m416 在手，**六个随机视角**各测一轮（`docs/posture/traces/20260805_094215`，4834 样本）：
+
+  | | 实测 |
   |---|---|
-  | 过「亮+低饱和」闸的像素 | 2003 / 4356 = **46%** |
-  | 最大连通域 | 1403 px（66×66 裁图的 32%，图标不可能这么大）|
-  | 三个模板的 IoU | prone **0.268** / standing 0.144 / crouching 0.092，阈值 0.32 |
+  | **开镜**状态下按姿势键 → 图标跟上 | **34–68 ms** |
+  | 开镜状态下任意时刻可读 | **3786 / 3787** |
+  | **不开镜**，整整 2000 ms 窗口 | **0 / 3787，六轮全部** |
 
-  prone 是最高的那个——**人确实趴下了，是检测器认不出来**，而 `ensure_posture` 因此整格丢弃。2026-08-04 那轮姿势轴 4 把枪 6 格死于 `posture unreadable`。
+  **所以 200 ms 的延迟不但不短，还富余三倍以上。** 真正发生的事是：`c`/`z` 按下那一刻通常还没开镜，图标压根**没画**，`classify` 返回 `None`，而 `Dispatcher._run_detect` 拿到 `None` **直接 return**——读数就这么丢了，`set_posture()` 连调用都没被调用，旧值原样留着。接着开镜开火，用的是过期姿势系数，站 1.0 对趴 0.50，**最多差 2 倍**。
 
-  **标注集看不见这个失败**：`training_data/Manual/posture/` 1714 张（standing 833 / crouching 432 / **prone 10** / bg 439）实测 **1698/1714 = 99.07%**，全过。这跟 `ads_detector` 那条「492 帧全来自同一片场地」是同一个病——**准确率数字只对采样过的背景成立**。所以别拿一张失败样本去改一个 99% 的检测器，先攒一批：`GunDriver.dump()` 已改成编号不覆盖（原来每次写同一个文件名，六次失败只剩最后一张）。
+  修法是**读不到就再问**（`retry_ms` / `retries`，`config.py` 三条各挂 100 ms × 10）。有界是故意的：1 秒内还没开镜就说明没人在瞄，姿势还不重要，而下一次右键会自带一次读。离线闸门 `pixi run detect-retry`（6 例，注入接线 bug 会红 3 例）。
 
-  另外 **prone 只有 10 个样本**，而它正是反复出问题的那一类。
+  ⚠ **这个 probe 自己踩了两个坑，都值得记**：① `ensure_ready()` 之后角色是**空手**，而空手时既没有姿势图标、也没有准星——于是 `AdsDetector` 对着「没开镜」返回 `True`（它答的是「准星缺席」），十个窗口全报 `ADS up: True` 而实际一次都没开过镜。现在开跑前先 `control.stock.ensure_weapon_in_hand()`，判据是**弹药数读得出**（在场证据），不是任何一个「缺席」判据。② 右键是**切换不是按住**，`click(0x02, 1200)` 不等于按住 1.2 秒，它只是切了一下——加上图标 ~0.85 s 才出现，ADS 整整晚了一个窗口，读出来的 `ads` 列刚好错位。
+
+  标注集仍然薄且不可尽信：`training_data/Manual/posture/` 1714 张里 **prone 只有 10 张**，而上面那张唯一的"失败样本"标签是错的。`GunDriver.dump()` 已改成编号不覆盖（原来每次写同一个文件名，六次失败只剩最后一张）。
 
 - `ammo_detector` 的十个字模全部采自**三位数**（150..121）。两位、一位实测逐个读对，但它们从没被单独重采过；哪天游戏改成按位数用不同字号，会先在这里翻车，重跑一次 `--verify` 就能看出来。
 - `ads_detector` 的 492 帧全部来自 **Kar98k、同一片场地、全程未开火**。没验过的：开火时后坐力抖动会不会糊掉准星（最可能翻车的一条，压枪场景恰恰全程在开火）、其他枪的腰射准星是否同形、载具/趴姿等会改准星的状态、以及 4 倍以下的其他红点变体。要上压枪主循环，先补一组**开火中**的帧
 - `lobby_detector` 的六态里，**加载页一张样本都没有**——`FULLBLEED` 现在被结算页和退出确认框覆盖，它对加载页的判定仍是照定义推的（活体转移里观测到了，没存图）。另外 **正式局的 ESC 菜单**没采过，`leave_entry_confirmed()` 届时会失配、拒绝点击，所以**正式局现在退不出来**（训练场可以）。补齐跑 `pixi run python tools/probe_lobby_transition.py`，全程截图落 `docs/lobby/runs/<n>/`。`control/lobby.py` 顶部的 `OBSERVED DURATIONS` 三项也还是空的
-- ~~`Lower_ThumbGrip_C`、`Stock_UZI_C` 已漂移~~ 两个都有 solved 变体了，槽位上 25/25 和 10/10。**`thumb_grip` 在库存行里仍然读不出来**（上面那条）。
+- ~~`Lower_ThumbGrip_C`、`Stock_UZI_C` 已漂移~~ 两个都有 solved 变体，槽位上 45/45 和 40/40。**行里仍然差**：`thumb_grip` 9/20（有 row 模板还是欠），`uzi_stock` 0/40（行解是云，要重采）。
 - ~~枪口制退器、重型枪托、多倍率混合瞄具没有模板~~ 三个都有了，槽位上 18/18、10/10、10/10。
 - ✅ **~~刷新器在连续多轮里会点错类别行~~ —— 那条诊断是假的，真因是读回在亮背景上说谎。已修（2026-08-04）。**
 
@@ -376,20 +393,11 @@ ammo.read(crop)['glyphs']     # 每个字形的 digit / iou / margin，排错用
 
   `read()` / `expansions()` 还在，但只做诊断和恢复，不在驱动路径上。离线 `pixi run panel-state` 永远看不见这类问题，因为它喂的是存图。
 - **背包清不空的时候，往后每一轮都会连带废掉。** 同一轮日志里 `库存 still holds 12 row(s) — the drops are not landing`，然后三轮 `no bare host gun`。往 附近 栏扔东西的释放点是固定 y（`DROP_XY`，落在第 4、5 行之间），列表一长就落在已有物品上。`control/inventory.py` 的注释里记着这件事的来龙去脉，那个文件 2026-08-03 深夜正在被改。
-- **库存行（`rows`）的真值集是坏的，一共 930 条里没有一条能用。** 两个独立的原因：
-  - 文件名 `row00__sks__lbg0.png` 不含轮次，多轮 run 里后一轮直接覆盖前一轮的文件，而两轮的 manifest 条目都还在。7 个 run、130 个文件、**580 条标签**，其中一个文件被 12 个不同配件同时声称。`CaptureRun.conflicts()` 现在能查出来，`labelled()` 不再发出这类标签；采集端的文件名已加轮次。
-  - 剩下的 350 条是**行号错位**：游戏把新件插进它自己的排序，采集器当时假设最新的在最后（ff047bc 修的）。证据是拿已验证 0.955 的模板库去读——`row2` 标 `cheek_pad` 读出 `ext_ar` MSE=12 margin=10.5，`row11` 标 `variable` 读出 `vert_grip` MSE=13 margin=9.1。MSE 12 配 10 倍 margin 是正确匹配的样子，不是巧合。**不是统一偏移，改不回来，只能重采。**
-  - 这批图**没删也不会删**，`pixi run attachments` 照样打印它们的得分，只是不计入总数。现在唯一可信的行真值是 `docs/tab_inventory.png` 那 12 行（人工读的）。
-  - **重采就能补齐，命令是一条**（12 轮 / 38 个件 / 约 40–50 分钟，占游戏前跟用户说一声）：
-
-    ```
-    pixi run python calibration/collect_templates.py --all --targets slots,rows
-    pixi run python tools/score_attachments.py --write     # 反解 + 重建 + 评分
-    pixi run attachments --holdout                          # 留一验收
-    ```
-
-    `bullet_loops` / `choke` / `duckbill` 会被跳过——ROSTER 里没有活枪能穿，`--plan` 会直接说。**采完 baseline 会变**（`score_attachments.py: BASELINE` 是棘轮，变好也会红），按它打印的数字更新，并把那段「够不着的清单」改成新的事实。
-  - 行模板本身还是从**槽位**尺度解出来的，换到列表尺度带系统偏差（`thumb_grip` 在行里 MSE 175，卡在 `ROW_MSE_MAX=150` 外面）。重采之后可以从**行**的捕获直接解：行没有配对的空行，但同一行拍了 10 个背景，**跨背景不动的像素就是不透明像素**，这条路不需要配对。
+- ✅ **~~库存行（`rows`）的真值集是坏的，930 条没一条能用~~ —— 已重采（2026-08-05），现在 930/1040 = 0.894。**
+  坏的那两个原因都已修在采集端：文件名不含轮次导致互相覆盖（`CaptureRun.add()` 现在遇到重名直接抛，不再静默覆盖）、行号错位（游戏把新件插进自己的排序，采集器假设最新的在最后）。旧图没删，`labelled()` 不再把它们当真值发出去。
+  **行采集现在不需要枪也不需要模板**：`collect_templates.py --targets rows` 走 `rows_only`——清空架子和库存 → 刷**一个**件 → `inv_rows`（纯 Laplacian）确认库存正好一行 → 那一行就是它。身份来自「只刷了一样东西」。
+  ⚠ 这条路以前是**寄生在装配流程里**的（装上→拆下→拍行），所以要过 `SlotDetector`，而缺模板的件正好卡死在那里——**要采模板的件恰好是采不了的件**。`--targets rows` 单独跑因此永远返回 0 crops（`rows` 列表是空的，喂给 `sweep` 什么都拍不到）。
+  还缺 `uzi_stock` / `variable` / `scope_8x`，命令见上面「两种渲染」那一节。
 - `attachment_catalog.SLOTS` 的 **`scope` 那一项仍是推断**。2026-08-02 全量扫过 30 把枪（`calibration/scan_compat.py`，run 在 `docs/compat/runs/20260802_155222/`），另外四个槽全部实测，`unverified()` 已清空；但 scope 槽**不画 tile**，存在性读不出来，`SlotDetector` 在那里返回 `unknown`。要确认得靠装一个瞄具。
 - `EXCLUDE` / `ONLY` / `GRIP_ONLY` **一条都没实测**。「某个槽只收部分配件」（汤姆逊枪口只收消音）读不出来——收与不收留下的是同一个空 tile，只能逐个拖。
 

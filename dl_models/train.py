@@ -15,44 +15,13 @@ from torch.utils.data import ConcatDataset, DataLoader
 from torchvision.models import mobilenet_v3_small
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from dl_models.dataset import BackgroundProvider, RealHUDDataset, RealClassifyDataset, SyntheticHUDDataset
-from dl_models.icon_layout import WeaponIconLayout, TabDetectLayout, AttachmentIconLayout, FireModeLayout
+from dl_models.dataset import BackgroundProvider, RealClassifyDataset, SyntheticHUDDataset
+from dl_models.icon_layout import FireModeLayout
 
 # ── Task configs ──
 BG_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data', 'backgrounds')
-REAL_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data', 'Manual', 'weapon_hud')
 
 TASKS = {
-    'weapon': {
-        'layout_cls': WeaponIconLayout,
-        'save_name': 'gun_name.pth.tar',
-        'train_samples': 16000,
-        'val_samples': 2000,
-        'epochs': 20,
-        'lr': 3e-4,
-        'batch_size': 64,
-        'hidden_dim': 1024,
-    },
-    'tab_detect': {
-        'layout_cls': TabDetectLayout,
-        'save_name': 'tab_detect.pth.tar',
-        'train_samples': 8000,
-        'val_samples': 1000,
-        'epochs': 15,
-        'lr': 3e-4,
-        'batch_size': 64,
-        'hidden_dim': 128,
-    },
-    'attachment': {
-        'layout_cls': AttachmentIconLayout,
-        'save_name': 'weapon_attachment.pth.tar',
-        'train_samples': 32000,
-        'val_samples': 4000,
-        'epochs': 25,
-        'lr': 2e-4,
-        'batch_size': 64,
-        'hidden_dim': 512,
-    },
     'fire_mode': {
         'layout_cls': FireModeLayout,
         'save_name': 'fire_mode.pth.tar',
@@ -126,26 +95,6 @@ def train(task_name):
     train_ds = SyntheticHUDDataset(bg, layout, cfg['train_samples'], augment=True)
     val_ds = SyntheticHUDDataset(bg, layout, cfg['val_samples'], augment=False)
 
-    # Mix real data for weapon task
-    if task_name == 'weapon' and os.path.isdir(REAL_DIR):
-        real_train = RealHUDDataset(REAL_DIR, layout, augment=True, oversample=4)
-        real_val = RealHUDDataset(REAL_DIR, layout, augment=False)
-        train_ds = ConcatDataset([train_ds, real_train])
-        val_ds = ConcatDataset([val_ds, real_val])
-        print(f'Mixed: train={len(train_ds)}, val={len(val_ds)}')
-
-    # Mix real data for attachment task
-    ATTACHMENT_REAL_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data', 'Manual', 'attachment')
-    if task_name == 'attachment' and os.path.isdir(ATTACHMENT_REAL_DIR):
-        from dl_models.icon_layout import ATTACHMENT_CLASSES
-        real_train = RealClassifyDataset(ATTACHMENT_REAL_DIR, layout, 'attachment',
-                                         ATTACHMENT_CLASSES, augment=True, oversample=4)
-        real_val = RealClassifyDataset(ATTACHMENT_REAL_DIR, layout, 'attachment',
-                                       ATTACHMENT_CLASSES, augment=False)
-        train_ds = ConcatDataset([train_ds, real_train])
-        val_ds = ConcatDataset([val_ds, real_val])
-        print(f'Mixed: train={len(train_ds)}, val={len(val_ds)}')
-
     # Mix real data for fire_mode task
     FIRE_MODE_REAL_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data', 'Manual', 'fire_mode')
     if task_name == 'fire_mode' and os.path.isdir(FIRE_MODE_REAL_DIR):
@@ -154,17 +103,6 @@ def train(task_name):
                                          FIRE_MODE_CLASSES, augment=True, oversample=4)
         real_val = RealClassifyDataset(FIRE_MODE_REAL_DIR, layout, 'fire_mode',
                                        FIRE_MODE_CLASSES, augment=False)
-        train_ds = ConcatDataset([train_ds, real_train])
-        val_ds = ConcatDataset([val_ds, real_val])
-        print(f'Mixed: train={len(train_ds)}, val={len(val_ds)}')
-
-    # Mix real data for tab_detect task
-    TAB_REAL_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data', 'Manual', 'tab_detect')
-    if task_name == 'tab_detect' and os.path.isdir(TAB_REAL_DIR):
-        real_train = RealClassifyDataset(TAB_REAL_DIR, layout, 'tab_open',
-                                         [], augment=True, oversample=4)
-        real_val = RealClassifyDataset(TAB_REAL_DIR, layout, 'tab_open',
-                                       [], augment=False)
         train_ds = ConcatDataset([train_ds, real_train])
         val_ds = ConcatDataset([val_ds, real_val])
         print(f'Mixed: train={len(train_ds)}, val={len(val_ds)}')

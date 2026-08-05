@@ -23,6 +23,7 @@ ROIs must stay out of HUD_REGIONS.
         ...
 """
 import enum
+import glob
 import os
 
 import cv2
@@ -143,12 +144,34 @@ def _text_mask(img, thresh):
 
 
 def _load_template(path):
-    t = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
-    # ultralytics swaps cv2.imread for a wrapper that defaults to IMREAD_COLOR;
-    # any process that imported it gets 3 channels back. See detector/CLAUDE.md.
-    if t is not None and t.ndim == 3:
-        t = t[:, :, 0]
-    return t
+    """Every variant of one title. -> [mask, ...], best-of at match time.
+
+    `<stem>.png` plus any `<stem>.<tag>.png` beside it. The tag says which
+    RENDERING of the same title this is, and here that means the client's UI
+    LANGUAGE — the same convention the weapon name plates use, for the same
+    reason: which language the game is running in is not a property of this
+    repository, and a detector that only knows English does not report that,
+    it reports that the dialog is not there.
+
+    That failure is expensive because these titles gate ACTIONS. A missed
+    SYSTEM MENU reads as "in a match" while every keypress is swallowed; a
+    missed 错误 leaves the inactivity-logout dialog up, and it blocks every
+    recovery behind itself — 2026-08-05, an unattended collection idled out
+    and then sat on that dialog while `dismiss_error()` scored it 0.087
+    against a gate of 0.55 and reported, correctly and uselessly, that there
+    was no dialog.
+    """
+    stem, ext = os.path.splitext(path)
+    out = []
+    for p in [path] + sorted(glob.glob(f'{glob.escape(stem)}.*{ext}')):
+        t = cv2.imread(p, cv2.IMREAD_GRAYSCALE)
+        # ultralytics swaps cv2.imread for a wrapper that defaults to
+        # IMREAD_COLOR; any process that imported it gets 3 channels back.
+        # See detector/CLAUDE.md.
+        if t is None:
+            continue
+        out.append(t[:, :, 0] if t.ndim == 3 else t)
+    return out
 
 
 _EXIT_TMPL = _load_template(EXIT_TMPL_PATH)
@@ -159,19 +182,28 @@ _ERROR_TMPL = _load_template(ERROR_TMPL_PATH)
 _RECONNECT_TMPL = _load_template(RECONNECT_TMPL_PATH)
 
 
-def _score(crop, tmpl, thresh):
-    """Best template match inside a search window.
+def _score(crop, tmpls, thresh):
+    """Best template match inside a search window, over every variant.
 
-    Returns 0.0 when the template is missing, so every caller fails closed:
-    no EXIT template means waiting the results screen out instead of clicking
-    blind, and no menu template means MENU is never reported.
+    Returns 0.0 when there is no template at all, so every caller fails
+    closed: no EXIT template means waiting the results screen out instead of
+    clicking blind, and no menu template means MENU is never reported.
+
+    Best-of rather than a chosen variant: the variants are the same title in
+    different UI languages and only one of them can be on screen, so the
+    highest score IS the answer. A variant too large for the window scores
+    nothing rather than disqualifying the rest.
     """
-    if tmpl is None:
+    if not tmpls:
         return 0.0
     win = _text_mask(crop, thresh)
-    if win.shape[0] < tmpl.shape[0] or win.shape[1] < tmpl.shape[1]:
-        return 0.0
-    return float(cv2.matchTemplate(win, tmpl, cv2.TM_CCOEFF_NORMED).max())
+    best = 0.0
+    for tmpl in tmpls:
+        if win.shape[0] < tmpl.shape[0] or win.shape[1] < tmpl.shape[1]:
+            continue
+        best = max(best, float(cv2.matchTemplate(
+            win, tmpl, cv2.TM_CCOEFF_NORMED).max()))
+    return best
 
 
 def _search_roi(roi, pad):

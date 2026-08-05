@@ -18,7 +18,9 @@ vs. an on-demand win32_cap), which is a capture concern, not a judgement one.
 There used to be a MobileNet loaded here as an "optional cross-check". It was
 never consulted — classify() has only ever looked at pixels — so it cost a
 checkpoint read and a chunk of VRAM per process to compute nothing. If a
-cross-check is ever actually wanted, add it to classify() first.
+cross-check is ever actually wanted, add it to classify() first. Its
+checkpoint and its training task went on 2026-08-05, and the `device`
+parameter this class kept accepting-and-ignoring went with them.
 """
 import numpy as np
 
@@ -28,10 +30,6 @@ from config import (TAB_PIXEL_THRESH, TAB_COUNT_MIN, TAB_COUNT_MAX,
 
 class TabTypeDetector:
     """Pixel-based tab open/close detection."""
-
-    def __init__(self, device=None):
-        # device is accepted and ignored, so robot.py's call site still works.
-        self.device = device
 
     def classify(self, crops):
         """Check if Type text is currently visible.

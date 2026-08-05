@@ -22,9 +22,10 @@ try:
 except (AttributeError, OSError):
     pass
 
-from control.inventory import (MOVES, InventoryControl, at_ground, at_gun,
-                            at_inv, at_slot, batch, is_gun, is_slot, kind_of,
-                            loc_str, move_info, parse_loc, step)
+from control.inventory import (MOVES, PLATE_INK_MIN, InventoryControl,
+                            at_ground, at_gun, at_inv, at_slot, batch, is_gun,
+                            is_slot, kind_of, loc_str, move_info, parse_loc,
+                            step)
 from detector.tab_layout import INV_ROWS, gun_tag_point, row_point
 
 FAILS = []
@@ -159,6 +160,29 @@ check('one bad step sinks the batch',
 check('an empty batch with an error is NOT ok',
       batch([], error='the Tab screen never came up')['ok'], False)
 check('an empty batch with no error is ok', batch([])['ok'], True)
+
+print('\n=== the journal reader agrees with the layer it reads ===')
+# tools/drag_log.py imports nothing on purpose -- it has to stay readable when
+# the run being debugged died on a broken import -- so it carries its own copy
+# of the plate threshold. This is what stops that copy drifting: it decides
+# which lines get flagged ⚠GUN LOST, and a stale value would mislabel exactly
+# the event the journal exists to catch.
+sys.path.insert(0, os.path.join(ROOT, 'tools'))
+import drag_log                                                  # noqa: E402
+check('drag_log PLATE_INK_MIN matches control/', drag_log.PLATE_INK_MIN,
+      PLATE_INK_MIN)
+# The kinds the journal writes, against the kinds the reader knows how to
+# print. A kind added on one side only is a line that summarises as nothing.
+check('reader handles a legacy line with no kind',
+      drag_log.landed({'gesture': True, 'moved': True, 'kind': 'drag'}), True)
+check('a refusal is not counted as a failed gesture',
+      drag_log.landed({'kind': 'refused', 'gesture': False}), None)
+check('an unverified click is not counted either',
+      drag_log.landed({'kind': 'click', 'gesture': True, 'moved': None}), None)
+check('a plate that fell to zero is a lost gun',
+      drag_log.gun_lost({'kind': 'click', 'plate': [740, 0]}), True)
+check('the same fall on a DROP is the request being granted',
+      drag_log.gun_lost({'kind': 'drop', 'plate': [740, 0]}), False)
 
 print()
 if FAILS:

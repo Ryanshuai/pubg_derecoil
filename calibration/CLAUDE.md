@@ -68,11 +68,11 @@ self.ac.pointer.drag(src, dst)       # ✗ 绕过了 _reject()
 
 **全部在 `docs/` 下，不在 `calibration/` 旁边。** `.gitignore` 里**故意不再有任何 `calibration/` 规则**——哪天有脚本回退写到源码旁边，`git status` 会变脏，那正是发现它的机制。
 
-分界是**结论 vs 原始数据**，不是文件类型：
+**`docs/` 整个不进 git**（`.gitignore` 第 19 行就一个 `docs`），2.7 GB，0 个文件被跟踪。
 
-| 进 git | 不进 |
-|---|---|
-| `docs/recoil/weapon_rpm.json` · `docs/pitch/pitch_range.json` · `docs/compat/kit_facts.json` — 几百字节的实测**结论**，别处读取的事实 | `docs/recoil/curves/` · `docs/recoil/runs/` · `docs/k/` — 产生它们的几百兆原始记录 |
+⚠ 这里原来写着一张「结论进 git、原始数据不进」的分界表，点名 `docs/recoil/weapon_rpm.json` 等三个文件在 git 里。**那从来没成立过**——查一次 `git ls-files docs/` 就知道是 0。2026-08-05 改成实际情况。
+
+代价是清醒的：**`weapon_rpm.json`、`pitch_range.json`、`kit_facts.json` 这些几百字节的实测结论没有版本历史，删了就没了**，而它们正是别处当事实读取的东西。哪天要给它们上版本，得单独开一条 `!docs/**/xxx.json` 的例外，而不是把 `docs` 整个放进来。
 
 采集类产物用 `CaptureRun`（默认 `docs/runs/<kind>/<stamp>/`；`capture_ads` 和 `collect_templates` 用 `create(path=...)` 留在各自的老根目录，理由见下面 5h）。它的 `labelled()` 只返回 `LABEL_REQUESTED`，**永不返回检测器读出来的标签**——理由在 `capture_run.py` 顶部：拿被测检测器的读数当它自己的真值是循环论证，而漂移的检测器不会报错，它会给一个看起来完全合理的错答案。
 
@@ -97,6 +97,24 @@ AKM 自己的弹匣画在它的 magazine 贴片框里，裸枪也有 395 个 Can
 三个假设先后被自己的数据否掉（重试打空槽、空槽画水印、内容读回能拦），最后是人眼盯屏看出来的：**配件依次落地之后，又拉了一遍，把枪拉下去了。**
 
 判据换成**正向识别配件**（`detector/slot_detector.py` 有数字和取舍），`scope` 位也一起接上——它以前恒 `unknown` 而 `unequip` 放行 `unknown`，是同一条路径的另一半。
+
+## 库存行采集不碰模板，也不碰枪（`rows_only`）
+
+`collect_templates.py --targets rows` 现在走一条独立的路：**清空架子和库存 → 刷一个件 → `inv_rows`（纯 Laplacian）确认库存正好一行 → 拍 10 个背景 → 下一个**。身份来自「只刷了一样东西」，跟 `one_part` 是同一条规则，去掉了那把逼出检测器依赖的枪。
+
+**为什么必须独立。** 行采集原来寄生在 `one_part` 里：装上件 → 拆下来 → 拍那一行。于是每一张行图都要过 `SlotDetector`，而它的占用判据是**模板识别**——**要采模板的件恰好是采不了的件**。2026-08-05 那轮 12 个件死了 11 个，一行日志就是整个循环：
+
+```
+quick_smg  hit='Magazine_QuickDraw_Medium_C'  mse=192  gate=150  state='empty'
+           "still wearing ['magazine'] after the strip"
+```
+
+认出来了，但 192 过不了 150 的闸门 → 槽读 `empty` → `strip` 跳过 → 枪上还戴着弹匣 → 新刷的件被顶进库存 → 放弃。这个循环上一次是靠**保留游戏美术图**垫过去的，而美术图已经删了（那是对的，它是合成的输入不是输出）——所以改成让采集路径根本不进那个循环。
+
+两个附带的坑，都已修：
+
+- **`--targets rows` 单独跑必然 0 crops**。`plan_rounds` 只在目标含 `slots` 时返回 `fit=True`，而 `fit=False` 的一轮把**空的** `rows` 列表喂给 `sweep`，什么都拍不到。这条路存在多久就坏了多久。
+- **库存清空要验证，不能假设**。`clear_inventory` 的拖拽会不落地，而它不读回；一次没清干净，后面每个件都是「库存里有两行」，身份就认不出来了。现在 `CLEAR_TRIES` 次清空、每次用 `inv_rows` 核对，核不过就跳过这个件而不是采一批说不清是谁的图。
 
 ## 待办
 

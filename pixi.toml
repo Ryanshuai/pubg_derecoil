@@ -82,6 +82,11 @@ name-plates = "python tools/test_name_plates.py"
 # number of runs reporting `laser`. --write rebuilds the .solved variants out
 # of the paired captures first.
 attachments = "python tools/score_attachments.py"
+# What separates the drags that landed from the ones that did not: cursor
+# placement, row counts, and the gap since the previous drag, side by side.
+# Reads the journal control/inventory.py writes on every gesture. A drop can
+# miss in three different places and they need three different fixes.
+drag-log = "python tools/drag_log.py"
 # control/inventory.py's address vocabulary. Pure tuples, pure functions, no game.
 # Exists because at_gun() shipped with a grab point and a drop_weapon() while
 # _reject() had never heard of it, so every gun drop was refused.
@@ -99,6 +104,12 @@ factors = "python calibration/analyse_factors.py"
 # proving it on the real game is the one run that would leave the trigger down
 # if the guard were broken.
 fire = "python tools/test_fire_guard.py"
+# A scheduled detection that read nothing has to ask again -- the posture icon
+# is only PAINTED while the sight is up, so None there means "not yet", not
+# "unreadable". Offline. Covers the requeue landing in the deque
+# _process_pending is building rather than the one it is about to discard,
+# which is a bug that leaves _run_detect correct in isolation.
+detect-retry = "python tools/test_detect_retry.py"
 # The spawner's declarative surface: what a caller asks for -> the clicks it
 # turns into. Pure planning, no panel and no game — the coordinates are
 # measured constants, so the plan is checkable without looking at anything.

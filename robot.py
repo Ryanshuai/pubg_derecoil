@@ -17,7 +17,7 @@ except (AttributeError, OSError):
 import torch
 
 from detector.game_state import GameState
-from detector.weapon_dl_detector import WeaponClassifier
+from detector.weapon_hud_detector import WeaponHudDetector
 from detector.fire_mode_detector import FireModeDetector
 from detector.posture_detector import PostureDetector
 from detector.highlight_detector import HighlightDetector
@@ -32,6 +32,8 @@ from control.match import Dispatcher
 class Robot:
     def __init__(self):
         self.state = GameState()
+        # Only FireModeDetector still wants torch; every other detector here
+        # is template matching or plain pixels.
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         # Components
@@ -40,11 +42,11 @@ class Robot:
         self.dispatcher = Dispatcher(self.state, self.capture, self.poller)
 
         # Register detectors
-        self.dispatcher.register('weapon_hud', WeaponClassifier(device))
+        self.dispatcher.register('weapon_hud', WeaponHudDetector())
         self.dispatcher.register('fire_mode', FireModeDetector(device))
         self.dispatcher.register('posture', PostureDetector())
-        self.dispatcher.register('highlight', HighlightDetector(self.state))
-        self.dispatcher.register('tab_type', TabTypeDetector(device))
+        self.dispatcher.register('highlight', HighlightDetector())
+        self.dispatcher.register('tab_type', TabTypeDetector())
         self.dispatcher.register('tab_weapon', TabWeaponDetector())
         self.dispatcher.register('tab_attachment', AttachmentDetector())
 

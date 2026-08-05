@@ -76,6 +76,7 @@ VERIFICATION
 """
 import argparse
 import contextlib
+import json
 import os
 import sys
 import time
@@ -99,6 +100,44 @@ from press.pointer import Pointer
 from control.focus import game_focused, ensure_focus
 
 PANEL_KINDS = ('nearby', 'inventory')
+
+
+_LAST_GESTURE_END = [None]   # perf_counter when the previous gesture returned
+
+# Which process wrote a line. The journal is a SHARED file — several agents
+# drive this one game in turn — so without these a run's lines are interleaved
+# with someone else's and `gap_s` (a per-process perf_counter difference) reads
+# as nonsense across the seam. `t` is wall clock so lines from two processes
+# can be ordered against each other and against a run directory's timestamps.
+PID = os.getpid()
+PROC = os.path.basename(sys.argv[0] or 'python')
+
+
+# One roll, kept. Covering clicks and toggles as well as drags multiplied the
+# line rate several times over, and this file is append-only and always on, so
+# it needs an end. 8 MB is roughly 30k gestures — several long collector runs —
+# and the previous 8 MB stays as `.1`, which is what a post-mortem two runs
+# later actually needs.
+JOURNAL_MAX_BYTES = 8 << 20
+
+
+def journal(rec):
+    """Append one gesture record. Never raises — a log must not fail a gesture."""
+    try:
+        os.makedirs(os.path.dirname(DRAG_LOG), exist_ok=True)
+        # RACY BETWEEN AGENTS, and deliberately not locked: two processes can
+        # both decide to roll and one loses a line. A lock file shared across
+        # agents is a way for a stuck run to block a healthy one from moving
+        # the mouse, which is a far worse failure than a missing log line.
+        if os.path.getsize(DRAG_LOG) > JOURNAL_MAX_BYTES:
+            os.replace(DRAG_LOG, DRAG_LOG + '.1')
+    except OSError:
+        pass
+    try:
+        with open(DRAG_LOG, 'a', encoding='utf-8') as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False, default=str) + '\n')
+    except Exception:
+        pass
 
 
 def panel_counts(src, dst):
@@ -338,6 +377,46 @@ NEARBY_DROP_X = 870
 # what shipped before anyone measured them; probe_drag_speed.py is what says
 # whether they can come down.
 DRAG_TIMING = {'drop': DROP_WAIT}
+
+# ── the gesture journal ───────────────────────────────────────────────────
+#
+# One JSON line per GESTURE, appended, always on. It exists because "sometimes
+# it does not land on the floor" is not answerable from a boolean: the record
+# has to carry what was DIFFERENT about the ones that failed. So every line has
+# the three families of candidate cause side by side —
+#
+#   the gesture   where the cursor was placed, and how many placement attempts
+#                 that took (Pointer.place). For a drag, both ends.
+#   the state     row counts in both lists before and the poll sequence after
+#                 (a drag), or the slot readback (a click), or the name-plate
+#                 ink before and after (anything aimed at a gun)
+#   the timing    seconds since the previous gesture, and how long this took
+#
+# IT WAS DRAGS ONLY UNTIL 2026-08-05, and that was the wrong half. The gesture
+# that costs a WEAPON is the right click: aimed at a slot with nothing in it —
+# or at a slot the cursor drifted off — it reaches the weapon row underneath
+# and throws the whole gun on the floor, wearing its parts. 74 of those across
+# 11 collector runs, and not one left a line here, because right_click_equip /
+# right_click_unequip / auto_equip / drop_weapon all went straight to the
+# Pointer. Now every one of them writes, with `kind` saying which:
+#
+#   drag      press-travel-release, the original record
+#   click     a right click, with what the slot read afterwards
+#   drop      drop_weapon: the whole gun out, plate ink before and after
+#   refused   a gesture this layer REFUSED to send, and why. The near-misses
+#             are evidence too — an unequip that declined an empty slot is the
+#             guard that saved a gun, and it is invisible in a log of actions.
+#
+# Reading it is `pixi run drag-log`. It is small (a few hundred bytes a
+# gesture) and it is the only place these are written down together; every
+# earlier attempt to explain a failure had to guess at one of them.
+#
+# WRITTEN BY WHOEVER IS DRIVING, which is the other reason it is always on:
+# several agents share this game, and when someone else's run comes back empty
+# the question is what their gestures did — not what they logged, since a run
+# that fails silently logs nothing. Every line carries `pid` and `proc`.
+DRAG_LOG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
+    __file__))), 'docs', 'drag', 'journal.jsonl')
 
 # Tab is a toggle and swallows 1/2 while it is up, so hold() has to close it,
 # switch, and reopen. That used to be two fixed 0.45 s sleeps.
@@ -1061,6 +1140,7 @@ class InventoryControl:
         err = self._reject(src, dst, weapon)
         if err:
             self._log(f'{loc_str(src)} -> {loc_str(dst)}: refused, {err}')
+            self._journal_refusal('refused', src, dst, err, by='_reject')
             return {'ok': False, 'verified': False, 'src': src, 'dst': dst,
                     'checks': [], 'attempts': 0, 'error': err}
 
@@ -1146,6 +1226,11 @@ class InventoryControl:
                     self._log(f'{loc_str(src)} -> {loc_str(dst)}: source is '
                               f'{now} after attempt {attempt}, so it moved; '
                               f'not retrying into the weapon row')
+                    self._journal_refusal(
+                        'refused', src, dst,
+                        f'source slot reads {now} after attempt {attempt}',
+                        by='retry guard', after_attempt=attempt,
+                        plate=[self._plate(src[1]), None])
                     return rec
             if panels is not None:
                 f = self._frame()
@@ -1165,14 +1250,22 @@ class InventoryControl:
                               f'cannot see this drag, not verifying it')
                     panels = None
                     rec['verified'] = bool(checks)
-            if not self.pointer.drag(p0, p1, **self.timing):
+            gesture = self.pointer.drag(p0, p1, **self.timing)
+            # The verdict is taken BEFORE the journal so that one line carries
+            # the gesture and its outcome together — split across two lines,
+            # a failed drop and a slow one are indistinguishable again.
+            # Runs before the slot checks and gates them, because "the slot
+            # emptied" is true whether the part reached the panel or the
+            # floor, and only this can tell those apart.
+            moved = (self._await_panel(panels, n_src0, n_dst0)
+                     if gesture and panels is not None else None)
+            self._journal(src, dst, p0, p1, panels, attempt,
+                          (n_src0, n_dst0) if panels is not None else None,
+                          gesture, moved)
+            if not gesture:
                 rec['error'] = 'cursor placement failed'
                 return rec
             if panels is not None:
-                # Runs BEFORE the slot checks and gates them, because "the
-                # slot emptied" is true whether the part reached the panel or
-                # the floor, and only this can tell those apart.
-                moved = self._await_panel(panels, n_src0, n_dst0)
                 rec['checks'] = [{'panel': panels, 'from': (n_src0, n_dst0),
                                   'ok': moved}]
                 if not moved:
@@ -1303,9 +1396,13 @@ class InventoryControl:
         if self.held is not None and self.held != gun:
             rec['error'] = (f'right-click only reaches the held weapon '
                             f'(holding {self.held}, asked for {gun})')
+            self._journal_refusal('refused', src, dst, rec['error'],
+                                  by='right_click_equip', held=self.held)
             return rec
 
-        before = self._slot_states(self._frame())
+        frame = self._frame()
+        before = self._slot_states(frame)
+        plate0 = self._plate(gun, frame)
         checks = [(gun, slot, want)]
         x, y = self.point_of(src)
         for attempt in range(retries + 1):
@@ -1314,7 +1411,15 @@ class InventoryControl:
             results = self._await(checks, before)
             rec['checks'] = [{'gun': g, 'slot': s, 'want': w, 'seen': seen,
                               'ok': ok} for g, s, w, ok, seen in results]
-            if all(r['ok'] for r in rec['checks']):
+            landed = all(r['ok'] for r in rec['checks'])
+            # The plate is re-read whatever the verdict: this click is aimed at
+            # a PANEL row, so it should not be able to touch the weapon at all,
+            # and an equip that quietly emptied the rack is exactly the kind of
+            # thing that gets blamed on the spawner three steps later.
+            self._journal_click(src, dst, attempt, landed, checks=rec['checks'],
+                                plate=[plate0, self._plate(gun)],
+                                held=self.held)
+            if landed:
                 rec['ok'] = True
                 self._log(f'{loc_str(src)} -> {loc_str(dst)}: right-clicked '
                           f'({self._checks_str(rec["checks"])})')
@@ -1354,11 +1459,24 @@ class InventoryControl:
         if mouse is None:
             self._log('no Pico: cannot press Tab (SendInput has no key path)')
             return False
+        # ONLY THE PRESSES ARE JOURNALLED, never the free case. This is called
+        # around every read, so a line per call would bury the log; a line per
+        # PRESS is rare and is the interesting event anyway. A swallowed press
+        # is the documented start of the cursor-drift chain — Tab stays up, the
+        # next turn()'s raw counts land on the cursor instead of the view, and
+        # the drag after that releases short (see Pointer.place).
+        pressed = 0
         for _ in range(tries):
             if bool(self.tab_open()) == want:
+                if pressed:
+                    self._stamp('tab', None, None, gesture=True, moved=True,
+                                want=want, presses=pressed)
                 return True
             mouse.key(HID_KEY_TAB, 60)
+            pressed += 1
             if self.await_tab(want):
+                self._stamp('tab', None, None, gesture=True, moved=True,
+                            want=want, presses=pressed)
                 return True
             # A THIRD FAILURE, AND PRESSING AGAIN CANNOT FIX IT: something
             # else owns the screen. The item-spawner panel is a menu, and
@@ -1369,9 +1487,16 @@ class InventoryControl:
             blocker = self._blocking_screen()
             if blocker:
                 self._log(f'Tab did not register — {blocker}')
+                self._journal_refusal('refused', None, None, blocker,
+                                      by='ensure_tab', want=want,
+                                      presses=pressed)
                 return False
             self._log(f'Tab press swallowed; retrying')
-        return bool(self.tab_open()) == want
+        ok = bool(self.tab_open()) == want
+        self._stamp('tab', None, None, gesture=True, moved=ok, want=want,
+                    presses=pressed,
+                    failed_at=None if ok else 'presses swallowed')
+        return ok
 
     def _blocking_screen(self):
         """What is on screen instead of the inventory. -> str | None
@@ -1434,16 +1559,33 @@ class InventoryControl:
         mouse = self.pointer.pico
         if mouse is None:
             self._log('no Pico: cannot press 1/2 (SendInput has no key path)')
+            self._journal_refusal('refused', None, at_gun(gun),
+                                  'no Pico: 1/2 cannot be pressed', by='hold')
             return False
         was_open = bool(self.tab_open())
         if was_open and not self.ensure_tab(False):
             self._log('Tab would not close; 1/2 would be swallowed')
+            self._journal_refusal('refused', None, at_gun(gun),
+                                  'Tab would not close, so 1/2 is swallowed',
+                                  by='hold', held=self.held)
             return False
         mouse.key(HID_KEY_1 if gun == 1 else HID_KEY_2, 60)
         time.sleep(settle)
         if was_open and not self.ensure_tab(True):
             self._log('Tab would not reopen after the weapon switch')
+            self._journal_refusal('refused', None, at_gun(gun),
+                                  'Tab would not reopen after the switch',
+                                  by='hold', held=self.held)
             return False
+        # UNVERIFIED, and journalled anyway. Nothing here reads which weapon is
+        # actually in hand — the key was sent and `held` is now a belief. It
+        # earns a line because of what it does to the NEXT gesture: a swallowed
+        # 1/2 leaves the wrong gun in hand, and the right-click equip that
+        # follows fits the part onto that one and reports a clean miss on this
+        # one. It is also the thing that happens BETWEEN two bursts of drags,
+        # which is the half the drag investigation is missing (control/CLAUDE.md).
+        self._stamp('hold', None, at_gun(gun), gesture=True, moved=None,
+                    was_open=was_open, held=self.held)
         self.held = gun
         return True
 
@@ -1503,6 +1645,10 @@ class InventoryControl:
             self._log(f'gun{gun}.{slot}: reads {state}, not clicking or '
                       f'dragging it — that gesture reaches the weapon row and '
                       f'drops the gun')
+            self._journal_refusal('refused', at_slot(gun, slot), dst,
+                                  f'slot reads {state}', by='unequip',
+                                  slot_state=state,
+                                  plate=[self._plate(gun), None])
             return step(at_slot(gun, slot), dst, ok=False, verified=True,
                         error=f'slot reads {state}', slot_state=state)
         # THE TILE IS NOT THE ONLY READER, and on the state that costs a gun it
@@ -1538,6 +1684,10 @@ class InventoryControl:
             self._log(f'gun{gun}.{slot}: the tile says filled but the '
                       f'templates cannot name what is in it — not gesturing. '
                       f'That is the state that drops the gun.')
+            self._journal_refusal('refused', at_slot(gun, slot), dst,
+                                  'slot content is ambiguous', by='unequip',
+                                  slot_state=state, content=AMBIGUOUS,
+                                  plate=[self._plate(gun), None])
             return step(at_slot(gun, slot), dst, ok=False, verified=True,
                         error='slot content is unreadable (ambiguous)',
                         slot_state=state, content=AMBIGUOUS)
@@ -1564,9 +1714,14 @@ class InventoryControl:
         rec = {'ok': False, 'verified': True, 'src': src, 'dst': at_inv(),
                'checks': [], 'attempts': 0, 'error': None,
                'gesture': 'right-click'}
-        before = self._slot_states(self._frame())
+        frame = self._frame()
+        before = self._slot_states(frame)
+        plate0 = self._plate(gun, frame)
         if not before[gun][slot]:
             rec['error'] = f'gun{gun}.{slot} is already empty'
+            self._journal_refusal('refused', src, at_inv(), rec['error'],
+                                  by='right_click_unequip',
+                                  plate=[plate0, None])
             return rec
         checks = [(gun, slot, EMPTY)]
         x, y = self.point_of(src)
@@ -1576,7 +1731,30 @@ class InventoryControl:
             results = self._await(checks, before)
             rec['checks'] = [{'gun': g, 'slot': s, 'want': w, 'seen': seen,
                               'ok': ok} for g, s, w, ok, seen in results]
-            if all(r['ok'] for r in rec['checks']):
+            cleared = all(r['ok'] for r in rec['checks'])
+            # THIS is the gesture that loses weapons, so the plate either side
+            # of it is the whole reason the journal covers clicks. The slot
+            # reading EMPTY afterwards is true both when the part came off and
+            # when the gun it was on went to the floor; only the plate tells
+            # those apart, and the caller cannot see it at all.
+            plate1 = self._plate(gun)
+            lost = bool(plate0 and plate0 >= PLATE_INK_MIN
+                        and (plate1 or 0) < PLATE_INK_MIN)
+            self._journal_click(src, at_inv(), attempt, cleared,
+                                checks=rec['checks'], plate=[plate0, plate1],
+                                gun_lost=lost)
+            if lost:
+                # REPORTED, NOT ACTED ON. `cleared` is True in this state —
+                # the slot really is empty — so returning ok=True is what this
+                # has always done and callers are written against it. Saying so
+                # is the change; deciding what a lost weapon means (re-rack?
+                # abandon the round?) belongs to the caller that knows.
+                rec['gun_lost'] = True
+                self._log(f'gun{gun}: plate ink {plate0} -> {plate1} across '
+                          f'that right-click — THE WEAPON LEFT THE RACK, and '
+                          f'the empty slot below reads exactly like a clean '
+                          f'unequip. See docs/drag/journal.jsonl.')
+            if cleared:
                 rec['ok'] = True
                 self._log(f'{loc_str(src)} -> 库存: right-clicked '
                           f'({self._checks_str(rec["checks"])})')
@@ -1664,9 +1842,18 @@ class InventoryControl:
             # attempted: point_of() would happily hand back the panel's drop
             # point and the click would land on nothing.
             self._log(f'auto_equip needs a specific 库存/附近 row, not {loc!r}')
+            self._journal_refusal('refused', loc, None,
+                                  'not a specific 库存/附近 row',
+                                  by='auto_equip')
             return False
         x, y = self.point_of(loc)
         self.pointer.right_click_at(x, y)
+        # `moved` is None and that is the honest answer: this method verifies
+        # NOTHING by design (see the docstring — its caller is photographing a
+        # part it cannot name). The journal still gets the geometry, which is
+        # the half that can be checked without a template, and it is the only
+        # trace the template collector's main gesture leaves anywhere.
+        self._journal_click(loc, None, 0, None, held=self.held)
         return True
 
     def gun_slot(self, frame=None, timeout=GUN_SLOT_WATCH_S):
@@ -1748,26 +1935,48 @@ class InventoryControl:
         labelled BARE came back wearing Lower_Foregrip_C and a quickdraw
         magazine nobody asked for.
         """
-        was = self._read_guns(self._frame()).get(gun)
+        frame = self._frame()
+        was = self._read_guns(frame).get(gun)
+        plate0 = self._plate(gun, frame)
 
         def settled():
             time.sleep(DROP_SETTLE)
-            now = self._read_guns(self._frame()).get(gun)
-            return now, (now is None and was is not None)
+            f = self._frame()
+            now = self._read_guns(f).get(gun)
+            return now, (now is None and was is not None), self._plate(gun, f)
 
-        rec, used, now, ok = None, None, was, False
+        rec, used, now, ok, plate1 = None, None, was, False, plate0
         if gesture in ('auto', 'click'):
             x, y = gun_tag_point(gun)
             self.pointer.right_click_at(x, y)
-            now, ok = settled()
+            now, ok, plate1 = settled()
             used = 'right-click'
+            # THE NAME IS NOT THE VERDICT HERE and the plate is why this line
+            # exists: `was`/`now` come from the plate TEMPLATE, which answers
+            # None both for an empty rack and for a gun it cannot name — so a
+            # drop that never happened on an unrecognised weapon reads as a
+            # clean one. The ink separates them (PLATE_INK_MIN), and it is in
+            # the journal even though this method still decides by the name.
+            # kind='drop', NOT 'click', and no `gun_lost` — losing the weapon
+            # is the request here. `gun_lost` stays greppable for the accidents
+            # only; a field that means two opposite things is worse than none.
+            self._journal_click(at_gun(gun), at_ground(), 0, ok, kind='drop',
+                                plate=[plate0, plate1], was=was, now=now,
+                                via='right-click')
             if not ok and gesture == 'auto':
                 self._log(f'gun{gun}: right-click left the plate reading '
                           f'{now!r} — falling back to the drag')
         if not ok and gesture in ('auto', 'drag'):
+            # The drag writes its own 'drag' line from inside drag(); this one
+            # is the OUTCOME, which that line cannot carry — the row count it
+            # verifies against says something arrived on the floor, not that
+            # the rack emptied.
             rec = self.drag(at_gun(gun), at_ground(), retries=retries)
-            now, ok = settled()
+            now, ok, plate1 = settled()
             used = 'drag'
+            self._stamp('drop', at_gun(gun), at_ground(), gesture=True,
+                        moved=ok, plate=[plate0, plate1], was=was, now=now,
+                        via='drag', failed_at=None if ok else 'rack not empty')
 
         if ok and self.held == gun:
             # The weapon that was in hand is on the floor. Leaving `held`
@@ -2360,6 +2569,95 @@ class InventoryControl:
                     for s, it in slots.items()}
                 for g, slots in worn.items()}
 
+    def _stamp(self, kind, src, dst, attempt=0, **fields):
+        """The half of a journal line that every gesture has. See DRAG_LOG.
+
+        `gap_s` is the point of the whole exercise. "Sometimes the second drop
+        does not land" is a claim about SEQUENCE, and the only way a log can
+        answer it is by carrying how long ago the previous gesture ended — a
+        record of one gesture can never show what a run of them does.
+
+        SINCE THE PREVIOUS GESTURE, not the previous drag, and that widening
+        is the point of stamping clicks too: the collector's drags are
+        separated by equips, weapon switches and panel toggles, and a gap that
+        only counted drags described a sequence that never happened.
+        """
+        now = time.perf_counter()
+        prev = _LAST_GESTURE_END[0]
+        rec = {'kind': kind, 't': round(time.time(), 3), 'pid': PID,
+               'proc': PROC,
+               'src': None if src is None else loc_str(src),
+               'dst': None if dst is None else loc_str(dst),
+               'attempt': attempt + 1,
+               'gap_s': None if prev is None else round(now - prev, 3)}
+        rec.update(fields)
+        journal(rec)
+        _LAST_GESTURE_END[0] = time.perf_counter()
+
+    def _journal(self, src, dst, p0, p1, panels, attempt, rows0, gesture,
+                 moved):
+        """One line for a drag: the gesture, the geometry and the outcome."""
+        d = getattr(self.pointer, 'last_drag', {}) or {}
+        self._stamp(
+            'drag', src, dst, attempt,
+            want={'grab': list(p0), 'release': list(p1)},
+            got={'grab': d.get('grab'), 'held': d.get('held'),
+                 'release': d.get('release')},
+            place={'grab': d.get('grab_place'), 'dst': d.get('dst_place')},
+            steps=d.get('steps'), drag_s=round(d.get('s') or 0.0, 3),
+            gesture=bool(gesture), failed_at=d.get('failed_at'),
+            rows_before=list(rows0) if rows0 else None,
+            poll=getattr(self, 'last_poll', None) if moved is not None
+                 else None,
+            moved=moved)
+        self.last_poll = None
+
+    def _journal_click(self, src, dst, attempt, moved, checks=None,
+                       plate=None, kind='click', **extra):
+        """One line for a right click. `moved` is the READBACK, not the click.
+
+        A right click always "succeeds" — the button goes down and comes up
+        wherever the cursor happens to be — so the only interesting fields are
+        where it went and what changed. `place.grab.ok` false means the cursor
+        would not stay put and the click landed somewhere unverified, which on
+        a slot-aimed gesture is the state that drops the gun.
+        """
+        c = getattr(self.pointer, 'last_click', {}) or {}
+        pl = c.get('place') or {}
+        self._stamp(
+            kind, src, dst, attempt,
+            want={'grab': list(c.get('want') or ())},
+            got={'grab': c.get('got')},
+            place={'grab': pl},
+            gesture=True,
+            failed_at=None if c.get('ok', True) else 'cursor would not stay',
+            moved=moved, checks=checks, plate=plate, **extra)
+
+    def _journal_refusal(self, kind, src, dst, why, **extra):
+        """A gesture this layer declined to send. See DRAG_LOG on `refused`.
+
+        Logged for the same reason a near-miss is logged in aviation: the
+        guards here (an empty slot, an unreadable slot, a move that is not in
+        MOVES) each stand in front of a failure that costs a weapon, and a run
+        that ends with fewer parts than it started needs to show which guard
+        fired as much as which gesture went out.
+        """
+        self._stamp(kind, src, dst, gesture=False, moved=None,
+                    failed_at=why, **extra)
+
+    def _plate(self, gun, frame=None):
+        """Name-plate ink for `gun`, or None if it cannot be read right now.
+
+        The one number that answers "is the gun still there" without a
+        template — see PLATE_INK_MIN. Journalled either side of any gesture
+        aimed at a gun or one of its slots, because `右键完枪没了` is exactly a
+        plate going 679-901 -> 0 and nothing else in a record shows it.
+        """
+        try:
+            return int(self.plate_ink(gun, frame))
+        except Exception:
+            return None
+
     def _await_panel(self, panels, n_src0, n_dst0, timeout=VERIFY_TIMEOUT):
         """Poll until a row leaves the source list or arrives in the target.
 
@@ -2369,11 +2667,20 @@ class InventoryControl:
         """
         src_p, dst_p = panels
         end = time.time() + timeout
+        # Every reading, not just the verdict. A drop that lands at 0.9 s and
+        # one that never lands both return through the same boolean, and the
+        # difference between "too slow" and "did not happen" is only visible
+        # in the sequence. Read back off `poll` in the drag journal.
+        self.last_poll = []
+        t0 = time.time()
         while True:
             f = self._frame()
-            if panel_rows(f, dst_p) > n_dst0:
+            n_dst = panel_rows(f, dst_p)
+            n_src = panel_rows(f, src_p) if src_p is not None else None
+            self.last_poll.append([round(time.time() - t0, 3), n_src, n_dst])
+            if n_dst > n_dst0:
                 return True
-            if src_p is not None and panel_rows(f, src_p) < n_src0:
+            if n_src is not None and n_src < n_src0:
                 return True
             if time.time() >= end:
                 return False

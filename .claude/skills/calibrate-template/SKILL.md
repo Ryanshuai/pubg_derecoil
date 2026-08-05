@@ -90,12 +90,18 @@ than a swapped item.
 Never rewrite labels in stored manifests: they are pictures of the right item
 under an old name.
 
-**Retire the game-file art once a photograph exists** —
-`tools/retire_gamefile_icons.py --apply` (`--restore` undoes it; assets with no
-photograph are left alone). It is not a spare copy: the extract can win the
-fine pass on crops it describes worse, and `light_grip`, `comp_sr` and
-`scope_15x` read nothing at all until it left. Cost: an asset holding only
-`.solved` loses its 库存 rows, so collect `.row` for those.
+**There is no game-file art left, and none may come back.** Every 2026-03-18
+extract was deleted on 2026-08-05. The extract is the INPUT to the game's
+compositing and a detector only ever sees the OUTPUT, so it is not a spare
+copy — it can win the fine pass on crops it describes worse. Measured twice,
+on two different surfaces: attachments read `light_grip` / `comp_sr` /
+`scope_15x` as nothing at all until the art left, and the weapon HUD scored
+0.489 on art against 0.975 on captures. A new item's template comes from the
+screen or it does not exist yet.
+
+The cost is real and was accepted: an asset holding only `.solved` has no
+row-scale picture, so `scope_6x` and `uzi_stock` lost their 库存 rows outright.
+Collect `.row` for them (see `tools/score_attachments.py: BASELINE`).
 
 ## Step 0 — check what is known
 

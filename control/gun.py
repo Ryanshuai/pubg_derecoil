@@ -326,9 +326,19 @@ class GunDriver:
                 nudge()
                 cur = self.read_posture(timeout_s=POSTURE_WATCH_S)
                 if cur is not None:
+                    # It used to say the brightness gate had let scenery in.
+                    # That explanation was checked on 2026-08-05 and is wrong:
+                    # the one stored failure has a CLEAN 424 px mask and reads
+                    # crouching at IoU 0.756 — the sample is mislabelled, not
+                    # misread. Over 1714 labelled crops the reader scores
+                    # 0.993 and three alternative masks/templates cannot beat
+                    # it. So say what was observed and nothing more; the icon
+                    # is simply not drawn at every moment (it needs ADS — see
+                    # docs/game_quirks.md), and moving the view costs time
+                    # during which it can appear.
                     print(f"      posture readable after moving the view "
-                          f"(read {cur!r}) — the icon was over scenery the "
-                          f"detector's brightness gate lets through")
+                          f"(read {cur!r}) — it was unreadable a moment "
+                          f"earlier; cause not established")
             if cur is None:
                 # Never toggle on an unknown state — a blind C/Z here is how an
                 # unattended run ends up measuring a posture nobody asked for.
