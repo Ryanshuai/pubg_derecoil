@@ -1457,7 +1457,13 @@ def main():
     # Only the slots some config actually fills are stocked.
     wanted_slots = frozenset().union(*(parse_config(c) for c in configs)) \
         if configs else frozenset()
-    parts = {SCOPE_PART}
+    # `if SCOPE_PART` because a profile can legitimately wear NOTHING: the VSS
+    # carries an integral PSO-1 and has no sight slot at all, so
+    # SIGHT_SCOPE['vss_pso1'] is None. Dropping the guard put None into a set
+    # of part keys, which survived until `sorted(parts)` compared it to a str
+    # and took the run down at the first line of the try -- after the range
+    # test, the spawner press and 28 s of re-entry.
+    parts = {SCOPE_PART} if SCOPE_PART else set()
     for w in weapons:
         cls = ROSTER.get(w, (None,))[0]
         table = PART_FOR_CLASS.get(cls, {})

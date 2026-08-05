@@ -453,7 +453,18 @@ class ViewDriver:
             prev = cur
             if m is None:
                 continue
-            if not m.out_of_range:
+            # `isfinite` as well as `out_of_range`: they are different
+            # refusals. out_of_range means the correlator measured something
+            # too large to trust; NaN means it could not measure at all —
+            # phaseCorrelate on a patch with no texture, which in this game is
+            # the sky. A NaN added here is not a wrong number, it is a
+            # CONTAGIOUS one: it lands in pending_pitch, survives every later
+            # addition, and finally surfaces hundreds of lines away as
+            # `int(round(nan))` inside recenter(), with a traceback that names
+            # neither the sky nor the patch. Measured 2026-08-05 on a vss cell
+            # that had drifted into the pitch clamp with the view near
+            # vertical.
+            if not m.out_of_range and np.isfinite(m.dy):
                 total_px += m.dy
             now = time.perf_counter()
             # min_s covers the gap between issuing a move over USB and the
@@ -557,6 +568,21 @@ class ViewDriver:
         """
         # Let post-fire recovery finish before believing any number.
         self.pending_pitch += self.track_still()
+        # Stated, not assumed. track_still filters the NaN at its source, so
+        # this can only fire if some other path put one in — and then the
+        # honest answer is that the view's position is unknown, which is a
+        # thing this class already knows how to report. Crashing here instead
+        # loses the cell AND the run.
+        if not np.isfinite(self.pending_pitch):
+            print('        [!] the integrated view offset is not a number — '
+                  'the correlator returned NaN somewhere. Position unknown.')
+            # tracking_lost, not just a return: the caller's next act is to
+            # fire, and a magazine fired from an unknown position is not noisy
+            # data, it is wrong data that looks fine. This is the flag that
+            # already means exactly that, and harvest already checks it.
+            self.tracking_lost = True
+            self.pending_pitch = 0.0
+            return None
         # Sign: dy > 0 means the view rotated UP (the recoil direction), and a
         # positive mouse dy pulls it back DOWN — so the correction has the same
         # sign as the drift, and what the screen then does comes back negative,
