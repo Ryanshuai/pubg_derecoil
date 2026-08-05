@@ -461,6 +461,23 @@ DROP_SETTLE = 0.5
 # the only one, and it is the one number here nobody has measured.
 KIT_SETTLE = 0.6
 
+# When a slot readback comes back AMBIGUOUS, how many times to move the world
+# behind the translucent panel and read again, and how far to move it.
+#
+# The panel is translucent, so a slot icon is composited over whatever the
+# world shows behind it, and a dark backdrop collapses the margin between
+# neighbouring parts. Measured on a vector wearing ext_smg, same gun, same
+# slot, one turn apart: a dark view read `quick_smg` at mse 267.7 / margin
+# 1.021, and six ordinary views read `ext_smg` at mse 88..164 / margin
+# 1.67..2.74. Two re-reads is enough for that spread; the loop stops as soon
+# as the ambiguity clears, so the usual cost is zero.
+#
+# Yaw is small on purpose: with Tab up, raw counts land partly on the CURSOR
+# rather than only on the view (see _nudge_backdrop).
+AMBIGUOUS_REREADS = 2
+NUDGE_COUNTS = 600
+NUDGE_SETTLE_S = 0.35
+
 # How long gun_slot() watches for the slot boxes to be drawn. The Tab panel
 # fades in, so the answer right after it opens is "no gun" for a few frames on
 # a rack that plainly holds one. Generous because the cost of waiting is a few
@@ -838,7 +855,13 @@ def kit_faults(want, worn):
             # as a part with no template: the slot cannot be read as holding
             # this, only as holding something. NOT verifiable, so ensure_kit
             # reports it rather than treating it as a drag that missed and
-            # dragging again — a retry cannot improve a reading.
+            # dragging again.
+            #
+            # ⚠ This used to end "— a retry cannot improve a reading", and
+            # that is false: the panel is TRANSLUCENT, so re-reading against a
+            # different backdrop can and does resolve it (see ensure_kit's
+            # AMBIGUOUS_REREADS). Re-DRAGGING still cannot, which is the part
+            # that was right. `verifiable: False` is what tells the two apart.
             out.append({'slot': slot, 'key': key, 'verifiable': False,
                         'why': f'holds something the templates cannot '
                                f'separate; wanted {key}'})
@@ -2382,6 +2405,35 @@ class InventoryControl:
             out['worn'] = self.read_slots(gun)
 
         out['bad'] = kit_faults(want, out['worn'])
+        # AN AMBIGUOUS READ IS NOT A FAILED FIT — RE-READ IT AGAINST ANOTHER
+        # BACKDROP. The Tab panel is translucent, so a slot icon is composited
+        # over whatever the world is showing behind it, and a dark backdrop
+        # collapses the margins between neighbouring parts. Measured 2026-08-05
+        # on a vector wearing ext_smg, same gun, same slot, one turn apart:
+        #
+        #     dark backdrop      best quick_smg  mse 267.7   margin 1.021
+        #     six other views    best ext_smg    mse  88..164  margin 1.67..2.74
+        #
+        # The part was on the gun the whole time. `kit_faults` said "a retry
+        # cannot improve a reading" and that is exactly what a retry does here
+        # — the same nudge `GunDriver.ensure_posture` already uses when the
+        # posture icon will not read, and for the same reason: move what is
+        # BEHIND the thing, then ask again.
+        #
+        # This cost eleven cells of the 2026-08-05 factorial. Every vector
+        # config and three mp5k configs were abandoned as "would not take
+        # ext_smg" while the magazine was fitted correctly.
+        #
+        # Only the UNVERIFIABLE faults are retried. A slot that reads a
+        # different part by name is a real disagreement and re-reading it says
+        # nothing new.
+        for _ in range(AMBIGUOUS_REREADS):
+            if not any(not b['verifiable'] for b in out['bad']):
+                break
+            if not self._nudge_backdrop():
+                break
+            out['worn'] = self.read_slots(gun)
+            out['bad'] = kit_faults(want, out['worn'])
         out['ok'] = not out['bad']
         if not out['ok'] and out['error'] is None:
             out['error'] = '; '.join(f'{b["slot"]}: {b["why"]}'
@@ -2389,6 +2441,26 @@ class InventoryControl:
         for b in out['bad']:
             self._log(f'gun{gun}.{b["slot"]}: {b["why"]}')
         return out
+
+    def _nudge_backdrop(self, counts=NUDGE_COUNTS):
+        """Move what is behind the translucent panel. -> True if it moved.
+
+        Yaw only, and small. The Tab screen stays up: PUBG keeps rendering the
+        world behind it and a mouse move still turns the view, which is the
+        whole point — the icons do not change, their backdrop does.
+
+        ⚠ WHILE TAB IS UP, RAW COUNTS LAND ON THE CURSOR, not only on the view
+        (control/CLAUDE.md: move(900,0) with Tab open drifts the cursor 450 px
+        over the following second). So this is deliberately small and every
+        caller that clicks afterwards goes through Pointer.place(), which
+        replays SetCursorPos until the position reads back.
+        """
+        mouse = self.pointer.pico
+        if mouse is None:
+            return False
+        mouse.move(counts, 0)
+        time.sleep(NUDGE_SETTLE_S)
+        return True
 
     def _kit_plan(self, gun, want, weapon, look):
         """One detection pass -> (plan, view). Names the guns as a side effect."""
