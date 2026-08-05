@@ -139,8 +139,28 @@ class AttachmentDetector:
 
     def __init__(self):
         self._templates = {}      # name → [(tmpl_vals, ys, xs), ...] variants
+        self._tags = {}           # name → ['', 'solved', 'row', ...] alongside
         self._slot_index = {}     # slot_name → [name, ...]
         self._load_templates()
+
+    def _rank_variant(self, name, prefer):
+        """Index of the variant the RANKING pass should use for this reading.
+
+        The shortlist is ranked on one variant per asset, and which one is not
+        a detail: the icon is drawn at slot size in a weapon's tile and at row
+        size in the 库存 list, and a bank holding both should rank a slot crop
+        against the slot picture. Ranking every crop on variant 0 cost 16 slot
+        reads the day the untagged game-file icons were retired and variant 0
+        silently became `.row` for half the bank.
+
+        Falls back to 0, so an asset with only one picture behaves exactly as
+        before and a caller that does not know its context loses nothing.
+        """
+        if prefer:
+            tags = self._tags.get(name, ())
+            if prefer in tags:
+                return tags.index(prefer)
+        return 0
 
     def _load_templates(self):
         if not os.path.isdir(TMPL_DIR):
@@ -169,6 +189,13 @@ class AttachmentDetector:
                         self._slot_index.setdefault(slot_name, []).append(name)
             self._templates.setdefault(name, []).append((tmpl_bgr[ys, xs],
                                                          ys, xs))
+            # WHICH RENDERING this variant is: '' for the untagged file, else
+            # the tag ('solved' = photographed in a weapon's slot tile, 'row' =
+            # photographed as an inventory row). best_two ranks on ONE of them
+            # and the icon is not the same size or sharpness in the two places,
+            # so the ranking pass has to be told which one it is reading.
+            self._tags.setdefault(name, []).append(
+                stem.split('.', 1)[1] if '.' in stem else '')
 
     # ── scoring ──
 
@@ -196,7 +223,7 @@ class AttachmentDetector:
         return min(self._variant(crop_f, name, i, shifts)
                    for i in range(len(self._templates[name])))
 
-    def best_two(self, crop, names, shortlist=SHORTLIST):
+    def best_two(self, crop, names, shortlist=SHORTLIST, prefer=None):
         """-> (name, mse, margin). Two-stage; see SHORTLIST.
 
         THE SHORTLIST PASS RANKS ON ONE VARIANT, THE FINE PASS SCORES THEM
@@ -216,7 +243,9 @@ class AttachmentDetector:
         between them.
         """
         crop_f = crop.astype(np.float32)
-        coarse = sorted((self._variant(crop_f, n, 0, ((0, 0),)), n)
+        coarse = sorted((self._variant(crop_f, n,
+                                       self._rank_variant(n, prefer),
+                                       ((0, 0),)), n)
                         for n in names)
         fine = sorted((self.score(crop_f, n), n)
                       for _, n in coarse[:shortlist])
@@ -293,7 +322,9 @@ class AttachmentDetector:
                 if crop.size == 0 or not names or not self.drawn(crop):
                     slots[slot] = None
                     continue
-                name, mse, margin = self.best_two(crop, names)
+                # prefer='solved': these crops ARE slot tiles, and the bank
+                # holds a picture taken in one.
+                name, mse, margin = self.best_two(crop, names, prefer='solved')
                 if mse > MSE_EMPTY_TH:
                     slots[slot] = None
                 elif margin < MARGIN_MIN:

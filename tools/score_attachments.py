@@ -87,7 +87,7 @@ import cv2
 import numpy as np
 
 from calibration.capture_run import CaptureRun
-from detector.attachment_catalog import ATTACHMENTS
+from detector.attachment_catalog import ATTACHMENTS, canonical
 import detector.attachment_detector as ad
 from detector.tab_items import ROW_MSE_MAX, ROW_MARGIN_MIN
 from detector.tab_layout import icon_box
@@ -183,13 +183,19 @@ def samples():
                 continue
             if bad and target in bad[1]:
                 continue
+            # THROUGH canonical(), because a key this project renamed is still
+            # written in eleven runs' manifests and those crops are still
+            # pictures of the right item. Renaming angled_grip -> tilted_grip
+            # without this dropped `slots` from 1675 to 1601 and shrank the row
+            # corpus by 40 — a table edit reading as a detector regression.
+            key = canonical(lab['asset'])
             slot = (lab['slot'] if target == 'slots'
-                    else ATTACHMENTS.get(lab['asset'], {}).get('slot'))
+                    else ATTACHMENTS.get(key, {}).get('slot'))
             if not slot:
                 continue
             parts = os.path.basename(path).split('__')
             out.append({'run': run.stamp, 'target': target, 'path': path,
-                        'key': lab['asset'], 'slot': slot,
+                        'key': key, 'slot': slot,
                         'weapon': parts[2] if target == 'slots'
                                   and len(parts) > 2 else None})
     return out
@@ -307,14 +313,15 @@ def read(det, s):
     if not det.drawn(crop):
         return '', 0.0
     if s['target'] != 'slots':
-        name, mse, margin = det.best_two(crop, list(det._templates))
+        name, mse, margin = det.best_two(crop, list(det._templates),
+                                        prefer='row')
         if mse > ROW_MSE_MAX or margin < ROW_MARGIN_MIN:
             return '', margin
         return KEY_OF.get(name, name), margin
     names = det.candidates(s['slot'], s['weapon'])
     if not names:
         return '', 0.0
-    name, mse, margin = det.best_two(crop, names)
+    name, mse, margin = det.best_two(crop, names, prefer='solved')
     if mse > ad.MSE_EMPTY_TH:
         return '', 0.0
     return KEY_OF.get(name, name), margin
@@ -525,8 +532,22 @@ COUNTED = ('slots', 'reference rows', 'rows')
 #
 # Going ABOVE the baseline fails too, on purpose: it means one of the above
 # was fixed and this comment is now a lie. Re-measure, then raise the numbers.
-BASELINE = {'slots': (1675, 1687), 'reference rows': (10, 12),
-            'rows': (441, 540)}
+# 2026-08-04, THE GAME-FILE ART LEFT THE BANK (tools/retire_gamefile_icons.py).
+# The reader only ever sees screen crops; the 2026-03-18 extracts are another
+# rendering, and they were winning the fine pass on crops they described worse.
+#
+#   light_grip  0/10 -> 8/10   comp_sr 0/10 -> 8/10   scope_15x 0/20 -> 20/20
+#   scope_6x   10/10 -> 0/10   uzi_stock 6/10 -> 0/10   rows 441 -> 502
+#
+# The three that read `<nothing>` on EVERY sample were stale art, not bad
+# labels. The casualties are assets left holding only `.solved`, so their 库存
+# rows have no row-scale template: `collect_templates --targets rows` for the
+# eleven that retire_gamefile_icons lists, and the ratchet goes back up.
+#
+# `prefer=` (rank on the context's own variant) landed with it and moved
+# nothing — the loss is in the fine pass, not the ranking.
+BASELINE = {'slots': (1659, 1687), 'reference rows': (9, 12),
+            'rows': (502, 540)}
 
 
 def score(rows, title):

@@ -64,7 +64,7 @@ OUT = os.path.join(ROOT, 'docs', 'stock')
 # duplicates a row scrolling up looks identical to the row it replaced, which
 # is exactly the ambiguity that hid this for a whole night.
 FILL = ['red_dot', 'holo', 'laser', 'comp_ar', 'comp_smg', 'supp_ar',
-        'supp_smg', 'flash_ar', 'vert_grip', 'angled_grip', 'half_grip',
+        'supp_smg', 'flash_ar', 'vert_grip', 'tilted_grip', 'half_grip',
         'thumb_grip', 'tactical_stock', 'cheek_pad', 'ext_ar', 'ext_smg']
 
 

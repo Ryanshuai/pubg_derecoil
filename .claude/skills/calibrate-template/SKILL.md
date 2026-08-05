@@ -1,6 +1,6 @@
 ---
 name: calibrate-template
-description: Give a detector a picture it can match, and prove it matches the right thing — icon glyphs, rendered UI text and HUD digits alike (attachment icons, weapon name plates, Type/类型, the ammo counter, button icons used as landmarks). Also covers where an icon is drawn and how it is composited (position, scale, alpha, blend formula). Use when a detector stops recognising something, after a game update or language switch, when a new weapon or attachment reads as unknown, to add a template variant, or to work out an icon's blend parameters. For a screen's row/slot geometry use calibrate-screen.
+description: Give a detector a picture it can match and prove it beats every near neighbour — icons, rendered UI text and HUD digits, plus where an icon is drawn and how it is blended. Use when a detector stops recognising something, after a game update or language switch, when a new weapon or attachment reads as unknown, or to add a template variant. For row/slot geometry use calibrate-screen.
 argument-hint: "<what to calibrate> - a screenshot, a run directory, or open the screen in game"
 ---
 
@@ -64,6 +64,38 @@ on one language is wrong for the other. `spawner_detector` identifies its
 screen from three button glyphs and works in every language;
 `tab_detector` uses the `Type` string's pixel count, and those bounds are
 *silently wrong* under 类型. Use text only when the thing genuinely is text.
+
+## Step 0a — after a patch: is it still the same item?
+
+A key resolves to a POSITION in a spawner category — the drive path reads no
+text, deliberately. Add or remove an entry and everything below it moves;
+**replace one in place and nothing moves at all**: the collector photographs
+the new item, files it under the old key, and every readback stays consistent
+forever. 41.1 swapped the Angled Foregrip for the Tilted Grip keeping the list
+length and the label 斜向握把, and four months of "angled_grip" recoil numbers
+were another part's.
+
+**The check: spawn one of every entry in the category into a level-3 backpack,
+Tab, capture the FULL screen, and read the names.** The 库存 list prints the
+item name beside each row, so one screenshot names the whole category in order.
+Use `detector.cropper.capture_screen()` — `InventoryControl.frame()` is a
+banded grab that cuts the labels off, and a wrong crop invents things.
+
+A part scoring `<nothing>` on *every* sample in `pixi run attachments` is the
+free version of the same alarm; three did, and all three were stale art rather
+than a swapped item.
+
+**If an item was replaced**, rename the key and keep its POSITION —
+`attachment_catalog.RENAMED` + `canonical()` keep stored labels resolving.
+Never rewrite labels in stored manifests: they are pictures of the right item
+under an old name.
+
+**Retire the game-file art once a photograph exists** —
+`tools/retire_gamefile_icons.py --apply` (`--restore` undoes it; assets with no
+photograph are left alone). It is not a spare copy: the extract can win the
+fine pass on crops it describes worse, and `light_grip`, `comp_sr` and
+`scope_15x` read nothing at all until it left. Cost: an asset holding only
+`.solved` loses its 库存 rows, so collect `.row` for those.
 
 ## Step 0 — check what is known
 

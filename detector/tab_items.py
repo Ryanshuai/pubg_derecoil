@@ -186,7 +186,9 @@ class TabItemDetector:
         if not occupied:
             return None, False
         cell = cv2.resize(cell, (63, 63), interpolation=cv2.INTER_AREA)
-        name, mse, margin = self._det.best_two(cell, self._all)
+        # prefer='row': this cell is an inventory ROW, and the bank holds a
+        # picture taken as one. See _rank_variant.
+        name, mse, margin = self._det.best_two(cell, self._all, prefer='row')
         if mse <= ROW_MSE_MAX and margin >= ROW_MARGIN_MIN:
             return Item(name, self._slot_of.get(name, '?'), row_point(i, panel),
                         (panel, i), mse, margin), True

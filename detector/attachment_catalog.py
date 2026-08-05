@@ -186,6 +186,25 @@ ROSTER = {
 # against the captured menus with `control/spawner.py --check`.
 # ════════════════════════════════════════════════════════════
 
+# Keys this project has renamed, old -> current.
+#
+# THE STORED CAPTURES ARE NOT REWRITTEN. Eleven runs' manifests carry
+# `angled_grip` labels, and every one of them is a picture of the right item --
+# what changed is which name the item goes by here, not what was photographed.
+# Editing ground truth to match a table is the move that turns a corpus into a
+# record of the table; reading it through a rename does not.
+#
+# Anything resolving a label from disk should go through canonical().
+RENAMED = {
+    'angled_grip': 'tilted_grip',   # 41.1 swapped the part at that position
+}
+
+
+def canonical(key):
+    """The current key for a possibly-renamed one. Unknown keys pass through."""
+    return RENAMED.get(key, key)
+
+
 ATTACHMENTS = {
     # ── 握把 (grip / lower rail) ──
     'half_grip':      {'slot': 'grip', 'zh': '半截式握把',
@@ -198,8 +217,22 @@ ATTACHMENTS = {
                        'asset': 'Lower_ThumbGrip_C', 'classes': ('AR', 'DMR', 'SMG')},
     'vert_grip':      {'slot': 'grip', 'zh': '垂直握把',
                        'asset': 'Lower_Foregrip_C', 'classes': ('AR', 'DMR', 'SMG')},
-    'angled_grip':    {'slot': 'grip', 'zh': '斜向握把',
-                       'asset': 'Lower_AngledForeGrip_C', 'classes': ('AR', 'DMR', 'SMG')},
+    # ⚠ WAS `angled_grip` UNTIL 2026-08-04, AND THAT WAS THE WRONG ITEM.
+    # Update 41.1 (2026-04-08) removed the Angled Foregrip and added the Tilted
+    # Grip. The training range's list kept its length AND its label 斜向握把, so
+    # nothing here noticed for four months -- the 库存 row prints the English
+    # name and reads "Tilted Grip". The 0.809 recoil factor filed under
+    # angled_grip is this part's, and the wiki contradiction it seemed to
+    # produce was never real.
+    #
+    # LAST IN THE GRIP BLOCK ON PURPOSE: attachment_position() takes the spawner
+    # index from the ORDER of this dict, so moving this line moves the click.
+    # Entry 7 of 7, the crossbow quiver being the uncatalogued extra at 6.
+    #
+    # `asset` is OUR name -- it keys the template files, nothing reads it off
+    # the client.
+    'tilted_grip':    {'slot': 'grip', 'zh': '斜向握把',
+                       'asset': 'Lower_TiltedGrip_C', 'classes': ('AR', 'DMR', 'SMG')},
 
     # ── 弹匣 (magazine) ──
     'quickext_smg':   {'slot': 'magazine', 'zh': '加长快速弹匣 (手枪, 冲锋枪)',
@@ -435,6 +468,17 @@ EXCLUDE = {
     's686':  {'duckbill'},
     'groza': {'comp_ar', 'flash_ar', 'brake_ar'},   # suppressor is its only muzzle
     'tommy': {'comp_smg', 'flash_smg'},             # suppressor only
+    # CONFIRMED BY HAND 2026-08-04. Two harvest cells failed to fit it and both
+    # recorded `reads ''` -- the part never landed at all, which is a different
+    # signature from the mp5k/scope_4x strikes recorded the same evening, where
+    # the slot read a red dot because the run had bolted one on and mislabelled
+    # it. That pair was this project's bug and was cleared; this one was tried
+    # in the game and the grip will not go on.
+    #
+    # Cost to the recoil work: tilted_grip is measured on the mp5k alone
+    # (0.809), with no second weapon to repeat it on. vert_grip and half_grip
+    # both have an mp5k/vector pair.
+    'vector': {'tilted_grip'},
 }
 
 # The other direction: an attachment whose class list is wider than the set of

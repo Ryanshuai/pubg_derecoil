@@ -167,7 +167,11 @@ class GameState:
         'Muzzle_Suppressor_Small_C': '消音', 'Muzzle_Suppressor_SniperRifle_C': '消音',
         'Muzzle_FlashHider_Large_C': '消焰', 'Muzzle_FlashHider_Medium_C': '消焰',
         'Muzzle_FlashHider_SniperRifle_C': '消焰',
-        'Lower_Foregrip_C': '垂直', 'Lower_AngledForeGrip_C': '三角',
+        # Both names: 41.1 replaced the Angled Foregrip with the Tilted Grip,
+        # and the old asset still appears in older captures and in
+        # dl_models/icon_layout.py, whose class ORDER cannot be edited.
+        'Lower_Foregrip_C': '垂直', 'Lower_TiltedGrip_C': '斜向',
+        'Lower_AngledForeGrip_C': '三角(已移除)',
         'Lower_HalfGrip_C': '半截', 'Lower_ThumbGrip_C': '拇指',
         'Lower_LightweightForeGrip_C': '轻型', 'Lower_LaserPointer_C': '激光',
         'Lower_Foregrip_Crossbow': '弩垂', 'Lower_QuickDraw_Large_Crossbow_C': '弩快',

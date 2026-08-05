@@ -52,12 +52,17 @@ MUZZLE_FACTOR = {
     'Suppressor': 1.0,
 }
 
-# Grip vertical recoil multipliers
+# Grip vertical recoil multipliers. Wiki figures except where marked measured;
+# this project's screen-observed residuals run consistently deeper than stated
+# (Foregrip states -20% and measures 0.747..0.761), so the two do not mix.
+#
+# 'AngledForeGrip': 1.0 is gone because update 41.1 removed the part, not
+# because it measured wrong -- see attachment_catalog's tilted_grip.
 GRIP_FACTOR = {
     'Foregrip': 0.85,       # Vertical Foregrip
     'HalfGrip': 0.92,
     'ThumbGrip': 0.95,
-    'AngledForeGrip': 1.0,
+    'TiltedGrip': 0.809,    # measured, mp5k — stated +12% vertical control
     'LightweightForeGrip': 1.0,
     'LaserPointer': 1.0,
 }

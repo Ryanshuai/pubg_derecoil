@@ -72,7 +72,7 @@ RUNS = os.path.join(os.path.dirname(HERE), 'docs', 'recoil', 'runs')
 # part for a slot skips every config naming it, rather than silently measuring
 # bare twice under two different labels.
 #
-# Overridable per slot with --parts muzzle=brake_ar,grip=angled_grip, which is
+# Overridable per slot with --parts muzzle=brake_ar,grip=tilted_grip, which is
 # how a second part in the same slot gets measured against the first.
 # THE STOCK SLOT USED TO NAME tactical_stock AND THAT MEASURED NOTHING.
 # Three cells across two weapons: 0.9942±0.0080, 1.0113±0.0120, 1.0025±0.0078.
@@ -1314,7 +1314,7 @@ def main():
                          'Pass it only to break that pairing deliberately.')
     ap.add_argument('--parts', default='',
                     help='swap which part fills a slot, e.g. '
-                         'muzzle=brake_ar,grip=angled_grip. This is how a '
+                         'muzzle=brake_ar,grip=tilted_grip. This is how a '
                          'second part in the same slot gets measured against '
                          'the first.')
     ap.add_argument('--home', action='store_true',
