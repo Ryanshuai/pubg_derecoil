@@ -483,6 +483,30 @@ def calibrate_combo(rig, weapon, posture, mags, log):
             if not rig.ensure_ads():
                 print("      [!] could not re-enter ADS after reload")
                 break
+            # POSTURE IS A PER-MAGAZINE PRECONDITION TOO, and until 2026-08-05
+            # it was checked once for the whole cell while ADS was checked
+            # every magazine. Both are assumptions the compensation multiplies
+            # by; only one was being maintained.
+            #
+            # What that cost: an m762 bare/prone cell measured 2026 counts —
+            # the STANDING figure, 2058/2103 in the same run — while the
+            # firmware pushed the prone factor of 0.50. Residual +1105, which
+            # is 117% of the compensation applied, and it passed every gate in
+            # analysis.magazine_fault. The cell then reported a prone factor
+            # of 0.9633 where the same weapon's kitted cell said 0.5502; one
+            # weapon cannot have both.
+            #
+            # Cheap enough to do every time: the icon is readable in 3786 of
+            # 3787 samples while the sight is up, and it follows a stance
+            # change in 34..68 ms (tools/probe_posture_trace.py). ADS is
+            # already up by the line above, which is exactly the condition the
+            # icon needs.
+            seen = rig.gun.read_posture()
+            if seen != posture:
+                print(f"      [!] posture is {seen!r}, not {posture!r} — the "
+                      f"stance changed mid-cell, so every magazine after this "
+                      f"would carry the wrong factor")
+                break
             rig.reaim()
 
         try:
