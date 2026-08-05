@@ -1215,6 +1215,27 @@ def load_done(path, want_mags=0):
     return done
 
 
+def _last_cell(path, weapon, config, posture):
+    """The most recent record for one cell. -> dict | None
+
+    Last wins, which is the same rule analyse_factors reads the log with, so
+    what this reports is what the analysis will use.
+    """
+    out = None
+    if not os.path.exists(path):
+        return None
+    for line in open(path, encoding='utf-8'):
+        try:
+            r = json.loads(line)
+        except Exception:
+            continue
+        if (r.get('type') == 'cell' and r.get('weapon') == weapon
+                and r.get('config') == config
+                and r.get('posture', 'standing') == posture):
+            out = r
+    return out
+
+
 def expand(spec, semi=False):
     """Weapon names from 'ar', 'smg', 'all', or explicit names.
 
@@ -1428,9 +1449,26 @@ def main():
         RUNS, f"harvest_{args.sight}_{datetime.now().strftime('%m%d_%H%M')}.jsonl")
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     done = load_done(out, args.mags) if args.resume else set()
-    if args.resume and done:
+    if args.resume:
+        short = load_done(out, 0) - done
         print(f"resume   : {len(done)} cell(s) already have {args.mags} "
-              f"magazine(s); anything short of that will be re-fired")
+              f"magazine(s); {len(short)} short one(s) will be re-fired")
+        # WHY each one is short, because re-firing does not always help and
+        # this is the only place that can say so. A cell that FIRED everything
+        # it was asked for and lost magazines to discards will come back
+        # short again -- the re-timing discard in particular is one per cell
+        # by construction, so such a cell can never reach `mags` and every
+        # --resume will re-fire it forever. That is a cost to see, not a
+        # policy to guess at: "fired 6, kept 1" was a real fault worth
+        # re-firing on 2026-08-05 and "fired 6, kept 5, re-timed" is not.
+        for w, c, p in sorted(short):
+            rec = _last_cell(out, w, c, p)
+            if not rec:
+                continue
+            why = ', '.join(rec.get('mags_discarded') or []) or 'cut short'
+            fired = rec.get('n_mags', 0) + len(rec.get('mags_discarded') or [])
+            print(f"           {w}/{c}/{p}: kept {rec.get('n_mags')}, fired "
+                  f"{fired} of {rec.get('mags_asked')} — {why}")
 
     # What each gun will actually be measured wearing. Printed before anything
     # spawns, because the answer is not "what you asked for": half the roster
