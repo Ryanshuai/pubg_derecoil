@@ -42,7 +42,7 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from detector.attachment_catalog import fits, has_slot
+from detector.attachment_catalog import canonical, fits, has_slot
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -51,6 +51,18 @@ PATH = os.path.join(ROOT, 'docs', 'compat', 'kit_facts.json')
 # Separate cells that must fail the same (weapon, slot, part) before it is
 # believed to be impossible rather than unlucky.
 FAILS_TO_BELIEVE = 2
+
+
+def _head():
+    """Short HEAD hash, or '' where git cannot answer. Metadata, never a gate."""
+    import subprocess
+    try:
+        out = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'],
+                             cwd=ROOT, capture_output=True, text=True,
+                             timeout=5)
+        return out.stdout.strip() if out.returncode == 0 else ''
+    except Exception:
+        return ''
 
 
 class KitFacts:
@@ -87,7 +99,16 @@ class KitFacts:
 
     @staticmethod
     def can_fit(weapon, slot, part):
-        """The catalogue's answer, unmodified."""
+        """The catalogue's answer, unmodified.
+
+        Through canonical(), so a strike recorded under a key this project has
+        since RENAMED is still asked the right question. Without it the rename
+        alone retires the strike -- the key stops resolving, can_fit goes
+        False, and `settled()` reports the catalogue as having caught up when
+        nothing was measured. That is the one way this file could quietly lose
+        evidence.
+        """
+        part = canonical(part)
         return bool(part) and has_slot(weapon, slot) and fits(weapon, part)
 
     # ── learning ──
@@ -99,6 +120,16 @@ class KitFacts:
                                        'part': part, 'failures': 0})
         rec['failures'] += 1
         rec['last'] = datetime.now().isoformat(timespec='seconds')
+        # WHICH BUILD FAILED. A count of failures cannot tell "the game refuses
+        # this" from "the code was broken that afternoon", and both look like
+        # an entry here. Two mp5k/scope/scope_4x strikes were recorded at 19:55
+        # on 2026-08-04 by a run whose --sight switched the measurement profile
+        # and not the fitted sight -- it bolted on a red dot and then reported
+        # that the slot held a red dot. The fix landed 45 minutes later, and
+        # nothing in this file said the evidence predated it.
+        head = _head()
+        if head:
+            rec['head'] = head
         if note:
             rec['note'] = note
         self.dirty = True
@@ -194,4 +225,21 @@ if __name__ == '__main__':
         gone = kf.retire_settled()
         kf.save()
         print(f'retired {len(gone)}: {", ".join(gone) or "nothing"}')
+    # A HUMAN FITTING IT BY HAND IS THE STRONGEST EVIDENCE THIS FILE CAN HOLD,
+    # and until now there was no way to enter it: strikes only ever arrived
+    # from a harvest run, so a combination this project had broken stayed on
+    # the check-list until another run happened to succeed at it. `note_success`
+    # existed and had no caller reachable from a keyboard.
+    for i, a in enumerate(sys.argv):
+        if a != '--fit':
+            continue
+        try:
+            weapon, slot, part = sys.argv[i + 1].split('.')
+        except (IndexError, ValueError):
+            print('--fit wants weapon.slot.part, e.g. mp5k.scope.scope_4x')
+            sys.exit(1)
+        had = kf.failures(weapon, slot, part)
+        kf.note_success(weapon, slot, part)
+        kf.save()
+        print(f'{weapon}.{slot}.{part}: cleared {had} strike(s) — fits by hand')
     kf.report()
