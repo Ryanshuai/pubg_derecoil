@@ -142,6 +142,27 @@ WEAPON_ICON_MAP = {
     'Item_Weapon_mortar_C_w.png':      'mortar',
 }
 
+# THE TRAINED MODEL'S VOCABULARY, NOT A LIST OF GUNS IN THE GAME. This is the
+# one place dp28 / pp19 / qbu / mosin survive the U42.1 deletion, and they have
+# to: the list's ORDER is the classifier's label encoding and its LENGTH is the
+# head's width.
+#
+#   dl_models/gun_name.pth.tar  heads.gun_name.weight  (48, 1024)
+#   len(WEAPON_CLASSES) + 1  ==  48
+#
+# Drop the four and the head becomes 44 wide, so the checkpoint either refuses
+# to load or -- worse -- loads and shifts every label past index 7. `dragunov`
+# sits at 8, directly after dp28, so every gun from there on would be named as
+# its neighbour: a confident wrong answer, which is the failure mode
+# detector/CLAUDE.md opens with.
+#
+# They also stay in WEAPON_ICON_MAP above, for the same reason one step back:
+# that map is what synthesises the training data, so removing them would make
+# this checkpoint unreproducible while its head still carries their slots.
+#
+# Retiring them for real means retraining and swapping the checkpoint in the
+# same commit. Until then this list describes a FILE ON DISK, and editing it to
+# describe the game instead is how the two silently stop matching.
 WEAPON_CLASSES = [
     '98k', 'ace32', 'akm', 'aug', 'awm', 'crossbow', 'dbs', 'dp28', 'dragunov',
     'famas', 'g36c', 'groza', 'js9', 'k2', 'lynx', 'm16', 'm24', 'm249', 'm416',

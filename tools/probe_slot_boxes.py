@@ -35,7 +35,7 @@ for _s in (sys.stdout, sys.stderr):
 import cv2
 import numpy as np
 
-from detector.attachment_catalog import SLOTS, is_live
+from detector.attachment_catalog import SLOTS
 from detector.slot_detector import SlotDetector
 from detector.tab_layout import SLOT_NAMES
 from control.lobby import LobbyControl
@@ -71,8 +71,8 @@ def main():
     ap.add_argument('--backend', default='auto')
     args = ap.parse_args()
 
-    if not is_live(args.weapon):
-        print(f'{args.weapon} is not a live weapon')
+    if args.weapon not in SLOTS:
+        print(f'the spawner cannot produce {args.weapon!r}')
         return 1
 
     if not ensure_focus(countdown_s=args.countdown, label='slot boxes'):

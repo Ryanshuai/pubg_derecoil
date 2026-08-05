@@ -14,9 +14,9 @@ WEAPON_RPM = {
     'scar': 600, 'm762': 620, 'g36c': 680, 'm16': 750, 'mk47': 600,
     'k2': 680, 'ace32': 680, 'famas': 900,
     'tommy': 700, 'uzi': 1050, 'ump45': 650, 'vector': 1100,
-    'pp19': 700, 'mp5k': 900, 'p90': 900, 'mp9': 1100, 'js9': 900,
-    'dp28': 550, 'm249': 750, 'mg3': 990,
-    'vss': 700, 'mk14': 600, 'mini14': 600, 'qbu': 600,
+    'mp5k': 900, 'p90': 900, 'mp9': 1100, 'js9': 900,
+    'm249': 750, 'mg3': 990,
+    'vss': 700, 'mk14': 600, 'mini14': 600,
     'sks': 600, 'slr': 600, 'dragunov': 600, 'mk12': 600,
     's12k': 250,
 }
@@ -52,17 +52,22 @@ MEASURED_RPM = load_measured_rpm()
 WEAPON_RPM.update(MEASURED_RPM)
 
 
-sp = {'98k', 'm24', 'awm', 'mosin', 'win94', 'lynx'}
-dmr = {'mini14', 'mk14', 'qbu', 'sks', 'slr', 'vss', 'dragunov', 'mk12'}
+# DP-28, PP-19 Bizon, QBU, Mosin, R45 and P1911 are NOT missing from these
+# sets by oversight — the June 2026 update (42.1) removed them from the game,
+# and every trace of them was deleted on 2026-08-04 rather than kept behind a
+# flag. See detector/attachment_catalog.py for why half-present is worse than
+# absent. Do not re-add one from a wiki page without checking the spawner.
+sp = {'98k', 'm24', 'awm', 'win94', 'lynx'}
+dmr = {'mini14', 'mk14', 'sks', 'slr', 'vss', 'dragunov', 'mk12'}
 ar = {'akm', 'aug', 'groza', 'm416', 'qbz', 'scar', 'm762', 'g36c', 'm16', 'mk47', 'k2', 'ace32', 'famas'}
-smg = {'tommy', 'uzi', 'ump45', 'vector', 'pp19', 'mp5k', 'p90', 'mp9', 'js9'}
-mg = {'m249', 'dp28', 'mg3'}
+smg = {'tommy', 'uzi', 'ump45', 'vector', 'mp5k', 'p90', 'mp9', 'js9'}
+mg = {'m249', 'mg3'}
 shotgun = {'s12k', 's1897', 's686'}
 
 # Weapons that can fire in full-auto or burst (used for fire_mode logic)
 can_full_guns = {
     'akm', 'aug', 'groza', 'm416', 'qbz', 'scar', 'mk14', 'tommy', 'uzi', 'vss',
-    'm762', 'ump45', 'vector', 'dp28', 'm249', 'pp19', 'g36c',
+    'm762', 'ump45', 'vector', 'm249', 'g36c',
     'k2', 'ace32', 'famas', 'mg3', 'mp5k', 'p90', 'mp9', 'js9',
 }
 

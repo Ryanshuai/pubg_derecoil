@@ -30,7 +30,7 @@ except (AttributeError, OSError):
 from control.spawner import (CATEGORY_OF_CLASS, CATEGORY_OF_SLOT, GEAR,
                              builtin_layout, click_plan, plan, position_of,
                              weapon_position)
-from detector.attachment_catalog import ATTACHMENTS, ROSTER, is_live
+from detector.attachment_catalog import ATTACHMENTS, ROSTER
 from detector.spawner_layout import (BOX_LEFT_PAD, CATEGORY_Y, CLICK_X_OFFSET,
                                      COLUMN_BOX, COLUMN_CLICK_DX, COLUMN_ROWS,
                                      SUBMENU_CLICK_DX, SUBMENU_ENTRY_DY,
@@ -266,7 +266,7 @@ print('\n=== every click of every catalogued key is on the panel ===')
 # A blanket sweep, because an index that runs off the end of a submenu does
 # not raise: it clicks empty panel, or the row below the list, and the run
 # reports ok=True having spawned nothing. The panel body ends around y=1350.
-live = ([k for k in ROSTER if is_live(k)] + list(ATTACHMENTS) + list(GEAR))
+live = (list(ROSTER) + list(ATTACHMENTS) + list(GEAR))
 bad = []
 for k in live:
     for m in click_plan(plan([k])):
@@ -287,19 +287,31 @@ for k in ('m416', 'comp_ar'):
     step = plan([k])[0]
     check(f'{k} index', (step['category'], step['index'], step['expect']),
           (cat, idx, expect))
-# A vaulted gun is still in ROSTER but no longer in the spawner's list, so
-# every index after it shifts. Clicking its old position spawns its NEIGHBOUR
-# and the run carries on measuring the wrong weapon.
-vaulted = [k for k in ROSTER if not is_live(k)]
-if not vaulted:
-    print('  SKIP  nothing in ROSTER is vaulted right now')
-for k in vaulted[:1]:
-    try:
-        weapon_position(k)
-        got = 'planned it anyway'
-    except ValueError:
-        got = 'refused'
-    check(f'{k} is vaulted', got, 'refused')
+# ROSTER IS THE SPAWNER'S ROW ORDER, so a name the game no longer offers is
+# not a harmless extra entry: weapon_position() numbers a gun by its index
+# among its classmates, and a dead name shifts every gun below it by one row.
+# The click then lands on its NEIGHBOUR and the run measures the wrong weapon
+# while reporting ok.
+#
+# This used to be enforced by a VAULTED set and an is_live() filter. Both are
+# gone as of 2026-08-04 — the six removed weapons were deleted outright rather
+# than flagged — so the invariant is now simply that ROSTER holds nothing the
+# spawner cannot produce, and the two ways to break it are checked here.
+try:
+    weapon_position('dp28')          # deleted from ROSTER in the U42.1 sweep
+    got = 'planned it anyway'
+except KeyError:
+    got = 'refused'
+check('a weapon not in ROSTER is refused, not indexed', got, 'refused')
+
+# The other direction, which no lint can see: the counts here are transcribed
+# from the spawner's own submenus (docs/spawner/runs/), so a name added to
+# ROSTER without one being added to the game shows up as a length that no
+# longer matches. Update these ONLY against a fresh screenshot.
+SPAWNER_ROWS = {'AR': 13, 'SR': 5, 'DMR': 7, 'SG': 5, 'SMG': 8, 'LMG': 2}
+for cls, n in sorted(SPAWNER_ROWS.items()):
+    have = [k for k, v in ROSTER.items() if v[0] == cls]
+    check(f'{cls} has {n} rows in the spawner', len(have), n)
 
 print('\n=== an unknown key is a KeyError, not a click ===')
 for name, k in [('never heard of it', 'ak47_but_wrong'), ('empty', '')]:

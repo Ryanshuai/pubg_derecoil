@@ -61,8 +61,7 @@ for _s in (sys.stdout, sys.stderr):
         pass
 
 from capture_run import CaptureRun
-from detector.attachment_catalog import (ATTACHMENTS, ROSTER, SLOTS, fits,
-                                         is_live)
+from detector.attachment_catalog import ATTACHMENTS, ROSTER, SLOTS, fits
 from control.lobby import LobbyControl
 from detector.slot_detector import SlotDetector
 from control.focus import ensure_focus, focus_keeper
@@ -121,7 +120,7 @@ def main():
                   f"{'FITS' if e.get('fitted') else 'no'}")
         return 0
 
-    weapons = [w for w in ROSTER if is_live(w)]
+    weapons = list(ROSTER)
     if args.only:
         want = [s.strip() for s in args.only.split(',') if s.strip()]
         weapons = [w for w in weapons if w in want]

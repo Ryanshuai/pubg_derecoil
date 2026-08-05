@@ -44,7 +44,7 @@ for _s in (sys.stdout, sys.stderr):
         pass
 
 from capture_run import CaptureRun, LABEL_DETECTED
-from detector.attachment_catalog import ROSTER, SLOTS, is_live
+from detector.attachment_catalog import ROSTER, SLOTS
 from control.lobby import LobbyControl
 from detector.slot_detector import SlotDetector
 from detector.tab_layout import SLOT_NAMES
@@ -175,7 +175,7 @@ def main():
         print(f'\n{bad} disagreement(s)')
         return 0
 
-    weapons = [w for w in ROSTER if is_live(w)]
+    weapons = list(ROSTER)
     if args.only:
         want = [s.strip() for s in args.only.split(',') if s.strip()]
         weapons = [w for w in weapons if w in want]

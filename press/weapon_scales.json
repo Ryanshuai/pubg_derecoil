@@ -22,11 +22,6 @@
   "mp9": 0.62,
   "m249": 1.02,
   "mg3": 0.95,
-  "_vaulted": {
-    "_note": "Removed from the game in the June 2026 update (42.1). Kept because these were measured, not guessed - restore the key to the top level if a weapon ever comes back.",
-    "dp28": 0.9,
-    "pp19": 1.029
-  },
   "_curve_mods": {
     "p90": {
       "note": "Kava4原始重下载. 15-33发x0.5, 34发x0.75, 35-44发x0.75, 40-49发x0.5, 45+发x0.75",
