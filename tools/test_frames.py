@@ -298,6 +298,34 @@ with ScreenBuffer.over_stills(first_half, IMGS[0]) as sb:
           np.array_equal(buf[y:y + h, x:x + w],
                          IMGS[1][y:y + h, x:x + w]), True)
 
+print('\n=== set_regions closes the old backend BEFORE opening the new one ===')
+# Not tidiness. bettercam's factory keeps ONE camera per (device, output) and
+# returns the SAME object to the next create(), so opening first yields one
+# camera started twice — and the old.close() that follows then stops and
+# releases the camera the new grabber is holding. Measured 2026-08-03: a
+# posture sweep switched to the VSS's PSO-1 (three patch columns, so the
+# bounding box moves), printed "You already created a BetterCam Instance",
+# and died on the next frame with CaptureLost, taking the run with it.
+#
+# The ordering is invisible in the pixels — both orders produce a correct
+# buffer with a GDI grabber — so it needs its own assertion or it will be
+# swapped back by anyone who reads "open then swap" as the safer shape.
+order = []
+
+
+class _NotingGrabber(StillGrabber):
+    def close(self):
+        order.append('close-old')
+
+
+with ScreenBuffer.over_stills(first_half, IMGS[0]) as sb:
+    sb.grabber = _NotingGrabber(first_half, IMGS[0])
+    real_open = sb._open
+    sb._open = lambda regions: (order.append('open-new'),
+                                real_open(regions))[1]
+    sb.set_regions(second_half)
+    check('the old backend is released first', order, ['close-old', 'open-new'])
+
 
 # ════════════════════════════════════════════════════════════
 # 4. flush

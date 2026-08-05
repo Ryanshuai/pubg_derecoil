@@ -266,6 +266,28 @@ class MagazineRecorder:
         continuous, so a jump of more than half a patch between consecutive
         frames is not physical.
         """
+        # NOTHING BUFFERED AT ALL is a different fault from a thin buffer, and
+        # it is the one that hides. push() drops a frame silently three ways --
+        # buffer full, duplicate, and slice_frame() returning None -- and only
+        # the third can account for ALL of them. slice_frame returns None when
+        # the frame lacks a region the tracker asks for, i.e. this tracker and
+        # the grabber that produced the frame disagree about how many patches
+        # exist.
+        #
+        # That is exactly what went wrong with the VSS: calibration/sweep.py's
+        # FireDriver held a 7-patch tracker by value while set_sight() had
+        # rebuilt the grabber for the 3-patch vss_pso1 profile, so every push
+        # asked for recoil_3..6 and got nothing. Four magazines, zero samples,
+        # and not one line of output from here to analyse() -- the weapon had
+        # simply never been measurable, for as long as anyone had tried.
+        #
+        # Said once, at the source, because the caller sees only an empty
+        # result and cannot tell an empty magazine from a mis-wired one.
+        if self._patches == [] and self._ts == []:
+            print(f'[tracker] recorded 0 frames for {len(self.tracker.xs)} '
+                  f'patches ({", ".join(self.tracker.names())}) — every push '
+                  f'was dropped, which for a whole magazine means the grabber '
+                  f'is not producing these regions')
         res = MagazineResult()
         prev_dy = 0.0
         for i in range(1, len(self._patches)):

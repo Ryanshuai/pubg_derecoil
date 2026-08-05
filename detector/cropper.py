@@ -577,16 +577,38 @@ class ScreenBuffer:
         tracker's patch columns move with it. The buffer is wiped rather than
         carried over: the old regions' pixels would otherwise sit there for the
         rest of the run, in coordinates nothing writes to any more.
+
+        THE OLD GRABBER IS CLOSED FIRST, and with DXGI it cannot be otherwise.
+        bettercam's factory keeps one camera per (device, output) and hands the
+        SAME object back to the next create(), so opening before closing does
+        not produce two cameras — it produces one camera started twice, and
+        then `old.close()` stops and releases the very camera the new grabber
+        is now holding. The next grab() finds a dead capture thread.
+
+        Measured 2026-08-03: a posture sweep reached the VSS, set_sight
+        switched to vss_pso1 (three patch columns instead of seven, so the
+        bounding box moves), and the run died on the first frame after —
+
+            You already created a BetterCam Instance for Device 0--Output 0!
+            Screen Capture FPS: 14273028      <- two start()s, one camera
+            Screen Capture FPS: 4631615
+            CaptureLost: bettercam capture thread is gone
+
+        — taking the whole run with it, because CaptureLost propagates out of
+        harvest_weapon. Closing first costs a few frames of blindness between
+        the two backends and nothing else: _open() falls back to GDI on its
+        own if the reopen fails, so there is no path where this leaves the
+        Cropper without a grabber.
         """
-        old = self.grabber
-        if grabber is not None:
-            self.grabber, self.paced = grabber, False
-        else:
-            self.grabber, self.paced = self._open(dict(regions))
+        old, self.grabber = self.grabber, None
         try:
             old.close()
         except Exception:
             pass
+        if grabber is not None:
+            self.grabber, self.paced = grabber, False
+        else:
+            self.grabber, self.paced = self._open(dict(regions))
         self.regions = dict(regions)
         self._whole = self._whole_name()
         if self._buf is not None:
