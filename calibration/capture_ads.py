@@ -649,6 +649,22 @@ class ManualEquip:
     name = 'manual'
     self_verifies = False       # run() falls back to ScopeVerifier
 
+    # DECLARED ABSENT, not simply missing. run() used to ask `hasattr(equip,
+    # 'locate')` and friends, so what this strategy cannot do was expressed by
+    # three attributes failing to exist — invisible from here, which is the
+    # only place a reader looks to find out what a strategy is. The file
+    # already had the better idiom one line up: `self_verifies` states a
+    # capability on the class. These do the same.
+    #
+    # None rather than a no-op method, because run() must be able to tell
+    # "there is no Tab-reading step for this strategy" from "the step ran and
+    # answered nothing" — preflight() returning None already means the second
+    # thing, and printing "preflight could not read the Tab screen" for a
+    # manual run would be a false report of a failure.
+    locate = None               # cannot read the Tab name plate
+    preflight = None            # cannot inventory the bag
+    gun = None                  # nothing to aim at a rack slot
+
     def __call__(self, key):
         zh, _, _ = scope_info(key)
         what = ('把瞄准镜卸下来（机械瞄准）' if key == IRON
@@ -1273,7 +1289,7 @@ def run(args):
             # guessing at its outline, and Tab has to be opened for the scopes
             # anyway. The HUD silhouette is the fallback for --equip manual,
             # where nothing can press Tab.
-            if hasattr(equip, 'locate'):
+            if equip.locate:
                 slot = equip.locate(args.weapon)
                 if slot:
                     print(f'[slot] working on slot {slot} — Tab name plate')
@@ -1284,8 +1300,7 @@ def run(args):
                     dump_slot_debug(frame, out_dir)
                     raise
                 print(f'[slot] working on slot {slot} — {why}')
-        if hasattr(equip, 'gun'):
-            equip.gun = slot
+        equip.gun = slot          # ManualEquip declares it None and ignores it
         if not hold_weapon(inv, slot):
             print('[slot] the gun is not in hand — stopping rather than '
                   'photographing the other one')
@@ -1296,7 +1311,7 @@ def run(args):
             except Exception as e:
                 print(f'[verify] disabled: {e}')
 
-        if hasattr(equip, 'preflight'):
+        if equip.preflight:
             missing = equip.preflight(scopes)
             if missing is None:
                 print('[equip] preflight could not read the Tab screen')
