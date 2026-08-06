@@ -118,6 +118,7 @@ def load(path, run=None):
                 'samples': samples, 'want': r.get('want', {}),
                 'fired': r.get('bullets_fired'),
                 'run': run,
+                'sight': r.get('sight'),
                 'uncovered': r.get('bullets_uncompensated', 0),
                 'oor': sum(m.get('n_out_of_range', 0) for m in r['mags']),
             }
@@ -348,6 +349,33 @@ def main():
                   f'already read: {", ".join(f"{w}/{c}/{po}" for w, c, po in sorted(clash)[:4])}'
                   + (' ...' if len(clash) > 4 else ''))
         cells.update(fresh)
+
+    # ── the sight axis ──
+    #
+    # Cells are keyed (weapon, config, posture) and NOT by sight, so the same
+    # gun measured at two magnifications collides on that key and the second
+    # file silently replaces the first. That makes the one comparison the
+    # scope axis needs impossible to ask for.
+    #
+    # The comparison itself is already designed, in harvest.py's SIGHT_SCOPE:
+    # fire the same bare/part pair at two sights and compare the FACTORS. The
+    # sight cancels inside each ratio, so equal factors mean the sight is
+    # orthogonal to that slot and unequal ones mean it is not.
+    #
+    # So when more than one sight is present, the sight goes into the weapon
+    # LABEL. Everything downstream then works unchanged — single-slot factors
+    # per column, and the pooled comparison with its inverse-variance weights
+    # and cross-run widening — and the column header says which axis is being
+    # compared instead of leaving the reader to assume "weapon".
+    sights = {v.get('sight') for v in cells.values() if v.get('sight')}
+    by_sight = len(sights) > 1
+    if by_sight:
+        cells = {(f"{w}@{v.get('sight') or '?'}", c, p): v
+                 for (w, c, p), v in cells.items()}
+        print(f'[i] {len(sights)} sights present ({", ".join(sorted(sights))}) '
+              f'— columns are weapon@sight, and the "same part, different '
+              f'columns" table below is comparing SIGHTS where the weapon '
+              f'matches.')
     all_cells = dict(cells)
     cells = {k: v for k, v in cells.items() if k[2] == args.posture}
     if not cells:
@@ -417,8 +445,8 @@ def main():
         per_slot[part].append((w, r, rel))
     if any(len(v) > 1 for v in per_slot.values()):
         print('\n' + '=' * 74)
-        print('IS THE FACTOR WEAPON-INDEPENDENT?   same part, different '
-              'weapons, in sigma')
+        print('IS THE FACTOR THE SAME IN EVERY COLUMN?   same part, '
+              'different weapon (or sight), in sigma')
         print('=' * 74)
         for s, entries in sorted(per_slot.items()):
             if len(entries) < 2:
@@ -436,7 +464,7 @@ def main():
                 print(f'    {w:<9}{r:>9.4f}   {dev:+6.1f} sigma from pooled')
             worst = max(abs((math.log(r) - mu) / rel) for _, r, rel in entries
                         if rel)
-            print(f'    -> {"consistent" if worst < 2 else "NOT the same on every weapon"}'
+            print(f'    -> {"consistent" if worst < 2 else "NOT the same in every column"}'
                   f' (worst {worst:.1f} sigma)')
 
     # ── multiplicativity ──

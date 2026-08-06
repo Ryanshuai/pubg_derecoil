@@ -529,6 +529,31 @@ def build_weapon(weapon, posture, att, rpm=None):
     w.set('posture', posture)
     w.set('muzzle', (att or {}).get('muzzle', ''))
     w.set('grip', (att or {}).get('grip', ''))
+    # THE SIGHT SCALES THE CURVE, and leaving it out meant every run above 1x
+    # fired the RED DOT's compensation. PUBG scales ADS sensitivity with
+    # magnification, so a count rotates the view roughly 1/mag as far and
+    # cancelling the same angular recoil needs roughly mag times the counts.
+    # Weapon.set_seq multiplies by scope_factor for exactly this; nothing set
+    # it, so it stayed 1.
+    #
+    # What that cost, measured 2026-08-05 on one gun in one afternoon:
+    #
+    #   aug bare, red dot, 6 magazines   true recoil 1812 counts, residual +4%
+    #   aug bare, 4x,      1 magazine    true recoil 6347 counts, residual +265%
+    #                                    -> ratio 3.50, and the view ran 2692
+    #                                       counts past a reference that holds 68
+    #
+    # Every 4x cell died that way, and so did every vss cell all day: the VSS
+    # carries an integral PSO-1 that _SCOPE_TO_MAG treats as 4x, its curve
+    # covers 324 counts over a 22-round magazine against a measured 1058 —
+    # ratio 3.26 — and that was read as "the curve was never fitted" through
+    # eight failed attempts. It was fitted. It was being fired at a quarter
+    # strength.
+    #
+    # From the READBACK, not from `--sight`: what the gun is wearing is what
+    # the compensation has to match, and the two disagree whenever a fit
+    # silently missed.
+    w.set('scope', (att or {}).get('scope', ''))
     w.set_seq()
     return w
 
