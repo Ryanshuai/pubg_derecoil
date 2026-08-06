@@ -13,6 +13,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import cv2
 
+from detector.geometry import cut
+
 from config import (LOBBY_BAR_ROI, LOBBY_ERROR_TEXT_ROI,
                     LOBBY_RECONNECT_TEXT_ROI,
                     LOBBY_LEAVE_CONFIRM_TEXT_ROI,
@@ -75,11 +77,6 @@ UNCOVERED = ['loading screen (LOBBY -> IN_GAME transition)',
              'a real match in progress (only the training range is captured)',
              "a real match's ESC menu (entry list differs from the training "
              "range's LEAVE TRAINING)"]
-
-
-def cut(frame, roi):
-    y, x, h, w = roi
-    return frame[y:y + h, x:x + w]
 
 
 def confusion():

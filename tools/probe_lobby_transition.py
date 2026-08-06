@@ -32,16 +32,12 @@ import cv2
 
 from config import LOBBY_BAR_ROI, LOBBY_PING_ROI, LOBBY_PLAY_XY
 from detector.cropper import capture_screen
+from detector.geometry import cut
 from detector.lobby_detector import LobbyState, bar_max, classify, ping_fraction
 from control.focus import game_focused
 
 RUNS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                     'docs', 'lobby', 'runs')
-
-
-def cut(frame, roi):
-    y, x, h, w = roi
-    return frame[y:y + h, x:x + w]
 
 
 def sample(frame):

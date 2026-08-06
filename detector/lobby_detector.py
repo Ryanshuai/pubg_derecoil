@@ -40,6 +40,7 @@ from config import (LOBBY_BAR_MAX, LOBBY_BAR_ROI, LOBBY_ERROR_MIN_SCORE,
                     LOBBY_MENU_THRESH, LOBBY_MENU_TITLE_ROI,
                     LOBBY_PING_MIN_FRAC, LOBBY_PING_ROI, LOBBY_PING_THRESH)
 from detector.cropper import RegionGrabber, win32_cap
+from detector.geometry import cut
 
 _TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data',
                          'pubg_assets', 'lobby')
@@ -123,10 +124,7 @@ def classify(bar_crop, ping_crop, menu_open=False, disconnected=False):
 def classify_frame(frame):
     """Same verdict from a full-screen BGR frame, for offline use on saved
     screenshots. The live path uses the grabber instead."""
-    def cut(roi):
-        y, x, h, w = roi
-        return frame[y:y + h, x:x + w]
-    return classify(cut(LOBBY_BAR_ROI), cut(LOBBY_PING_ROI),
+    return classify(cut(frame, LOBBY_BAR_ROI), cut(frame, LOBBY_PING_ROI),
                     is_system_menu(frame), reconnect_visible(frame))
 
 
