@@ -25,6 +25,13 @@ class GameState:
         self.fire_mode = ''
         self.posture = 'standing'
 
+        # Last line print_status printed, so an unchanged state prints once
+        # rather than every tick. Declared here instead of springing into
+        # existence on first call: `getattr(self, '_last_status', '')` was a
+        # note saying this object had no settled shape, and the loop that
+        # reads it runs on every keypress.
+        self._last_status = ''
+
         # ── Flags ──
         self.stop_recoil = False
         self.tab_open = False
@@ -151,7 +158,7 @@ class GameState:
         l1 = self._fmt(self.weapon_1, self.weapon_1 is self.active)
         l2 = self._fmt(self.weapon_2, self.weapon_2 is self.active)
         new = f'{l1}\n{l2}'
-        if new != getattr(self, '_last_status', ''):
+        if new != self._last_status:
             self._last_status = new
             print(f'--------------------------------------\n{new}', flush=True)
 
@@ -186,8 +193,14 @@ class GameState:
         if not w.name:
             return f'  {mark} (empty)'
         left = f'{w.name} | {w.fire_mode or "?"}'
-        scope = self._short(getattr(w, 'scope', ''))
-        muzzle = self._short(getattr(w, 'muzzle', ''))
-        grip = self._short(getattr(w, 'grip', ''))
+        # Read straight off the Weapon: detector/weapon.py's __init__ assigns
+        # scope / muzzle / grip unconditionally, so the three-arg getattr could
+        # never fire. It was not free either — if that class ever moves its
+        # attachments into a dict, the fallback would print three blanks and
+        # this status line would quietly stop reporting what the gun wears.
+        # Reading directly turns that into an AttributeError on the first tick.
+        scope = self._short(w.scope)
+        muzzle = self._short(w.muzzle)
+        grip = self._short(w.grip)
         right = f'{scope:>4s} | {muzzle:>5s} | {grip:>5s}'
         return f'  {mark} {left:<16s}  {right} | {self.posture}'

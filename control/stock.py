@@ -264,7 +264,10 @@ def _view_sig(stock):
     a slot a dropped part just left is movement, and reading it as stillness
     stops the tidy one pass early.
     """
-    return tuple((getattr(i, 'key', None) or '?') if i is not None else '-'
+    # `i.key`, not getattr: Item declares key in __slots__ and always assigns
+    # it. The `or '?'` stays — key is None for an asset with no catalogue
+    # entry, and those rows still have to count as occupied here.
+    return tuple((i.key or '?') if i is not None else '-'
                  for i in stock.view.inventory)
 
 
