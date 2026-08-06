@@ -30,7 +30,7 @@ It will also catch a template going stale after a game update, which is the
 first rule in detector/CLAUDE.md and does not otherwise announce itself: a
 drifted template does not error, it returns a confident wrong answer.
 
-Rebuild the masks with tools/build_name_templates.py.
+Rebuild the masks with calibration/build_name_templates.py.
 """
 import collections
 import glob

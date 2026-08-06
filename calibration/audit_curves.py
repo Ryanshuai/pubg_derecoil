@@ -1,6 +1,6 @@
 """Did the alpha=1 runs damage any curve? Compare each to its oldest backup.
 
-    pixi run python tools/audit_curves.py
+    pixi run python calibration/audit_curves.py
 
 The per-magazine EMA landed with curve_updates() returning 0 for curves that
 had in fact been fitted many times -- the ema_updates field was new that

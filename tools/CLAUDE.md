@@ -157,7 +157,6 @@ pixi run layering        # 9 条规则
 | `verify_pico.py` (`pixi run verify-pico`) | 固件验收。**每次刷完固件、每次标定之前跑** | 🔌 |
 | `snap_on_key.py` | 按键存全屏 + 光标 sidecar，不用 alt-tab | 🎮 |
 | `focus_trace.py` | 谁在占前台；`--windows` 列游戏的所有窗口 | 🎮 |
-| `audit_curves.py` | 每条曲线 vs 它最老的备份 | 📄 |
 
 **离线回归**（改完代码就跑）
 
@@ -220,7 +219,7 @@ pixi run layering        # 9 条规则
 | 压枪偏了但残差看起来正常 | `pixi run impulse-ab` / `tools/probe_impulse_align.py` |
 | 弹药数读不出来或读错 | `tools/probe_ammo_ocr.py` + `--confusion`；重建模板 `tools/collect_ammo_digits.py --write` |
 | 枪名认不出来（中文客户端） | `tools/probe_gun_name_ocr.py --variants` |
-| 配件认不出来或认错 | `pixi run attachments`（全量真值 + margin）；重建模板 `tools/score_attachments.py --write`，单个 run 看解算质量 `tools/solve_template.py <run>` |
+| 配件认不出来或认错 | `pixi run attachments`（全量真值 + margin）；重建模板 `calibration/score_attachments.py --write`，单个 run 看解算质量 `calibration/solve_template.py <run>` |
 | 某把枪的槽位跟 catalogue 对不上 | `tools/probe_slot_boxes.py <weapon> --strip`（**刷出来的枪不是裸枪**） |
 | 拖拽 / 右键落不下去 | `tools/probe_equip_gesture.py` / `probe_unequip_gesture.py`——两个都读回验证，不看鼠标 |
 | 右键完枪没了 / 一轮采集颗粒无收 | **`pixi run drag-log --guns`**。右键卸配件之后槽位是空的、记录报成功，枪掉了长得一模一样——日志里 `plate` 从 679–901 掉到 0 就是枪走了，汇总会标 ⚠GUN LOST。同时看 `refused` 那几行：哪道闸拦下了同一个手势 |

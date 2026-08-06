@@ -81,7 +81,7 @@ name-plates = "python tools/test_name_plates.py"
 # neighbour, confidently, which is how Lower_ThumbGrip_C spent an unknown
 # number of runs reporting `laser`. --write rebuilds the .solved variants out
 # of the paired captures first.
-attachments = "python tools/score_attachments.py"
+attachments = "python calibration/score_attachments.py"
 # What separates the drags that landed from the ones that did not: cursor
 # placement, row counts, and the gap since the previous drag, side by side.
 # Reads the journal control/inventory.py writes on every gesture. A drop can

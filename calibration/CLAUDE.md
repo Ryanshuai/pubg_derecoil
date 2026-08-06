@@ -60,7 +60,12 @@ self.ac.pointer.drag(src, dst)       # ✗ 绕过了 _reject()
 | **实验设计** | `harvest.py`（后坐力主 sweep）· `sweep.py`（`Rig` 装配壳 + CLI）· `weapon_axis.py`（**标杆：全文零硬件调用**）· `scan_compat.py` / `scan_fits.py`（槽位/配件兼容性）· `collect_templates.py` · `capture_ads.py` |
 | **分析** | `analysis.py`（**除 numpy 什么都不拉**）· `fit_curve.py` · `analyse_factors.py` · `bullet_detect.py` |
 | **落盘 / 事实存储** | `capture_run.py`（`CaptureRun` 格式）· `rpm_store.py` · `kit_facts.py` |
+| **模板构建 / 审计** | `solve_template.py` · `score_attachments.py` · `build_name_templates.py` · `build_lobby_tab_templates.py` · `audit_curves.py` |
 | **状态与库存** | `state.py`（只读探针）· `mismatch.py` |
+
+**最后那一行 2026-08-06 从 `tools/` 搬过来，判据是本文件第一句的第三样东西：「产物怎么落盘」。** 它们全都 `--write` 一份检测器当事实读的模板或掩膜，也全都**不碰游戏、不碰硬件**（`press` / `control` import 数为 0，所以搬进来不动规则 6）。留在 `tools/` 的代价是实的：那一层的自我描述是「这里没有别人 import 的东西」，而 `score_attachments` 一直在 import `solve_template`，`scan_compat` / `scan_fits` 至今还 import `tools.drive_screen`——**一个声称没有出边的层长出了出边，就没人再检查它的出边。**
+
+`drive_screen.py` **没有**跟着搬，虽然两个 calibration 模块 import 它。它整份都在做 `ensure_focus` → `ensure_in_match` → 开面板 → 验证，也就是本文件第 5 行禁止的那件事（「一个 `ensure_*` 都不该有」）。按同一条判据它该去 `control/`，不是这里。
 
 `analysis.py` 那条「除 numpy 什么都不拉」是可验证的收益，不是形容词：以前查一个 `fit_interval` 要先 import 一个 Pico 后端、一个 torch 的火力模式检测器和 win32gui。离线回归 `pixi run analysis`（合成 trace 的属性检查 + 411 个历史弹匣回放）。
 

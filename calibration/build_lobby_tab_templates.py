@@ -1,8 +1,8 @@
 """Cut lobby tab-label masks out of a full-screen lobby capture. Offline.
 
-    pixi run python tools/build_lobby_tab_templates.py <shot.png> --tag zh
-    pixi run python tools/build_lobby_tab_templates.py <shot.png> --tag zh --write
-    pixi run python tools/build_lobby_tab_templates.py --verify
+    pixi run python calibration/build_lobby_tab_templates.py <shot.png> --tag zh
+    pixi run python calibration/build_lobby_tab_templates.py <shot.png> --tag zh --write
+    pixi run python calibration/build_lobby_tab_templates.py --verify
 
 WHY THIS EXISTS. `detector/lobby_nav` used to name tabs BY POSITION: segment
 the bright mask over the bar, call run i `TOP_TABS[i]`. That holds only while

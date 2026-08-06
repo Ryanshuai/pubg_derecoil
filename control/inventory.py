@@ -836,7 +836,7 @@ def kit_faults(want, worn):
     As of 2026-08-03 no attachment in the catalogue is in that state — the
     three that were (brake_ar, heavy_stock, variable, all added to the game
     after this repo's art dump) now carry icons recovered off the screen by
-    tools/solve_template.py. The branch stays for the next one the game adds.
+    calibration/solve_template.py. The branch stays for the next one the game adds.
     """
     out = []
     for slot in _slot_order(want):

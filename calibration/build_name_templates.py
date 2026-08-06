@@ -1,8 +1,8 @@
 """Rebuild every weapon name-plate template from the captured plates. Offline.
 
-    pixi run python tools/build_name_templates.py            # report only
-    pixi run python tools/build_name_templates.py --write    # install them
-    pixi run python tools/build_name_templates.py --holdout 3
+    pixi run python calibration/build_name_templates.py            # report only
+    pixi run python calibration/build_name_templates.py --write    # install them
+    pixi run python calibration/build_name_templates.py --holdout 3
 
 WHAT A TEMPLATE IS HERE. detector/weapon_template_detector.py is not an OCR,
 whatever it is called: it holds ONE BINARY MASK per weapon and matches the
@@ -17,7 +17,7 @@ background and the glyphs are the same in all of them, so a PER-PIXEL VOTE
 across backgrounds keeps the text and drops the scenery. Ten backgrounds, a
 pixel kept when at least VOTE_FRAC of them agree.
 
-This is the same idea as the icon solve (tools/solve_template.py) reached by a
+This is the same idea as the icon solve (calibration/solve_template.py) reached by a
 different route. Icons are alpha-blended, so they need the backdrop measured
 and the blend inverted. Plates are thresholded, so the scene is already mostly
 gone and what is left is noise that averages out. Neither can be done from one

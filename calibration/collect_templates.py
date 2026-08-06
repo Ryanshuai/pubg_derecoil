@@ -1652,7 +1652,7 @@ def main():
                     help='which weapon slot to kit (default 2)')
     ap.add_argument('--angles', type=int, default=10,
                     help='how many backgrounds. MEASURED, not guessed: '
-                         'tools/solve_template.py --stability holds one '
+                         'calibration/solve_template.py --stability holds one '
                          'capture out of the solve and reconstructs it, and '
                          'on comp_ar over 16 backgrounds the error plateaus '
                          'at k>=9 (0.27-0.41 grey levels) after falling from '

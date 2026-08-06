@@ -198,7 +198,7 @@ class TabItemDetector:
         #   80x80      10/10          1.3..68.5        2.57..205
         #
         # Nothing was wrong with the templates. `pixi run attachments` scored
-        # rows 930/1050 all the way through, because tools/score_attachments.py
+        # rows 930/1050 all the way through, because calibration/score_attachments.py
         # HAD been moved to 80x80 and this reader had not — so the ratchet was
         # green on a path the game never takes. If this line comes back, that
         # gate will not notice.

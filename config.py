@@ -889,7 +889,7 @@ LOBBY_TAB_MIN_MARGIN = 5.0
 # in training_data/pubg_assets/lobby/tabs/. Below it the run is nameless, which
 # is the correct answer for the event icon and for a label in a language this
 # repo has no template for. Measured by
-# `tools/build_lobby_tab_templates.py --verify`; set from that report, and
+# `calibration/build_lobby_tab_templates.py --verify`; set from that report, and
 # rerun it after touching the templates.
 LOBBY_TAB_TMPL_MIN = 0.55
 

@@ -107,7 +107,7 @@ with LobbyControl() as lc:
 
 ```
 pixi run python calibration/collect_templates.py --targets rows --keys uzi_stock,variable,scope_8x
-pixi run python tools/solve_template.py docs/attachments/runs/<stamp> --rows --install
+pixi run python calibration/solve_template.py docs/attachments/runs/<stamp> --rows --install
 pixi run attachments
 ```
 

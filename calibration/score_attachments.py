@@ -18,7 +18,7 @@ see calibration/capture_run.py.
 
 WHAT --write BUILDS. calibration/collect_templates.py photographs each part
 over ten backgrounds AND photographs the empty slot behind it, and
-tools/solve_template.py inverts the compositing to recover the icon and its
+calibration/solve_template.py inverts the compositing to recover the icon and its
 alpha. That recovered picture is what the screen actually draws, which the
 shipped game art was not: the art is scaled, outlined and blended into a
 translucent panel before a single pixel of it reaches the screen. Every
@@ -102,7 +102,7 @@ from detector.attachment_catalog import ATTACHMENTS, canonical
 import detector.attachment_detector as ad
 from detector.tab_items import ROW_MSE_MAX, ROW_MARGIN_MIN
 from detector.tab_layout import icon_box
-from tools.solve_template import solve
+from calibration.solve_template import solve
 
 RUNS = os.path.join(ROOT, 'docs', 'attachments', 'runs')
 TMPL_DIR = os.path.join(ROOT, 'training_data', 'pubg_assets', 'Item',

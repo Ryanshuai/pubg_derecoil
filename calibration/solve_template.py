@@ -1,7 +1,7 @@
 """Solve an attachment's icon and alpha out of paired captures. Offline.
 
-    pixi run python tools/solve_template.py docs/attachments/runs/<stamp>
-    pixi run python tools/solve_template.py <run> --write
+    pixi run python calibration/solve_template.py docs/attachments/runs/<stamp>
+    pixi run python calibration/solve_template.py <run> --write
 
 Reads the (backdrop, filled) pairs calibration/collect_templates.py's
 paired_sweep produces, recovers the icon and its alpha per pixel, and reports
