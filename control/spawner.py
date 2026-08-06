@@ -1477,6 +1477,39 @@ class SpawnerControl:
         return {'ok': err is None, 'steps': [out[k] for k in order],
                 'clicks': clicks, 'error': err}
 
+    def rack_pair(self, pair):
+        """Put both guns on the rack in one panel visit. -> bool
+
+        `weapon_times=1` IS LOAD-BEARING and that is why this exists as a
+        named method rather than as two lines at each call site: the rack has
+        exactly two slots and this call fills both, so a second click per gun
+        would have the second gun EVICT the first. The default happens to be
+        1, and it is stated anyway — a caller reading `give_many(pair)` has no
+        way to see that the count is a constraint rather than a preference.
+
+        ⚠ 曾经有一个版本带着一个 `panel` 形参，函数体从来没读过它。函数体没坏，
+        坏的是调用点：它接着传了一个在那个作用域里已经不存在的名字，于是**每一批
+        的第一次刷枪都抛 NameError**。一个没人读的形参不是无害的，它是一份还在
+        被调用方当真的过期契约。
+
+        Opens the panel and closes it again, whatever happens — the panel is
+        modal over the world, so leaving it up makes every later keypress go
+        to a menu (see ensure_tab's _blocking_screen).
+        """
+        if not self.ensure_panel(True):
+            self._log('spawner panel would not open')
+            return False
+        try:
+            self.sync()
+            res = self.give_many(list(pair), switch=False, weapon_times=1)
+            if not res['ok']:
+                self._log(f'spawner: {res["error"]}')
+            else:
+                self._log(f'racked {", ".join(pair)} in {res["clicks"]} clicks')
+        finally:
+            self.ensure_panel(False)
+        return res['ok']
+
     # ── Rescue surface: L0/L1 under their public names ──────────────────
     #
     # NOT the normal path. A module that knows what it wants calls give_many()

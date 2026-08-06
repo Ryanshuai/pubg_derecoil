@@ -100,26 +100,6 @@ def stock_sight(ac, sc, sight):
                    per=len(RACK), drop_unwanted=False)
 
 
-def spawn_pair(sc, pair):
-    """Both guns, one panel visit, ONE click each.
-
-    weapon_times=1 is load-bearing: the rack has two slots and this fills
-    both, so a second click per gun would have the second evict the first.
-    """
-    if not sc.ensure_panel(True):
-        print('  [!] spawner panel would not open')
-        return False
-    try:
-        sc.sync()
-        res = sc.give_many(list(pair), switch=False, weapon_times=1)
-        if not res['ok']:
-            print(f"  [!] spawner: {res['error']}")
-        else:
-            print(f"  spawned {', '.join(pair)} in {res['clicks']} clicks")
-    finally:
-        sc.ensure_panel(False)
-    return res['ok']
-
 
 def read_rack(rig, ac):
     """Which gun is in which slot and what each is wearing. ONE Tab session.
@@ -281,7 +261,7 @@ def main():
                 print('  [!] could not stock the sights — skipping this batch '
                       'rather than measuring at the wrong K')
                 continue
-            if not spawn_pair(sc, pair):
+            if not sc.rack_pair(pair):
                 continue
             rack = read_rack(rig, ac)
             if rack is None:
