@@ -17,7 +17,6 @@ Shots land in docs/, so tools/regression_check.py picks them up on its own.
 """
 import argparse
 import ctypes
-import ctypes.wintypes
 import json
 import os
 import sys
@@ -34,6 +33,7 @@ except (AttributeError, OSError):
 import cv2
 
 from detector.cropper import capture_screen
+from press.pointer import cursor_pos
 
 VK = {'C': 0x43, 'V': 0x56, 'X': 0x58, 'B': 0x42, 'F8': 0x77, 'F9': 0x78}
 VK_ESC = 0x1B
@@ -43,10 +43,7 @@ def down(vk):
     return bool(ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000)
 
 
-def cursor():
-    pt = ctypes.wintypes.POINT()
-    ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
-    return int(pt.x), int(pt.y)
+cursor = cursor_pos   # 本文件的旧名字，实现在 press.pointer
 
 
 def main():

@@ -164,6 +164,26 @@ def move_cursor(xy):
     ctypes.windll.user32.SetCursorPos(int(xy[0]), int(xy[1]))
 
 
+def cursor_pos():
+    """Where the system cursor is. -> (x, y)
+
+    MODULE LEVEL, and that is the whole point: `Pointer.cursor_pos` needs a
+    Pointer, and constructing one TAKES THE PICO — a serial port shared with
+    every other agent driving this game. So a script that only wants to read
+    the cursor cannot afford the object, and three of them
+    (`snap_on_key`, `probe_drag_cursor`, `probe_human_drag`) each wrote their
+    own `POINT` struct rather than pay for it. `probe_human_drag`'s reason is
+    the sharpest: it records a HUMAN dragging, so touching the device is the
+    one thing it must not do.
+
+    Symmetric with `move_cursor` above, which exists for the same reason —
+    park the cursor before a screenshot without owning a device.
+    """
+    pt = _POINT()
+    ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+    return pt.x, pt.y
+
+
 class Pointer:
     """Cursor placement, buttons, drags — and relative aiming moves.
 
@@ -322,9 +342,9 @@ class Pointer:
             ctypes.windll.user32.mouse_event(up, 0, 0, 0, 0)
 
     def cursor_pos(self):
-        pt = _POINT()
-        ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
-        return pt.x, pt.y
+        # 方法保留是因为这一层的每个调用点都已经握着一个 Pointer；实现只有
+        # 模块级那一份，见上面 cursor_pos() 里为什么它必须能脱离对象存在。
+        return cursor_pos()
 
     def place(self, x, y, settle=MOVE_WAIT, tries=PLACE_TRIES):
         """Put the system cursor at (x, y) and see that it STAYS. -> bool

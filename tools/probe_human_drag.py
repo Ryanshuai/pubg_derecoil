@@ -34,14 +34,9 @@ user32 = ctypes.windll.user32
 VK_LBUTTON = 0x01
 
 
-class POINT(ctypes.Structure):
-    _fields_ = [('x', ctypes.c_long), ('y', ctypes.c_long)]
-
-
-def cursor():
-    p = POINT()
-    user32.GetCursorPos(ctypes.byref(p))
-    return p.x, p.y
+# 这个探针**不碰鼠标**（它录的是真人的手），所以它不能构造 Pointer —— 那会占掉
+# 共用的 Pico 串口。模块级的 cursor_pos 正是为这种调用方存在的。
+from press.pointer import cursor_pos as cursor
 
 
 def down():

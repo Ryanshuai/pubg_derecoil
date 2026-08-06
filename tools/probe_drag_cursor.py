@@ -37,17 +37,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from press.pointer import (DRAG_HOLD_MS, DRAG_REARM_S, MOVE_WAIT, Pointer,
-                           move_cursor)
+                           cursor_pos, move_cursor)
 
 
-class _POINT(ctypes.Structure):
-    _fields_ = [('x', ctypes.c_long), ('y', ctypes.c_long)]
-
-
-def pos():
-    p = _POINT()
-    ctypes.windll.user32.GetCursorPos(ctypes.byref(p))
-    return p.x, p.y
+pos = cursor_pos      # 本文件的旧名字，实现在 press.pointer
 
 
 # Where the probe parks. Inside the Tab panel's 库存 column, which is where the
