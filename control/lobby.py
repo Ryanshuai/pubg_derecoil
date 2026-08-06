@@ -405,8 +405,24 @@ class LobbyControl:
         return self._pump(LobbyState.LOBBY, timeout, act, 'exit_to_lobby')
 
     def enter_match(self, timeout=ENTER_TIMEOUT):
-        """From the lobby into a running match."""
+        """From the lobby into a running match.
+
+        Clears a reconnect prompt or ERROR dialog first, for the same reason
+        `ensure_in_match` does: both sit OVER the lobby, so the state still
+        classifies as LOBBY and PLAY is sent — into a modal that swallows it.
+        The symptom is not an error, it is this pump retrying a click that
+        cannot land until ENTER_TIMEOUT runs out.
+
+        This was the one of the three policies without that preamble
+        (2026-08-06). Its only caller is the `match` CLI action, which is
+        reached by hand precisely when something has already gone wrong — a
+        firmware flash drops the game to the lobby, sometimes with a dialog up
+        — so the missing clear was worst exactly where it was most likely.
+        """
         def act(state):
+            done = self.click_reconnect() or self.dismiss_error()
+            if done:
+                return done
             if state is LobbyState.LOBBY:
                 return self.press_play()
             if state is LobbyState.MENU:
