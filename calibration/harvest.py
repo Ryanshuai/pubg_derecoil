@@ -619,8 +619,24 @@ def measure_cell(rig, weapon, posture, mags, slot, log, cfg_name, want,
     mode = rig.ensure_fire_mode(weapon)
     want_mode = rig.FIRE_MODE_FOR.get(weapon, 'full')
     if mode is None:
-        print(f"      [!] fire mode unreadable — firing anyway, but if this "
-              f"gun spawned in single fire the cell is worthless")
+        # UNREADABLE IS NOT SAFE ON A GUN THAT SPAWNS SINGLE. ensure_fire_mode's
+        # own docstring says the Mk14 and the DMRs come out single, and a
+        # magazine fired in single mode is one round per trigger pull — the
+        # cell is not noisy, it is measuring a burst that never happened, and
+        # nothing downstream can tell. For those weapons the default assumption
+        # is WRONG, so an unreadable mode has to refuse rather than warn.
+        #
+        # The rest still fire on a warning: they spawn in full, so proceeding
+        # is the likely-correct guess and the detector being briefly blind
+        # should not cost a run.
+        if weapon in weapon_mod.dmr:
+            print(f"      [!] fire mode unreadable on {weapon}, which spawns "
+                  f"SINGLE — refusing rather than measuring one round per "
+                  f"trigger pull")
+            return None
+        print(f"      [!] fire mode unreadable — firing anyway. {weapon} "
+              f"spawns full, so this is the likely-correct guess; a gun that "
+              f"spawned single would make the cell worthless")
     elif mode != want_mode:
         print(f"      [!] {weapon} is in {mode!r} and would not cycle to "
               f"{want_mode!r} — skipping rather than measuring single fire")
