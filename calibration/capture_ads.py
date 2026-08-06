@@ -377,10 +377,6 @@ def _hud_slot(frame, slot):
     return frame[y:y + h, x:x + w]
 
 
-def _zscore(a):
-    a = a.astype(np.float32)
-    return (a - a.mean()) / (a.std() + 1e-6)
-
 
 def hud_match(frame, icon_key):
     """How well each HUD weapon slot matches one weapon. -> {1: s, 2: s}

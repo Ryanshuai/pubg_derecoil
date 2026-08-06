@@ -175,6 +175,8 @@ formula is the game's, not the icon's:
 
 | HUD area | function | formula |
 |---|---|---|
+⚠ **下表里那些函数名指的是 2026-08-06 已删除的代码**（`dl_models/icon_merging.py` 的 `alpha_blend` / `blend_tab_background` / `blend_attachment`）：它们的入参是带 alpha 的美术图，而美术图 2026-08-05 已全仓库删除，函数因此零调用方。**公式是实测的、仍然有效**——名字当标签读，别去 import。
+
 | Weapon HUD (right) | `alpha_blend` | `a*strength*fg + (1-a*strength)*bg` |
 | Tab panel background | `blend_tab_background` | `blur(bg, k=41) * 0.49` |
 | Tab slot, occupied | `blend_attachment` | `a*icon + (1-a)*(0.37*blur(bg,k=49,σ=8) + 44)`, 63×63 with the 2px bevel cropped |

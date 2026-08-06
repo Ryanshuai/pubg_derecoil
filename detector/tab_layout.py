@@ -314,7 +314,14 @@ def slot_tile_box(gun, slot):
 
 
 def slot_window(gun, slot, pad=None):
-    """Outer window a presence test needs. -> (y, x, h, w)"""
+    """Outer window a presence test needs. -> (y, x, h, w)
+
+    ⚠ **零调用方，而且它不是死代码。** 2026-08-06 的可达性扫描把它报成死的、删掉了、
+    又装了回来：它的调用方是**人或 agent 按 skill 跑的一段测量步骤**
+    （`.claude/skills/calibrate-compat`、`calibrate-screen` 都把它写成「外框裁剪」这
+    一步），而那种调用方不在任何 import 图里。删掉它不会让任何测试变红，只会让下一次
+    跑那个 skill 的人调到一个不存在的函数。
+    """
     p = TAB_SLOT_RING_PAD if pad is None else pad
     ty, tx, th, tw = slot_tile_box(gun, slot)
     return (ty - p, tx - p, th + 2 * p, tw + 2 * p)
