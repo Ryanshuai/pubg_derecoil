@@ -43,6 +43,19 @@ returned row 1-24 of a 1440-tall frame. Nothing here uses it.
 this never saw. That is caught rather than silently measured: harvest and
 sweep call `tracking_confirmed()` before magazine 0 as of 2026-08-05, which
 moves the view a known amount and asks whether the reading followed.
+
+⚠ THE FIRST RUN OF THIS REPORTED "nothing tracks" AT EVERY BEARING AND I
+BLAMED THE SCENE — committed it, too: "the character stands on a large flat
+concrete pad, that is the scene, not the method". It was not. The rack still
+held the previous run's VSS, so the red dot profile's seven patches were
+sitting on that gun's integral scope body, and `ensure_weapon_in_hand` only
+checked that A weapon was out. The tell was in the output the whole time —
+`holding m416 in slot 2, 22 rounds`, and 22 is the VSS's magazine.
+
+That is why `band_at` prints every reading rather than a verdict. Four words
+of "nothing tracks" is what let a wrong story stand for an hour; thirty
+numbers would have shown the view never moved at all, which is a different
+fault from the correlator failing to follow it.
 """
 import argparse
 import json
@@ -71,24 +84,41 @@ OUT = os.path.join(ROOT, 'docs', 'pitch', 'pitch_range.json')
 BEARING_COUNTS = 2600
 
 
-def band_at(rig, step=BAND_STEP):
-    """Rise from the bottom clamp and report which rises tracked. -> [counts]
+def band_at(rig, step=BAND_STEP, verbose=True):
+    """Rise from the bottom clamp and report which rises tracked.
+    -> (usable_counts, per_step_readings)
 
     Deliberately a copy of what ViewDriver.calibrate_pitch does rather than a
     call to it: that one also MOVES to the centre and stores state on the rig,
     and this wants the raw observation from several bearings before deciding
     anything.
+
+    ⚠ IT RETURNS WHAT IT SAW, not just the verdict. `calibrate_pitch` prints
+    "no part of the pitch range tracks" and nothing else, which is four words
+    for thirty measurements — and on 2026-08-05 that sent an hour into
+    theorising about the scene when the actual reading was available all
+    along. A gate that cannot say what it saw cannot be argued with.
     """
     rig.view.home_to_clamp(+1)
-    rises, usable = 0, []
+    rises, usable, seen = 0, [], []
     while rises < BAND_MAX:
         prev = rig.tracker.slice_frame(rig.grab())
         rig.mouse.move(0, -step)
         got = rig.view.track_still(timeout_s=0.7, still_s=0.10, prev=prev)
         rises += step
+        seen.append((rises, got))
         if abs(got) > step * BAND_TRACK_FRAC:
             usable.append(rises)
-    return usable
+    if verbose:
+        # Every reading, in rows of six, so the SHAPE is visible: a band that
+        # opens and closes looks nothing like a run of zeros, and "0.0
+        # everywhere" says the view never moved at all, which is a different
+        # fault from "the correlator could not follow it".
+        print('      commanded -%d per step, observed:' % step)
+        for i in range(0, len(seen), 6):
+            print('        ' + '  '.join(
+                f'{r:>4}:{g:+7.1f}' for r, g in seen[i:i + 6]))
+    return usable, seen
 
 
 def main():
@@ -133,7 +163,7 @@ def main():
             for b in range(a.bearings):
                 if b:
                     rig.view.turn(BEARING_COUNTS, 0, settle_s=0.4)
-                usable = band_at(rig)
+                usable, _seen = band_at(rig)
                 if not usable:
                     print(f'  {posture} bearing {b}: nothing tracks')
                     bands.append(None)
