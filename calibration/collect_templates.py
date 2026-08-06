@@ -85,6 +85,7 @@ from config import (HUD_REGIONS, TAB_PIXEL_THRESH, TAB_COUNT_MIN,
                     TAB_COUNT_MAX)
 from detector.attachment_catalog import ATTACHMENTS, ROSTER, SLOTS, fits
 from detector.cropper import capture_screen, win32_cap
+from detector.geometry import detail
 from detector.tab_detector import TabTypeDetector
 from detector.attachment_detector import SLOT_DETAIL_MIN, SLOT_NAMES
 from detector.slot_detector import SlotDetector
@@ -272,16 +273,11 @@ def parse_label(text):
 # Template-free reads — nothing here may depend on a template
 # ════════════════════════════════════════════════════════════
 
-def detail(crop):
-    """High-frequency energy — is UI drawn here, or is it the blurred world?
-
-    Pixel variance does not separate them (blurred scenery is colourful); an
-    icon's hard edges do. Thresholds and their measurements live in tab_items.
-    """
-    if crop is None or crop.size == 0:
-        return 0.0
-    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.ndim == 3 else crop
-    return float(cv2.Laplacian(gray, cv2.CV_32F).var())
+# `detail` is detector/geometry.detail — imported at the top of this file, and
+# re-exported here because tools/ scripts import it from this module by name.
+# It used to be defined here; five other copies of the same Laplacian read had
+# drifted into four different guard sets before they were merged 2026-08-06.
+# Thresholds still live with their callers, deliberately: see geometry.detail.
 
 
 def change(a, b):

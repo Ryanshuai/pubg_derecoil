@@ -53,10 +53,9 @@ from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import cv2
-
 from detector.attachment_catalog import ATTACHMENTS, ROSTER
 from detector.cropper import win32_cap
+from detector.geometry import detail
 from detector.tab_layout import equip_region
 from control.focus import ensure_focus, game_focused
 
@@ -87,8 +86,7 @@ def backpack_worn(crop=None):
     """Is the character wearing a backpack? Reads the equipment slot."""
     if crop is None:
         crop = win32_cap(equip_region('backpack'))
-    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    return float(cv2.Laplacian(gray, cv2.CV_32F).var()) >= BACKPACK_DETAIL_MIN
+    return detail(crop) >= BACKPACK_DETAIL_MIN
 
 
 def open_tab(ac, label='the backpack'):

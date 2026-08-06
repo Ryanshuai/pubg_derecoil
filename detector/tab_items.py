@@ -74,6 +74,7 @@ import numpy as np
 
 from detector.attachment_detector import AttachmentDetector
 from detector.attachment_catalog import ATTACHMENTS
+from detector.geometry import detail
 from detector.tab_layout import (PANELS, INV_ROWS, icon_box, row_point,
                                  ATT_SLOT_XY)
 from config import HUD_REGIONS, SCREEN_W, SCREEN_H
@@ -181,8 +182,7 @@ class TabItemDetector:
         cell = frame[y0:y1, x0:x1]
         if cell.size == 0:
             return None, False
-        gray = cv2.cvtColor(cell, cv2.COLOR_BGR2GRAY)
-        occupied = float(cv2.Laplacian(gray, cv2.CV_32F).var()) >= ROW_DETAIL_MIN
+        occupied = detail(cell) >= ROW_DETAIL_MIN
         if not occupied:
             return None, False
         # AT 80x80, ITS OWN SIZE. This used to resize to 63x63 so the row would
@@ -299,8 +299,7 @@ def panel_rows(frame, panel='inventory'):
         cell = frame[y0:y1, x0:x1]
         if cell.size == 0:
             break
-        gray = cv2.cvtColor(cell, cv2.COLOR_BGR2GRAY)
-        if float(cv2.Laplacian(gray, cv2.CV_32F).var()) >= ROW_DETAIL_MIN:
+        if detail(cell) >= ROW_DETAIL_MIN:
             n = i + 1
     return n
 

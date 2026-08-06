@@ -44,6 +44,7 @@ import numpy as np
 
 from config import HUD_REGIONS
 from detector.attachment_catalog import ATTACHMENTS, compatible
+from detector.geometry import detail
 
 SLOT_NAMES = ['scope', 'muzzle', 'grip', 'magazine', 'stock']
 
@@ -299,8 +300,7 @@ class AttachmentDetector:
         is not which template is closest, it is that there is no box on screen
         to hold one.
         """
-        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.ndim == 3 else crop
-        return float(cv2.Laplacian(gray, cv2.CV_32F).var()) >= SLOT_DETAIL_MIN
+        return detail(crop) >= SLOT_DETAIL_MIN
 
     def candidates(self, slot, weapon=None):
         """Templates worth testing in this slot of this weapon.

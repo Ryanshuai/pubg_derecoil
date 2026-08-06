@@ -1,10 +1,23 @@
-"""Screen-agnostic geometry primitives shared by the layout modules.
+"""Screen-agnostic primitives shared by the layout and reading modules.
 
 Nothing here knows which screen it is looking at — no ROIs, no thresholds, no
 game. That is the point: `segments` was living in spawner_layout.py, so
 lobby_nav.py had to import the spawner's module to find rows in the lobby's
 tab bar. A primitive used by two screens belongs to neither.
+
+⚠ **The module is named for `segments`, and two of the three things in it are
+not geometry.** `cut` slices and `detail` reads pixels. The name is kept
+anyway because the contract that actually decides what may live here is the
+paragraph above — knows-no-screen — and splitting on the word "geometry" would
+put shared primitives in two places, which is the failure this module exists
+to end. Judge additions by the contract, not the filename.
+
+`detail` is why this file imports cv2 at all; everything else here is pure
+Python. That cost is deliberate: the alternative home, `detector/utils.py`,
+pulls in torch and `dl_models.train`, and `control/stock.py` needs a Laplacian
+reading without needing a neural network.
 """
+import cv2
 
 
 def cut(frame, roi):
@@ -30,6 +43,45 @@ def cut(frame, roi):
     """
     y, x, h, w = roi
     return frame[y:y + h, x:x + w]
+
+
+def detail(crop):
+    """High-frequency energy in a crop. -> float
+
+    The one question underneath every "is UI drawn here, or is it the blurred
+    world showing through": an icon has hard edges, blurred scenery does not.
+    **Pixel variance cannot ask it** — blurred scenery is colourful, so its
+    variance is high while its Laplacian is not.
+
+    Six copies of `float(cv2.Laplacian(gray, CV_32F).var())` were live on
+    2026-08-06, in five files, under five names — `detail`, two different
+    `drawn`, `backpack_worn`, `panel_rows`/`_read_row`. They did not disagree
+    about the maths. They disagreed about the GUARDS, which is the drift that
+    does not announce itself:
+
+        collect_templates.detail    None guard, grayscale guard
+        weapon_hud_detector.drawn   None guard, grayscale guard
+        attachment_detector.drawn                grayscale guard
+        stock.backpack_worn         neither
+        tab_items ×2                size guard only
+
+    So `backpack_worn` raised on a single-channel crop and
+    `attachment_detector.drawn` raised on None, and each would have done so
+    only on the day some caller first handed it one.
+
+    **The threshold does NOT come along.** Every caller keeps its own, and they
+    are genuinely different readings of different boxes — SLOT_DETAIL_MIN 100,
+    ROW_DETAIL_MIN 100, BACKPACK_DETAIL_MIN 300, PLATE_INK_MIN 12.0, each
+    measured against its own corpus. Merging those would be the actual bug.
+
+    Returns 0.0 rather than raising on None / empty, which is safe precisely
+    BECAUSE every threshold is positive: `0.0 >= MIN` is False everywhere, and
+    "nothing drawn" is the right answer for a crop that does not exist.
+    """
+    if crop is None or crop.size == 0:
+        return 0.0
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.ndim == 3 else crop
+    return float(cv2.Laplacian(gray, cv2.CV_32F).var())
 
 
 def segments(profile, thresh, min_len, max_len=None, gap=0):
