@@ -18,18 +18,20 @@ identically. Regression: temp_debug/eval_highlight_jitter.py.
 import cv2
 import numpy as np
 
-
-def _dewhite(img_bgr):
-    bg = cv2.GaussianBlur(img_bgr.astype(np.float32), (31, 31), 10)
-    signal = np.clip((img_bgr.astype(np.float32) - bg) * 2, 0, 255)
-    return cv2.cvtColor(signal.astype(np.uint8), cv2.COLOR_BGR2GRAY)
+# 同一个算子在这里曾经有第二份逐字相同的实现（`_dewhite`）：高斯背景估计、减、
+# ×2、钳位、转灰度，两边连 (31,31) 和 sigma=10 都一样。带 docstring 的那份是原件
+# ——它说得出这个通道是干什么的（weapon HUD 检测的第 4 通道），而副本说不出。
+#
+# `detector/ads_detector.py` 早就在从那里 import 同一个函数，所以方向是现成的，
+# 这里只是把最后一份副本并回去。
+from dl_models.icon_merging import dewhite
 
 
 def _combined_max(img_bgr):
     """How lit this slot is. Two channels, because the HUD has two ways to
     draw an active weapon: the white overlay, and the red one it uses when the
     weapon is unusable. Whichever is stronger is the answer."""
-    dw = _dewhite(img_bgr).astype(np.float32)
+    dw = dewhite(img_bgr).astype(np.float32)
     r = img_bgr[:, :, 2].astype(np.float32)
     g = img_bgr[:, :, 1].astype(np.float32)
     return max(float(np.percentile(dw, 95)), float(np.percentile(r - g, 90)))
