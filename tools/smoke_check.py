@@ -153,11 +153,15 @@ _section("hardware")
 
 
 def _pico():
-    from serial.tools import list_ports
-    for p in list_ports.comports():
-        if p.vid == 0xCAFE and p.pid in (0x4001, 0x4005):
-            return f"{p.device}  vid=0x{p.vid:04X} pid=0x{p.pid:04X}"
-    raise RuntimeError("Pico not on the serial bus (check USB / PICO_PORT)")
+    # press.pico_mouse.find_pico, NOT a second comports() scan of our own.
+    # This used to repeat both the VID and the PID tuple, and a smoke check
+    # that recognises the Pico by its own list can report green for a device
+    # the driver would then refuse to open.
+    from press.pico_mouse import find_pico
+    p = find_pico()
+    if p is None:
+        raise RuntimeError("Pico not on the serial bus (check USB / PICO_PORT)")
+    return f"{p.device}  vid=0x{p.vid:04X} pid=0x{p.pid:04X}"
 
 
 _check('pico mouse', _pico)

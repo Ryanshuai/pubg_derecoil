@@ -466,14 +466,37 @@ def other_agents():
     return _other_python()
 
 
+# TinyUSB's example VID, and the two PIDs this firmware has shipped under.
+# Named rather than inline because the answer to "is the Pico on the bus" has
+# to be the SAME answer everywhere: tools/smoke_check.py had its own copy of
+# both literals, so a firmware built under a third PID would have made the
+# cold-start check report a healthy Pico that robot.py could not open.
+PICO_VID = 0xCAFE
+PICO_PIDS = (0x4001, 0x4005)
+
+
+def find_pico():
+    """The Pico's serial port, or None. -> ListPortInfo | None
+
+    Returns the port OBJECT, not its device string, because the callers that
+    only want to report differ from the ones that want to connect -- smoke
+    prints vid/pid, `_find_pico_port` wants `.device`, and neither should be
+    re-scanning comports to get the other half.
+    """
+    for p in serial.tools.list_ports.comports():
+        if p.vid == PICO_VID and p.pid in PICO_PIDS:
+            return p
+    return None
+
+
 def _find_pico_port():
     """Auto-detect Pico CDC port by VID:PID."""
-    for p in serial.tools.list_ports.comports():
-        if p.vid == 0xCAFE and p.pid in (0x4001, 0x4005):
-            return p.device
-    raise RuntimeError(
-        "Pico mouse not found. Check USB connection or set PICO_PORT in config.py."
-    )
+    p = find_pico()
+    if p is None:
+        raise RuntimeError(
+            "Pico mouse not found. Check USB connection or set PICO_PORT in config.py."
+        )
+    return p.device
 
 
 def get_mouse(port=None):
