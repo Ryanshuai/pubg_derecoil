@@ -2088,7 +2088,12 @@ class InventoryControl:
             rows = view.rows('nearby')
             if not rows:
                 break
-            before = tuple((getattr(i, 'key', None) or '?') if i is not None
+            # `i.key`, not `getattr(i, 'key', None)`: Item declares key in
+            # __slots__ and __init__ always assigns it. The `or '?'` DOES
+            # carry weight and stays — key is None for a template whose asset
+            # has no catalogue entry, which is exactly the row a collection
+            # run is here to photograph.
+            before = tuple((i.key or '?') if i is not None
                            else '-' for i in view.nearby)
             n = 0
             for _ in range(rows):
@@ -2101,7 +2106,7 @@ class InventoryControl:
             rows = after.rows('nearby')
             if not rows:
                 break
-            cur = tuple((getattr(i, 'key', None) or '?') if i is not None
+            cur = tuple((i.key or '?') if i is not None
                         else '-' for i in after.nearby)
             if cur == before:
                 # Nothing moved. Repeating is how tidy() once looped forever
@@ -2140,7 +2145,7 @@ class InventoryControl:
             rows = view.rows('inventory')
             if not rows:
                 break
-            before = tuple((getattr(i, 'key', None) or '?') if i is not None
+            before = tuple((i.key or '?') if i is not None
                            else '-' for i in view.inventory)
             for _ in range(rows):
                 rec = self.discard(at_inv(0), retries=retries)
@@ -2151,7 +2156,7 @@ class InventoryControl:
             rows = after.rows('inventory')
             if not rows:
                 break
-            cur = tuple((getattr(i, 'key', None) or '?') if i is not None
+            cur = tuple((i.key or '?') if i is not None
                         else '-' for i in after.inventory)
             if cur == before:
                 return batch(out, error=f'{rows} row(s) left and the panel did '
