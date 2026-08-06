@@ -298,6 +298,17 @@ class LobbyControl:
         `act(state)` returns a label to log, or None to do nothing for that
         state. It is called at most once per RETRY_AFTER so a slow transition
         is not mistaken for a lost keypress.
+
+        ⚠ **`exit_to_lobby`, `enter_match` and `ensure_in_match` ARE the merged
+        form — do not fold them further.** A duplicate-intent scan pairs the
+        three of them on 15 shared rare tokens (`_pump`, `click_exit`,
+        `click_reconnect`, `dismiss_error`, `press_esc`, `press_play`, the
+        LobbyState members), and that overlap is the design, not a smell: this
+        method is the machine and each of the three is a POLICY over it, six
+        lines long, differing only in which state gets which click and what
+        counts as arrival. Anything that unified the three `act` closures would
+        have to take the state->action table as an argument, i.e. would
+        reinvent the closures with worse names.
         """
         t0 = time.perf_counter()
         # Two counters, because they answer different questions. `retries` is
