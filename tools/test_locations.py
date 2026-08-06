@@ -22,10 +22,10 @@ try:
 except (AttributeError, OSError):
     pass
 
-from control.inventory import (MOVES, PLATE_INK_MIN, InventoryControl,
-                            at_ground, at_gun, at_inv, at_slot, batch, is_gun,
-                            is_slot, kind_of, loc_str, move_info, parse_loc,
-                            step)
+from control.inventory import (ANY_ITEM, MOVES, PLATE_INK_MIN,
+                            InventoryControl, at_ground, at_gun, at_inv,
+                            at_slot, batch, is_gun, is_slot, kind_of, loc_str,
+                            move_info, parse_loc, step)
 from detector.tab_layout import INV_ROWS, gun_tag_point, row_point
 
 FAILS = []
@@ -160,6 +160,43 @@ check('one bad step sinks the batch',
 check('an empty batch with an error is NOT ok',
       batch([], error='the Tab screen never came up')['ok'], False)
 check('an empty batch with no error is ok', batch([])['ok'], True)
+
+print('\n=== _await returns the record shape its three callers publish ===')
+# ADDED 2026-08-06 AFTER THIS SUITE LET A NameError THROUGH. _await used to
+# return tuples and all three callers rebuilt the same dict from them; folding
+# that into _await left one stale tuple unpack on drag()'s RETRY guard, and
+# `kit`, `locations`, `smoke` and `layering` were all green with it in place —
+# nothing offline reaches a drag that fails once and tries again.
+#
+# So the shape is asserted where it is CONSUMED, not just produced: rec['checks']
+# is read by callers, by _checks_str, and by the journal, and a key renamed on
+# one side is three silent breakages.
+_await_probe = InventoryControl.__new__(InventoryControl)
+_await_probe._frame = lambda: None
+_await_probe._slot_states = lambda f: {1: {'muzzle': 'comp_ar', 'grip': ''}, 2: {}}
+_before = {1: {'muzzle': '', 'grip': ''}, 2: {}}
+_rows = _await_probe._await([(1, 'muzzle', ANY_ITEM), (1, 'grip', 'vert_grip')],
+                            _before, timeout=0)
+check('_await yields dicts, not tuples', isinstance(_rows[0], dict), True)
+# `if isinstance` and not a bare sorted(): on the tuple shape this suite exists
+# to reject, sorted() raises TypeError comparing str to int, which aborts the
+# run and takes the six checks below it with it. A gate is allowed to fail; it
+# is not allowed to stop the other gates from reporting.
+check('_await record keys',
+      sorted(_rows[0]) if isinstance(_rows[0], dict) else _rows[0],
+      ['gun', 'ok', 'seen', 'slot', 'want'])
+# ANY_ITEM must compare against `before`, or a slot that already held
+# something passes on the strength of what was there before the gesture.
+check('ANY_ITEM passes when the slot changed', _rows[0]['ok'], True)
+check('a named want fails when the slot is empty', _rows[1]['ok'], False)
+check('_checks_str reads the same shape',
+      'gun1.grip=<empty> (wanted vert_grip)' in
+      InventoryControl._checks_str(_rows), True)
+# drag()'s retry guard: "it had an effect, just not the one asked for" -- the
+# exact expression that was left unpacking tuples.
+check('the retry guard names the slot that moved',
+      [(c['gun'], c['slot']) for c in _rows
+       if c['seen'] != _before[c['gun']][c['slot']]], [(1, 'muzzle')])
 
 print('\n=== the journal reader agrees with the layer it reads ===')
 # tools/drag_log.py imports nothing on purpose -- it has to stay readable when

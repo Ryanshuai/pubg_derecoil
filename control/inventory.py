@@ -1320,9 +1320,7 @@ class InventoryControl:
                           f'(unverified)')
                 return rec
 
-            results = self._await(checks, before)
-            rec['checks'] = [{'gun': g, 'slot': s, 'want': w, 'seen': seen,
-                              'ok': ok} for g, s, w, ok, seen in results]
+            rec['checks'] = self._await(checks, before)
             if all(r['ok'] for r in rec['checks']):
                 rec['ok'] = True
                 self._log(f'{loc_str(src)} -> {loc_str(dst)}: ok '
@@ -1333,8 +1331,8 @@ class InventoryControl:
                 break
             # Retrying is safe only if the screen is exactly as it was: then
             # the item never left, so the source row is still the source row.
-            moved = [(g, s) for g, s, _, _ok, seen in results
-                     if seen != before[g][s]]
+            moved = [(c['gun'], c['slot']) for c in rec['checks']
+                     if c['seen'] != before[c['gun']][c['slot']]]
             if moved:
                 rec['error'] = ('drag had an effect but not the expected one; '
                                 'not retrying, re-detect first')
@@ -1442,9 +1440,7 @@ class InventoryControl:
         for attempt in range(retries + 1):
             rec['attempts'] = attempt + 1
             self.pointer.right_click_at(x, y)
-            results = self._await(checks, before)
-            rec['checks'] = [{'gun': g, 'slot': s, 'want': w, 'seen': seen,
-                              'ok': ok} for g, s, w, ok, seen in results]
+            rec['checks'] = self._await(checks, before)
             landed = all(r['ok'] for r in rec['checks'])
             # The plate is re-read whatever the verdict: this click is aimed at
             # a PANEL row, so it should not be able to touch the weapon at all,
@@ -1762,9 +1758,7 @@ class InventoryControl:
         for attempt in range(retries + 1):
             rec['attempts'] = attempt + 1
             self.pointer.right_click_at(x, y)
-            results = self._await(checks, before)
-            rec['checks'] = [{'gun': g, 'slot': s, 'want': w, 'seen': seen,
-                              'ok': ok} for g, s, w, ok, seen in results]
+            rec['checks'] = self._await(checks, before)
             cleared = all(r['ok'] for r in rec['checks'])
             # THIS is the gesture that loses weapons, so the plate either side
             # of it is the whole reason the journal covers clicks. The slot
@@ -2772,11 +2766,20 @@ class InventoryControl:
     def _await(self, checks, before, timeout=VERIFY_TIMEOUT):
         """Poll the weapon slots until every check passes, or time runs out.
 
-        Returns [(gun, slot, want, ok, seen), ...]. ANY_ITEM additionally
-        demands the slot differ from `before`: dropping onto a slot that
-        already reads as *something* would otherwise pass on the strength of
-        what was there before the drag, so a swap that never happened would
-        report success.
+        Returns the CHECK RECORDS themselves — [{'gun', 'slot', 'want', 'ok',
+        'seen'}, ...] — and not the tuples it used to. All three callers
+        (`drag`, `right_click_equip`, `right_click_unequip`) immediately
+        rebuilt exactly this dict from those tuples, in three verbatim copies,
+        and the shape is not private to them: it goes into `rec['checks']`
+        that callers read, into `_checks_str`, and into the journal. A
+        conversion that every caller performs identically is not a
+        conversion, and a fourth caller inventing its own key names would
+        break `_checks_str` and the journal at once.
+
+        ANY_ITEM additionally demands the slot differ from `before`: dropping
+        onto a slot that already reads as *something* would otherwise pass on
+        the strength of what was there before the drag, so a swap that never
+        happened would report success.
         """
         deadline = time.perf_counter() + timeout
         while True:
@@ -2786,8 +2789,9 @@ class InventoryControl:
                 seen = states[gun][slot]
                 ok = (seen != '' and seen != before[gun][slot]
                       if want == ANY_ITEM else seen == want)
-                out.append((gun, slot, want, ok, seen))
-            if all(r[3] for r in out) or time.perf_counter() >= deadline:
+                out.append({'gun': gun, 'slot': slot, 'want': want,
+                            'ok': ok, 'seen': seen})
+            if all(r['ok'] for r in out) or time.perf_counter() >= deadline:
                 return out
             time.sleep(VERIFY_POLL)
 
