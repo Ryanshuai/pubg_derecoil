@@ -915,6 +915,13 @@ class InventoryControl:
         self.rows = {'nearby': None, 'inventory': None}
         self.guns = {1: None, 2: None}        # catalog key per weapon slot
         self.held = None                      # weapon in hand, or None if unknown
+        # The poll sequence _await_panel records, consumed and cleared by
+        # _journal. Declared here rather than sprung into existence on first
+        # use: _journal ran `getattr(self, 'last_poll', None)` because a drag
+        # journalled before any panel-to-panel wait would otherwise raise, and
+        # a getattr on YOUR OWN attribute is a note saying the object has no
+        # settled shape. Giving it a home is the fix; the getattr only hid it.
+        self.last_poll = None
         # Overrides passed straight to Pointer.drag — the gesture's timing.
         # Every calibration run reaches the Tab screen through here, so these
         # are worth measuring rather than guessing; tools/probe_drag_speed.py
@@ -2674,7 +2681,13 @@ class InventoryControl:
     def _journal(self, src, dst, p0, p1, panels, attempt, rows0, gesture,
                  moved):
         """One line for a drag: the gesture, the geometry and the outcome."""
-        d = getattr(self.pointer, 'last_drag', {}) or {}
+        # Pointer.__init__ creates last_drag as {} and drag() only ever
+        # reassigns it to a dict, so neither a getattr default nor an `or {}`
+        # can fire. Reading it directly is also the thing that would BREAK
+        # loudly if that ever stopped being true, which is the point: the
+        # guard's only real effect was to make a missing recorder look like a
+        # drag with no geometry.
+        d = self.pointer.last_drag
         self._stamp(
             'drag', src, dst, attempt,
             want={'grab': list(p0), 'release': list(p1)},
@@ -2684,8 +2697,7 @@ class InventoryControl:
             steps=d.get('steps'), drag_s=round(d.get('s') or 0.0, 3),
             gesture=bool(gesture), failed_at=d.get('failed_at'),
             rows_before=list(rows0) if rows0 else None,
-            poll=getattr(self, 'last_poll', None) if moved is not None
-                 else None,
+            poll=self.last_poll if moved is not None else None,
             moved=moved)
         self.last_poll = None
 
@@ -2699,7 +2711,7 @@ class InventoryControl:
         would not stay put and the click landed somewhere unverified, which on
         a slot-aimed gesture is the state that drops the gun.
         """
-        c = getattr(self.pointer, 'last_click', {}) or {}
+        c = self.pointer.last_click          # see _journal: always a dict
         pl = c.get('place') or {}
         self._stamp(
             kind, src, dst, attempt,
