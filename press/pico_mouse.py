@@ -17,6 +17,7 @@ import queue
 import threading
 import time
 import struct
+import psutil
 import serial
 import serial.tools.list_ports
 
@@ -432,11 +433,16 @@ class PicoMouse:
 
 
 def _other_python():
-    """Other python processes in this project, as 'pid cmdline' lines."""
-    try:
-        import psutil
-    except ImportError:
-        return ''
+    """Other python processes in this project, as 'pid cmdline' lines.
+
+    psutil is imported at module level, not behind `try: import psutil /
+    except ImportError: return ''`. That fallback translated "the library is
+    missing" into **"nobody else is running"** — the one answer that is unsafe
+    to be wrong about, since the whole point of this call is to stop two agents
+    driving one Pico and one game window. psutil is a declared dependency
+    (pixi.toml), so its absence is a broken environment, and `pixi run smoke`
+    is where a broken environment should surface — loudly, at import, once.
+    """
     me = os.getpid()
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__))).lower()
     out = []

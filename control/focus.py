@@ -11,6 +11,7 @@ key while the game is not frontmost types into whatever *is* frontmost, so
 """
 import time
 
+import psutil
 import win32gui
 import win32process
 
@@ -41,8 +42,13 @@ def window_info(hwnd):
         out['title'] = win32gui.GetWindowText(hwnd) or ''
     except Exception:
         pass
+    # The `except` stays and the import does not. psutil.Process(pid) really
+    # does raise for a process this one may not inspect (NoSuchProcess,
+    # AccessDenied) and an unreadable window is a normal answer here — but a
+    # MISSING psutil is a broken environment, and hiding that inside the same
+    # handler makes every window on the machine report exe='' with no way to
+    # tell "cannot inspect it" from "the library is not installed".
     try:
-        import psutil
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
         out['pid'] = pid
         out['exe'] = psutil.Process(pid).name().lower()
