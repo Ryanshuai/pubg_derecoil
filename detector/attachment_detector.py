@@ -366,12 +366,13 @@ class AttachmentDetector:
         '' covers both "empty" and "not this weapon's slot"; use read_slots if
         the distinction matters.
         """
-        if crop is None or crop.size == 0:
-            return ''
-        names = self.candidates(slot, weapon)
-        if not names or not self.drawn(crop):
-            return ''
-        name, mse, _ = self.best_two(crop, names)
+        # BEHAVIOUR CHANGED 2026-08-06: this used to call best_two WITHOUT
+        # prefer='solved', so it ranked slot tiles against whichever variant
+        # happened to be index 0 — `.row`, the 库存 list picture, for 38 of the
+        # bank's 41 assets. Both callers cut HUD slot tiles (capture_ads reads
+        # `scope`, tools/regression_check reads `muzzle`), so the preference
+        # was simply missing, not deliberately absent.
+        name, mse, _ = self.read_tile(crop, slot, weapon)
         return '' if mse > MSE_EMPTY_TH else name
 
     def read_slots(self, frame, weapons=None):

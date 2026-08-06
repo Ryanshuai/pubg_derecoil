@@ -60,14 +60,18 @@ def edges(crop):
 def match(det, crop, slot, weapon):
     """What the template bank makes of this tile. -> (name, mse, margin)
 
-    The bank is narrowed by weapon, exactly as read_slots narrows it, so the
-    numbers here are the ones the live reader would see and not a wider bank's.
+    `AttachmentDetector.read_tile`, which is what the live reader calls — the
+    whole value of this probe is that its numbers ARE the reader's numbers, and
+    the only way to keep that true is to share the code rather than restate it.
+
+    ⚠ This used to restate it, and the restatement had drifted: it called
+    best_two without `prefer='solved'`, so it ranked tiles against the 库存 row
+    picture for 38 of the bank's 41 assets while the reader ranked them against
+    the slot picture. Its docstring claimed parity the whole time. Numbers
+    published before 2026-08-06 — including the MSE percentiles quoted in
+    detector/slot_detector.py — were measured that way.
     """
-    names = det.candidates(slot, weapon)
-    if not names or not det.drawn(crop):
-        return ('', float('inf'), 0.0)
-    name, mse, margin = det.best_two(crop, names)
-    return (name, float(mse), float(margin))
+    return det.read_tile(crop, slot, weapon)
 
 
 def gather(root, want_slot=None, targets=('backdrop',)):
