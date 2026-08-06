@@ -70,7 +70,9 @@ FILL = ['red_dot', 'holo', 'laser', 'comp_ar', 'comp_smg', 'supp_ar',
 
 def rows_of(stock):
     """The visible inventory rows, as names, in order."""
-    return [(getattr(i, 'key', None) or '?') if i is not None else '-'
+    # Item declares key in __slots__; the `or '?'` stays because key is None
+    # for an asset with no catalogue entry, and those rows still occupy one.
+    return [(i.key or '?') if i is not None else '-'
             for i in stock.view.inventory]
 
 
@@ -144,7 +146,7 @@ def main():
         # around and prove nothing.
         target = None
         for item in stock.view.inventory:
-            if item is not None and getattr(item, 'key', None):
+            if item is not None and item.key:
                 target = item
                 break
         if target is None:
