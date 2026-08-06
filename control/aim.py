@@ -37,6 +37,29 @@ a wrapped absolute reading that lands near ZERO looks exactly like success —
 knocked 300 counts off centre, absolute_offset() came back -0.3. That is what
 tracking_confirmed() exists for.
 
+TWO NAMED EXCEPTIONS, AND WHAT EARNS THE NAME. `turn()` and `ads_tap()` are
+open loop. They are named here so they stay two rather than becoming a habit,
+and so the argument for them lives in ONE place instead of being restated in
+every docstring that needs it:
+
+  turn()      has no closed-loop equivalent to defer to. It exists to CHANGE
+              WHAT IS BEHIND THE PANEL, and "different" is the whole
+              requirement -- where it lands is not unchecked, it is irrelevant.
+  ads_tap()   does have one (control/gun.py's ensure_ads, which watches the
+              crosshair), and therefore REFUSES to run for callers who can
+              reach it. It is open loop only for the one caller that cannot.
+
+That caller is calibration/capture_ads.py, and its reason is CIRCULAR RATHER
+THAN LAZY: every loop that could be closed around a sight coming up needs
+detector/ads_detector.py, and capture_ads exists to photograph the transition
+that detector is FITTED TO. Confirming the sight with the detector under
+construction is confirming it against itself. The same sentence governs
+`open_loop()`, which is the constructor that hands out a ViewDriver with no
+tracker for exactly this reason.
+
+So the criterion is **"refuse when a verified route exists FOR YOU"**, not
+"refuse because it is open loop". turn() takes no guard; ads_tap() raises.
+
 WHY IT MATTERS THAT THIS IS CLOSED LOOP: PUBG clamps pitch, and a magazine
 fired against the clamp measures near-zero recoil while reporting nothing
 wrong. A silently corrupted measurement is worse than a failed one. The open
@@ -167,10 +190,9 @@ class ViewDriver:
         tracker that does not exist, and this class's whole discipline is that
         an unverified position is not a position.
 
-        The one caller is calibration/capture_ads.py, and its reason is
-        circular rather than lazy: it PHOTOGRAPHS the ADS transition so that
-        detector/ads_detector.py can be fitted to it. Every loop that could be
-        closed around a sight going up needs that detector.
+        The one caller is calibration/capture_ads.py; the circularity that
+        makes it legitimate is in this module's header, stated once for both
+        this and ads_tap().
 
         The Pointer comes from press/pointer.py's strict constructor, so no
         Pico means no run — the reason is written there, and it applies to
@@ -210,13 +232,13 @@ class ViewDriver:
     def turn(self, yaw, pitch=0, settle_s=0.0):
         """Swing the view, OPEN LOOP, and do not claim to know where it ended.
 
-        The exception to this module's rule, and it is named so it stays an
-        exception. Everything else here moves in order to ARRIVE somewhere and
-        proves it against the screen. This one moves in order to CHANGE WHAT
-        IS BEHIND THE PANEL: calibration/collect_templates.py photographs the
-        translucent Tab screen against a dozen different backdrops, and where
-        the view lands is not merely unchecked, it is irrelevant — different
-        is the whole requirement.
+        The first of the module's two named exceptions (see the header for
+        what earns the name). Everything else here moves in order to ARRIVE
+        somewhere and proves it against the screen. This one moves in order to
+        CHANGE WHAT IS BEHIND THE PANEL: calibration/collect_templates.py
+        photographs the translucent Tab screen against a dozen different
+        backdrops, and where the view lands is not merely unchecked, it is
+        irrelevant — different is the whole requirement.
 
         Callers used to get this by reaching through to `rig.mouse.move`,
         which is worse than it looks: a HAL member pulled out of a high-level
@@ -242,15 +264,10 @@ class ViewDriver:
         the gate, and reported +588 counts of residual: the analysis applies
         the scoped K of 1.55 to motion that happened at the hip's 0.50.
 
-        This cannot be that, and the reason is circular rather than lazy.
-        ensure_ads() reads detector/ads_detector.py, and the only caller here
-        is calibration/capture_ads.py, which exists to photograph the
-        transition that detector is FITTED TO. Confirming the sight is up with
-        the detector under construction is confirming it against itself. So
-        nothing is checked, and the caller is the one that must be able to
-        live with that — capture_ads does, because a human looks at
-        probe.jpg before a run and the report is built on medians across
-        views.
+        This cannot be that, for the circularity in the module header. What
+        that leaves is the caller's problem, and capture_ads can carry it: a
+        human looks at probe.jpg before a run, and the report is built on
+        medians across views.
 
         ADS IS A TAP, NOT A HOLD. Holding the right button down is
         hip/shoulder aim and the sight picture never appears; it is the
@@ -261,21 +278,9 @@ class ViewDriver:
         leaving it out is worse than it looks: the next thing captured starts
         already scoped in and nothing downstream can tell.
 
-        REFUSED ON A CLOSED-LOOP DRIVER, and that guard is the point of this
-        paragraph. A docstring saying "prefer ensure_ads()" is a plea; this is
-        a refusal. A ViewDriver holding a tracker was built by sweep.Rig, and
-        Rig also builds the GunDriver whose ensure_ads() watches the crosshair
-        — so for that caller the closed-loop version is not merely preferable,
-        it is already in the room. Without this, the method sits on rig.view
-        as a second, silent, unverified ADS path beside the verified one, and
-        the two disagree exactly when it matters (the sight did not come up).
-
-        turn() deliberately has NO such guard, and the difference is the whole
-        criterion: turn() has no closed-loop equivalent to defer to — changing
-        the scenery behind a panel is not a position anyone can verify — so
-        every caller may legitimately need it. This one does have an
-        equivalent. The rule is "refuse when a verified route exists for you",
-        not "refuse because it is open loop".
+        A docstring saying "prefer ensure_ads()" would be a plea; the guard
+        below is a refusal, and it says why in its own message rather than
+        having this paragraph say it twice.
         """
         if self.tracker is not None:
             raise RuntimeError(
