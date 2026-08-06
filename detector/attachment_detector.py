@@ -326,6 +326,40 @@ class AttachmentDetector:
 
     # ── entry points ──
 
+    def read_tile(self, crop, slot, weapon=None):
+        """One already-cut SLOT TILE -> (name, mse, margin).
+
+        ('', inf, 0.0) when there is nothing to read: no crop, no candidate
+        template for this weapon's slot, or nothing drawn in the tile.
+
+        **This exists to carry `prefer='solved'` so no caller has to remember
+        it**, and the reason is measured, not stylistic. `prefer` picks the
+        variant the RANKING pass scores, and 38 of the bank's 41 assets have
+        `.row` at variant 0 — the 库存 row-size picture, which is not what a
+        weapon tile draws. Ranking a tile against it is the exact regression
+        `_rank_variant`'s docstring records as costing 16 slot reads.
+
+        Four functions were doing candidates -> drawn -> best_two on a slot
+        tile, and two of them passed `prefer` while two did not (2026-08-06).
+        Nothing about that is visible in a result: all four return a plausible
+        asset name either way. The two that agree are routed through here; the
+        two that do not are a behaviour change and are NOT folded into this
+        commit -- see the report.
+
+        No thresholds are applied. MSE_EMPTY_TH and MARGIN_MIN are the
+        CALLER's verdict: read_slots turns a weak match into None and an
+        unseparated one into AMBIGUOUS, while slot_detector wants the raw pair.
+        Baking either in here would have made this mergeable with only one of
+        them.
+        """
+        if crop is None or crop.size == 0:
+            return ('', float('inf'), 0.0)
+        names = self.candidates(slot, weapon)
+        if not names or not self.drawn(crop):
+            return ('', float('inf'), 0.0)
+        name, mse, margin = self.best_two(crop, names, prefer='solved')
+        return (name, float(mse), float(margin))
+
     def classify_crop(self, crop, slot, weapon=None):
         """One slot crop -> asset name, or '' for nothing recognised.
 
@@ -353,14 +387,8 @@ class AttachmentDetector:
             slots = {}
             for slot in SLOT_NAMES:
                 y, x, h, w = HUD_REGIONS[f'att_{gun}_{slot}']
-                crop = frame[y:y + h, x:x + w]
-                names = self.candidates(slot, weapon)
-                if crop.size == 0 or not names or not self.drawn(crop):
-                    slots[slot] = None
-                    continue
-                # prefer='solved': these crops ARE slot tiles, and the bank
-                # holds a picture taken in one.
-                name, mse, margin = self.best_two(crop, names, prefer='solved')
+                name, mse, margin = self.read_tile(
+                    frame[y:y + h, x:x + w], slot, weapon)
                 if mse > MSE_EMPTY_TH:
                     slots[slot] = None
                 elif margin < MARGIN_MIN:

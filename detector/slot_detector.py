@@ -156,14 +156,11 @@ class SlotDetector:
             from detector.attachment_detector import AttachmentDetector
             self._att = AttachmentDetector()
         y, x, h, w = HUD_REGIONS[f'att_{gun}_{slot}']
-        crop = frame[y:y + h, x:x + w]
-        names = self._att.candidates(slot, weapon)
-        # `drawn` is a floor on detail, and it is the reason 257 of the
-        # corpus's 281 empty tiles never reach a template at all.
-        if crop.size == 0 or not names or not self._att.drawn(crop):
-            return ('', float('inf'))
-        name, mse, _ = self._att.best_two(crop, names, prefer='solved')
-        return (name, float(mse))
+        # read_tile carries the `drawn` floor -- the reason 257 of the corpus's
+        # 281 empty tiles never reach a template at all -- and `prefer='solved'`,
+        # which this used to spell out for itself.
+        name, mse, _ = self._att.read_tile(frame[y:y + h, x:x + w], slot, weapon)
+        return (name, mse)
 
     # ── Verdicts ──
 
