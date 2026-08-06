@@ -843,7 +843,18 @@ def kit_faults(want, worn):
         key = want[slot]
         cur = (worn or {}).get(slot, '') or ''
         if key is None:
-            if cur:
+            if cur == AMBIGUOUS:
+                # "Something is there and the bank cannot name it" is not
+                # evidence that the slot is occupied — a translucent panel over
+                # a dark backdrop drags an EMPTY tile's best match under
+                # MSE_EMPTY_TH with no margin, and out comes the sentinel. Same
+                # cause as the fitted case below; the `key is None` branch was
+                # simply missed when that was fixed, and it cost two of three
+                # mk14 EMA passes to `muzzle should be empty, reads '?'`.
+                out.append({'slot': slot, 'key': None, 'verifiable': False,
+                            'why': f'reads {cur!r} — cannot tell an occupied '
+                                   f'slot from a dark backdrop; wanted empty'})
+            elif cur:
                 out.append({'slot': slot, 'key': None, 'verifiable': True,
                             'why': f'reads {cur!r}, should be empty'})
             continue

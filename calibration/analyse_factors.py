@@ -49,6 +49,18 @@ def parse_config(name):
         return frozenset(('muzzle', 'grip'))
     return frozenset(p for p in name.split('+') if p)
 
+# ⚠ TWO PARTS IN ONE SLOT STILL COLLIDE, and the fix is one file per part, not
+# a cleverer key. Measuring vert_grip and thumb_grip both give cells keyed
+# (weapon, 'grip', posture), so loading them together keeps only the second.
+#
+# 2026-08-05 this was "fixed" by relabelling the config `grip[thumb_grip]`.
+# That collides no more and DELETED THE WHOLE MUZZLE AXIS from the factor
+# table without a word: "config name == slot name" is assumed in several
+# places, not just parse_config, so every muzzle cell stopped being a muzzle
+# cell. Reverted. Give each part its own --out and compare the per-file
+# factors; each carries its own same-run bare, and the cross-part comparison is
+# then an ordinary cross-run one, which BETWEEN_RUN_REL already widens.
+
 
 # HOW FAR APART TWO MEASUREMENTS OF THE SAME CELL LAND IN DIFFERENT RUNS,
 # over and above the magazine-to-magazine spread inside one. MEASURED on the
