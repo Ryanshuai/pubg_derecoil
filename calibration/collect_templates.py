@@ -1736,7 +1736,9 @@ def main():
         return 1
 
     rig = Rig('red_dot')
-    if not hasattr(rig.mouse, 'key'):
+    # `can_key`, not `hasattr(rig.mouse, 'key')`. Same question the two
+    # can_press() methods answer, asked before either of their objects exists.
+    if not rig.mouse.can_key:
         print('[!] ABORT: no Pico — Tab and the spawner key cannot be pressed.')
         rig.close()
         return 1

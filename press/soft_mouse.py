@@ -70,7 +70,20 @@ def _send_move(dx, dy):
 
 
 class SoftMouse:
-    """Software mouse with same API as PicoMouse."""
+    """Software mouse with same API as PicoMouse — except for keys.
+
+    ⚠ **The API is NOT the same, and this is the one place that difference is
+    written down.** SendInput has no key path here, so there is no `key()` and
+    Tab / 1 / 2 cannot be sent: this backend can drag, but it cannot open the
+    screen there is anything to drag on.
+
+    Callers used to discover that by asking `hasattr(mouse, 'key')`, i.e. by
+    the method's ABSENCE, which is unreadable from either class. `can_key`
+    states it, and it is the same capability `InventoryControl.can_press()` and
+    `SpawnerControl.can_press()` answer from further up.
+    """
+
+    can_key = False
 
     def __init__(self):
         self._dx_s = []

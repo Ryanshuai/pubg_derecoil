@@ -51,6 +51,11 @@ _instance = None
 
 
 class PicoMouse:
+    # This backend has key(), so Tab / 1 / 2 can be sent. SoftMouse does not,
+    # and its docstring says why; a caller picks between them on this rather
+    # than on `hasattr(mouse, 'key')`.
+    can_key = True
+
     def __init__(self, port=None):
         self._port = port
         self._ser = None
