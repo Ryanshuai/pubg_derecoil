@@ -5,6 +5,7 @@ All input via GetAsyncKeyState polling (5ms). No hooks, no GIL issues.
 import ctypes
 import time
 import threading
+from daemon_loop import DaemonLoop
 from collections import namedtuple
 
 from config import POLL_VK_MAP
@@ -16,7 +17,7 @@ VK_LBUTTON = 0x01
 VK_RBUTTON = 0x02
 
 
-class KeyPoller:
+class KeyPoller(DaemonLoop):
     """Produces KeyEvent items into a queue. Pure polling, no hooks."""
 
     def __init__(self):
@@ -29,17 +30,6 @@ class KeyPoller:
         self._thread = None
         self.left_held = False  # exposed for aim assist
 
-    def start(self):
-        self._running = True
-        self._thread = threading.Thread(target=self._poll_loop, daemon=True)
-        self._thread.start()
-
-    def stop(self):
-        self._running = False
-
-    def join(self):
-        if self._thread:
-            self._thread.join()
 
     def pop_events(self):
         with self._lock:
@@ -53,7 +43,7 @@ class KeyPoller:
         with self._lock:
             self._queue.append(KeyEvent(key, event, ts, held))
 
-    def _poll_loop(self):
+    def _loop(self):
         while self._running:
             try:
                 # Keyboard

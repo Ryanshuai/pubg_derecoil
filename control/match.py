@@ -13,7 +13,8 @@ its regions are not in the per-frame capture and its state has to come from
 looking rather than from having seen the key.
 """
 import time
-import threading
+
+from daemon_loop import DaemonLoop
 from collections import deque
 
 from config import KEY_ACTION_TABLE, DETECT_TABLE, MISMATCH_TABLE
@@ -23,7 +24,7 @@ from detector.weapon import Weapon
 from press.pico_mouse import get_mouse
 
 
-class Dispatcher:
+class Dispatcher(DaemonLoop):
     """Main logic loop. Consumes key events, drives detections."""
 
 
@@ -49,17 +50,6 @@ class Dispatcher:
 
     # ── Thread lifecycle ──
 
-    def start(self):
-        self._running = True
-        self._thread = threading.Thread(target=self._loop, daemon=True)
-        self._thread.start()
-
-    def stop(self):
-        self._running = False
-
-    def join(self):
-        if self._thread:
-            self._thread.join()
 
     # ── Main loop ──
 

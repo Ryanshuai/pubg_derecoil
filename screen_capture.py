@@ -20,14 +20,14 @@ is what DETECT_TABLE's delay values ride on. dxgi_fps trades CPU against
 that precision almost linearly; lower it if the game needs the cores back.
 """
 import time
-import threading
+from daemon_loop import DaemonLoop
 from collections import deque
 
 from config import FRAME_REGIONS, HUD_REGIONS
 from detector.cropper import make_grabber
 
 
-class ScreenCapture:
+class ScreenCapture(DaemonLoop):
     """Capture thread: owns all capture calls, stores timestamped frames."""
 
     # How many times a lost DXGI backend is rebuilt as DXGI before the loop
@@ -67,17 +67,6 @@ class ScreenCapture:
 
     # ── Thread lifecycle ──
 
-    def start(self):
-        self._running = True
-        self._thread = threading.Thread(target=self._loop, daemon=True)
-        self._thread.start()
-
-    def stop(self):
-        self._running = False
-
-    def join(self):
-        if self._thread:
-            self._thread.join()
 
     # ── Capture loop ──
 
