@@ -21,22 +21,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import win32gui
 import win32process
 
-from control.focus import game_focused, raise_game, game_hwnd, GAME_EXES
+from control.focus import (GAME_EXES, game_focused, game_hwnd,
+                           raise_game, window_info)
 
 
 def _describe(hwnd):
-    try:
-        title = win32gui.GetWindowText(hwnd)
-    except Exception:
-        title = '?'
-    exe, pid = '?', 0
-    try:
-        import psutil
-        _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        exe = psutil.Process(pid).name()
-    except Exception:
-        pass
-    return f'hwnd={hwnd} pid={pid} {exe} {title[:44]!r}'
+    i = window_info(hwnd)
+    return (f'hwnd={hwnd} pid={i["pid"]} {i["exe"] or "?"} '
+            f'{i["title"][:44]!r}')
 
 
 def list_windows():
@@ -45,17 +37,12 @@ def list_windows():
     raise_game() picks the largest: PUBG owns several windows and only one of
     them takes input. If the biggest is not the one you see, that is the bug.
     """
-    import psutil
     found = []
 
     def _cb(hwnd, _):
         if not win32gui.IsWindowVisible(hwnd):
             return
-        try:
-            _, pid = win32process.GetWindowThreadProcessId(hwnd)
-            exe = psutil.Process(pid).name().lower()
-        except Exception:
-            return
+        exe = window_info(hwnd)['exe']
         if not any(exe.startswith(k) for k in GAME_EXES):
             return
         try:

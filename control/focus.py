@@ -17,18 +17,64 @@ import win32process
 GAME_EXES = ('tslgame',)     # PUBG ships as TslGame.exe
 
 
-def _exe_of(hwnd):
+def window_info(hwnd):
+    """Who owns this window. -> {'pid', 'exe', 'title'}, all filled on failure.
+
+    THE one place that walks hwnd -> pid -> process name. There were four,
+    and they differed only in **which of the three fields they threw away**:
+    `_exe_of` kept the exe, `focus_trace._describe` wanted the pid too so it
+    re-walked the whole chain, `focus_trace.list_windows` wanted the exe for
+    filtering, and `calibration/state.py` wanted all three and grew a second
+    `game_focused()` around them — same name as the one here, different return
+    type. A caller that read one and used the other got a truthy 3-tuple where
+    it expected a bool.
+
+    `exe` is lowercased because every consumer compares it against GAME_EXES;
+    `title` is not, because it is only ever printed.
+
+    Never raises. A window can die between being enumerated and being asked
+    about, and the answer to "who owns this now" is then genuinely nothing —
+    but the shape stays, so callers do not each need a try block.
+    """
+    out = {'pid': 0, 'exe': '', 'title': ''}
+    try:
+        out['title'] = win32gui.GetWindowText(hwnd) or ''
+    except Exception:
+        pass
     try:
         import psutil
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        return psutil.Process(pid).name().lower()
+        out['pid'] = pid
+        out['exe'] = psutil.Process(pid).name().lower()
     except Exception:
-        return ''
+        pass
+    return out
+
+
+def _exe_of(hwnd):
+    return window_info(hwnd)['exe']
 
 
 def _is_game(hwnd):
     exe = _exe_of(hwnd)
     return any(exe.startswith(k) for k in GAME_EXES)
+
+
+def foreground():
+    """What is frontmost right now. -> (is_the_game, exe, title)
+
+    The diagnostic counterpart to `game_focused()`, which answers the same
+    question with a bool. Both exist because the two questions are different:
+    a guard wants "may I drive", a report wants "then what DID have focus".
+    Before this, the report version lived in calibration/state.py under the
+    name `game_focused` — see window_info on what that cost.
+    """
+    try:
+        info = window_info(win32gui.GetForegroundWindow())
+    except Exception:
+        return False, '?', '?'
+    return (any(info['exe'].startswith(k) for k in GAME_EXES),
+            info['exe'] or '?', info['title'] or '?')
 
 
 def game_focused():

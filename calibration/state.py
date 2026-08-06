@@ -25,6 +25,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
 
+from control.focus import foreground
+
 from config import (HUD_REGIONS, RECOIL_SIGHT_PROFILES,
                     TAB_PIXEL_THRESH, TAB_COUNT_MIN, TAB_COUNT_MAX,
                     TAB_DARK_FLOOR_MAX)
@@ -108,23 +110,6 @@ class Probe:
         }
 
 
-def game_focused():
-    """Foreground process, and whether it is the game. Matched on the EXE:
-    this repository's own name contains "pubg", so a title match calls an
-    editor window the game."""
-    try:
-        import win32gui
-        import win32process
-        import psutil
-        hwnd = win32gui.GetForegroundWindow()
-        title = win32gui.GetWindowText(hwnd)
-        _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        exe = psutil.Process(pid).name()
-    except Exception:
-        return False, '?', '?'
-    from control.focus import GAME_EXES
-    return (any(exe.lower().startswith(k) for k in GAME_EXES), exe, title)
-
 
 def pico_state():
     """Open the CDC link and see whether hand reporting is alive.
@@ -152,7 +137,7 @@ def pico_state():
 
 
 def show(p, args):
-    focused, exe, title = game_focused()
+    focused, exe, title = foreground()
     s = p.read()
 
     print(f"focus       {OK if focused else NO}  {exe}  {title[:40]!r}")
