@@ -49,10 +49,23 @@ carries scenery too, and the only thing that separates "a part is fitted"
 from everything else is RECOGNISING THE PART.
 
 So occupancy is now a template match, and the numbers say it separates
-cleanly. Fitted tiles score MSE p50 15.2, p90 40.3, p99 89.2 over 1685
-captures; the bare AKM magazine scores 346.6 and the 24 measurable empty
-tiles in the corpus run 891..; TAB_SLOT_MATCH_MAX sits in that gap.
-(tools/scan_slot_bleed.py --mse, calibration/scan_bare_tiles.py.)
+cleanly. Re-measured 2026-08-06 (`tools/scan_slot_bleed.py --mse`,
+calibration/scan_bare_tiles.py):
+
+    fitted  n=1725   p50 15.4   p90 48.2   p99 535.7   max 14823.8
+    empty   n=24     p01 1744.2  p10 2296.7  p50 3357.6  min 1604.6
+
+MSE_EMPTY_TH = 450 sits in that gap and keeps 98.3% of fitted tiles while
+rejecting 100% of the empty ones.
+
+⚠ **The p99 is 535.7, not the 89.2 this paragraph used to claim.** The corpus
+grew 1685 -> 1725 captures and the tail came with it, so the old figure was a
+smaller sample's tail, not a drift in the reader. It matters because 535.7 is
+ABOVE the gate: the 1.7% of fitted tiles the gate drops are real fits scoring
+worse than an empty tile's floor, and reading those as `empty` refuses a
+gesture rather than misplacing one — the direction this module already argues
+for two paragraphs down. Do not read the p99 as "everything fitted is under
+the gate".
 
 ⚠ WHAT THIS GIVES UP, deliberately: a part with NO TEMPLATE now reads `empty`.
 This class used to be the reader that a missing template could not touch, and
