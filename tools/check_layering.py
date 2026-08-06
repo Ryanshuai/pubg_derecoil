@@ -218,14 +218,12 @@ READY_DEBT = {
     'tools/probe_slot_boxes.py': 'pre-dates control/session.py',
     'tools/probe_spawn_wait.py': 'pre-dates control/session.py',
     'tools/probe_spawner_layers.py': 'pre-dates control/session.py',
-    'tools/probe_spawner_layout.py': 'pre-dates control/session.py',
     'tools/probe_submenu_hover.py': 'pre-dates control/session.py',
     'tools/probe_toggle_latency.py': 'pre-dates control/session.py',
     'tools/probe_transfer.py': 'pre-dates control/session.py',
     'tools/probe_unequip_gesture.py': 'pre-dates control/session.py',
     'tools/probe_unequip_where.py': 'pre-dates control/session.py',
     'tools/verify_kit.py': 'pre-dates control/session.py',
-    'tools/verify_refactor.py': 'pre-dates control/session.py',
 }
 
 READY_LEDGER = {**READY_EXEMPT, **READY_DEBT}

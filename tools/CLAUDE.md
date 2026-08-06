@@ -192,19 +192,39 @@ pixi run layering        # 9 条规则
 |---|---|
 | 后坐力 / 时序 | `probe_recenter` `probe_kick_profile` `probe_impulse_align` `probe_impulse_ab` `probe_shot_latency` `probe_input_latency` `probe_pitch_range` `probe_ammo_during_fire` |
 | Tab / 配件 | `probe_click_speed` `probe_drag_speed`（`--panel` 测面板到面板那条）`probe_human_drag`（录真人拖拽，不碰鼠标） `probe_drag_cursor`（光标为什么不待在放好的位置；A/B 段会按住左键） `probe_equip_gesture` `probe_unequip_gesture` `probe_drop_weapon` `probe_gun_grab` `probe_rack_cycle` `probe_slot_boxes` `probe_tab_watch_live` `probe_toggle_latency` `probe_transfer` |
-| 刷新器 | `probe_spawn_wait` `probe_spawner_layers` `probe_spawner_layout` `probe_submenu_hover` `scrape_spawner` |
+| 刷新器 | `probe_spawn_wait` `probe_spawner_layers` `probe_submenu_hover` `scrape_spawner` |
 | 大厅 | `probe_lobby_transition` |
-| 采集 / 验收 | `collect_ammo_digits` · `verify_kit` · `verify_refactor` |
+| 采集 / 验收 | `collect_ammo_digits` · `verify_kit` |
 
 **离线分析**（吃已存图，📄）
 
-`probe_ammo_ocr`（`--confusion` / `--selftest`）· `probe_gun_name_ocr`（`--variants`）· `probe_tab_anchor` · `probe_backpack_slot` · `probe_button_icons` · `probe_icon_threshold` · `probe_mask_diff` · `probe_panel_state` · `probe_submenu_rows` · `probe_submenu_thresh` · `probe_lobby_nav` · `probe_capture_recovery`
+`probe_ammo_ocr`（`--confusion` / `--selftest`）· `probe_gun_name_ocr`（`--variants`）· `probe_tab_anchor` · `probe_backpack_slot` · `probe_button_icons` · `probe_icon_threshold` · `probe_mask_diff` · `probe_panel_state` · `probe_lobby_nav` · `probe_capture_recovery`
 
-**一次性调查**（结论已进代码/文档，跑它只是复现历史）
+## 删探针之前：先查有没有代码在引用它
 
-`probe_spawner_layout`（`find_menu` 已降级成兜底）· `probe_submenu_thresh` / `probe_submenu_rows` / `probe_mask_diff` / `probe_icon_threshold`（阈值已固化成常量）· `verify_refactor`（2026-08-02 那次重构的验收）
+**这一节 2026-08-06 换掉了一张叫「一次性调查」的表**，那张表点名六个脚本「结论已进代码/文档，跑它只是复现历史」，读起来像一张删除清单。照着删会删掉两个**还在承重**的：
 
-> 这一组**不要拿来当模板抄**。它们的写法反映的是还没有 `control/` 的世界。
+- `probe_icon_threshold` 是 `.claude/skills/calibrate-template` 的一个步骤。**技能里写的步骤在任何 import 图里都看不见**，和 `slot_window` 那次同一个形状。
+- `probe_mask_diff` 被 `detector/spawner_layout.py:159` 用一句 `See tools/probe_mask_diff.py` 指着，那行上面就是它测出来的 ~75。**删掉探针，那个常量就只剩一个数字，没有出处。**
+
+真正查得准的一条命令，判据是「除了它自己，还有谁写过这个名字」：
+
+```bash
+grep -rn "probe_xxx" --include=*.py --include=*.md . ~/.claude/skills
+```
+
+2026-08-06 全量跑过一次，结论跟直觉相反：**`tools/` 里被任何东西引用为零的脚本只有一个**（`eval_highlight`，而它自己的 docstring 就在论证该留），其余全被引用着，而且**最强的引用来自代码注释而不是文档**——`press/pico_mouse.py` 引 `probe_input_latency` 存 `L = 38 ms`，`detector/slot_detector.py` 引 `scan_slot_bleed`，`control/stock.py` 引 `probe_backpack_depth` 两次。探针从来不被 import，所以「谁 import 我」对这个目录是个**恒零的量具**；对它们成立的问题是**「哪个常量的出处是我」**。
+
+同一次跑下来实际删掉的四个，理由各不相同，都不是「看起来旧」：
+
+| 删掉的 | 理由 |
+|---|---|
+| `verify_refactor`（326 行） | 2026-08-02 那次重构的验收，那次重构早就完了；占游戏 + Pico，所以没人会顺手跑 |
+| `probe_spawner_layout`（77） | `find_menu` 已降级成兜底，而「趁面板开着拍一张」现在是 `drive_screen.py spawner --shoot` |
+| `probe_submenu_thresh`（58） | 结论是 `detector/spawner_layout.py:151` 的 `SUBMENU_THRESH = 215` |
+| `probe_submenu_rows`（79） | **两处独立地跑不起来**：默认取 `sorted(glob)[-1]`，而 `_verify_0802` 排在数字后面且没有 baseline；打中文标签时 cp1252 崩。中文客户端之后它就没绿过 |
+
+> 剩下的实机探针**不要拿来当模板抄**——它们的写法反映的是还没有 `control/` 的世界。但那是**别抄**，不是**该删**。
 
 ---
 
