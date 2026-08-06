@@ -568,14 +568,28 @@ def ensure_weapon_in_hand(ac, sc, weapon='m416', slots=(1, 2), verbose=True):
     `collapse_all()` on a CLOSED panel collapses nothing and reports nothing,
     and give_many then clicks from a stale layout.
     """
+    # WHICH gun, not just A gun. The ammo counter proves a weapon is out and
+    # the HUD is drawn; it says nothing about WHOSE. A rack left loaded by the
+    # previous run satisfied that and the caller carried on with the wrong
+    # weapon — measured 2026-08-05: tools/fit_pitch_level.py asked for an m416,
+    # got the vss still racked from the run before, and every bearing came back
+    # "nothing tracks" because the red dot's patches were sitting on the VSS's
+    # integral scope body. An hour of the failure looking like the scene.
+    with ac.tab_up():
+        racked = ac.loadout()['guns']
     for slot in slots:
+        if racked.get(slot) != weapon:
+            continue
         if ac.hold(slot) and weapon_in_hand() is not None:
             if verbose:
-                print(f'      [stock] slot {slot} already in hand')
+                print(f'      [stock] {weapon} already in slot {slot}')
             return slot
 
     if verbose:
-        print(f'      [stock] rack reads empty — spawning {weapon}')
+        others = {s: g for s, g in racked.items() if g}
+        print(f'      [stock] no {weapon} in the rack'
+              + (f' (holds {others})' if others else ' — rack empty')
+              + f' — spawning {weapon}')
     if not sc.ensure_panel(True):
         if verbose:
             print('      [stock] spawner panel would not open')
@@ -591,12 +605,17 @@ def ensure_weapon_in_hand(ac, sc, weapon='m416', slots=(1, 2), verbose=True):
     finally:
         sc.ensure_panel(False)
 
+    with ac.tab_up():
+        racked = ac.loadout()['guns']
     for slot in slots:
+        if racked.get(slot) != weapon:
+            continue
         if ac.hold(slot):
             n = weapon_in_hand()
             if n is not None:
                 if verbose:
-                    print(f'      [stock] holding slot {slot}, {n} rounds')
+                    print(f'      [stock] holding {weapon} in slot {slot}, '
+                          f'{n} rounds')
                 return slot
     if verbose:
         print(f'      [stock] spawned {weapon} but no ammo counter in slots '
