@@ -76,6 +76,12 @@ tab-watch = "python tools/test_tab_watch.py"
 # whether recoil compensation runs at all.
 tab-open = "python tools/test_tab_open.py"
 name-plates = "python tools/test_name_plates.py"
+# HighlightDetector, scored the way it is USED: a highlighted and a plain crop
+# of the SAME weapon go in as a pair, and the pair is right when the highlighted
+# one wins. Offline, 254 pairs over 26 weapons. It is in the per-keypress path,
+# and it was the one script in tools/ that nothing anywhere named -- an offline
+# check with no task is one nobody runs.
+highlight = "python tools/eval_highlight.py"
 # Every attachment template against every ground-truth crop, with the margin.
 # Offline. A drifted icon does not read as nothing -- it reads as its nearest
 # neighbour, confidently, which is how Lower_ThumbGrip_C spent an unknown

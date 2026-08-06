@@ -160,7 +160,9 @@ pixi run layering        # 9 条规则
 
 **离线回归**（改完代码就跑）
 
-`analysis` · `abs-offset` · `attachments` · `drag-log` · `fire` · `frames` · `harness` · `kit` · `locations` · `lobby-detector` · `panel-state` · `recenter` · `runs` · `snaps` · `spawner-plan` · `stocktake-test` · `tab-open` · `tab-watch`
+`analysis` · `abs-offset` · `attachments` · `drag-log` · `fire` · `frames` · `harness` · `highlight` · `kit` · `locations` · `lobby-detector` · `panel-state` · `recenter` · `runs` · `snaps` · `spawner-plan` · `stocktake-test` · `tab-open` · `tab-watch`
+
+`highlight` 是 2026-08-06 补的，理由跟 `lobby-detector` / `stocktake-test` 那次一模一样，只是这次是**量出来的**：全目录查了一遍「除了自己还有谁写过这个名字」，92 个脚本里引用为零的就它一个。它绿着（254/254，26 把枪），而且在每次按键的路径上——**一个没有 task 的离线闸门，跟没有这个闸门的区别只是你以为它在**。
 
 `drag-log` 读的是 `control/inventory.py` 每次**手势**都追加的 `docs/drag/journal.jsonl`（**常开**，几百字节一次）。它把三类候选原因写在同一行里——手势（定位重放次数、抓/放点偏差）、状态（两栏行数 + 轮询序列 / 槽位读回 / 枪名板墨迹）、时序（距上次手势多久）——因为「有时候扔不到地上」是关于**差异**的问题，布尔量答不了。
 
