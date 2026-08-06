@@ -98,6 +98,45 @@ AKM 自己的弹匣画在它的 magazine 贴片框里，裸枪也有 395 个 Can
 
 判据换成**正向识别配件**（`detector/slot_detector.py` 有数字和取舍），`scope` 位也一起接上——它以前恒 `unknown` 而 `unequip` 放行 `unknown`，是同一条路径的另一半。
 
+## `the correlator lost the view` / `view position is no longer known` — 在**倍率镜**上，这句话是假的
+
+**2026-08-05：`build_weapon` 从来不设 `scope`，所以每一轮采集在任何倍率下都在发红点的曲线。**
+
+`Weapon.set_seq` 里 `factor = scope_factor * naked_scale * att_f * posture_f`，而 `scope_factor` 只有 `set('scope', …)` 会写。`build_weapon` 设 name / posture / muzzle / grip——**没有 scope**，于是它恒为 1。
+
+PUBG 按倍率缩放开镜灵敏度：4x 下一个 count 转的角度约 1/4，抵消同样的角位移要约 4 倍 counts。所以：
+
+| aug bare，42 发 | 发出去的曲线 | 实测真值 | 残差 |
+|---|---|---|---|
+| 红点 | 1741 | 1812 | **+4%** |
+| **4x** | 1741（**该是 6964**） | 6347 | **+265%** |
+
+**症状伪装成了别的东西**，这是它藏得住的原因：补偿只有 1/4 → 残差 +265% → 一梭把视角推 **2692 counts** → 参考图块（容量 **68**）wrap → 报出来是「相关器丢了视角」「俯仰带扫不出来」。**看起来像检测器坏了，其实是补偿发小了。**
+
+⚠ **vss 是同一件事，不是特例。** 它自带的 PSO-1 在 `_SCOPE_TO_MAG` 里就是 4x。它的曲线前 22 发 324、实测 1058，比值 **3.26**。2026-08-05 为它试了 **8 次**，否掉 **7 个**解释，还写了一整节「它的曲线是外部导入从没拟合过」——**那节是错的**。被否掉的七个（别再走）：3-patch 剖面、`horizon_row()` 坏了、少传 `--home`、「昨天 red_dot 能跑」、视角朝向没纹理、开镜时不可跟踪、`pitch_range.json` 被清空。
+
+**这也是「scope 轴是四个轴里唯一 0 次测量」的真正原因**：不是没人测，是**一测就死，而死法看起来像别的问题**。
+
+修法取**读回来的**镜（`att['scope']`）而不是 `--sight` 请求的——装配会静默失败，而补偿要匹配枪上真有的东西。红点档不受影响（factor 1.0，`curve_sum` 一字未变）。
+
+## 打在俯仰限位上的弹匣会流进 EMA，把曲线推到负值
+
+**EMA 本身不是不稳的那一环。** 它是 `alpha = 1/(k+1)` 的 running mean，带 floor、`PRIOR_MAGS=5` 的先验、`ALPHA_MAX=0.5`——对 vss 实际只用 0.167。发散的是**喂进去的东西**：
+
+```
+1. 一格漂出参考范围 → reaim 失败 → tracking_lost → 正确弃格 ✓
+2. 下一轮 harvest 是新进程 → tracking_lost 复位
+   set_reference() 在视角当前所在处取基准 —— 而那是限位上
+3. mag 0 打在限位上，视角不动 → 读出 32.1 counts / 22 发（真值 ~1058）
+4. --apply 照单全收 → 下一轮残差 −85.7%
+```
+
+`tracking_lost` 守的是 **1..n 号弹匣，0 号从来没人守**，而 `tracking_confirmed()`（推一个已知量、看读数跟不跟）早就存在、用在 `recenter` 内部和两个探针里，**就是没用在取格起点**。现在 `harvest` 和 `sweep` 在打第一梭前都验一次。
+
+兜底在 `analysis.magazine_fault`：隐含后坐力（曲线+残差 = 真实后坐力，是个物理量）**每发不得低于 `IMPLIED_PER_BULLET_MIN`**。⚠ 这个下限第一次设成 5.0 被 `pixi run analysis` 拒收——它是从四把枪外推的，**一把 LMG 都没有**，而 m249 每发 4.7、mg3 2.5–2.7。现改 2.0，余量薄（2.5 对 1.5），**是兜底不是判据**。
+
+`docs/recoil/curves/vss_att.0802_BROKEN_negative.bak.json` 是 8 月 2 日同一个循环跑到 −307 留下的。**同一个坑踩了两次**，第二次的证据就躺在第一次的备份文件名里。
+
 ## 库存行采集不碰模板，也不碰枪（`rows_only`）
 
 `collect_templates.py --targets rows` 现在走一条独立的路：**清空架子和库存 → 刷一个件 → `inv_rows`（纯 Laplacian）确认库存正好一行 → 拍 10 个背景 → 下一个**。身份来自「只刷了一样东西」，跟 `one_part` 是同一条规则，去掉了那把逼出检测器依赖的枪。
