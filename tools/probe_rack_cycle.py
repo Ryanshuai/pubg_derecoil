@@ -34,7 +34,7 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from control.focus import ensure_focus
+from control.session import ensure_ready
 from control.lobby import LobbyControl
 from control.spawner import SpawnerControl
 
@@ -57,7 +57,7 @@ def main():
     args = ap.parse_args()
 
     print('>>> Spawns and drops guns. Fires nothing, writes no curve.')
-    if not ensure_focus(countdown_s=args.countdown, label='the rack probe'):
+    if not ensure_ready(label='the rack probe', countdown_s=args.countdown)['ok']:
         print('[!] could not focus the game')
         return 1
     with LobbyControl() as lc:

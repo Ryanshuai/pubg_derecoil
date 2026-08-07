@@ -196,34 +196,20 @@ READY_EXEMPT = {
 }
 
 READY_DEBT = {
-    'tools/drive_screen.py': 'pre-dates control/session.py',
-    'tools/dump_state.py': 'pre-dates control/session.py',
-    'tools/probe_ammo_during_fire.py': 'pre-dates control/session.py',
-    'tools/probe_autofit.py': 'pre-dates control/session.py',
-    'tools/probe_backpack_depth.py': 'pre-dates control/session.py',
-    'tools/probe_click_speed.py': 'pre-dates control/session.py',
-    'tools/probe_drag_speed.py': 'pre-dates control/session.py',
-    'tools/probe_drop_to_ground.py': 'pre-dates control/session.py',
-    'tools/probe_drop_weapon.py': 'pre-dates control/session.py',
-    'tools/probe_equip_gesture.py': 'pre-dates control/session.py',
-    'tools/probe_fit_smoke.py': 'pre-dates control/session.py',
-    'tools/probe_gun_grab.py': 'pre-dates control/session.py',
-    'tools/probe_impulse_ab.py': 'pre-dates control/session.py',
-    'tools/probe_impulse_align.py': 'pre-dates control/session.py',
-    'tools/probe_input_latency.py': 'pre-dates control/session.py',
-    'tools/probe_kick_profile.py': 'pre-dates control/session.py',
-    'tools/probe_rack_cycle.py': 'pre-dates control/session.py',
-    'tools/probe_recenter.py': 'pre-dates control/session.py',
-    'tools/probe_shot_latency.py': 'pre-dates control/session.py',
-    'tools/probe_slot_boxes.py': 'pre-dates control/session.py',
-    'tools/probe_spawn_wait.py': 'pre-dates control/session.py',
-    'tools/probe_spawner_layers.py': 'pre-dates control/session.py',
-    'tools/probe_submenu_hover.py': 'pre-dates control/session.py',
-    'tools/probe_toggle_latency.py': 'pre-dates control/session.py',
-    'tools/probe_transfer.py': 'pre-dates control/session.py',
-    'tools/probe_unequip_gesture.py': 'pre-dates control/session.py',
-    'tools/probe_unequip_where.py': 'pre-dates control/session.py',
-    'tools/verify_kit.py': 'pre-dates control/session.py',
+    # 27 entries left this table on 2026-08-06, when every probe that opens by
+    # taking the foreground was switched to ensure_ready -- the same change
+    # that put goto_range('200m') in front of every training-range run.
+    #
+    # tools/probe_tab_watch_live.py did NOT move here; it is in READY_EXEMPT,
+    # and a batch rewrite changed it anyway before the exemption was read. The
+    # ledger is the thing that knew, which is the argument for it existing.
+    'tools/drive_screen.py':
+        'its ensure_focus is inside drive(), a LIBRARY function that '
+        'calibration/scan_compat.py calls once per weapon -- 30 times a run. '
+        'ensure_ready there would teleport 30 times. The real fix is the one '
+        'calibration/CLAUDE.md already names: this file is all ensure_* and '
+        'belongs in control/, at which point its caller opens with the gate '
+        'and drive() stops needing one.',
 }
 
 READY_LEDGER = {**READY_EXEMPT, **READY_DEBT}

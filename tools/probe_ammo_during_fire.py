@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.join(ROOT, 'calibration'))
 import cv2
 
 from detector.weapon import Weapon
-from control.focus import ensure_focus
+from control.session import ensure_ready
 
 from sweep import Rig, MAX_FIRE_S
 
@@ -52,7 +52,7 @@ def main():
 
     out = os.path.join(OUT_ROOT, datetime.now().strftime('%m%d_%H%M'))
     print('>>> One magazine, compensation on. Every ammo crop is saved.')
-    if not ensure_focus(countdown_s=args.countdown, label='the ammo probe'):
+    if not ensure_ready(label='the ammo probe', countdown_s=args.countdown)['ok']:
         print('[!] could not focus the game')
         return 1
 

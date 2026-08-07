@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.join(ROOT, 'calibration'))
 import numpy as np
 
 from detector.weapon import WEAPON_RPM
-from control.focus import ensure_focus
+from control.session import ensure_ready
 from control.lobby import LobbyControl
 from control.spawner import SpawnerControl
 
@@ -73,7 +73,7 @@ def main():
           f'{args.bullet}, nothing anywhere else.')
     print('>>> The view will climb — the rest of the curve is deliberately '
           'empty.')
-    if not ensure_focus(countdown_s=args.countdown, label='the impulse probe'):
+    if not ensure_ready(label='the impulse probe', countdown_s=args.countdown)['ok']:
         print('[!] could not focus the game')
         return 1
 

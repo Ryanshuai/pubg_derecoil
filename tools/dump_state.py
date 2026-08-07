@@ -18,7 +18,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from control.evidence import dump_state
-from control.focus import ensure_focus
+from control.session import ensure_ready
 
 OUT = os.path.join(ROOT, 'docs', 'state_dumps')
 
@@ -34,7 +34,7 @@ def main():
     ap.add_argument('--out', default='')
     args = ap.parse_args()
 
-    if not ensure_focus(countdown_s=3, label='the state dump'):
+    if not ensure_ready(label='the state dump', countdown_s=3)['ok']:
         print('[!] could not focus the game')
         return 1
     time.sleep(0.5)

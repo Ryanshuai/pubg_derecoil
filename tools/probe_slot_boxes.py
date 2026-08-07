@@ -40,7 +40,7 @@ from detector.slot_detector import SlotDetector
 from detector.tab_layout import SLOT_NAMES
 from control.lobby import LobbyControl
 from press.pointer import Pointer
-from control.focus import ensure_focus
+from control.session import ensure_ready
 from tools.drive_screen import SCREENS
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -75,7 +75,7 @@ def main():
         print(f'the spawner cannot produce {args.weapon!r}')
         return 1
 
-    if not ensure_focus(countdown_s=args.countdown, label='slot boxes'):
+    if not ensure_ready(label='slot boxes', countdown_s=args.countdown)['ok']:
         print('could not focus the game')
         return 1
 

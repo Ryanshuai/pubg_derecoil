@@ -47,7 +47,8 @@ import cv2
 import numpy as np
 
 from config import SCREEN_H, SCREEN_W
-from control.focus import ensure_focus, focus_keeper
+from control.focus import focus_keeper
+from control.session import ensure_ready
 from control.lobby import LobbyControl
 from detector.cropper import capture_screen, win32_cap
 from detector.spawner_detector import ICON_BOX, SpawnerDetector
@@ -308,7 +309,7 @@ def main():
                          'whether it still read the same')
     args = ap.parse_args()
 
-    if not ensure_focus(countdown_s=args.countdown, label='the toggle probe'):
+    if not ensure_ready(label='the toggle probe', countdown_s=args.countdown)['ok']:
         return 1
 
     with LobbyControl(verbose=False) as lc:

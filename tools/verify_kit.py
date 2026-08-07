@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(
 import cv2
 import numpy as np
 
-from control.focus import ensure_focus
+from control.session import ensure_ready
 from control import spawner as spawner_mod
 from control.spawner import SpawnerControl
 from control.stock import restock
@@ -77,7 +77,7 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     stamp = datetime.now().strftime('%m%d_%H%M%S')
 
-    if not ensure_focus(countdown_s=5, label='the kit check'):
+    if not ensure_ready(label='the kit check', countdown_s=5)['ok']:
         print('[!] could not focus the game')
         return 1
 

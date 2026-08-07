@@ -36,7 +36,7 @@ except (AttributeError, OSError):
 
 from capture_run import CaptureRun                       # noqa: E402
 from collect_templates import Collector, inv_rows        # noqa: E402
-from control.focus import ensure_focus                   # noqa: E402
+from control.session import ensure_ready
 from control.inventory import InventoryControl, at_inv   # noqa: E402
 from control.spawner import SpawnerControl               # noqa: E402
 from range_session import get_session                    # noqa: E402
@@ -46,7 +46,7 @@ GUN, PART, GUN_SLOT = 'sks', 'comp_ar', 1
 
 
 def main():
-    if not ensure_focus(countdown_s=4, label='the fit smoke test'):
+    if not ensure_ready(label='the fit smoke test', countdown_s=4)['ok']:
         return 1
     if not get_session('auto').ensure()[0]:
         print('[!] could not get into the training range')

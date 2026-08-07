@@ -42,7 +42,8 @@ try:
 except (AttributeError, OSError):
     pass
 
-from control.focus import ensure_focus, focus_keeper
+from control.focus import focus_keeper
+from control.session import ensure_ready
 from control.inventory import InventoryControl, at_slot, move_info
 from detector.attachment_detector import SLOT_NAMES
 
@@ -94,7 +95,7 @@ def main():
           f'with both rack slots holding a gun, and {args.slot} fitted on '
           f'gun{args.from_gun} only.\n')
 
-    if not ensure_focus(countdown_s=args.countdown, label='probe_transfer'):
+    if not ensure_ready(label='probe_transfer', countdown_s=args.countdown)['ok']:
         print('[!] could not focus the game')
         return 1
 

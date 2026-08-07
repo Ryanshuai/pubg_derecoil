@@ -30,7 +30,8 @@ except (AttributeError, OSError):
     pass
 
 from control.inventory import InventoryControl
-from control.focus import ensure_focus, focus_keeper
+from control.focus import focus_keeper
+from control.session import ensure_ready
 from control.spawner import SpawnerControl
 from press.pico_mouse import get_mouse
 
@@ -91,7 +92,7 @@ def main():
     ap.add_argument('--countdown', type=int, default=4)
     args = ap.parse_args()
 
-    if not ensure_focus(countdown_s=args.countdown, label='the click probe'):
+    if not ensure_ready(label='the click probe', countdown_s=args.countdown)['ok']:
         return 1
 
     mouse = get_mouse()

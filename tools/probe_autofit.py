@@ -57,7 +57,7 @@ except (AttributeError, OSError):
     pass
 
 from collect_templates import inv_rows                  # noqa: E402
-from control.focus import ensure_focus                  # noqa: E402
+from control.session import ensure_ready
 from control.inventory import (InventoryControl, at_ground,  # noqa: E402
                                at_inv)
 from control.spawner import SpawnerControl              # noqa: E402
@@ -111,7 +111,7 @@ def main():
     ap.add_argument('--countdown', type=int, default=4)
     args = ap.parse_args()
 
-    if not ensure_focus(countdown_s=args.countdown, label='the autofit probe'):
+    if not ensure_ready(label='the autofit probe', countdown_s=args.countdown)['ok']:
         return 1
     if not get_session('auto').ensure()[0]:
         print('[!] could not get into the training range')

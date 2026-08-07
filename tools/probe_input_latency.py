@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.join(ROOT, 'calibration'))
 
 import numpy as np
 
-from control.focus import ensure_focus
+from control.session import ensure_ready
 from sweep import Rig
 
 MOVE = 250          # counts per probe; big enough to clear the noise floor
@@ -80,7 +80,7 @@ def main():
     args = ap.parse_args()
 
     print('>>> Face something with texture. No weapon needed.')
-    if not ensure_focus(countdown_s=args.countdown, label='the latency probe'):
+    if not ensure_ready(label='the latency probe', countdown_s=args.countdown)['ok']:
         print('[!] could not focus the game')
         return 1
 

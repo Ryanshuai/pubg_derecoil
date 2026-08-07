@@ -61,7 +61,8 @@ sys.path.insert(0, os.path.join(ROOT, 'calibration'))
 import numpy as np
 
 from detector.weapon import WEAPON_RPM
-from control.focus import ensure_focus, focus_keeper
+from control.focus import focus_keeper
+from control.session import ensure_ready
 from control.lobby import LobbyControl
 from control.spawner import SpawnerControl
 
@@ -201,7 +202,7 @@ def main():
     print(f'>>> {args.rounds} x ({1 + len(ks)}) = '
           f'{args.rounds * (1 + len(ks))} magazines')
 
-    if not ensure_focus(countdown_s=args.countdown, label='the A/B impulse probe'):
+    if not ensure_ready(label='the A/B impulse probe', countdown_s=args.countdown)['ok']:
         print('[!] could not focus the game')
         return 1
     with LobbyControl() as lc:

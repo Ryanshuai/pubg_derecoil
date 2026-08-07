@@ -46,7 +46,7 @@ sys.path.insert(0, os.path.join(ROOT, 'calibration'))
 import numpy as np
 
 from detector.weapon import Weapon, WEAPON_RPM
-from control.focus import ensure_focus
+from control.session import ensure_ready
 
 from analysis import fit_interval
 from sweep import Rig
@@ -161,7 +161,7 @@ def main():
           + ("OFF — the view will climb, expect only the opening rounds to "
              "stay trackable" if args.no_comp else
              "ON — the view holds, so every round stays measurable"))
-    if not ensure_focus(countdown_s=args.countdown, label='the kick probe'):
+    if not ensure_ready(label='the kick probe', countdown_s=args.countdown)['ok']:
         print('[!] could not focus the game')
         return 1
 

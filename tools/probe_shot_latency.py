@@ -39,7 +39,7 @@ sys.path.insert(0, os.path.join(ROOT, 'calibration'))
 
 import numpy as np
 
-from control.focus import ensure_focus
+from control.session import ensure_ready
 
 from sweep import Rig
 
@@ -120,7 +120,7 @@ def main():
 
     print('>>> Hold the gun, face texture. One round per tap, compensation '
           + ('ON' if args.keep_comp else 'OFF') + '.')
-    if not ensure_focus(countdown_s=args.countdown, label='the shot-latency probe'):
+    if not ensure_ready(label='the shot-latency probe', countdown_s=args.countdown)['ok']:
         print('[!] could not focus the game')
         return 1
 

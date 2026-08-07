@@ -33,7 +33,7 @@ try:
 except (AttributeError, OSError):
     pass
 
-from control.focus import ensure_focus
+from control.session import ensure_ready
 from control.inventory import InventoryControl
 from control.spawner import SpawnerControl
 from detector.tab_layout import INV_ROWS
@@ -73,7 +73,7 @@ def main():
     ap.add_argument('--countdown', type=int, default=3)
     args = ap.parse_args()
 
-    if not ensure_focus(countdown_s=args.countdown, label='the unequip probe'):
+    if not ensure_ready(label='the unequip probe', countdown_s=args.countdown)['ok']:
         return 1
 
     ac = InventoryControl(verbose=True)

@@ -28,7 +28,8 @@ try:
 except (AttributeError, OSError):
     pass
 
-from control.focus import ensure_focus, game_focused
+from control.focus import game_focused
+from control.session import ensure_ready
 from control.spawner import SpawnerControl
 
 # One per category, so the batch has something to reorder. All attachments:
@@ -44,7 +45,7 @@ def main():
                     help='skip the one-at-a-time run used as the baseline')
     args = ap.parse_args()
 
-    if not ensure_focus(countdown_s=args.countdown, label='the spawner probe'):
+    if not ensure_ready(label='the spawner probe', countdown_s=args.countdown)['ok']:
         print('[!] could not focus the game')
         return 1
 

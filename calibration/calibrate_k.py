@@ -35,6 +35,7 @@ import win32process
 
 from config import RECOIL_PATCH
 from control.focus import game_focused
+from control.session import ensure_ready
 from detector.cropper import make_grabber
 from detector.view_tracker import ViewTracker, MagazineRecorder
 from press.pico_mouse import get_mouse
@@ -223,21 +224,25 @@ def main():
           f"x2 directions = {len(amounts) * args.repeats * 2}")
     print(f"Per trial : {WARMUP_S}+{INJECT_S}+{COOLDOWN_S} s "
           f"(wall-clock, not frame-counted)")
-    print("\n>>> Switch to the game NOW. Stand still, aim at something with "
-          "structure.\n    Do not touch the mouse until it finishes.")
-    for s in range(args.countdown, 0, -1):
-        print(f"    starting in {s} ...", flush=True)
-        time.sleep(1.0)
-
-    if not args.dry_run and not game_focused():
-        title, exe = foreground_name()
-        print(f"\n[!] ABORT: foreground window is {title!r} ({exe}), not the "
-              "game.")
-        print("    Injected input is ignored while the game is unfocused, so "
-              "every\n    trial would read zero. Click into the game and "
-              "re-run.")
-        grabber.close()
-        return 1
+    # ensure_ready rather than a countdown plus a focus check: it takes the
+    # foreground itself (the countdown survives as its fallback), and its last
+    # step moves to the 200m lane -- which is what "aim at something with
+    # structure" was asking a human to arrange. K is measured off the picture
+    # moving, so a screen full of sky reads zero at every amount, exactly like
+    # an unfocused one does.
+    #
+    # Skipped under --dry-run for the same reason the focus check was: that
+    # mode injects nothing, it measures the noise floor.
+    if not args.dry_run:
+        print("\n>>> Taking the foreground and moving to the 200m lane. "
+              "Do not touch the mouse until it finishes.")
+        ready = ensure_ready(label='calibrate_k', countdown_s=args.countdown)
+        if not ready['ok']:
+            print(f"\n[!] ABORT: could not get the game ready — failed at "
+                  f"{ready['failed']!r}. Injected input is ignored while the "
+                  f"game is unfocused, so every trial would read zero.")
+            grabber.close()
+            return 1
 
     rows = []
     raw = []

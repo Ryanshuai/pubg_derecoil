@@ -25,7 +25,7 @@ except (AttributeError, OSError):
 
 import control.spawner as spawner_mod
 from control.inventory import InventoryControl
-from control.focus import ensure_focus
+from control.session import ensure_ready
 from control.lobby import LobbyControl
 from control.spawner import SpawnerControl
 from press.pico_mouse import get_mouse
@@ -54,7 +54,7 @@ def main():
     ap.add_argument('--countdown', type=int, default=4)
     args = ap.parse_args()
 
-    if not ensure_focus(countdown_s=args.countdown, label='the spawn-wait probe'):
+    if not ensure_ready(label='the spawn-wait probe', countdown_s=args.countdown)['ok']:
         return 1
 
     # A training-range session ends on its own, and a probe that stops there is

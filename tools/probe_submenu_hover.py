@@ -43,7 +43,7 @@ import cv2
 from detector.cropper import capture_screen
 from detector.spawner_layout import (find_submenu_items, expansions,
                                      SUBMENU_OFFSET)
-from control.focus import ensure_focus
+from control.session import ensure_ready
 from control.lobby import LobbyControl
 from control.spawner import SpawnerControl, shoot_parked
 
@@ -78,7 +78,7 @@ def main():
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     except (AttributeError, OSError):
         pass
-    if not ensure_focus(countdown_s=6, label='the submenu hover probe'):
+    if not ensure_ready(label='the submenu hover probe', countdown_s=6)['ok']:
         print('[!] could not focus the game')
         return 1
     with LobbyControl() as lc:

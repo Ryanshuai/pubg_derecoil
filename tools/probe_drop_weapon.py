@@ -38,7 +38,7 @@ except (AttributeError, OSError):
     pass
 
 from control.inventory import InventoryControl
-from control.focus import ensure_focus
+from control.session import ensure_ready
 from control.lobby import LobbyControl
 from control.spawner import SpawnerControl
 
@@ -83,7 +83,7 @@ def main():
     ap.add_argument('--countdown', type=int, default=5)
     args = ap.parse_args()
 
-    if not ensure_focus(countdown_s=args.countdown, label='the gun-drop probe'):
+    if not ensure_ready(label='the gun-drop probe', countdown_s=args.countdown)['ok']:
         return 1
 
     with LobbyControl(verbose=False) as lc:

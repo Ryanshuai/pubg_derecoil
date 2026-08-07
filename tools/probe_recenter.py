@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__))), 'calibration'))
 
-from control.focus import ensure_focus
+from control.session import ensure_ready
 from detector.weapon import Weapon
 from analysis import analyse
 from sweep import Rig
@@ -48,7 +48,7 @@ def main():
                          'of returning to a remembered reference')
     args = ap.parse_args()
 
-    if not ensure_focus(countdown_s=5, label='the recentre probe'):
+    if not ensure_ready(label='the recentre probe', countdown_s=5)['ok']:
         print('[!] could not focus the game')
         return 1
 

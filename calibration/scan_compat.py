@@ -48,7 +48,8 @@ from detector.attachment_catalog import ROSTER, SLOTS
 from control.lobby import LobbyControl
 from detector.slot_detector import SlotDetector
 from detector.tab_layout import SLOT_NAMES
-from control.focus import ensure_focus, focus_keeper
+from control.focus import focus_keeper
+from control.session import ensure_ready
 from tools.drive_screen import SCREENS
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -188,14 +189,17 @@ def main():
         print('nothing to scan')
         return 1
 
-    if not ensure_focus(countdown_s=args.countdown, label='scan_compat'):
-        print('could not bring the game to the foreground')
-        return 1
-
-    with LobbyControl(args.backend) as lc:
-        rec = lc.ensure_in_match()
-    if not rec['ok']:
-        print(f'not in a match: {rec["error"]}')
+    # One call replaces the focus check AND the ensure_in_match below it, and
+    # adds the two this scan was missing: Tab and the spawner panel both eat
+    # the keypresses it is about to send. Its last step moves to the 200m lane,
+    # off the compound where the traffic is.
+    #
+    # ⚠ ensure_ready takes no backend, so its control objects come up on
+    # 'auto'. That only matters for --backend sendinput, which cannot press a
+    # key at all (can_key is False) and so could never have run this scan.
+    ready = ensure_ready(label='scan_compat', countdown_s=args.countdown)
+    if not ready['ok']:
+        print(f'could not get the game ready — failed at {ready["failed"]!r}')
         return 1
 
     from control.inventory import InventoryControl

@@ -46,7 +46,8 @@ except (AttributeError, OSError):
     pass
 
 from control.inventory import InventoryControl, at_inv, at_ground
-from control.focus import ensure_focus, focus_keeper
+from control.focus import focus_keeper
+from control.session import ensure_ready
 from control.spawner import SpawnerControl
 from press.pico_mouse import get_mouse
 
@@ -127,7 +128,7 @@ def main():
     ap.add_argument('--countdown', type=int, default=6)
     args = ap.parse_args()
 
-    if not ensure_focus(countdown_s=args.countdown, label='the drag probe'):
+    if not ensure_ready(label='the drag probe', countdown_s=args.countdown)['ok']:
         print('[!] could not focus the game')
         return 1
 

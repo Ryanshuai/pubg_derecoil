@@ -123,6 +123,7 @@ from detector.attachment_catalog import ATTACHMENTS
 from detector.cropper import FocusLost, ScreenBuffer
 from control.aim import ViewDriver, NoPico
 from control.focus import game_focused
+from control.session import ensure_ready
 
 try:
     # The operator prompts and the scope labels are Chinese; a console left on
@@ -1105,9 +1106,16 @@ def timing_run(args):
     print(f'weapon   {args.weapon}, whatever sight is on it now')
     print(f'watching {args.timing_ms} ms either side of the tap')
     print(f'out      {out_dir}\n')
-    wait_for_key(prompt=f'>>> 切到游戏，{args.weapon} 拿在手上，对着有内容的'
-                        f'方向站定别动。\n    程序会点一次右键开镜、再点一次'
-                        f'退出，全程连拍。')
+    wait_for_key(prompt=f'>>> {args.weapon} 拿在手上，然后按任意键。\n'
+                        f'    程序会自己抢焦点、走到 200m 靶道，再点一次右键'
+                        f'开镜、点一次退出，全程连拍。')
+    # After the key, not before: the operator's job is the loadout, and
+    # standing still facing something is this call's job now.
+    ready = ensure_ready(label='capture_ads timing')
+    if not ready['ok']:
+        print(f'[timing] ABORT: could not get the game ready — failed at '
+              f'{ready["failed"]!r}.')
+        return 1
 
     base = grab()
     if looks_black(base):
@@ -1272,12 +1280,17 @@ def run(args):
 
     done = []
     try:
-        prompt = (f'>>> 切到游戏，{args.weapon}（栓狙）带在身上（1 号或 2 号位'
-                  f'都行），站在空旷处，视角摆正。')
+        prompt = (f'>>> {args.weapon}（栓狙）带在身上（1 号或 2 号位都行）。'
+                  f'\n    站位不用管，程序会自己走到 200m 靶道。')
         if equip.self_verifies:
-            prompt += '\n    要采的镜子全部放进背包，Tab 关掉。'
+            prompt += '\n    要采的镜子全部放进背包（Tab 程序会自己关）。'
         prompt += '\n    开镜是点一下右键（不是按住），程序按这个来。'
         wait_for_key(prompt=prompt)
+        ready = ensure_ready(label='capture_ads')
+        if not ready['ok']:
+            print(f'[capture] ABORT: could not get the game ready — failed at '
+                  f'{ready["failed"]!r}.')
+            return 1
         frame = grab()
         if looks_black(frame):
             print('[capture] the screen grab is black — GDI cannot see the '

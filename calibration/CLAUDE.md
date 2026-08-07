@@ -4,6 +4,8 @@
 
 一个 `ensure_*` 都不该有。想让游戏做点什么，去 `control/`。
 
+⚠ **「不该有」指的是不该自己实现，不是不该调。** 2026-08-06 起这一层的六个入口（`harvest` / `sweep` / `collect_templates` / `scan_compat` / `calibrate_k` / `capture_ads`）开场统一调 `control.session.ensure_ready()`——那是 `control/` 的东西，正是 `pixi run layering` 第 9 条要求的方向。它现在是**五步**：焦点 → 在局内 → Tab 收起 → 刷新器面板收起 → **走到 200m 靶道**。最后一步不是「游戏听不听得见我」而是「有没有人会撞我」：出生点是主场地，人多的服上有车穿过，而**被撞掉的弹匣不会自己报告**——轨迹里只是混进了别人的物理，每一道闸照样绿。
+
 判据跟 `control/CLAUDE.md` 那条是同一条，只是落在这一层：
 
 > 这段代码需要知道「游戏里正在发生什么」吗？需要 → `control/`。

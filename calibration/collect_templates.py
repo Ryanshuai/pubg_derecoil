@@ -92,7 +92,8 @@ from detector.slot_detector import SlotDetector
 from detector.tab_items import (ROW_DETAIL_MIN, inserted_row,
                                 row_icons, tab_blocks)
 from detector.tab_layout import INV_ROWS, icon_box
-from control.focus import ensure_focus, focus_keeper
+from control.focus import focus_keeper
+from control.session import ensure_ready
 
 from control.spawner import SpawnerControl
 from control.inventory import (InventoryControl, PLATE_INK_MIN,
@@ -1730,9 +1731,14 @@ def main():
     out_dir = run.path
     print(f'out      : {os.path.relpath(out_dir, ROOT)}\n')
 
-    print('>>> Stand at an item spawner with room to turn all the way round.')
-    if not ensure_focus(countdown_s=args.countdown, label='template collection'):
-        print('[!] ABORT: game not focused and could not take the foreground.')
+    # No standing instruction any more: the spawner is a key-bound menu that
+    # opens anywhere (control/CLAUDE.md), and ensure_ready's last step puts the
+    # character in the 200m lane, away from the compound traffic.
+    ready = ensure_ready(label='template collection',
+                         countdown_s=args.countdown)
+    if not ready['ok']:
+        print(f'[!] ABORT: could not get the game ready — failed at '
+              f'{ready["failed"]!r}.')
         return 1
 
     rig = Rig('red_dot')

@@ -72,13 +72,14 @@ FAIL_DIR = os.path.join(os.path.dirname(HERE), 'docs', 'fail')
 HEADROOM_WARN_FRAC = 0.6
 POSTURES = ('standing', 'crouching', 'prone')
 
-# Re-exported for the tools that reach them through this module. Checked
-# 2026-08-03: every `from sweep import` in the repo takes ensure_focus or
-# focus_keeper and nothing else, so raise_game / FocusKeeper / GAME_EXES were
-# dropped -- they were forwarding for importers that do not exist, while the
-# real users go to control.focus directly.
-from control.focus import (game_focused, ensure_focus,  # noqa: E402
-                           focus_keeper)
+# Re-exported for the tools that reach them through this module. Re-checked
+# 2026-08-06, after the openers moved to control.session.ensure_ready:
+# `focus_keeper` still has one importer (harvest.py), `game_focused` is used
+# below as ScreenBuffer's focus_fn, and `ensure_focus` went to zero on both
+# counts -- so it is gone from here rather than forwarded for nobody. Anything
+# that wants it goes to control.focus, and anything opening a run wants
+# ensure_ready instead.
+from control.focus import game_focused, focus_keeper  # noqa: E402
 # The three closed loops this rig is made of. None of them is about recoil —
 # they are "point the view", "get the character into a known state" and "empty
 # a magazine and report what the game said", which is why they are in control/
@@ -86,6 +87,10 @@ from control.focus import (game_focused, ensure_focus,  # noqa: E402
 from control.aim import ViewDriver, PROBE_COUNTS, BAND_STEP
 from control.gun import GunDriver
 from control.fire import FireDriver, MAX_FIRE_S  # noqa: F401  (tools import it)
+# Module level is safe: control/session.py imports only control.focus up here
+# and pulls the four control objects in inside the function, precisely so the
+# things it gates can import it back.
+from control.session import ensure_ready
 
 
 class Rig:
@@ -696,11 +701,16 @@ def main():
     switcher = get_switcher(
         args.switcher, verify_fn=lambda: (rig.read_loadout()[0] or ''))
 
-    print("\n>>> Taking the foreground. Stand still and aim at something with "
-          "texture — the recoil is measured off it.")
-    if not ensure_focus(countdown_s=args.countdown, label='the sweep'):
-        print("[!] ABORT: game not focused, and could not take the "
-              "foreground. Is PUBG running?")
+    # ensure_ready, not ensure_focus. The last of its five steps teleports to
+    # the 200m lane, which is both why the operator no longer aims at anything
+    # by hand (that lane faces the bays -- texture across the whole band) and
+    # why nobody drives through the middle of the run.
+    print("\n>>> Taking the foreground and moving to the 200m lane.")
+    ready = ensure_ready(label='the sweep', countdown_s=args.countdown)
+    if not ready['ok']:
+        print(f"[!] ABORT: could not get the game ready — failed at "
+              f"{ready['failed']!r}. Is PUBG running and in the training "
+              f"range?")
         rig.close()
         return 1
     keeper = focus_keeper()

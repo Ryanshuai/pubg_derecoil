@@ -53,7 +53,7 @@ sys.path.insert(0, ROOT)
 import cv2
 
 from control.evidence import full_frame
-from control.focus import ensure_focus
+from control.session import ensure_ready
 from control.inventory import InventoryControl
 from control.stock import read_stock
 from detector.tab_layout import INV_ROWS
@@ -91,7 +91,7 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     stamp = datetime.now().strftime('%m%d_%H%M%S')
 
-    if not ensure_focus(countdown_s=4, label='the backpack depth probe'):
+    if not ensure_ready(label='the backpack depth probe', countdown_s=4)['ok']:
         print('[!] could not focus the game')
         return 1
     time.sleep(0.5)

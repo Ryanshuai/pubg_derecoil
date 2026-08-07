@@ -33,7 +33,7 @@ except (AttributeError, OSError):
     pass
 
 from control.inventory import InventoryControl
-from control.focus import ensure_focus
+from control.session import ensure_ready
 from control.spawner import SpawnerControl
 from press.pico_mouse import get_mouse
 
@@ -73,7 +73,7 @@ def main():
     ap.add_argument('--no-stock', action='store_true')
     args = ap.parse_args()
 
-    if not ensure_focus(countdown_s=args.countdown, label='the equip probe'):
+    if not ensure_ready(label='the equip probe', countdown_s=args.countdown)['ok']:
         return 1
 
     # "the spawner would not come up" is what being in the lobby looks like

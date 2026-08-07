@@ -32,7 +32,7 @@ import cv2
 from config import SCREEN_W, SCREEN_H
 from detector.cropper import win32_cap
 from detector.tab_layout import gun_tag_point
-from control.focus import ensure_focus
+from control.session import ensure_ready
 
 from control.inventory import InventoryControl
 from control.stock import open_tab
@@ -46,7 +46,7 @@ def main():
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     except (AttributeError, OSError):
         pass
-    if not ensure_focus(countdown_s=6, label='the gun-grab probe'):
+    if not ensure_ready(label='the gun-grab probe', countdown_s=6)['ok']:
         print('[!] could not focus the game')
         return 1
 

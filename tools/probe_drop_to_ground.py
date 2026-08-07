@@ -70,7 +70,7 @@ try:
 except (AttributeError, OSError):
     pass
 
-from control.focus import ensure_focus                        # noqa: E402
+from control.session import ensure_ready
 from control.inventory import InventoryControl, at_inv        # noqa: E402
 from control.spawner import SpawnerControl                    # noqa: E402
 from detector.tab_layout import DROP_XY, PANELS, row_y        # noqa: E402
@@ -170,7 +170,7 @@ def main():
     ap.add_argument('--countdown', type=int, default=5)
     args = ap.parse_args()
 
-    if not ensure_focus(countdown_s=args.countdown, label='the drop probe'):
+    if not ensure_ready(label='the drop probe', countdown_s=args.countdown)['ok']:
         return 1
     # force=True: a re-entry is the only thing that reliably empties BOTH
     # lists, and starting under the 12-row cap is the precondition this whole

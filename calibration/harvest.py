@@ -52,8 +52,8 @@ from detector.weapon import Weapon, WEAPON_RPM, can_full_guns
 import rpm_store
 from analysis import (analyse, interval_from_span, magazine_fault,  # offline
                       ROUNDS_TOL)
-from sweep import (Rig, ensure_focus, focus_keeper,
-                   POSTURES, HEADROOM_WARN_FRAC)
+from sweep import Rig, focus_keeper, POSTURES, HEADROOM_WARN_FRAC
+from control.session import ensure_ready
 from control import spawner as spawner_mod
 from control.spawner import SpawnerControl, ROSTER
 from control.inventory import InventoryControl, slot_matches
@@ -1628,10 +1628,16 @@ def main():
     # satisfy is the recoil measurement: phaseCorrelate needs texture to lock
     # onto, and a patch of empty sky reads zero displacement no matter how hard
     # the gun kicks.
-    print("\n>>> Face something with texture — the recoil is measured off it.")
-    if not ensure_focus(countdown_s=args.countdown, label='the harvest'):
-        print("[!] ABORT: game not focused, and could not take the "
-              "foreground. Is PUBG running?")
+    # ensure_ready, not ensure_focus: focus alone is four of the five things
+    # this run needs, and the fifth is why the operator no longer has to aim at
+    # anything. The 200m lane it teleports to faces the shooting bays -- wood,
+    # rock and scrub across the whole measurement band -- while the compound it
+    # spawns in has people driving through it.
+    ready = ensure_ready(label='the harvest', countdown_s=args.countdown)
+    if not ready['ok']:
+        print(f"[!] ABORT: could not get the game ready — failed at "
+              f"{ready['failed']!r}. Is PUBG running and in the training "
+              f"range?")
         rig.close()
         return 1
     time.sleep(0.6)     # the game ignores input for a few frames after a
