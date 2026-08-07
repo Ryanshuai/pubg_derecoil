@@ -1008,6 +1008,74 @@ LOBBY_RECONNECT_TEXT_ROI = (881, 1689, 23, 119)   # (y, x, h, w)
 LOBBY_RECONNECT_MIN_SCORE = 0.55
 LOBBY_RECONNECT_XY = (1730, 906)
 
+# ── In-match map (M) ─────────────────────────────────────────────────────
+# The training range map doubles as a teleporter: each practice area is drawn
+# as a translucent yellow box, and clicking one moves the character there.
+#
+# WHY A RUN WANTS THIS. Spawning drops everyone at the main compound, which on
+# a populated server has people driving through it. A measurement round that
+# gets rammed loses the magazine and does not necessarily know it did. The
+# 200m range is a lane off to the side of that.
+#
+# Boxes are (x0, y0, x1, y1) of the highlight's own bounds, measured off
+# docs/map/map_400m.png by detector/map_detector.highlight_box(). The click
+# target is the box centre -- a CONSTANT, not a per-run measurement, for the
+# same reason the spawner's entry points are constants (detector/CLAUDE.md:
+# nothing on the driving path may depend on recognising the thing it drives).
+# highlight_box() is how these get re-measured when a patch moves the map.
+MAP_RANGE_BOXES = {
+    '200m': (1937, 460, 1999, 622),
+}
+MAP_RANGE_XY = {name: ((b[0] + b[2]) // 2, (b[1] + b[3]) // 2)
+                for name, b in MAP_RANGE_BOXES.items()}
+
+# Where a landed teleport actually puts the marker: the range's spawn point,
+# drawn at the top edge of the highlight and slightly OUTSIDE it. Measured on
+# the first live run, 2026-08-06 -- ONE sample each.
+#
+# This is separate from the box on purpose. Padding the box until it admitted
+# the arrival point also widened it toward the neighbouring lane, so a
+# character standing next door read as "already at the 200m range" and the
+# teleport was skipped. Arrival is a point question, occupancy is an area one.
+MAP_RANGE_SPAWN = {
+    '200m': (1977, 450),
+}
+
+# ⚠ THE MINIMAP DRAWS THE SAME PLAYER MARKER, and it is on screen whenever the
+# big map is NOT. So "I can see a yellow disc" is true essentially always, and
+# the first live frame taken after map_detector was written said map_open=True
+# with the map shut — the marker it found was at (3222, 1227), in this corner.
+#
+# The two are mutually exclusive (opening the map hides the minimap), so
+# excluding this rectangle turns the marker back into a map signal. Excluding
+# it costs nothing: the big map's own UI ends around x=3000, so nothing it
+# draws ever lands here.
+#
+# Measured off docs/map/ingame_minimap.png: the minimap occupies
+# x[3050,3405) y[1050,1405). Padded by 20 px, then out to the screen edge.
+#
+# ⚠ _BOX, NOT _ROI. Every *_ROI in this file is (y, x, h, w) -- the row-major
+# order detector/geometry.cut() exists to enforce, and getting it wrong does
+# not raise, it silently returns a different rectangle. This one is corner
+# points like MAP_RANGE_BOXES, because it is tested against and sliced with,
+# never cut(). The suffix is the only thing that says which convention a
+# constant follows, so it has to stay honest.
+MINIMAP_BOX = (3030, 1030, SCREEN_W, SCREEN_H)   # (x0, y0, x1, y1)
+
+# Width of the strip holding the map's left-hand list of training areas. The
+# selected entry is drawn with a yellow border -- two vertical strokes at
+# x=80, 320 px of them -- and that is the map-open signal that does NOT move
+# when the map is panned or zoomed. Both stored frames with the map shut read
+# 0 px of yellow in this strip.
+MAP_LEFT_PANEL_W = 420
+
+# Hovering a range pops a preview card ~40 px down-right of the cursor. It
+# does not cover the marker at any range measured so far, but the read-back
+# that verifies a jump is by definition taken with the cursor sitting on the
+# box just clicked -- the same trap LOBBY_PARK_XY exists for. Parked in the
+# blurred game world left of the map, which draws no UI and no hover state.
+MAP_PARK_XY = (450, 1200)
+
 # ════════════════════════════════════════════════════════════
 # Alpha blending (for highlight hypothesis test)
 # ════════════════════════════════════════════════════════════

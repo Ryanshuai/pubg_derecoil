@@ -25,6 +25,7 @@ pixi run layering      # 只解析 import，不跑任何东西
 | `focus.py` | 抢并保持游戏前台 | `ensure_focus()` / `focus_keeper()` |
 | `lobby.py` | 大厅 ↔ 局内转移 | `LobbyControl.ensure_in_match()` |
 | `spawner.py` | 训练场刷新器面板，刷枪/配件/装备 | `SpawnerControl.give()` |
+| `map.py` | 大地图（M）：开关它、点练习区传送 | `MapControl.goto_range('200m')` |
 | `match.py` | 对局内实时回路（按键→状态→硬件） | `Dispatcher`，由 `robot.py` 装配 |
 | `tab_watch.py` | Tab 界面：开没开、枪上装了什么（**只读**） | `TabWatch`，由 `Dispatcher` 持有 |
 | `inventory.py` | Tab 界面：拖配件、装卸、扔枪（**驱动**） | `InventoryControl` |
@@ -100,6 +101,29 @@ with LobbyControl() as lc:
 
 - **ESC 菜单的像素探针全都说「在局内」**。不查 `SYSTEM MENU` 标题就会返回 `playable=True`，而按键全被菜单吃掉。
 - **别用固定 `sleep` 等游戏。** 结算页 ~18 秒、匹配+加载不是常数。`EXIT_TIMEOUT`/`ENTER_TIMEOUT` 是放弃阈值，不是预期耗时。
+
+### 进局之后挪到 200m 射击场
+
+**不用自己调，`session.ensure_ready()` 已经在做**（第五步，见下）。要单独驱动地图才用 `control/map.py`：
+
+```python
+from control.map import MapControl
+with MapControl() as mc:
+    mc.goto_range('200m')      # M → 点黄框 → M，落地靠读回玩家标记
+```
+
+出生点是主场地，人多的服上有人开车从中间穿过。**被撞掉的弹匣不会自己报告**——后坐力轨迹里只是混进了别人的物理，而下游每一道闸照样绿。
+
+四条：
+
+- **落地判据是读回玩家标记落到 spawn 点，不是点击返回。** 点歪了和游戏没接，留下的屏幕**一模一样**。判据能成立的原因见 `detector/CLAUDE.md` 的「大地图 + 传送点」。
+- **幂等**：开图后先看在不在，已经在了就只付一次开关图，不点。
+- ⚠ **关地图是 `finally`，不是每个 return 前一行。** 上一版是后者，于是**抛异常那条路完全没覆盖**。地图开着交还给调用方的话，后面每一次按键和点击都进地图而不进游戏，**下游没有任何东西会去测这件事**。唯一不关的是「图压根没开起来」那一支——那时按 M 是**打开**它。
+- ⚠ **M 是 toggle，所以重发一次不需要的 M 会撤销这一步。** 这跟 `ensure_tab` / `ensure_panel` 是同一课，`ensure_map` 因此**先读后按**。真正结束一个卡住的步骤的是 `MAP_MAX_RETRIES`（4×1.5s ≈ 6s），不是 `MAP_TIMEOUT`——直接抄 lobby 的 `MAX_RETRIES=3` 会变成「4.5 秒放弃」而注释还写着 15 秒上限。
+
+**为什么它不在 `LobbyControl` 里**（一开始是）：M 是按键，而 **Tab 和刷新器面板都吞按键**。管这事的是 `session.ensure_ready()`，而 `session` 是 `lobby` 的**消费者**——从 `LobbyControl` 内部够不着，于是那一版只验了 `IN_GAME`。Tab 开着跑它会报「按键没生效」，而真相是有块屏幕在吃键。搬出来之后 `ensure_ready` 直接调它，前置条件在它跑之前就是真的。
+
+⚠ **`MAP_SETTLE` 没实测**，其余三个常量有一次实机数据（每步都是第一次尝试就成，2.3s 冷 / 1.4s 已在）。
 
 ### 刷东西 — 三层，按需要进入
 

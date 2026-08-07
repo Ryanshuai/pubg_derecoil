@@ -65,6 +65,12 @@ layering = "python tools/check_layering.py"
 # ground truth. Offline, and the thing that lets the panel be driven without
 # returning to a collapsed baseline between actions.
 panel-state = "python tools/test_panel_state.py"
+# Player marker and range highlights on the in-match map, off one stored frame.
+# Offline. Two-sided by construction: half the cases paint the marker OUT, and
+# they are the half that matters -- the area-only gate this replaced accepted
+# the left panel's selection border (167 px) and only ever returned the marker
+# because the marker outweighed it.
+map-detect = "python detector/map_detector.py --selftest"
 # Drives TabWatch's state machine against a scripted screen. Offline. Covers
 # the two cases the old toggle got wrong: a Tab key the game swallowed, and
 # the screen changing with no key at all.

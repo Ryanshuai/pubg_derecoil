@@ -5,9 +5,10 @@
         return 1
 
 Nothing here is new behaviour. It is `ensure_focus` + `ensure_in_match` +
-`ensure_tab(False)` + `ensure_panel(False)`, in the one order that works, in
-one call — because the alternative is every tool remembering four things, and
-they do not. WHAT GETS FORGOTTEN IS NEVER THE FIRST ONE.
+`ensure_tab(False)` + `ensure_panel(False)` + `goto_range('200m')`, in the one
+order that works, in one call — because the alternative is every tool
+remembering five things, and they do not. WHAT GETS FORGOTTEN IS NEVER THE
+FIRST ONE.
 
 The reason it exists, in full, because the shape repeats:
 
@@ -36,14 +37,28 @@ WHY EACH ONE, AND IN THIS ORDER:
   panel    the spawner panel is modal over the world: the HUD is there but the
            character does not move, so a view-driving probe measures a frozen
            screen and reports a clean zero.
+  range    everyone spawns at the main compound, and on a populated server
+           that compound has people driving through it. Being rammed
+           mid-magazine costs the magazine and DOES NOT ANNOUNCE ITSELF — the
+           recoil trace just has someone else's physics in it, and every gate
+           downstream still passes. The 200m lane is off to one side.
 
 The order is not arrangeable. Tab and the panel cannot be read without focus,
-and neither can be read meaningfully outside a match.
+and neither can be read meaningfully outside a match. The range goes LAST for
+a reason that cost a rewrite to find: opening the map is a keypress, and both
+Tab and the spawner panel swallow keypresses while they are up
+(docs/game_quirks.md). Run it before those two are down and it reports "the
+key had no effect" about a screen that was eating the key.
+
+⚠ **The range step is the one that is not about being heard.** The other four
+answer "can the game hear me"; this one answers "will anything hit me". It
+lives here anyway because there is exactly one door every training-range
+script goes through, and a precaution nobody remembers to take is not a
+precaution — the same argument that put the other four here.
 
 WHAT IT DELIBERATELY DOES NOT DO: put a weapon in your hands, or anything else
 about the loadout. That is the experiment's business, not the session's — see
-control/stock.py's restock() and InventoryControl.ensure_kit(). This answers
-"can the game hear me", nothing more.
+control/stock.py's restock() and InventoryControl.ensure_kit().
 
 Every step is skipped by argument (`match=False` and so on) for the scripts
 that genuinely mean it — reading the lobby, probing the panel itself. Skipping
@@ -53,8 +68,9 @@ from control.focus import ensure_focus
 
 
 def ensure_ready(label='this script', countdown_s=6, focus=True, match=True,
-                 tab=True, panel=True, verbose=True):
-    """Focus, in a match, Tab down, spawner panel down. -> {'ok', 'steps', ...}
+                 tab=True, panel=True, range_name='200m', verbose=True):
+    """Focus, in a match, Tab down, panel down, at the 200m range.
+    -> {'ok', 'steps', ...}
 
     Returns rather than raises: a probe that cannot run should say which of the
     four it could not get and stop, not stack a traceback on top of it.
@@ -108,6 +124,22 @@ def ensure_ready(label='this script', countdown_s=6, focus=True, match=True,
                         lambda: sc.ensure_panel(False)):
                 out['failed'] = 'panel'
                 return out
+
+    if range_name:
+        from control.map import MapControl
+        with MapControl() as mc:
+            # The record, not just its ok: a teleport that failed says which
+            # of open/click/close it failed at, and 'range: FAILED' alone
+            # would throw that away.
+            rec = {}
+            def go():
+                rec.update(mc.goto_range(range_name))
+                return rec['ok']
+            if not step(f'at the {range_name} range', go):
+                out['failed'] = 'range'
+                out['range'] = rec
+                return out
+            out['range'] = rec
 
     out['ok'] = True
     return out

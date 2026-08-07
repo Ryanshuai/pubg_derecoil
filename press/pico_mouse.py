@@ -46,6 +46,8 @@ HID_KEY_1   = 0x1E
 HID_KEY_2   = 0x1F
 HID_KEY_3   = 0x20
 HID_KEY_ESC = 0x29   # opens/closes the system menu
+HID_KEY_M   = 0x10   # opens/closes the map; in the training range the map is
+                     # also the teleporter (control/lobby.goto_range)
 
 _instance = None
 
