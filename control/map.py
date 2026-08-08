@@ -34,10 +34,11 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import MAP_PARK_XY, MAP_RANGE_BOXES, MAP_RANGE_XY
-from detector.cropper import capture_screen
+from capture.cropper import capture_screen
 from detector.lobby_detector import LobbyDetector
 from detector.map_detector import at_range_xy, map_open, player_xy
-from press.pointer import Pointer, move_cursor
+from press.pointer import move_cursor
+from control.driver import Driver
 from control.focus import focus_keeper
 
 # Measured on the first live run, 2026-08-06 (see OBSERVED DURATIONS): every
@@ -75,46 +76,31 @@ def _rec(elapsed, tries, error=None, frame=None):
             'error': error, 'frame': frame}
 
 
-class MapControl:
+class MapControl(Driver):
     """The map screen: open it, click a range to teleport, close it."""
 
-    def __init__(self, backend='auto', verbose=True):
+    def __init__(self, verbose=True):
+        super().__init__()
         self.verbose = verbose
         self.det = LobbyDetector()
-        self._pointer = None
-        self._backend = backend
-
-    # Lazy for the reason LobbyControl's is: constructing a Pointer opens the
-    # Pico, and a caller that only reads state should not hold the one serial
-    # port harvest.py and robot.py also want.
-    @property
-    def pointer(self):
-        if self._pointer is None:
-            self._pointer = Pointer(self._backend)
-        return self._pointer
 
     def _log(self, msg):
         if self.verbose:
             print(f'[map] {msg}', flush=True)
 
     def close(self):
+        super().close()
         self.det.close()
-        if self._pointer is not None:
-            self._pointer = None
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        self.close()
 
     # ── Actions ──
 
     def press_map(self):
-        """Toggle the map. Pico only — SendInput has no keyboard path, the
-        same limit press_esc and ensure_panel report."""
-        if self.pointer.pico is None:
-            return None
+        """Toggle the map.
+
+        ⚠ The "SendInput has no keyboard path" caveat and the `pico is None`
+        guard under it both went with that backend (2026-08-08). See
+        LobbyControl.press_esc for the same removal.
+        """
         from press.pico_mouse import HID_KEY_M
         self.pointer.pico.key(HID_KEY_M, 60)
         return 'M'
@@ -184,6 +170,22 @@ class MapControl:
 
         Reads before it presses, so calling this on a map already in the
         wanted state costs one capture and no keypress.
+
+        ⚠ READ-BEFORE-PRESS IS RIGHT FOR A TOGGLE AND IT INHERITS THE READ'S
+        LIES. Observed 2026-08-08, 0.0 s after the game reached in_game: this
+        returned ok having sent NO M, because map_open() answered True on a
+        screen with no map on it. `player_xy` was None in the same frame, so
+        what fired was the left panel's yellow selection border. goto_range
+        then spent all four of its attempts clicking the 200m box INTO THE
+        WORLD, reported "4 attempts had no effect", and the same call nine
+        seconds later worked on its first try.
+
+        Nothing here is wrong -- the failure is loud, bounded, and recovered by
+        LobbyControl.RANGE_SETTLE_S, whose comment carries the full trace. But
+        the two halves of that OR are not equally trustworthy in the first
+        seconds of a match, and a caller reading "proved it" should know which
+        proof it got. `player_xy` disagreeing with `map_open` IS the tell, and
+        goto_range already logs it ("player is at None").
         """
         pred = map_open if want else (lambda f: not map_open(f))
         return self._await_frame(pred, timeout, self.press_map,
@@ -192,7 +194,14 @@ class MapControl:
     # ── The one thing this module is for ──
 
     def goto_range(self, name='200m', timeout=MAP_TIMEOUT):
-        """Move the character to a practice range, then put the map away.
+        """L1 — Teleport to a practice range and put the map away again. One step,
+        proved by reading the PLAYER MARKER back (a missed click and an
+        ignored one leave the same screen). ensure_ready() is the L2.
+
+        ⚠ IT CHECKS `playable` AND NOTHING ELSE. M is a keypress, and Tab
+        and the spawner panel both swallow keypresses — run it under either
+        and it reports "N attempts had no effect" about a screen eating the
+        key. The map itself is closed on every path, exceptions included.
 
         M -> click the range's highlight -> M. The middle step is a teleport:
         in the training range each practice area is drawn on the map as a
@@ -291,11 +300,9 @@ def main():
                     help='practice range for `goto`')
     ap.add_argument('--timeout', type=float, default=MAP_TIMEOUT)
     ap.add_argument('--countdown', type=int, default=5)
-    ap.add_argument('--backend', default='auto',
-                    choices=('auto', 'pico', 'sendinput'))
     args = ap.parse_args()
 
-    with MapControl(args.backend) as mc:
+    with MapControl() as mc:
         if args.action == 'state':
             frame = capture_screen()
             xy = player_xy(frame)
@@ -341,6 +348,19 @@ def main():
 #                        predates the rewrite that split this out of
 #                        LobbyControl -- the numbers are the game's, not this
 #                        code's, but nothing here has been re-timed since.
+#
+#   RE-TIMED 2026-08-08, now that ensure_in_match calls this on every entry.
+#   Three calls in one session, and they are the three branches:
+#
+#     0.0 s after in_game   FAILED. 4 attempts, ~6 s, no M sent at all (see
+#                           ensure_map's warning). Marker unreadable.
+#     +3 s settle, cold     2.39 s. open 0.60 / teleport 0.80 / close 0.56,
+#                           each first try. Marker (2036,1020) -> (1979,454),
+#                           i.e. the spawn compound to the lane's spawn point.
+#     already standing there 1.41 s. open / already-there / close, no click.
+#
+#   The cold number is within 0.1 s of the 2026-08-06 run, across the rewrite
+#   AND the move back into LobbyControl. Whatever this costs, it is the game's.
 
 
 if __name__ == '__main__':

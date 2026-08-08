@@ -56,7 +56,7 @@ class TabWatch:
 
     def _type_crop(self):
         if self._type_grab is None:
-            from detector.cropper import RegionGrabber
+            from capture.cropper import RegionGrabber
             self._type_grab = RegionGrabber({'type': HUD_REGIONS['type']})
         return self._type_grab.grab()
 
@@ -161,7 +161,7 @@ class TabWatch:
         if now < self._watch_until:
             got = self.measure_open()
             if got is not None and got != self.open:
-                self._set_open(got, now)
+                self._set_open(got)
                 self._watch_until = 0.0
             elif now + 0.011 >= self._watch_until and self._want is not None:
                 # Last look before giving up. The screen never changed, so the
@@ -184,11 +184,11 @@ class TabWatch:
             got = self.measure_open()
             if got is not None and got != self.open:
                 self._log(f'drifted: screen says {"open" if got else "closed"}')
-                self._set_open(got, now)
+                self._set_open(got)
 
     # ── Internals ──
 
-    def _set_open(self, value, now):
+    def _set_open(self, value):
         self.open = value
         self.state.tab_open = value
         if value:

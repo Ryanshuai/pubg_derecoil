@@ -123,6 +123,66 @@ def game_hwnd():
     return best
 
 
+def game_minimized():
+    """The game has a window and it is iconified. -> True / False / None.
+
+    None means there is no window to ask about -- NOT "it is fine". The three
+    answers are the three different situations control/CLAUDE.md's table
+    already separates, and collapsing the last two is what this exists to stop.
+
+    ⚠ `IsWindowVisible` IS TRUE FOR A MINIMIZED WINDOW. Only IsIconic (or the
+    -32000 rect Windows parks it at) says so, which is why game_hwnd() happily
+    returns a window nobody can screenshot. Everything downstream then reads
+    the DESKTOP and classifies it: measured 2026-08-07, a minimized game gave
+    bar_max 251 / ping_frac 0.000 -> FULLBLEED, and ensure_running sat in its
+    poll loop for 420 s waiting for a "loading screen" to finish -- the exact
+    failure control/CLAUDE.md documents for a game that is not running at all.
+    The rule there ("ask the process before you ask the screen") was right and
+    one state short: a minimized window is a process that is up and a screen
+    that is not the game.
+    """
+    hwnd = game_hwnd()
+    if not hwnd:
+        return None
+    try:
+        if win32gui.IsIconic(hwnd):
+            return True
+        l, t, r, b = win32gui.GetWindowRect(hwnd)
+    except Exception:
+        return None
+    # Belt and braces: Windows parks minimized windows near -32000, and a
+    # window whose rect is off every monitor cannot be captured either way.
+    return l < -30000 or t < -30000
+
+
+def game_pids():
+    """Every live game process, by name. -> [pid, ...]
+
+    The process-table counterpart to `game_hwnd()`, and the two disagree
+    exactly where it matters: during startup and during shutdown the game HAS
+    a process and does NOT yet (or no longer) have a drivable window. Reading
+    only the window collapses those onto "not installed", and the recoveries
+    are opposites — wait a few minutes vs. launch it.
+
+    ⚠ ORDER MATTERS TO THE CALLER, not to correctness. Measured 2026-08-07:
+    game_hwnd() 1.4 ms, this 18.7 ms over 603 processes. So the polling loop
+    in control/lobby.py asks for the window first and only comes here when
+    that answers None, which is the rare branch.
+
+    Never raises: processes die between being listed and being named, and
+    "it went away" is the answer, not an error.
+    """
+    out = []
+    try:
+        for p in psutil.process_iter(['pid', 'name']):
+            name = (p.info.get('name') or '').lower()
+            if any(name.startswith(k) for k in GAME_EXES):
+                out.append(p.info['pid'])
+    except Exception:
+        pass
+    return out
+
+
 def raise_game(settle_s=0.8):
     """Put the game window in front. Returns whether it actually got focus.
 
@@ -222,7 +282,13 @@ def _take_focus(countdown_s, tries, label):
 
 
 def ensure_focus(countdown_s=0, tries=3, label='', settle_s=FOCUS_SETTLE_S):
-    """Take the foreground, verify it, settle, and only then return.
+    """L1 — Take the foreground and prove it took, then settle. -> bool.
+    Guarantees exactly one thing: the game's EXE is frontmost. It is the
+    first of ensure_ready()'s five legs, never a substitute for them.
+
+    ⚠ FRONTMOST IS NOT PLAYABLE. The lobby, the loading screen, the ESC menu
+    and the results screen all satisfy this and all swallow input —
+    probe_pitch_range drove three postures into the lobby on a True here.
 
     This is what makes a run unattended. Every tool here starts from a
     terminal, so at t=0 the terminal owns the foreground and the game does

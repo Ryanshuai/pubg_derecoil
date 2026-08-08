@@ -70,7 +70,7 @@ import numpy as np
 
 from detector.attachment_catalog import ROSTER, ATTACHMENTS
 from detector.spawner_detector import SpawnerDetector
-from detector.cropper import capture_screen
+from capture.cropper import capture_screen
 from detector.spawner_layout import (CHANGE_MIN, COLUMN_ROWS, LAYOUT_SCREEN,
                                      PANEL_Y0, PANEL_Y1, PARK_XY,
                                      SUBMENU_ENTRY_DY, SUBMENU_ENTRY_PITCH,
@@ -78,7 +78,8 @@ from detector.spawner_layout import (CHANGE_MIN, COLUMN_ROWS, LAYOUT_SCREEN,
                                      entry_point, expansions, find_menu,
                                      find_submenu_items, known_layout)
 from press.pico_mouse import HID_KEY_2, HID_KEY_COMMA
-from press.pointer import Pointer, move_cursor
+from press.pointer import move_cursor
+from control.driver import Driver
 from control.focus import game_focused, ensure_focus
 
 # The submenu's slide-open is watched, not waited out. Every screen in this
@@ -91,9 +92,28 @@ OPEN_WAIT = 0.45       # only for L0 clicks, which verify nothing by definition
 CLOSE_WAIT = 0.40
 
 
-def shoot_parked(settle=0.10):
-    """Screenshot with the cursor off the panel, so no row is hover-lit."""
-    move_cursor(PARK_XY)
+def shoot_parked(settle=0.10, park=True):
+    """Screenshot with the cursor off the panel, so no row is hover-lit.
+
+    ⚠ `park=False` TAKES THE SHOT WITHOUT MOVING THE CURSOR, and the rule is
+    the same one control/inventory.py's _frame carries: parking belongs to the
+    DETECTION, not to the grab.
+
+      classify()      reads the three panel BUTTON ICONS, which are background
+                      independent (24 positives at 0.989-1.000 against 0
+                      negatives) and cannot be changed by a row highlight.
+                      No park.
+      bright_mask()   compares pixel brightness between two shots to decide a
+                      category expanded. A hover highlight IS brightness.
+                      Parks, and must.
+
+    The cursor is thrown to PARK_XY = (200, 1380), the bottom-left corner, and
+    the operator watched it happen once per panel poll -- ensure_panel calls
+    this three times in its own wait loop. Same complaint, same fix as the Tab
+    side: "只有做检测需要的时候才挪".
+    """
+    if park:
+        move_cursor(PARK_XY)
     time.sleep(settle)
     return capture_screen()
 
@@ -178,8 +198,9 @@ SPAWNER_EXTRAS = {
 PANEL_WATCH_S = 3.0    # comma -> panel drawn; generous, it is a full screen
 PANEL_SETTLE_S = 0.5
 # Measured, not guessed, and it is the one wait here that could NOT come down.
-# tools/probe_spawn_wait.py spawns N copies and then counts what reached the
-# backpack, because clicking faster than the game accepts raises nothing --
+# Method, because the number will need re-measuring: spawn N copies and then
+# count what reached the BACKPACK, not what was clicked. Clicking faster
+# than the game accepts raises nothing --
 # the click is eaten and the run reports ok=True having spawned less than it
 # asked for. 0.30 delivered 5/5; 0.15 delivered 2/5 with ok=True.
 SPAWN_WAIT = 0.30     # after clicking an entry, before the next click
@@ -578,7 +599,7 @@ class PanelState:
         return f'<panel open, col{c}_row{r:02d} expanded, {len(self.entries)} entries>'
 
 
-class SpawnerControl:
+class SpawnerControl(Driver):
     """Spawn what a caller asks for. It says WHAT; this works out the clicks.
 
         with SpawnerControl() as sc:
@@ -601,8 +622,18 @@ class SpawnerControl:
     have to drive the panel by hand. Marked as such where it is defined.
     """
 
-    def __init__(self, backend='auto', verbose=True, layout=None):
-        self.pointer = Pointer(backend)
+    def __init__(self, verbose=True, layout=None):
+        # ⚠ WAS `self.pointer = Pointer(backend)` HERE, WHICH OPENED COM10 THE
+        # MOMENT ANYBODY CONSTRUCTED ONE. plan() is documented as 纯离线 ("想先
+        # 看它要点哪，不碰游戏") and took the shared serial port to answer;
+        # ensure_ready() builds one of these on every call just to ask whether
+        # a panel is shut. Several agents share one Pico.
+        #
+        # The tell was sitting in __exit__, whose comment read "Nothing to
+        # release: the Pointer is lazily built" -- twenty-three lines under the
+        # line that built it eagerly. Third time today a comment described the
+        # code somebody meant to write.
+        super().__init__()
         self.screen = SpawnerDetector()
         self.verbose = verbose
         self.base_mask = None
@@ -625,28 +656,12 @@ class SpawnerControl:
                 self._log(f'layout override {layout} is unusable ({e}) — '
                           f'keeping the measured constants')
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        # Nothing to release: the Pointer is lazily built and the screen
-        # grabber is shared. Deliberately does NOT close the panel -- callers
-        # open it themselves and several of them keep it open across steps.
-        return False
-
-    def can_press(self):
-        """Is there a Pico, i.e. can this send KEYS as well as clicks?
-
-        Exists so a caller can check the precondition up front instead of
-        discovering it four minutes in. Every panel here is opened by a
-        keypress and SendInput has no key path, so the answer decides whether
-        the run is possible at all -- but "which backend, and is it there" is
-        this layer's question. calibration/ used to answer it by building a
-        throwaway `Pointer(backend)` purely to read `.pico`, which imports
-        press/ from a module that is not supposed to know devices exist, and
-        reaches for the shared serial port before the driver that needs it.
-        """
-        return self.pointer.pico is not None
+    def close(self):
+        # Releases the Pointer handle and nothing else. Deliberately does NOT
+        # close the panel: callers open it themselves and several of them keep
+        # it open across steps, so shutting it here would undo work the caller
+        # is still relying on. SpawnerDetector holds only decoded templates.
+        super().close()
 
     def _log(self, msg):
         if self.verbose:
@@ -675,7 +690,13 @@ class SpawnerControl:
         return self.sync(need_cols=need_cols)
 
     def sync(self, need_cols=(), retries=3, recalibrate=False):
-        """Confirm the panel is on screen. -> bool   (see ready())
+        """R — Is the panel on screen? One icon check, and NOT ONE COORDINATE is
+        read. ready() is the same call under a name that says so;
+        sync(recalibrate=True) is a different function.
+
+        ⚠ `need_cols` CANNOT CATCH A HALF-DRAWN PANEL. It is tested
+        against the constant table, which always has all three columns.
+        Only the recalibrate path counts what the game actually drew.
 
         Kept under its old name because several callers use it as a gate
         before a give_*(). It no longer reads any coordinates: those are
@@ -832,16 +853,27 @@ class SpawnerControl:
     # ════════════════════════════════════════════════════════════
 
     def panel_open(self):
-        """Is the item-spawner screen up? One parked screenshot, no keys.
+        """R — One frame, one icon check: is the spawner panel drawn? Presses
+        nothing — ensure_panel() is the one that acts. Also the in-range
+        test: comma produces this panel only inside the training range.
+
+        ⚠ NO RETRY, unlike _panel_up(). Straight after a comma press a
+        False usually means "too early" rather than "closed" — the panel
+        takes 32-44 ms to draw and ensure_panel polls PANEL_WATCH_S.
 
         Also the in-range test: comma produces this panel only inside the
         training range, so "it opened" and "we are where we think we are" are
         the same observation.
         """
-        return bool(self.screen.classify(shoot_parked(settle=0.10)))
+        return bool(self.screen.classify(shoot_parked(settle=0.10, park=False)))
 
     def ensure_panel(self, want=True, tries=3):
-        """Comma toggles the item spawner. Poll until it is `want`. -> bool
+        """L1 — Press comma until the panel IS `want`, reading before and after
+        every press. -> bool. panel_open() is that read on its own.
+
+        ⚠ False CAN MEAN THERE IS NO PICO. Comma is a keypress and
+        SendInput has no key path, so the panel may be perfectly fine and
+        the run simply impossible — can_press() says so up front.
 
         Works anywhere in the training range — the panel is a menu bound to a
         key, not a world object you have to stand next to.
@@ -859,11 +891,11 @@ class SpawnerControl:
             mouse.key(HID_KEY_COMMA, 60)
             t0 = time.perf_counter()
             while time.perf_counter() - t0 < PANEL_WATCH_S:
-                if bool(self.screen.classify(shoot_parked(settle=0.05))) == want:
+                if bool(self.screen.classify(shoot_parked(settle=0.05, park=False))) == want:
                     time.sleep(PANEL_SETTLE_S)
                     return True
                 time.sleep(0.08)
-        return bool(self.screen.classify(shoot_parked(settle=0.10))) == want
+        return bool(self.screen.classify(shoot_parked(settle=0.10, park=False))) == want
 
     def _click_category(self, col, row, settle=OPEN_WAIT):
         """Click a category row. It TOGGLES; this says nothing about the result."""
@@ -1067,24 +1099,6 @@ class SpawnerControl:
 
     # ── Compatibility: the old two-call shape, on top of the new one ──
 
-    def expand(self, col, row, retries=2):
-        """Open a category. Returns its submenu entries, or [] on failure."""
-        return self._goto(col, row)['entries']
-
-    def collapse(self, col, row, retries=2):
-        """Close a category. Kept for callers that name the row explicitly.
-
-        The old implementation diffed the column against the baseline mask
-        taken at sync() and had to keep patching around that baseline drifting:
-        the panel is translucent, so items landing on the ground changed the
-        pixels *behind* column 2 and every category after the first spawn read
-        as permanently expanded. Four "stuck expanded" warnings in a row, for
-        menus that had closed perfectly.
-
-        Reading the submenu directly has no baseline to drift, so the whole
-        problem and its workaround are gone.
-        """
-        return self._collapse_all(retries=retries)
 
     def _spawn(self, col, row, index, times=1, expect=None, leave_open=False):
         """Click entry #index (1-based) of a category, `times` times.
@@ -1176,7 +1190,7 @@ class SpawnerControl:
         The row-band recognition next door has no such margin — see _spawn.
         """
         for attempt in range(retries + 1):
-            if self.screen.classify(shoot_parked(settle=0.10)):
+            if self.screen.classify(shoot_parked(settle=0.10, park=False)):
                 return True
             if attempt < retries:
                 time.sleep(0.3)
@@ -1201,8 +1215,35 @@ class SpawnerControl:
     # constants, without looking for anything.
     # ════════════════════════════════════════════════════════════
 
+    # ── expand() / collapse() lived here, deleted 2026-08-07 ──
+    #
+    # Zero callers, and both signatures lied. `expand(col, row, retries)` never
+    # read `retries` -- the retrying is _walk_to's -- while its docstring named
+    # it. `collapse(col, row, retries)` never read `col` OR `row`: the body was
+    # `self._collapse_all(retries=retries)`, so collapse(2, 3) shut whatever
+    # happened to be open, under a first line that said it was "for callers
+    # that name the row explicitly".
+    #
+    # ⚠ A PARAMETER NO BODY READS IS AN EXPIRED CONTRACT THE CALLER STILL
+    # BELIEVES. Found by scanning every def in the driving layers for
+    # arguments that appear in no Name node; 19 came back, and the three whose
+    # DOCSTRING also named the dead argument are the expensive kind. The last
+    # reference to either of these was a refactor plan describing the world
+    # before 2026-08-04, when a collapse between actions was still mandatory.
+    #
+    # Use goto(col, row) to reach a node and collapse_all() to return to the
+    # root -- which is what every live caller already did.
+
     def give_weapon(self, key, switch=True, times=1):
-        """Spawn weapon `key`, once. Returns a record with ok/clicked/error.
+        """L1 — One click on one weapon entry, on a panel the CALLER must already
+        have open. give_many([key]) opens the panel, starts from the root
+        and proves the category expanded; this proves only that the panel
+        is up.
+
+        ⚠ THE GUN DOES NOT ARRIVE BARE — the spawner auto-fits a red dot.
+        Nor is the slot yours to choose: empty rack -> 1, otherwise -> 2
+        with the old gun on the ground, and switch=True assumes the
+        latter.
 
         Which slot it lands in is the game's rule (see the module docstring),
         not something this decides. `switch=True` presses 2 afterwards, which
@@ -1223,7 +1264,14 @@ class SpawnerControl:
         return rec
 
     def give_attachment(self, key, count=1):
-        """Spawn attachment `key` into the backpack, `count` times.
+        """L1 — One click per copy into the BACKPACK, on a panel the caller
+        already has open. Evicts nothing, unlike give_weapon; getting the
+        part onto a gun is control/inventory.py's job.
+
+        ⚠ WITH NO BACKPACK, OR A FULL 库存, IT GOES NOWHERE AND SAYS
+        ok=True. The rows then shift under every later drag target — a run
+        fitted a suppressor while being told comp_ar, then skipped seven
+        configs. Spawn backpack3 first; keep 库存 drained.
 
         Only one click per copy: attachments do not evict anything, they land
         in the backpack. Getting one onto a gun from there is
@@ -1237,7 +1285,14 @@ class SpawnerControl:
         return rec
 
     def give_gear(self, key):
-        """Spawn a piece of column-3 gear. -> {'ok', 'gear', 'error'}
+        """L2 — Spawn column-3 gear (the backpacks). A one-item give_many(), so
+        unlike its two siblings it opens the panel, collapses to the root,
+        proves the open and closes up after itself.
+
+        ⚠ BLIND IS NOT UNVERIFIED. Nothing in column 3 is recognised — it
+        cannot be — but the open is proved by the column CHANGING between
+        two frames, which is strictly more than give_weapon and
+        give_attachment prove. It is only valid from the root.
 
         Driven BLIND: the category is clicked open and the entry clicked
         without ever recognising either. That is not laziness, it is the one
@@ -1257,7 +1312,13 @@ class SpawnerControl:
         return {'ok': rec['ok'], 'gear': key, 'error': rec['error']}
 
     def give(self, key, **kw):
-        """Whichever of the three applies to `key`."""
+        """L1 — Dispatch one key to whichever give_* owns it. give_many() is the
+        batch form, and the only one that opens the panel for itself.
+
+        ⚠ ITS STRENGTH DEPENDS ON THE KEY. 'backpack3' routes through
+        give_many and opens/closes the panel; a weapon or an attachment
+        goes to _spawn, which returns 'not on the item-spawner screen'
+        unless the panel is ALREADY up. One call, two preconditions."""
         if key in ROSTER:
             return self.give_weapon(key, **kw)
         if key in ATTACHMENTS:
@@ -1267,11 +1328,26 @@ class SpawnerControl:
         raise KeyError(f'{key!r} is in ROSTER, ATTACHMENTS nor GEAR')
 
     def plan(self, keys, weapon_times=1):
-        """What give_many(keys) would do. Clicks nothing. See plan()."""
+        """R — The shopping list give_many(keys) would execute. No panel, no
+        frame, no game, no hardware. script() is the level below it: the
+        literal clicks.
+
+        ⚠ THE ORDER IS THE CONTRACT, NOT PRESENTATION. Gear first (it is
+        driven blind and needs the root) and bottom-row-first within a
+        column, because an open submenu pushes the rows BELOW it down. A
+        re-sorted list clicks a stale coordinate — which lands on a
+        submenu entry and spawns something nobody asked for."""
         return plan(keys, weapon_times=weapon_times)
 
     def script(self, keys, weapon_times=1):
-        """Every click give_many(keys) would send. See click_plan().
+        """R — Every click give_many(keys) will send, off THIS instance's layout
+        table rather than the constants directly. Offline and exact;
+        plan() is the item list this expands into clicks.
+
+        ⚠ IT DOES NOT END AT THE ROOT: there is no 'close' after the LAST
+        category, because give_many closes the whole panel instead. Replay
+        it by hand and the next script — which assumes nothing is expanded
+        — opens a row hidden under that submenu. 3 of 4 rounds.
 
         Offline and exact, which is what makes a shopping list reviewable
         before anything touches the game — and what `pixi run spawner-plan`
@@ -1340,7 +1416,14 @@ class SpawnerControl:
         return None
 
     def give_many(self, keys, switch=True, weapon_times=1):
-        """Spawn everything in `keys`, moving the panel as little as possible.
+        """L2 — THE entry point: name keys, this opens the panel, orders the
+        list, clicks, and closes the panel again. give() is the one-key
+        form and does NOT open anything for itself.
+
+        ⚠ ok=True MEANS EVERY CATEGORY WAS PROVED OPEN, NOT THAT ANYTHING
+        ARRIVED. No entry click is ever read back: one sent faster than
+        SPAWN_WAIT is eaten (0.15 delivered 2/5 with ok=True), and a full
+        库存 makes the spawner deliver nothing at all.
 
         -> {'ok', 'steps': [...], 'clicks', 'error'}
 
@@ -1478,7 +1561,12 @@ class SpawnerControl:
                 'clicks': clicks, 'error': err}
 
     def rack_pair(self, pair):
-        """Put both guns on the rack in one panel visit. -> bool
+        """L2 — Fill BOTH rack slots in one panel visit; opens the panel and
+        closes it again whatever happens. -> bool
+
+        ⚠ IT DOES NOT CLEAR THE RACK AND DOES NOT READ IT BACK. From a
+        non-empty rack gun 1 lands in slot 2 and gun 2 evicts it onto the
+        ground. Both callers empty the rack in finish_pair() first.
 
         `weapon_times=1` IS LOAD-BEARING and that is why this exists as a
         named method rather than as two lines at each call site: the rack has
@@ -1514,11 +1602,14 @@ class SpawnerControl:
     #
     # NOT the normal path. A module that knows what it wants calls give_many()
     # and lets this file work out the clicks; these are here because a probe
-    # sometimes has to drive the panel by hand —
-    # tools/probe_spawner_layers.py walks goto()/read() to record which kind of
-    # menu this is, tools/probe_submenu_hover.py needs a click with nothing
-    # verified after it, and several callers still use sync() as a gate before
-    # a give_*() (which is redundant now: give_many() gates itself).
+    # sometimes has to drive the panel by hand — walking goto()/read() to
+    # record which kind of menu a row opens, or clicking with nothing
+    # verified after it. Several callers also still use sync() as a gate
+    # before a give_*() (redundant now: give_many() gates itself).
+    #
+    # ⚠ The two probes that named this surface were deleted 2026-08-08. If
+    # no investigation reaches for it again, these aliases are dead weight —
+    # check before adding a third.
     #
     # Aliases rather than the definitions, so that reading this class top to
     # bottom makes the boundary obvious: everything the panel is actually
@@ -1549,8 +1640,6 @@ def main():
     ap.add_argument('--count', type=int, default=1,
                     help='attachments: how many copies into the backpack')
     ap.add_argument('--countdown', type=int, default=5)
-    ap.add_argument('--backend', default='auto',
-                    choices=('auto', 'pico', 'sendinput'))
     args = ap.parse_args()
 
     if args.check:
@@ -1607,7 +1696,7 @@ def main():
         print('[!] ABORT: could not focus the game.')
         return 1
 
-    with SpawnerControl(args.backend) as sc:
+    with SpawnerControl() as sc:
         rec = sc.give_many(keys, switch=not args.no_switch)
     print(f'\n{rec}')
     return 0 if rec['ok'] else 1

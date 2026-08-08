@@ -67,8 +67,15 @@ VERIFICATION
     Anything with a weapon slot at either end is checked by reading that slot
     back: the target must hold the named item — or, when the item has no icon
     template, must at least have *changed* — and a slot dragged *from* must
-    end up empty. Panel-to-panel drags cannot be checked here at all:
-    rec['verified'] is False for those, and it is on the caller to re-detect.
+    end up empty. Panel-to-panel drags are checked by COUNTING ROWS
+    (panel_counts), so rec['verified'] is True for those too.
+
+    ⚠ That last sentence used to read "cannot be checked here at all ... it is
+    on the caller to re-detect", and it stayed for as long as it took someone
+    to notice: the row-count check landed 2026-08-04, and a docstring saying a
+    result is unverified when it is verified sends the caller to re-do work
+    that is already done — the opposite of the failure this file usually has,
+    and just as expensive.
 
     A failed drag is retried only when nothing changed, which is the one case
     where the source row is provably still where it was. If the slot changed
@@ -89,19 +96,39 @@ from detector.attachment_detector import (AMBIGUOUS, AttachmentDetector,
                                          SLOT_NAMES)
 from detector.slot_detector import (SlotDetector, ABSENT as SLOT_ABSENT,
                                     EMPTY as SLOT_EMPTY)
-from detector.cropper import capture_screen, win32_cap
+from capture.cropper import capture_screen, win32_cap
 from detector.tab_detector import TabTypeDetector
-from detector.tab_items import TabGrabber, TabItemDetector, panel_rows
+from detector.tab_items import (TabGrabber, TabItemDetector, panel_rows,
+                               _BY_ASSET)
 from detector.tab_layout import (DROP_XY, INV_ROWS, PARK_XY, att_slot_point,
                                  gun_tag_point, row_point)
 from detector.weapon_template_detector import TabWeaponDetector
 from press.pico_mouse import HID_KEY_1, HID_KEY_2, HID_KEY_TAB
 from press.pointer import Pointer
+from control.driver import Driver
 from control.focus import game_focused, ensure_focus
 
-PANEL_KINDS = ('nearby', 'inventory')
-
-
+# ⚠ RE-EXPORTED, NOT JUST IMPORTED. Roughly forty call sites across
+# calibration/ and tools/ say `from control.inventory import at_inv, at_gun`,
+# and the split that moved these out (2026-08-08, this file was 3776 lines)
+# is not a reason to touch any of them. The names live in control/locations.py
+# now; reaching for them here still works and is not deprecated -- a driver
+# handing out the vocabulary it drives with is the useful shape.
+from control.locations import (                                  # noqa: F401
+    ANY_ITEM, EMPTY, GUNS, MOVES, PANEL_KINDS, as_loc, at_ground, at_gun,
+    at_inv, at_slot, is_gun, is_slot, kind_of, loc_str, move_info,
+    panel_counts, parse_loc)
+# Same reason, same day: the planners were the other pure half. harvest.py
+# imports slot_matches from here and stays working.
+from control.kit_plan import (                                   # noqa: F401
+    kit_faults, loose_items, plan_equip, plan_kit, slot_matches)
+# ⚠ PRIVATE AND STILL IMPORTED, because right_click_equip and _kit_run both
+# sort candidate sources with it. `pixi run names` caught the two NameErrors
+# the split left behind before either of them could reach a run -- which is
+# the whole argument for that gate: an undefined name in a rarely-taken branch
+# is a crash scheduled for whenever the branch is taken, and this one sits in
+# the retry path of the gesture that fits attachments.
+from control.kit_plan import _src_rank
 _LAST_GESTURE_END = [None]   # perf_counter when the previous gesture returned
 
 # Which process wrote a line. The journal is a SHARED file — several agents
@@ -138,125 +165,6 @@ def journal(rec):
             fh.write(json.dumps(rec, ensure_ascii=False, default=str) + '\n')
     except Exception:
         pass
-
-
-def panel_counts(src, dst):
-    """Which lists can be counted to see whether this drag landed.
-
-    -> (source panel or None, destination panel) | None
-
-    `dst` with no row means "anywhere in this list", and a list fills from the
-    top with no gaps, so its row count answers "did something arrive". That is
-    the ONLY reading available for a drop into a panel, and it is available
-    whatever the source is — which matters, because the source tells you much
-    less than it appears to:
-
-        unequip() releases a slot onto the floor and verifies the SLOT IS
-        EMPTY. It is empty either way. docs/game_quirks.md has the record: the
-        part reached the floor instead of the backpack and the slot check
-        passed, for months.
-
-    So the source is returned only when it is itself a list row (then its
-    departure is a second, independent signal), and the destination always.
-    """
-    if is_slot(dst) or is_gun(dst) or dst[0] not in PANEL_KINDS:
-        return None
-    if len(dst) > 1 and dst[1] is not None:
-        return None
-    src_panel = (src[0] if src[0] in PANEL_KINDS and len(src) > 1
-                 and src[1] is not None else None)
-    return (src_panel, dst[0])
-GUNS = (1, 2)
-
-# Verification targets.
-EMPTY = ''          # the slot must read as nothing
-ANY_ITEM = '*'      # the slot must read as something, no matter what
-
-# ════════════════════════════════════════════════════════════
-# MOVES — which src -> dst pairs exist, and what is KNOWN about each
-# ════════════════════════════════════════════════════════════
-#
-# This was prose in the module docstring, which meant nothing could check it
-# and nothing could read it. Now `_reject` gates on it and another agent
-# composing a flow can look the answer up:
-#
-#     from control.inventory import MOVES, kind_of, at_slot, at_inv
-#     MOVES[(kind_of(at_inv(0)), kind_of(at_slot(1, 'muzzle')))]
-#     -> {'gesture': 'click', 'verified': True, 'evidence': 'measured', ...}
-#
-# EVERY ENTRY CARRIES `evidence`, AND THAT IS THE POINT. attachment_catalog's
-# SLOTS table shipped as 22 wiki readings, 6 guesses and 2 screenshot reads
-# with 0 measured, all indistinguishable from each other, and it cost two
-# entries that silently dropped attachments on the floor. A capability table
-# that cannot say how it knows repeats that.
-#
-#     'measured'  a probe ran it and the numbers are in docs/game_quirks.md
-#     'used'      no dedicated probe, but calibration runs take this path
-#                 constantly and would fail loudly if it did not work
-#     'untested'  believed to exist, never confirmed. transfer() refuses to
-#                 default to one of these.
-#
-# `gesture` is the one that LANDS, which is not always the obvious one — see
-# the 0/4 below. `verified` is whether *this module* can confirm the outcome
-# by re-reading; a panel-to-panel move has no slot to read, so it cannot.
-MOVES = {
-    ('inventory', 'weapon'): {
-        'gesture': 'click', 'verified': True, 'evidence': 'measured',
-        'note': 'RIGHT-CLICK, not drag. The drag measured 0/4 — it does not '
-                'land at all — while right-click is 4/4 at 0.35 s. It equips '
-                'onto the gun IN HAND, so hold(gun) first.'},
-    ('nearby', 'weapon'): {
-        'gesture': 'click', 'verified': True, 'evidence': 'used',
-        'note': 'same gesture as from 库存; build() fits off the ground this '
-                'way on every range entry.'},
-    ('weapon', 'inventory'): {
-        'gesture': 'drag', 'verified': True, 'evidence': 'measured',
-        'note': 'the direction that DOES drag. Right-click on a fitted part '
-                'also sends it to the pack (measured 2026-08-02), which is '
-                'what unequip(gesture="click") uses.'},
-    ('weapon', 'nearby'): {
-        'gesture': 'drag', 'verified': True, 'evidence': 'used',
-        'note': 'strip(to=at_ground()) — a part straight from the slot to '
-                'the floor, skipping the pack.'},
-    ('gun', 'nearby'): {
-        'gesture': 'click', 'verified': True, 'evidence': 'measured',
-        'carries_attachments': True,
-        'note': 'the whole weapon, WEARING its parts: 0.66 s by right-click '
-                'vs 1.15 s by a 1621 px drag, both 1/1. Two runs confirmed '
-                'rack empty, 库存 zero growth, ground +1 row. Stripping '
-                'first is worse — PUBG auto-fits the pack onto the next gun '
-                'to arrive, which is how a cell labelled BARE ran wearing a '
-                'grip and a quickdraw magazine.'},
-    ('nearby', 'inventory'): {
-        'gesture': 'drag', 'verified': False, 'evidence': 'used',
-        'note': 'stow(). Nothing here can confirm it — see `verified`.'},
-    ('inventory', 'nearby'): {
-        'gesture': 'drag', 'verified': False, 'evidence': 'used',
-        'note': 'discard(). stock.tidy() drops the surplus this way and '
-                'confirms by re-reading the whole panel, which is the '
-                'caller-side check `verified: False` is asking for.'},
-    ('weapon', 'weapon'): {
-        'gesture': 'drag', 'verified': True, 'evidence': 'untested',
-        'note': 'slot to slot, including gun 1 -> gun 2. The module '
-                'docstring has always advertised it and nothing has ever '
-                'measured it — and the neighbouring fact is discouraging: a '
-                'drag INTO a weapon slot from 库存 is 0/4. If that failure '
-                'is about the drop target rather than the source, this does '
-                'not work either. transfer() therefore does NOT default to '
-                'it; tools/probe_transfer.py is what would settle it.'},
-}
-
-
-def kind_of(loc):
-    """The MOVES key for a location tuple. ('weapon', 1, 'muzzle') -> 'weapon'"""
-    return loc[0] if isinstance(loc, (tuple, list)) and loc else None
-
-
-def move_info(src, dst):
-    """What is known about dragging src -> dst, or None if it is not a move."""
-    return MOVES.get((kind_of(src), kind_of(dst)))
-
-
 # ════════════════════════════════════════════════════════════
 # The two record shapes, and nothing else
 # ════════════════════════════════════════════════════════════
@@ -320,7 +228,8 @@ def batch(steps, error=None, ok=None, **extra):
 # Once a panel drop is verified (see is_panel_drop / _await_panel), the poll
 # itself holds the cursor still while it grabs frames, which is exactly what
 # the settle was for. Swept again with retries=0, six drags per value, so a
-# retry could not hide anything (temp_debug/floor_drag_params.py):
+# retry could not hide anything (measured by a scratch script that is no
+# longer on disk; the numbers below are what it left):
 #
 #     0.00  6/6    0.10  6/6    0.20  6/6
 #     0.05  5/6    0.15  6/6    0.25  5/6
@@ -352,7 +261,7 @@ def batch(steps, error=None, ok=None, **extra):
 # IS the wait:
 #
 #     0.00  1/3     0.10  2/3     0.20  3/3
-#     0.05  2/3     0.15  2/3     (temp_debug/sweep_drop_wait.py)
+#     0.05  2/3     0.15  2/3     (a scratch sweep, no longer on disk — this table is what it left)
 #
 # 0.20 is the floor and this is one run on one machine, so 0.25 is the value.
 #
@@ -374,8 +283,8 @@ DROP_WAIT = 0.25
 NEARBY_DROP_X = 870
 
 # Gesture timing handed to Pointer.drag. Defaults are press/pointer.py's, i.e.
-# what shipped before anyone measured them; probe_drag_speed.py is what says
-# whether they can come down.
+# what shipped before anyone measured them. Whether they can come down is a
+# sweep with a read-back at every step, not a guess.
 DRAG_TIMING = {'drop': DROP_WAIT}
 
 # ── the gesture journal ───────────────────────────────────────────────────
@@ -439,15 +348,56 @@ TAB_TOGGLE_TIMEOUT = 0.5    # per press: 4x the slowest close, 13x the slowest
 VERIFY_TIMEOUT = 1.05   # the item animates into the slot; polling beats one
                         # fixed sleep long enough to cover the worst case
 VERIFY_POLL = 0.08
+# ⚠ ON, AND MEASURED BOTH WAYS. Switched off on 2026-08-07 and back on the
+# same night, because the run settled it:
+#
+#     slot reads the templates could not separate
+#       park ON  (runs 12, 13) : 0 and 0
+#       park OFF (run 18)      : 4, across three weapons
+#
+# What each one starts: an unreadable slot reads as "did not land", ensure_kit
+# records a false strike against a part the gun does take, the config is
+# skipped, and the weapon is thrown WITHOUT BEING MEASURED. From outside that
+# is a collector swapping attachments and binning guns forever, which is how
+# it was reported.
+#
+# WHAT STAYED OFF, because the rule is per-DETECTION: panel_rows (Laplacian
+# occupancy) at both drag sites, and the spawner's classify() (button icons).
+# Neither can be fooled by a tooltip. Originally turned off 2026-08-07
+# at the operator's call, after watching it: park() threw the cursor to
+# PARK_XY (200, 1380) -- the bottom-left corner -- before reads, including in
+# the instant after a drag released, and the trip back across the screen is
+# the stretch where Pointer.place fights the game's cursor drift.
+#
+# WHAT IT WAS FOR, so the failure is recognisable rather than mysterious: a
+# hovered slot tile draws a TOOLTIP over itself, and slot reads are template
+# matches. With this off, a slot the cursor happens to be sitting on can read
+# `?` instead of its part. ensure_kit treats `?` as "did not land", retries,
+# and can burn a cell -- that is the shape of the 11 AMBIGUOUS cells on
+# 2026-08-05, and control/CLAUDE.md's "读不出来 ≠ 没装上" section is the same
+# subject.
+#
+# ⚠ SO THE THING TO WATCH IS `reads '?'` IN THE KIT LOG. If those appear,
+# this is the first suspect and one line puts it back. The mitigation already
+# in place is AMBIGUOUS_REREADS: an unreadable slot is re-read after a small
+# view nudge, bounded at two, which is a weaker guard than not hovering in the
+# first place but is not nothing.
+PARK_BEFORE_READ = True
+
 PARK_SETTLE = 0.06      # cursor off the slot -> tooltip gone, before a read
 
 # Releasing over a panel means "put it in this container", and WHERE inside it
 # is not a row -- see tab_layout.DROP_XY, measured by holding a drag until the
-# game drew its dashed accept-region. This constant survives only because
-# set_rows()/DEFAULT_DROP_ROW is still the story for pick-UP points; the guess
-# it used to feed (row 0, or the first empty row) is what dropped parts on the
-# floor while reporting success.
-DEFAULT_DROP_ROW = 0
+# game drew its dashed accept-region. The guess that used to be made here
+# (row 0, or the first empty row) is what dropped parts on the floor while
+# reporting success.
+#
+# ⚠ `DEFAULT_DROP_ROW = 0` stood here until 2026-08-07 with zero readers, and
+# the sentence that had replaced this one is why: it said the constant
+# "survives only because set_rows()/DEFAULT_DROP_ROW is still the story for
+# pick-UP points". set_rows() is indeed the story and has three callers.
+# DEFAULT_DROP_ROW had none -- the true half carried the dead half. A comment
+# asserting that something is still used is not evidence that it is.
 
 # A dropped weapon leaves the rack over a short animation; the plate is read
 # back after this. Generous, because reading it too early reports the drop as
@@ -474,7 +424,22 @@ KIT_SETTLE = 0.6
 #
 # Yaw is small on purpose: with Tab up, raw counts land partly on the CURSOR
 # rather than only on the view (see _nudge_backdrop).
-AMBIGUOUS_REREADS = 2
+# ⚠ RAISED FROM 2 ON 2026-08-07, once the nudge started working. Until that
+# day _nudge_backdrop moved nothing (Tab was up, so the raw counts landed on
+# the cursor -- 0.29 against a noise floor of 0.32), so this number was the
+# count of times the SAME picture got re-read and any value would have done.
+#
+# With a real backdrop change behind each retry the number finally means
+# something, and 2 is too few for the tightest pair in the corpus: mp5k's
+# ext_smg against quickext_smg lost a cell to `templates cannot separate` on
+# the very next run, having survived two nudges. docs/recoil's own measurement
+# says one view in seven is ambiguous for that pair, so three views leave ~0.3%
+# and five leave ~0.006%.
+#
+# A nudge is a Tab close, 600 counts of yaw and a Tab open, call it 1.5 s. The
+# thing it is spending that against is a whole cell -- 25 magazines and its
+# kitting -- so the trade is not close.
+AMBIGUOUS_REREADS = 4
 NUDGE_COUNTS = 600
 NUDGE_SETTLE_S = 0.35
 
@@ -501,402 +466,64 @@ GUN_SLOT_WATCH_S = 1.2
 # clear_rack decides whether to drop a gun by this number. A second copy in a
 # caller would drift, and the failure would be silent both ways.
 PLATE_INK_MIN = 200
+# ⚠ AND AN UPPER BOUND, because the low one only separates "gun" from "empty"
+# and there is a third thing this crop can be showing: the SPAWNER PANEL, which
+# is drawn over the Tab screen. Measured off docs/drag/journal.jsonl on
+# 2026-08-07, the same field on the same gestures:
+#
+#     empty slot                        0
+#     a gun's name plate           679 - 901   (19 samples)
+#     the spawner panel over it  10941 - 11250
+#
+# An order of magnitude clear of the plate range, so the bound is not a
+# tuning question. It matters because the reading is CONFIDENT and WRONG in a
+# direction that passes PLATE_INK_MIN: clear_rack sees 11250, decides there is
+# a gun, drops it, gets `moved=False` because the click went into the panel,
+# and returns success with nothing dropped. Three cells in a row then refused
+# themselves for the magazine the clear was supposed to remove.
+#
+# Same shape as the two other screen-confusions this repo has paid for -- Tab
+# open while sending raw counts, a latency probe tapping an empty gun -- and
+# the same rule: a real reading of the wrong screen is the failure that looks
+# most like success. control/CLAUDE.md states it; this is it in a number.
+PLATE_INK_MAX = 2000
 
+def _calling_frame():
+    """The project frame that asked. -> 'file.py:line func' | None
 
-# ════════════════════════════════════════════════════════════
-# Locations
-# ════════════════════════════════════════════════════════════
+    Skips this module AND the standard library. The first cut skipped only
+    inventory.py and duly reported `contextlib.py:137 __enter__` for every
+    churn that came through a `with` block -- a true statement naming nothing
+    anybody can go and fix.
 
-def at_ground(row=None):
-    """Row `row` of 附近 / 地面, or the panel itself when row is None."""
-    return ('nearby', row)
-
-
-def at_inv(row=None):
-    """Row `row` of 库存, or the panel itself when row is None."""
-    return ('inventory', row)
-
-
-def at_slot(gun, slot):
-    """Attachment slot `slot` of weapon `gun` (1 = top / key 1, 2 = bottom).
-
-    Spelled ('weapon', ...) rather than ('slot', ...) because that is what
-    TabItemDetector already stamps on every Item it finds in a gun — one
-    vocabulary, so an Item can be handed straight back as a drag source.
+    ⚠ MODULE LEVEL, not a staticmethod, and that is not style. As a
+    staticmethod it re-binds when copied onto another class, which is exactly
+    what a test double does -- the offline check of this very function died on
+    `takes 0 positional arguments but 1 was given`. A helper whose test cannot
+    call it the way production does is a helper with no test.
     """
-    return ('weapon', gun, slot)
-
-
-def at_gun(gun):
-    """The WEAPON itself in rack slot `gun`, not one of its attachment slots.
-
-    Spelled ('gun', n) so it cannot be confused with ('weapon', n, slot),
-    which is an attachment slot on that gun.
-
-    The drag point is the boxed slot number at the left end of the row --
-    tab_layout.gun_tag_point, measured off docs/tab_inventory.png. That is the
-    handle for the weapon itself; the name plate beside it and the attachment
-    tiles below it are not.
-    """
-    return ('gun', gun)
-
-
-def is_gun(loc):
-    return isinstance(loc, tuple) and len(loc) == 2 and loc[0] == 'gun'
-
-
-def as_loc(x):
-    """A location tuple out of either a location tuple or a TabView Item."""
-    where = getattr(x, 'where', None)
-    return where if where is not None else x
-
-
-def is_slot(loc):
-    return loc[0] == 'weapon'
-
-
-def loc_str(loc):
-    loc = as_loc(loc)
-    if is_gun(loc):
-        return f'gun{loc[1]}'           # the weapon, vs gun1.muzzle for a slot
-    if is_slot(loc):
-        return f'gun{loc[1]}.{loc[2]}'
-    return f'{loc[0]}' + ('' if loc[1] is None else f'[{loc[1]}]')
-
-
-def parse_loc(text):
-    """Location tuple from CLI text. -> at_inv / at_ground / at_slot / at_gun
-
-        inv:3          库存 row 3          ground / ground:0   附近
-        slot:1:muzzle  gun 1's muzzle      gun:1               gun 1 ITSELF
-
-    `gun:1` and `gun:1:muzzle` mean different things -- the whole weapon
-    against one of its slots -- which is why at_gun is spelled ('gun', n) and
-    a slot ('weapon', n, slot). The three-part form is kept for both spellings
-    because it was already accepted.
-    """
-    parts = text.split(':')
-    kind = parts[0].lower()
-    if kind in ('slot', 'gun', 'weapon'):
-        if len(parts) == 2 and kind in ('gun', 'weapon'):
-            return at_gun(int(parts[1]))
-        if len(parts) != 3:
-            raise ValueError(f'{text!r}: expected slot:<gun>:<slot> for a '
-                             f'slot, or gun:<n> for the weapon itself')
-        return at_slot(int(parts[1]), parts[2])
-    if kind in ('inv', 'inventory'):
-        return at_inv(int(parts[1]) if len(parts) > 1 else None)
-    if kind in ('ground', 'nearby', 'floor'):
-        return at_ground(int(parts[1]) if len(parts) > 1 else None)
-    raise ValueError(f'{text!r}: expected inv[:row], ground[:row], '
-                     f'slot:<gun>:<slot> or gun:<n>')
-
-
-# ════════════════════════════════════════════════════════════
-# Planning — pure, no game needed
-# ════════════════════════════════════════════════════════════
-
-def loose_items(found):
-    """{loc: att_key} for everything sitting in the two lists.
-
-    Accepts a TabView or an already-flattened mapping, so a caller can plan
-    straight off a detection pass or hand-build one for a test.
-    """
-    if not hasattr(found, 'inventory'):
-        return dict(found)
-    return {item.where: item.key
-            for panel in ('inventory', 'nearby')
-            for item in getattr(found, panel)
-            if item is not None and item.key}
-
-
-def plan_equip(weapon, found, current=None, replace=False):
-    """Turn one detection pass into an ordered list of drags.
-
-    weapon   ROSTER key of the gun being built, or None to skip the
-             compatibility gate (then every found attachment is attempted)
-    found    a TabView, or {loc: att_key} — what is loose in the two left
-             panels, e.g. {('inventory', 3): 'comp_ar', ('nearby', 0): 'vert_grip'}
-    current  {slot: template_name} of what the gun already wears. An occupied
-             slot is left alone unless replace=True.
-    replace  drag onto occupied slots too; the game swaps, and the old
-             attachment lands in 库存 as a new row
-
-    Returns (drags, skipped):
-        drags    [{'att', 'src', 'slot'}, ...], sorted by source row
-                 descending within each panel so that pulling one row out
-                 cannot invalidate the rows of the drags still queued
-        skipped  [(att, loc, reason), ...] — every candidate that was dropped,
-                 so a caller can print why an attachment went unused
-    """
-    current = current or {}
-    drags, skipped, claimed = [], [], set()
-
-    for loc, att in loose_items(found).items():
-        spec = ATTACHMENTS.get(att)
-        if spec is None:
-            skipped.append((att, loc, 'not in the attachment catalogue'))
+    import traceback, os
+    skip = ('inventory.py', 'contextlib.py')
+    for fr in reversed(traceback.extract_stack()[:-2]):
+        base = os.path.basename(fr.filename)
+        if base in skip or f'{os.sep}lib{os.sep}' in fr.filename.lower():
             continue
-        slot = spec['slot']
-        if weapon is not None and not fits(weapon, att):
-            reason = ('weapon has no {} slot'.format(slot)
-                      if not has_slot(weapon, slot)
-                      else f'{weapon} does not take {att}')
-            skipped.append((att, loc, reason))
-            continue
-        if slot in claimed:
-            skipped.append((att, loc, f'{slot} already claimed by an earlier '
-                                      f'candidate'))
-            continue
-        if current.get(slot) and not replace:
-            skipped.append((att, loc, f'{slot} already holds '
-                                      f'{current[slot]}'))
-            continue
-        claimed.add(slot)
-        drags.append({'att': att, 'src': loc, 'slot': slot})
+        return f'{base}:{fr.lineno} {fr.name}'
 
-    # Descending row order per panel: removing row i only shifts rows > i.
-    def key(d):
-        src = d['src']
-        row = -1 if is_slot(src) or src[1] is None else src[1]
-        return (src[0], -row)
-
-    drags.sort(key=key)
-    return drags, skipped
-
-
-# ── The kit: what a gun should be wearing ──
-
-# Where a part is preferred from when both lists have one. 库存 first, which is
-# what TabView.find() already answers with, and it is also the cheaper source:
-# a swap displaces the old part back into the panel the new one came from, so
-# equipping out of 库存 keeps the floor clean.
-_PANEL_RANK = {'inventory': 0, 'nearby': 1}
-
-
-def _src_rank(loc):
-    row = loc[1] if len(loc) > 1 and loc[1] is not None else 0
-    return (_PANEL_RANK.get(loc[0], 2), row)
-
-
-def slot_matches(readback, key):
-    """Does a slot readback name attachment `key`?
-
-    Two vocabularies meet here. read_slots() answers in AttachmentDetector
-    template stems (Muzzle_Compensator_Large_C) and every caller speaks
-    catalogue keys (comp_ar). ATTACHMENTS[key]['asset'] is the catalogue's own
-    bridge between them and is what this trusts first.
-
-    The substring fallbacks are not sloppiness, they are the template bank
-    being wider than the catalogue: 'laser' is catalogued as
-    Lower_LaserPointer_C and the bank ships SideRail_LaserPointer_C, so an
-    exact comparison reads a fitted laser as "not a laser" and the kitter
-    takes it off and puts it back on forever.
-
-    It stays a *narrow* fallback on purpose. The pair this must never confuse
-    is 扩容弹匣 against 加长快速弹匣 — weapon_axis swaps one for the other and
-    calls the difference a measurement — and neither name contains the other.
-    """
-    if not readback:
-        return False
-    r = str(readback).lower()
-    asset = (ATTACHMENTS.get(key) or {}).get('asset') or ''
-    if asset:
-        a = asset.lower()
-        if r == a or a in r or r in a:
-            return True
-    return bool(key) and str(key).lower() in r
-
-
-def _slot_order(want):
-    """want's slots, in SLOT_NAMES order, with anything unrecognised last."""
-    return ([s for s in SLOT_NAMES if s in want]
-            + [s for s in want if s not in SLOT_NAMES])
-
-
-def _kit_refuse(weapon, slot, key):
-    """Why `key` cannot go in `slot` of `weapon`, or None.
-
-    Emptying a slot is never refused: a slot the weapon does not have reads
-    exactly like one that is drawn empty, so "must be empty" is already true
-    there and asking for it costs nothing.
-    """
-    if slot not in SLOT_NAMES:
-        return f'{slot!r} is not one of {SLOT_NAMES}'
-    if key is None:
-        return None
-    spec = ATTACHMENTS.get(key)
-    if spec is None:
-        return f'unknown attachment {key!r}'
-    if spec['slot'] != slot:
-        return f'{key} is a {spec["slot"]}, not a {slot}'
-    if weapon is not None:
-        if weapon not in ROSTER:
-            return f'unknown weapon {weapon!r}'
-        if not has_slot(weapon, slot):
-            return f'{weapon} has no {slot} slot'
-        if not fits(weapon, key):
-            return f'{weapon} does not take {key}'
-    return None
-
-
-def _kit_step(action, slot, key, src, was, error):
-    return {'action': action, 'slot': slot, 'key': key, 'src': src,
-            'was': was, 'error': error}
-
-
-def plan_kit(want, worn, found=None, weapon=None):
-    """The shortest way from `worn` to `want`. Pure — no game, no screen.
-
-    want    {slot: att_key or None}. None means the slot must END UP EMPTY,
-            which is not the same as leaving it alone: PUBG auto-fits whatever
-            the backpack holds onto a gun the moment it arrives, so a slot
-            nobody named is not empty, it is whatever the last strip left
-            lying around. A run labelled BARE came back wearing a cheek pad,
-            and a cheek pad reduces recoil. A slot ABSENT from `want` is
-            explicitly unmanaged and this will not touch or check it.
-    worn    {slot: template name} as read_slots() gives it, '' for empty
-    found   what is loose in the two panels: a TabView, or {loc: att_key}.
-            None means "do not check availability" — every equip is planned
-            with src=None and the executor re-finds the part by name.
-    weapon  ROSTER key, for the catalogue gate. Without one a drag can be
-            planned onto a slot the weapon does not have, and a part released
-            over a slot that is not drawn goes on the floor.
-
-    Returns {'ok', 'steps', 'unchanged', 'missing', 'error'}:
-
-        steps      [{'action': 'unequip'|'equip', 'slot', 'key', 'src',
-                     'was', 'error'}, ...] — removals first, then fits, each
-                   in SLOT_NAMES order. A step carrying an `error` is NOT
-                   executable and is in the list so that the impossible slot
-                   is reported rather than silently dropped.
-        unchanged  slots already correct. These are never touched, which is
-                   the whole point of asking before acting.
-        missing    keys that are wanted, legal, and nowhere on screen
-        ok         no step carries an error
-
-    ONE ACTION PER WRONG SLOT is what "shortest" means here. A part dropped on
-    an occupied slot swaps, and the displaced one goes back to the panel the
-    new one came from (docs/game_quirks.md), so a replacement is one step and
-    not an unequip followed by an equip. Removals go first because they are
-    the steps that cannot fail for want of a part: if a fit later turns out to
-    be impossible, the gun is at least in the state its `None`s asked for
-    rather than half of two configurations.
-    """
-    loose = None if found is None else loose_items(found)
-    steps, unchanged, missing = [], [], []
-
-    for slot in _slot_order(want):
-        key = want[slot]
-        cur = (worn or {}).get(slot, '') or ''
-        err = _kit_refuse(weapon, slot, key)
-        if err:
-            steps.append(_kit_step('equip' if key is not None else 'unequip',
-                                   slot, key, None, cur, err))
-            continue
-        if key is None:
-            if cur:
-                steps.append(_kit_step('unequip', slot, None, None, cur, None))
-            else:
-                unchanged.append(slot)
-            continue
-        if slot_matches(cur, key):
-            unchanged.append(slot)
-            continue
-        src = None
-        if loose is not None:
-            hits = sorted((loc for loc, k in loose.items() if k == key),
-                          key=_src_rank)
-            if not hits:
-                missing.append(key)
-                steps.append(_kit_step('equip', slot, key, None, cur,
-                                       'not on screen'))
-                continue
-            src = hits[0]
-        steps.append(_kit_step('equip', slot, key, src, cur, None))
-
-    # Stable, so slots keep SLOT_NAMES order inside each half.
-    steps.sort(key=lambda s: 0 if s['action'] == 'unequip' else 1)
-    bad = [f'{s["slot"]}: {s["error"]}' for s in steps if s['error']]
-    return {'ok': not bad, 'steps': steps, 'unchanged': unchanged,
-            'missing': missing, 'error': '; '.join(bad) or None}
-
-
-def kit_faults(want, worn):
-    """Slots whose readback disagrees with what was asked for. [] is clean.
-
-    -> [{'slot', 'key', 'why', 'verifiable'}, ...]
-
-    `verifiable` is False when the wanted part has no icon template: the slot
-    cannot be read as holding it, only as holding *something*, so the fault
-    means "cannot be proven" rather than "is wrong". Both are reasons not to
-    record a measurement, but only one of them is a reason to go looking for a
-    failed drag.
-
-    As of 2026-08-03 no attachment in the catalogue is in that state — the
-    three that were (brake_ar, heavy_stock, variable, all added to the game
-    after this repo's art dump) now carry icons recovered off the screen by
-    calibration/solve_template.py. The branch stays for the next one the game adds.
-    """
-    out = []
-    for slot in _slot_order(want):
-        key = want[slot]
-        cur = (worn or {}).get(slot, '') or ''
-        if key is None:
-            if cur == AMBIGUOUS:
-                # "Something is there and the bank cannot name it" is not
-                # evidence that the slot is occupied — a translucent panel over
-                # a dark backdrop drags an EMPTY tile's best match under
-                # MSE_EMPTY_TH with no margin, and out comes the sentinel. Same
-                # cause as the fitted case below; the `key is None` branch was
-                # simply missed when that was fixed, and it cost two of three
-                # mk14 EMA passes to `muzzle should be empty, reads '?'`.
-                out.append({'slot': slot, 'key': None, 'verifiable': False,
-                            'why': f'reads {cur!r} — cannot tell an occupied '
-                                   f'slot from a dark backdrop; wanted empty'})
-            elif cur:
-                out.append({'slot': slot, 'key': None, 'verifiable': True,
-                            'why': f'reads {cur!r}, should be empty'})
-            continue
-        if slot_matches(cur, key):
-            continue
-        if cur == AMBIGUOUS:
-            # Occupied, and the bank cannot separate its top two candidates
-            # (AttachmentDetector.MARGIN_MIN). That is the same KIND of fault
-            # as a part with no template: the slot cannot be read as holding
-            # this, only as holding something. NOT verifiable, so ensure_kit
-            # reports it rather than treating it as a drag that missed and
-            # dragging again.
-            #
-            # ⚠ This used to end "— a retry cannot improve a reading", and
-            # that is false: the panel is TRANSLUCENT, so re-reading against a
-            # different backdrop can and does resolve it (see ensure_kit's
-            # AMBIGUOUS_REREADS). Re-DRAGGING still cannot, which is the part
-            # that was right. `verifiable: False` is what tells the two apart.
-            out.append({'slot': slot, 'key': key, 'verifiable': False,
-                        'why': f'holds something the templates cannot '
-                               f'separate; wanted {key}'})
-            continue
-        spec = ATTACHMENTS.get(key) or {}
-        if spec.get('asset'):
-            out.append({'slot': slot, 'key': key, 'verifiable': True,
-                        'why': f'reads {cur!r}'})
-        else:
-            out.append({'slot': slot, 'key': key, 'verifiable': False,
-                        'why': f'{key} has no icon template; slot reads '
-                               f'{cur!r}'})
-    return out
-
-
-# ════════════════════════════════════════════════════════════
 # Control
 # ════════════════════════════════════════════════════════════
 
-class InventoryControl:
+class InventoryControl(Driver):
     """Drag attachments between the ground, the backpack and the two guns."""
 
-    def __init__(self, backend='auto', verbose=True):
-        self.pointer = Pointer(backend)
+    def __init__(self, verbose=True):
+        # ⚠ WAS `self.pointer = Pointer(backend)`, and the comment eight lines
+        # below already stated the rule it broke -- "_slots is built on first
+        # use ... it is the same rule the Pointer follows -- do not construct
+        # what this instance may not need". The Pointer was not following it.
+        # 41 construction sites, and the read-only ones (loadout, survey,
+        # slot_states) took the shared serial port to look at a screenshot.
+        super().__init__()
         self.items = TabItemDetector()
         self.grabber = TabGrabber()
         self.tab = TabTypeDetector()          # device=None: pixel check only
@@ -922,10 +549,14 @@ class InventoryControl:
         # a getattr on YOUR OWN attribute is a note saying the object has no
         # settled shape. Giving it a home is the fix; the getattr only hid it.
         self.last_poll = None
+        # When Tab was last closed, or None once anything real has
+        # happened since. See _churn.
+        self._since_close = None
         # Overrides passed straight to Pointer.drag — the gesture's timing.
         # Every calibration run reaches the Tab screen through here, so these
-        # are worth measuring rather than guessing; tools/probe_drag_speed.py
-        # sweeps them and reports the fastest setting that still lands.
+        # are worth measuring rather than guessing: sweep them and take the
+        # fastest setting that still READS BACK, never the fastest that the
+        # gesture reports ok for.
         self.timing = dict(DRAG_TIMING)
         # Built on first failure only: ensure_tab succeeds nearly
         # always, and loading three templates for a diagnosis that
@@ -938,18 +569,16 @@ class InventoryControl:
             print(f'[attach] {msg}', flush=True)
 
     def close(self):
-        """Release the GDI objects TabGrabber holds open."""
-        self.grabber.close()
+        """Release the GDI objects TabGrabber holds open, and the Pointer.
 
-    def can_press(self):
-        """Is there a Pico, i.e. can this send KEYS as well as clicks?
-
-        Tab, 1 and 2 are keypresses and SendInput has no key path, so without
-        one this can drag but never open the screen to drag on. Checkable up
-        front rather than four minutes in. Same method, same reason, as
-        SpawnerControl.can_press.
+        ⚠ Now reachable as `with InventoryControl() as ac:`. It had no
+        __enter__/__exit__ at all, so all 41 construction sites hand-rolled
+        their own try/finally -- and a hand-rolled one is a try/finally
+        somebody can forget, which is a different failure from getting it
+        wrong: nothing reports it.
         """
-        return self.pointer.pico is not None
+        super().close()
+        self.grabber.close()
 
     # ── Screen state ──
 
@@ -967,11 +596,24 @@ class InventoryControl:
             self.rows['inventory'] = int(inventory)
 
     def tab_open(self):
+        """R — Is the Tab inventory drawn? One 41x18 crop, 3-6 ms, and NOT a
+        keypress: this reads the answer, ensure_tab() acts on it.
+
+        ⚠ False is not "Tab is closed". The item-spawner panel hides the
+        inventory AND swallows Tab, so False there means pressing cannot
+        help — which is why ensure_tab asks _blocking_screen() first.
+        """
         return bool(self.tab.classify({'type': win32_cap(HUD_REGIONS['type'])}))
 
     @contextlib.contextmanager
     def tab_up(self, restore=True):
-        """Have the Tab screen up for the block, then leave it as it was found.
+        """L2 — Hold the Tab screen up for the block, and leave it as found.
+        Nesting is free: already-open costs nothing, and only the call that
+        opened it closes it. ensure_tab() is the L1 it presses with.
+
+        ⚠ THE RESTORE IS WHERE THE CHURN COMES FROM — 20 of the journal's 85
+        churn records are one harvest session closing on itself. Hold ONE
+        across the whole flow; do not wrap each read in its own.
 
         The old way to be sure of the state was to force a known cycle: close
         it if it was open, open it, read, close it. Three keypresses, and with
@@ -998,25 +640,135 @@ class InventoryControl:
             if ok and restore and not was_open:
                 self.ensure_tab(False)
 
+    # WHAT EACH READ NEEDS, AS DATA. Every unnecessary gesture found on
+    # 2026-08-06 came from the same shape: a prerequisite that was satisfied at
+    # the CALL SITE instead of being declared, so each helper re-established it
+    # as though it were the only reader. Tab was opened five times before the
+    # first click of a weapon; the cursor was thrown to the bottom-left before
+    # reads that could not be fooled by a tooltip.
+    #
+    #   tab   True  the reading only exists on the Tab screen
+    #   park  True  the reading is a TEMPLATE MATCH over a region the cursor
+    #               may be sitting on, and a hovered tile draws a tooltip over
+    #               itself. False for judgements a tooltip cannot change:
+    #               panel_rows is Laplacian occupancy, tab_open is saturation.
+    #
+    # Declared here so the union can be satisfied ONCE for a whole survey, and
+    # so a new reader states its needs rather than inheriting whatever the
+    # previous line happened to leave behind.
+    READ_PREREQS = {
+        # template matches -- a hovered tile draws a tooltip over itself and
+        # the match then finds the tooltip. Measured 2026-08-07: with the move
+        # off, four slot reads came back "templates cannot separate" in one
+        # run against zero in the two before it, and each one skipped a cell.
+        'guns':  {'tab': True, 'park': True},   # name plates
+        'slots': {'tab': True, 'park': True},   # slot tiles
+        'loose': {'tab': True, 'park': True},   # row items
+        'plate': {'tab': True, 'park': True},   # name-plate ink
+        'tiles': {'tab': True, 'park': True},   # HUD attachment tiles
+        # judgements a tooltip cannot change
+        'rows':  {'tab': True, 'park': False},  # Laplacian occupancy count
+    }
+
+    # What survey() knows how to answer. Derived from the table above so the
+    # two cannot drift: a kind with no declared prerequisites is not a kind.
+    SURVEY_KINDS = tuple(READ_PREREQS)
+
+    def _frame_for(self, *kinds):
+        """A frame fit for reading `kinds`. -> the grabber's crops
+
+        THE READ DECLARES, THIS DECIDES. Every call site used to pass
+        `park=True/False` itself, which put a detection property in the hands
+        of whoever happened to be grabbing -- and the default quietly carried
+        it for fourteen of them. Asked for on 2026-08-07: "park 应该放到检测
+        逻辑里".
+
+        Behaviourally this changed nothing on the day it landed: an audit of
+        all sixteen grabs found every one except the two panel_rows sites was
+        a template match, so `park=True` had been right for them by accident.
+        What it changes is that a NEW read states what it is, instead of
+        inheriting whatever the previous line left behind.
+        """
+        bad = [k for k in kinds if k not in self.READ_PREREQS]
+        if bad:
+            raise ValueError(f'unknown read kind(s) {bad}; '
+                             f'known: {list(self.READ_PREREQS)}')
+        return self._frame(park=any(self.READ_PREREQS[k]['park']
+                                    for k in kinds))
+
+    def survey(self, *what, frame=None):
+        """Everything the caller asked for, off ONE screen opening. -> dict
+
+            s = ac.survey('guns', 'slots', 'loose')
+            s['guns']    {1: 'ace32', 2: None}
+            s['slots']   {1: {'muzzle': asset, ...}, 2: {...}}
+            s['loose']   a TabView -- both left panels, backpack and ground
+
+        THE CALLER SAYS WHAT IT WANTS TO KNOW; THIS DECIDES HOW MANY SCREEN
+        VISITS THAT TAKES. Asked for on 2026-08-06 in exactly those terms:
+        "需求方告诉你我要检测什么,然后 detector 那儿决定要不要合并检测 ...
+        不能检测一个开关一次 tab".
+
+        It costs one tab_up() and one grab no matter how much is asked for,
+        because the whole Tab screen is two blocks and `frame()` already
+        returns both: name plates and all ten slots are tab_blocks()['right'],
+        the backpack and ground lists are ['left']. Everything below reads the
+        SAME pixels -- which is also why it is more correct than separate
+        calls, not just cheaper. Two reads of a screen being dragged on are
+        two different screens, and nothing downstream can tell.
+
+        Measured before this existed: 1836 real Tab key presses across the
+        shared journal, 184 blocks of four or more consecutive toggles with no
+        gesture between them (1477 presses, 80% of all of them). The commonest
+        shape was literal alternation -- OCOCOOCOCOO -- one open-read-close per
+        helper, five helpers deep, before the first click of a weapon. No
+        helper was wrong on its own; there was simply nobody holding the
+        screen, so each opened it as if it were the only reader.
+
+        `frame` accepts one the caller already grabbed, same contract as
+        look(): a caller holding a captured frame and letting this grab its own
+        gets an answer about a different instant.
+        """
+        bad = [k for k in what if k not in self.SURVEY_KINDS]
+        if bad:
+            raise ValueError(f'survey: unknown kind(s) {bad}; '
+                             f'known: {list(self.SURVEY_KINDS)}')
+        want = set(what) or set(self.SURVEY_KINDS)
+        with self.tab_up() as ok:
+            if not ok:
+                return None
+            # ONE grab for the whole survey, parked only if something being
+            # read actually needs it. See READ_PREREQS.
+            need_park = any(self.READ_PREREQS[k]['park'] for k in want)
+            frame = (self._frame_for(*want) if frame is None else frame)
+            # Always read, never conditional: _read_guns is what narrows the
+            # template bank for both of the others, and it is a dict lookup
+            # off a frame that has already been grabbed.
+            self.guns = self._read_guns(frame)
+            out = {}
+            if 'guns' in want:
+                out['guns'] = self.guns
+            if 'slots' in want:
+                out['slots'] = self._slot_states(frame)
+            if 'loose' in want:
+                out['loose'] = self.look(frame=frame)
+        return out
+
     def loadout(self, gun=None):
         """What the guns are, and what they are wearing. Opens Tab if needed.
 
         -> {'guns': {1: key, 2: key}, 'slots': {1: {slot: asset}, 2: {...}}},
         or None if the screen never came up. With `gun`, just that one's dict.
 
-        One screen block covers all of it -- both name plates and all ten
-        slots are tab_blocks()['right'] -- so this is one 7 ms grab plus the
-        detectors, whatever state the screen started in.
+        A thin shape over survey(), which is where the one-opening rule lives.
+        Kept because a caller that wants exactly this reads better for it.
         """
-        with self.tab_up() as ok:
-            if not ok:
-                return None
-            frame = self._frame()
-            self.guns = self._read_guns(frame)
-            slots = self._slot_states(frame)
-        out = {'guns': self.guns, 'slots': slots}
-        return out if gun is None else {'gun': self.guns[gun],
-                                        'slots': slots[gun]}
+        s = self.survey('guns', 'slots')
+        if s is None:
+            return None
+        out = {'guns': s['guns'], 'slots': s['slots']}
+        return out if gun is None else {'gun': s['guns'][gun],
+                                        'slots': s['slots'][gun]}
 
     def sync(self):
         """False unless the game is focused with the Tab screen up."""
@@ -1030,12 +782,13 @@ class InventoryControl:
         return True
 
     def park(self):
-        """Move the cursor off every interactive element, then let the hover
-        highlight and any tooltip fade before a read.
+        """Move the cursor off every interactive element before a read.
 
-        A no-op when the cursor is already parked, so polling a slot does not
-        pay the settle time on every pass.
+        ⚠ OFF BY DEFAULT SINCE 2026-08-07 — see PARK_BEFORE_READ. One constant,
+        one line to put back.
         """
+        if not PARK_BEFORE_READ:
+            return
         if self.pointer.cursor_pos() == PARK_XY:
             return
         self.pointer.move_to(*PARK_XY)
@@ -1051,7 +804,7 @@ class InventoryControl:
         `ac.grabber.grab()` for exactly this, which skips park() — and a
         hovered slot draws a tooltip over itself.
         """
-        return self._frame()
+        return self._frame_for('loose')
 
     def look(self, frame=None):
         """Grab the Tab screen and read it. Returns a TabView.
@@ -1068,7 +821,7 @@ class InventoryControl:
         slot. Both were live in collect_templates, which reached past this
         method into `ac.items.detect(...)` to get it.
         """
-        frame = self._frame() if frame is None else frame
+        frame = self._frame_for('guns', 'loose') if frame is None else frame
         self.guns = self._read_guns(frame)
         view = self.items.detect(frame, self.guns)
         self.set_rows(nearby=view.rows('nearby'),
@@ -1084,7 +837,7 @@ class InventoryControl:
         hand — which is this method's body, minus the roster filter that stops
         an unrecognised name narrowing every slot's template bank to nothing.
         """
-        return self._read_guns(self._frame() if frame is None else frame)
+        return self._read_guns(self._frame_for('guns') if frame is None else frame)
 
     def plate_ink(self, gun, frame=None):
         """White-text pixels on gun `gun`'s name plate. -> int
@@ -1096,7 +849,7 @@ class InventoryControl:
         any template, and that is the missing half of labelling a plate
         capture with the weapon that was requested.
         """
-        frame = self._frame() if frame is None else frame
+        frame = self._frame_for('plate') if frame is None else frame
         y, x, h, w = HUD_REGIONS[f'gun_name_{gun}']
         return self.name_template.ink(frame[y:y + h, x:x + w])
 
@@ -1121,7 +874,7 @@ class InventoryControl:
         """
         if self._slots is None:
             self._slots = SlotDetector()
-        frame = self._frame() if frame is None else frame
+        frame = self._frame_for('loose') if frame is None else frame
         # The weapon narrows the bank to what it can physically hold, which is
         # what stops an SMG suppressor being read onto an SKS. `self.guns` is
         # whatever the last look() cached and None is a legitimate answer --
@@ -1144,13 +897,20 @@ class InventoryControl:
         taken a frame all along — the two readers are only worth comparing
         when they are describing the same screen.
         """
-        out = self._slot_states(self._frame() if frame is None else frame)
+        out = self._slot_states(self._frame_for('slots') if frame is None else frame)
         return out if gun is None else out[gun]
 
     # ── The primitive ──
 
     def drag(self, src, dst, want=None, retries=1, weapon=None, verify=True):
-        """Drag whatever is at `src` onto `dst`.
+        """L0 — Drag whatever is at `src` onto `dst`. It DOES read back and
+        retry; what it does not carry is the guards. equip()/unequip() do.
+
+        ⚠ Into a weapon slot the drag measured 0/10 and never lands — that
+        edge is not slow, it is shut. ⚠ The empty-slot check here runs only
+        from the SECOND attempt, so the first gesture is covered by
+        unequip()'s guard and by nothing else. And never substitute
+        ac.pointer.drag: _reject() is the only thing on that release.
 
         want     what the destination slot should read as afterwards. Defaults
                  to ANY_ITEM when dst is a slot; ignored when it is a panel.
@@ -1193,7 +953,7 @@ class InventoryControl:
         # The pre-drag reading is needed twice: ANY_ITEM on a slot that was
         # already occupied would otherwise pass without the drag doing
         # anything, and a retry is only safe while nothing has changed.
-        before = self._slot_states(self._frame()) if checks else None
+        before = self._slot_states(self._frame_for('slots')) if checks else None
 
         # A PANEL DESTINATION IS READ BACK TOO, by counting rows.
         #
@@ -1219,6 +979,9 @@ class InventoryControl:
                'error': None}
         p0 = self.point_of(src)
         p1 = self.point_of(dst, from_y=p0[1])
+        # What the source row held on the FIRST attempt, so a retry can tell
+        # "still there" from "the list moved under me". See the guard below.
+        src_key0 = None
 
         for attempt in range(retries + 1):
             rec['attempts'] = attempt + 1
@@ -1273,8 +1036,56 @@ class InventoryControl:
                         by='retry guard', after_attempt=attempt,
                         plate=[self._plate(src[1]), None])
                     return rec
+            # When THIS attempt began, before any reading or gesture. See
+            # _stamp: journalling happens after the poll, so a gap measured
+            # there is a gap that contains its own outcome.
+            t_begin = time.perf_counter()
+            # Bound before the branch: the row identity is only readable when
+            # there are panels to read, and an unbound name here would turn a
+            # slot-destination drag into a NameError.
+            src_key = '(no panel to read)'
             if panels is not None:
-                f = self._frame()
+                # No park, same reason as _await_panel: this is panel_rows, a
+                # Laplacian occupancy count, and a tooltip cannot change a row
+                # count. Here it cost more than a wasted move -- park() throws
+                # the cursor to PARK_XY (200, 1380) in the instant BEFORE the
+                # grab, so every drag began by walking the cursor back across
+                # the screen, which is exactly the stretch where Pointer.place
+                # fights the game's cursor drift. Watched and reported by the
+                # operator: "往左边拖东西的时候突然点了一下 ... 就拖不动东西".
+                f = self._frame_for('rows')
+                # ⚠ WHAT WAS ACTUALLY UNDER THE GRAB POINT. Every other field
+                # on this record describes what WE did -- where the cursor was
+                # placed, how many steps, how long the button was down -- and
+                # on 2026-08-07 all of them came back identical for the 63
+                # drags that missed and the 284 that landed: same tries, same
+                # dy of 0, same 0.53 s, same 4 steps. Geometry is exonerated.
+                #
+                # That leaves two explanations that the journal cannot yet
+                # tell apart: the game REFUSED a clean gesture, or there was
+                # nothing at the grab point to move. This names the row.
+                #
+                # Read off the frame that was being taken anyway, so it costs
+                # one template pass and no extra grab. Best effort: with
+                # PARK_BEFORE_READ off the cursor may be over the row and the
+                # tooltip can make it unreadable, which is itself worth
+                # seeing -- an unreadable source row is not the same claim as
+                # an empty one.
+                # TabView keeps `inventory` and `nearby` as ROW-INDEXED
+                # lists, so the row is a lookup, not a search. None means the
+                # row read as empty; '?' means it was there and unreadable,
+                # and those are different claims -- an unreadable row is a
+                # detector problem, an empty one means the grab had nothing
+                # to pick up.
+                try:
+                    kind, idx = (src if isinstance(src, tuple) else (None, None))[:2]
+                    if kind in ('inventory', 'ground') and isinstance(idx, int):
+                        v = self.look(frame=f)
+                        lst = v.inventory if kind == 'inventory' else v.nearby
+                        it = lst[idx] if 0 <= idx < len(lst) else None
+                        src_key = None if it is None else (it.key or '?')
+                except Exception as e:
+                    src_key = f'(read failed: {type(e).__name__})'
                 n_src0 = panel_rows(f, panels[0]) if panels[0] else 0
                 n_dst0 = panel_rows(f, panels[1])
                 # BOTH LISTS FULL: the count cannot answer. A panel is a
@@ -1291,6 +1102,51 @@ class InventoryControl:
                               f'cannot see this drag, not verifying it')
                     panels = None
                     rec['verified'] = bool(checks)
+            # ⚠ RETRY-SAFE: p0/p1 are reused across attempts, and that is only
+            # sound while the address still resolves to the same thing. Two
+            # guards make it so, one per address kind, and this is the second:
+            #
+            #   a SLOT source is checked above -- slots are addressed by name,
+            #   so they cannot shift, but they can EMPTY, and a gesture on an
+            #   empty slot drops the whole gun.
+            #
+            #   a ROW source is checked here -- rows are POSITIONAL. Removing
+            #   a row scrolls everything below it up, so a retry at the same
+            #   pixel grabs whatever slid into that place.
+            #
+            # The row half was the missing one, and it is not hypothetical:
+            # `moved` is False for about 18% of drags that in fact landed
+            # (the row poll cannot see an arrival when both lists are full,
+            # among other things), and every one of those became a retry --
+            # aimed, by then, at a list that had already shifted. Same shape as
+            # right_click_equip's retry, which put the evicted magazine back on
+            # the gun and got the combination written into kit_facts.json as
+            # incompatible. Enforced by `pixi run gestures`.
+            #
+            # Refuse rather than re-aim: the callers that drag rows in bulk
+            # (stock.tidy, clear_ground) already repeat until a pass moves
+            # nothing, so declining one gesture costs a loop iteration, while
+            # dragging the wrong row costs a part.
+            if attempt and src_key0 and not str(src_key0).startswith('('):
+                if src_key != src_key0:
+                    rec['ok'] = True
+                    rec['source_emptied'] = True
+                    rec['error'] = (
+                        f'{loc_str(src)} held {src_key0} on attempt 1 and '
+                        f'reads {src_key!r} now — the list moved, so the '
+                        f'previous attempt did something. Not dragging again '
+                        f'at a stale row.')
+                    self._log(f'{loc_str(src)} -> {loc_str(dst)}: source row '
+                              f'changed {src_key0} -> {src_key} after attempt '
+                              f'{attempt}; not retrying at a moved row')
+                    self._journal_refusal(
+                        'refused', src, dst,
+                        f'source row changed {src_key0} -> {src_key} after '
+                        f'attempt {attempt}',
+                        by='retry guard', after_attempt=attempt)
+                    return rec
+            if not attempt:
+                src_key0 = src_key
             gesture = self.pointer.drag(p0, p1, **self.timing)
             # The verdict is taken BEFORE the journal so that one line carries
             # the gesture and its outcome together — split across two lines,
@@ -1298,12 +1154,54 @@ class InventoryControl:
             # Runs before the slot checks and gates them, because "the slot
             # emptied" is true whether the part reached the panel or the
             # floor, and only this can tell those apart.
+            # ⚠ THE ROW POLL RUNS WHATEVER THE CURSOR SAID. It used to be
+            # `if gesture and panels is not None`, and that one `and` is why
+            # this layer could not answer its own oldest question.
+            #
+            # `gesture` comes from press/pointer.py, which compares the cursor
+            # position AFTER the release (and after DRAG_DROP_WAIT) against the
+            # drop point with PLACE_TOL = 2 px, on the stated assumption that
+            # "SetCursorPos is exact". That assumption is FALSE while Tab is
+            # up: raw counts land on the cursor and arrive over about a second
+            # (see Pointer.place), so the check measures drift that accumulated
+            # AFTER the item had already been dropped.
+            #
+            # Measured over the whole shared journal, 2026-08-06, labelling each
+            # drag by the NEXT record's row counts:
+            #
+            #     said missed, actually LANDED   147     <- 98% of all failures
+            #     said ok,     landed            104
+            #     said ok,     actually MISSED    53     <- invisible to it
+            #     said missed, actually missed      3
+            #
+            # So the cursor verdict was wrong 147 times out of 150 in the
+            # failing direction, and it cannot see the real misses at all --
+            # it never looks at the item. Every one of those 147 became a
+            # retry, which is the "it drags the same thing over and over"
+            # the operator kept seeing.
+            #
+            # And it poisoned the evidence as well as the behaviour: with the
+            # poll skipped, `moved` stayed None and `poll` was journalled as
+            # None, so the ONE field that records the outcome was absent from
+            # exactly the records anybody would go read. Reconstructing the
+            # truth needed the following record's rows_before. That is why the
+            # investigation in this package's CLAUDE.md ran on mislabelled data.
+            #
+            # Rows are the verdict now; the cursor is a diagnostic (`failed_at`
+            # and the got/held pair stay in the record). When rows CANNOT judge
+            # -- both lists full, or no countable panel -- `moved` is None and
+            # the old cursor-based refusal still stands, which is the right
+            # fallback rather than believing a gesture nothing checked.
             moved = (self._await_panel(panels, n_src0, n_dst0)
-                     if gesture and panels is not None else None)
-            self._journal(src, dst, p0, p1, panels, attempt,
+                     if panels is not None else None)
+            # `panels` is not passed: rows0 below already carries the only
+            # thing the journal did with it -- the two row counts, or None
+            # when there was no countable panel to take them from.
+            self._journal(src, dst, p0, p1, attempt,
                           (n_src0, n_dst0) if panels is not None else None,
-                          gesture, moved)
-            if not gesture:
+                          gesture, moved, started=t_begin,
+                          src_key=src_key)
+            if not gesture and not moved:
                 rec['error'] = 'cursor placement failed'
                 return rec
             if panels is not None:
@@ -1358,7 +1256,12 @@ class InventoryControl:
 
     def equip(self, gun, slot=None, src=None, att=None, weapon=None, retries=1,
               gesture='auto'):
-        """Put the attachment at `src` into weapon `gun`'s `slot`.
+        """L1 — Put the attachment at `src` into weapon `gun`'s `slot`. One
+        gesture at the row you name; ensure_kit() is the L2 that re-finds it.
+
+        ⚠ gesture='drag' INTO a weapon slot has never landed — 0/10 against
+        right-click 10/10 — so 'auto' takes the gun in hand first, and a
+        forced 'drag' is choosing to spend 1.7 s failing. Never force it.
 
         Hand it a TabView Item and everything but the gun is implied:
 
@@ -1408,18 +1311,55 @@ class InventoryControl:
                           f'only be checked for having changed, not for '
                           f'holding {att}')
         if gesture == 'auto':
-            gesture = 'click' if self.held == gun else 'drag'
+            # ⚠ TAKE THE GUN IN HAND RATHER THAN FALLING BACK TO THE DRAG.
+            # This used to be a bare `'click' if self.held == gun else 'drag'`,
+            # and `held` is a BELIEF, not a reading -- hold() says so itself:
+            # nothing reads which weapon is actually in hand. So any moment the
+            # belief was false or had been cleared (ensure_kit clears it after
+            # a restock, because the spawner can push a gun out of the rack)
+            # this quietly chose the drag.
+            #
+            # And the drag into a weapon slot is not a slower option, it is a
+            # gesture that has never worked: 0/10 measured against right-click
+            # 10/10 at 0.17 s (control/CLAUDE.md), 0/4 against 4/4 in the
+            # earlier probe. Choosing it is choosing to fail, then to spend
+            # 1.7 s failing, and a mis-aimed drag onto a slot can drop the gun.
+            #
+            # hold() returns immediately when the belief already matches, so
+            # the common path costs nothing; when it does not match, one 1/2
+            # keypress buys the gesture that works.
+            if self.held != gun:
+                self.hold(gun)
+            if self.held == gun:
+                gesture = 'click'
+            else:
+                gesture = 'drag'
+                self._log(f'gun{gun} would not come to hand — falling back to '
+                          f'the drag, which measured 0/10 into a weapon slot. '
+                          f'Expect this to fail; it is logged rather than '
+                          f'refused so the readback still records what the '
+                          f'slot ended up holding.')
         if gesture == 'click':
+            # att travels with it: without the catalogue key the retry cannot
+            # re-find the row, and re-finding the row is the whole point.
             return self.right_click_equip(gun, slot, src, want=want,
-                                          retries=retries)
+                                          retries=retries, att=att)
         return self.drag(src, at_slot(gun, slot), want=want, retries=retries,
                          weapon=weapon)
 
-    def right_click_equip(self, gun, slot, src, want=ANY_ITEM, retries=1):
-        """Fit `src` by right-clicking it. Only reaches the HELD weapon.
+    def right_click_equip(self, gun, slot, src, want=ANY_ITEM, retries=1,
+                          att=None):
+        """L0 — Fit `src` by right-clicking it, reading the slot back.
+        equip() is the entry point; it takes the gun in hand and passes att.
+
+        ⚠ PASS `att=`. `src` is a ROW, and the first click evicts the
+        incumbent into 库存, renumbering rows — without `att` the retry
+        cannot re-find the part and so never re-clicks at all.
+        ⚠ "Only reaches the HELD weapon" is a BELIEF: hold() reads nothing,
+        and right-click measured 10/10 without it on a single-gun rack.
 
         Measured 4/4 at 0.35 s against 0/4 at 1.70 s for the equivalent drag
-        (tools/probe_equip_gesture.py, 2026-08-02) -- the drag is not merely
+        (measured 2026-08-02) -- the drag is not merely
         slower here, it did not land at all. See docs/game_quirks.md.
 
         The target is not a parameter the game takes: right-click equips onto
@@ -1439,12 +1379,63 @@ class InventoryControl:
                                   by='right_click_equip', held=self.held)
             return rec
 
-        frame = self._frame()
+        frame = self._frame_for('slots', 'plate')
         before = self._slot_states(frame)
         plate0 = self._plate(gun, frame)
         checks = [(gun, slot, want)]
         x, y = self.point_of(src)
         for attempt in range(retries + 1):
+            # ⚠ THE RETRY MUST RE-FIND THE PART. `src` is a ROW, and the first
+            # click moves rows: fitting into an occupied slot evicts the
+            # incumbent into the backpack, which inserts a row and shifts the
+            # ones below it. Clicking the same (x, y) a second time therefore
+            # aims at whatever slid into that position -- usually the part just
+            # evicted -- and puts it straight back on, throwing this run's part
+            # off. The readback then reports the FACTORY part in the slot and
+            # the caller records "this weapon will not take ext_smg", which is
+            # false and goes into kit_facts.json as a compatibility fact.
+            #
+            # Watched on screen 2026-08-07 and described exactly: "好像是装对
+            # 了,然后又装一次,装错了,然后说找不到,把枪扔了". It also explains
+            # the number this package's CLAUDE.md has been carrying unexplained
+            # -- right-click into an occupied magazine slot measured 6/6 in the
+            # isolated probe and 18/68 in the collector. The probe fits once.
+            # The collector retries.
+            if attempt:
+                fresh = loose_items(self.look(frame=self._frame_for('loose'))
+                                    or {})
+                hits = sorted((loc for loc, k in fresh.items() if k == att),
+                              key=_src_rank) if att else []
+                if not hits:
+                    # NOT in either panel. Either the first click landed after
+                    # all and _await simply ran out of patience, or the part is
+                    # gone. Ask the slot before believing the worse one --
+                    # "verification was slow" and "it never went on" have been
+                    # indistinguishable here, and clicking blind is how the
+                    # wrong part gets fitted.
+                    rec['checks'] = self._await(checks, before)
+                    if all(r['ok'] for r in rec['checks']):
+                        rec['ok'] = True
+                        self._log(f'{loc_str(src)} -> {loc_str(dst)}: the '
+                                  f'first right-click had landed; the readback '
+                                  f'was just late')
+                        return rec
+                    # ⚠ TWO DIFFERENT FACTS, AND CONFLATING THEM WROTE
+                    # FICTION INTO kit_facts.json. Without `att` this branch
+                    # never searched for anything -- `hits` is `[] if not att`
+                    # -- so reporting "the part is in neither panel" described
+                    # a search that did not happen, and the caller records
+                    # that as a COMPATIBILITY FACT about the weapon. equip()
+                    # passes att; a direct caller does not, and the one who
+                    # reads the log later cannot tell which happened.
+                    rec['error'] = (
+                        f'{att} is in neither panel and the slot does not '
+                        f'hold it' if att else
+                        'retry disabled: no att= was given, so the row could '
+                        'not be re-found. This says nothing about whether the '
+                        'part exists or whether the gun takes it.')
+                    return rec
+                x, y = self.point_of(hits[0])
             rec['attempts'] = attempt + 1
             self.pointer.right_click_at(x, y)
             rec['checks'] = self._await(checks, before)
@@ -1465,7 +1456,12 @@ class InventoryControl:
         return rec
 
     def await_tab(self, want, timeout=TAB_TOGGLE_TIMEOUT):
-        """Poll until the Tab screen is open/closed as asked. -> bool
+        """R — Block until the Tab screen reads `want`, or the deadline. It
+        SENDS NOTHING: False means the screen never changed, not that
+        anything was attempted. ensure_tab() is what presses.
+
+        ⚠ The bound is short on purpose — a swallowed key is not cured by
+        waiting, so the answer to False is another press, not a longer wait.
 
         No sleep in the loop: one pass IS the pace. tab_open() grabs a 41x18
         crop, and win32_cap is ~3-6 ms of fixed GDI overhead almost regardless
@@ -1479,7 +1475,13 @@ class InventoryControl:
                 return False
 
     def ensure_tab(self, want, tries=3):
-        """Press Tab until the screen is `want`, re-pressing if need be. -> bool
+        """L1 — Press Tab until the screen reads `want`, re-pressing a
+        swallowed key. -> bool. It RESTORES NOTHING: the caller owns the state
+        afterwards, so an ensure_tab(False) in a finally shuts a screen
+        somebody upstream is holding. tab_up() (L2) is the owner.
+
+        ⚠ False can mean NOT PRESSED AT ALL — under the spawner panel or in
+        the lobby the game ignores Tab, so this refuses rather than pressing.
 
         Two different failures, and only one of them is a timing constant:
 
@@ -1503,12 +1505,36 @@ class InventoryControl:
         # next turn()'s raw counts land on the cursor instead of the view, and
         # the drag after that releases short (see Pointer.place).
         pressed = 0
+        # ⚠ ASK WHAT IS ON SCREEN BEFORE PRESSING, not after the tries are
+        # spent. The item-spawner panel is a menu: while it is up the game does
+        # not act on Tab at all, AND tab_open() reads False because the
+        # inventory is not drawn -- so this loop used to press (swallowed),
+        # wait out await_tab, press again, and only then ask _blocking_screen.
+        # Two wasted presses and two timeouts per occurrence, and it happens
+        # once per spawner visit, i.e. once per weapon.
+        #
+        # It is also why the journal shows blocks opening `OO`: two presses in
+        # a row with no state change between them, which reads as a swallowed
+        # keystroke and is really a keystroke sent at a menu.
+        # ⚠ AND IT RUNS ONLY WHEN A PRESS IS ABOUT TO HAPPEN. _blocking_screen
+        # is a full capture_screen() plus two detectors, and this method is
+        # called around every read -- putting the probe at the top would put a
+        # full-screen grab on the commonest path there is, the one where the
+        # screen is already in the wanted state and nothing needs doing.
         for _ in range(tries):
             if bool(self.tab_open()) == want:
                 if pressed:
                     self._stamp('tab', None, None, gesture=True, moved=True,
                                 want=want, presses=pressed)
                 return True
+            if not pressed:
+                blocker = self._blocking_screen()
+                if blocker:
+                    self._log(f'not pressing Tab — {blocker}')
+                    self._journal_refusal('refused', None, None, blocker,
+                                          by='ensure_tab', want=want,
+                                          presses=0)
+                    return False
             mouse.key(HID_KEY_TAB, 60)
             pressed += 1
             if self.await_tab(want):
@@ -1581,7 +1607,12 @@ class InventoryControl:
         return None
 
     def hold(self, gun, settle=0.6):
-        """Put weapon `gun` in hand, so right-click equips onto it.
+        """L0 — Press 1/2 so right-click equips onto `gun`. Nothing reads the
+        HUD back: True means the key went out, not that the gun is in hand.
+
+        ⚠ It short-circuits on the CACHED `self.held` and presses nothing, so
+        anything that can move a gun — the spawner, an eviction — must set
+        `ac.held = None` first. capture_ads.hold_weapon() is the checked one.
 
         Costs a Tab close/open: the number keys are swallowed while the
         inventory is up. Worth it once per weapon, not once per attachment --
@@ -1627,7 +1658,12 @@ class InventoryControl:
         return True
 
     def unequip(self, gun, slot, to=None, retries=1, gesture='auto'):
-        """Pull weapon `gun`'s `slot` off, into 库存 by default.
+        """L1 — Pull weapon `gun`'s `slot` off, into 库存 by default. Proves
+        the SLOT emptied, never that the part arrived — see panel_counts().
+
+        ⚠ THE EMPTY-SLOT REFUSAL LIVES HERE. A gesture on an empty slot
+        reaches the weapon row and throws the whole gun on the floor; drag()
+        only checks that from its SECOND attempt, so do not call it direct.
 
         gesture: 'auto' right-clicks when the destination IS 库存 and drags
         otherwise; 'click' and 'drag' force one.
@@ -1639,7 +1675,7 @@ class InventoryControl:
         than a parameter.
 
         THE DRAG, AS CURRENTLY AIMED, DOES NOT REACH 库存. Measured twice on
-        2026-08-02 (tools/probe_unequip_gesture.py): the slot empties and the
+        2026-08-02: the slot empties and the
         part lands ON THE FLOOR -- 库存 +0, 附近 +1.
 
         The release POINT is what is wrong, not the gesture: point_of(at_inv())
@@ -1737,7 +1773,15 @@ class InventoryControl:
         return self.drag(at_slot(gun, slot), dst, retries=retries)
 
     def right_click_unequip(self, gun, slot, retries=1):
-        """Pull a part off by right-clicking the slot. -> the drag record shape.
+        """L0 — Pull a part off by right-clicking the slot, verified EMPTY.
+        Go through unequip(): its tile and AMBIGUOUS guards are what keep the
+        gesture off an empty slot, and the check here is a TEMPLATE read,
+        which docs/game_quirks.md says cannot answer that question.
+
+        ⚠ ok=True DOES NOT MEAN THE GUN IS STILL RACKED. An empty-slot click
+        drops the whole gun, and the slot then reads empty, so `cleared` is
+        True either way. Only rec['gun_lost'] separates them. This is the
+        clearest case of an L0 that checks — and checks the wrong object.
 
         The destination is NOT a parameter: right-click sends the part to the
         backpack, always. A caller that wants it on the floor has to drag.
@@ -1751,9 +1795,28 @@ class InventoryControl:
         rec = {'ok': False, 'verified': True, 'src': src, 'dst': at_inv(),
                'checks': [], 'attempts': 0, 'error': None,
                'gesture': 'right-click'}
-        frame = self._frame()
+        frame = self._frame_for('slots', 'plate')
         before = self._slot_states(frame)
         plate0 = self._plate(gun, frame)
+        # ⚠ THE TILE, NOT THE TEMPLATE. `before` comes from _slot_states,
+        # which reads TEMPLATE names -- and docs/game_quirks.md says in so
+        # many words that a template read cannot answer "is there something
+        # here": a part whose icon is not in the bank, or one the panel's
+        # translucency made AMBIGUOUS, both come back '' from a slot that is
+        # occupied. This gate then lets the click through onto what it
+        # believes is an empty slot, the click reaches the weapon row
+        # underneath, and the whole gun goes on the floor -- 74 parts across
+        # 11 collector runs. slot_state() is the geometric read unequip()
+        # already gates on; using it here means a caller who reached past
+        # unequip is covered by the same guard rather than by a weaker one.
+        tile = self.slot_state(gun, slot, frame)
+        if tile in (SLOT_EMPTY, SLOT_ABSENT):
+            rec['error'] = (f'gun{gun}.{slot} reads {tile} by tile — a click '
+                            f'here reaches the weapon row and drops the gun')
+            self._journal_refusal('refused', src, at_inv(), rec['error'],
+                                  by='right_click_unequip',
+                                  plate=[plate0, None])
+            return rec
         if not before[gun][slot]:
             rec['error'] = f'gun{gun}.{slot} is already empty'
             self._journal_refusal('refused', src, at_inv(), rec['error'],
@@ -1763,6 +1826,18 @@ class InventoryControl:
         checks = [(gun, slot, EMPTY)]
         x, y = self.point_of(src)
         for attempt in range(retries + 1):
+            # RETRY-SAFE: `src` is a SLOT, and slots are addressed by name, not
+            # by position — nothing this loop does can move one. The sibling
+            # hazard is the row lists, where removing a row scrolls the ones
+            # below it up and a reused point grabs whatever slid into place;
+            # see drag() and right_click_equip(), both of which re-find their
+            # target every attempt. Checked by `pixi run gestures`.
+            #
+            # The danger here is the OTHER one and it is already guarded above:
+            # a slot that EMPTIED between attempts, because a gesture on an
+            # empty slot reaches the weapon row and drops the whole gun. That
+            # check runs before the loop, once — which is why `before` is read
+            # outside it and the emptiness test is not repeated here.
             rec['attempts'] = attempt + 1
             self.pointer.right_click_at(x, y)
             rec['checks'] = self._await(checks, before)
@@ -1798,7 +1873,12 @@ class InventoryControl:
         return rec
 
     def strip(self, gun, to=None, retries=1):
-        """Take every attachment off `gun`. -> BATCH record.
+        """L1 — Take every attachment off `gun`, one verified slot at a time.
+        -> BATCH. Every slot it touched reads empty; the gun is not re-read.
+
+        ⚠ THE DEFAULT DESTINATION IS 库存, and PUBG bolts whatever is in the
+        pack onto the next gun to arrive — pass to=at_ground(), and never
+        strip before drop_weapon(), which throws the gun WEARING its parts.
 
         `worn` names what it found, so a caller can tell "nothing to do" from
         "did it and it worked" — both are ok=True with zero failures, and a
@@ -1827,7 +1907,7 @@ class InventoryControl:
         # ONE FRAME FOR BOTH READERS. They used to grab their own, so `states`
         # and `named` could describe different instants -- which is exactly the
         # pair whose disagreement decides whether a gesture goes out.
-        frame = self._frame()
+        frame = self._frame_for('slots')
         states = self.slot_states(gun, frame)
         named = self.read_slots(gun, frame)
         # `unknown` no longer means scope: that position is read like every
@@ -1843,11 +1923,26 @@ class InventoryControl:
                      states={s: states.get(s) for s in had})
 
     def discard(self, src, retries=1):
-        """Drop whatever is at `src` on the floor. Works from a slot too."""
+        """L1 — One gesture: drop what is at `src` on the floor, read back by
+        the row count. clear_inventory() is the loop; this is one step.
+
+        ⚠ FROM A SLOT THIS SKIPS THE EMPTY-SLOT GUARD, which lives in
+        unequip(), not here. A gesture at an empty slot reaches the weapon
+        row underneath and throws the whole gun out — 74 measured losses.
+        Use unequip(gun, slot, to=at_ground()) for anything on a gun.
+
+        (This line used to read "Works from a slot too", which is exactly the
+        use the paragraph above exists to refuse.)
+        """
         return self.drag(src, at_ground(), retries=retries)
 
     def auto_equip(self, src):
-        """Right-click `src` and let the GAME choose the slot. -> True if sent.
+        """L0 — Right-click `src` and let the GAME choose the slot. OPEN
+        LOOP: True means the click was SENT, not that anything moved.
+
+        ⚠ It never calls hold(), and the game fits onto the weapon IN HAND;
+        with two guns racked, which one receives the part has never been
+        measured. For a named part in a named slot use equip()/ensure_kit().
 
         A different action from equip(), not a convenience over it: equip()
         takes a destination and refuses without one, because it is checking
@@ -1921,7 +2016,7 @@ class InventoryControl:
         """
         deadline = time.perf_counter() + (0 if frame is not None else timeout)
         while True:
-            f = self._frame() if frame is None else frame
+            f = self._frame_for('tiles') if frame is None else frame
             for gun in GUNS:
                 for slot in SLOT_NAMES:
                     y, x, h, w = HUD_REGIONS[f'att_{gun}_{slot}']
@@ -1945,7 +2040,15 @@ class InventoryControl:
         return self.auto_equip(item.where)
 
     def drop_weapon(self, gun, retries=1, gesture='auto'):
-        """Throw the gun in rack slot `gun` on the floor, WEARING its parts.
+        """L2 — Throw the gun in rack slot `gun` on the floor WEARING its
+        parts, confirmed by re-reading the plate ('auto' falls back from
+        right click to drag). Do NOT strip() first: parts left in the pack
+        get auto-fitted onto the next gun to arrive.
+
+        ⚠ THE VERDICT IS THE NAME PLATE, and it reads None both for an empty
+        rack and for a gun the templates cannot name — so an unnamed gun that
+        DID leave reports failure, and 'auto' then drags at an empty rack row.
+        clear_rack gates on plate_ink; this does not. Two rulers, one fact.
 
         -> {'ok', 'was', 'now', 'gesture', 'error'} — `was` is what the plate
         read before.
@@ -1970,13 +2073,13 @@ class InventoryControl:
         labelled BARE came back wearing Lower_Foregrip_C and a quickdraw
         magazine nobody asked for.
         """
-        frame = self._frame()
+        frame = self._frame_for('guns', 'plate')
         was = self._read_guns(frame).get(gun)
         plate0 = self._plate(gun, frame)
 
         def settled():
             time.sleep(DROP_SETTLE)
-            f = self._frame()
+            f = self._frame_for('guns', 'plate')
             now = self._read_guns(f).get(gun)
             return now, (now is None and was is not None), self._plate(gun, f)
 
@@ -2032,7 +2135,13 @@ class InventoryControl:
                     was=was, now=now, gesture=used, drag=rec)
 
     def clear_rack(self, guns=(1, 2)):
-        """Empty both rack slots onto the floor. -> BATCH record.
+        """L1 — Drop every racked gun on the floor, ONE PASS. -> BATCH. An
+        empty slot is skipped, not failed; a failed drop is not retried, and
+        the rack is not re-read afterwards.
+
+        ⚠ THE GUNS LEAVE WEARING THEIR PARTS, so this takes the run's
+        attachments to the floor with them. Deliberate — see drop_weapon:
+        stripping first lets PUBG auto-fit them onto the next gun.
 
         `dropped` is the guns it actually acted on; an empty slot is skipped,
         not failed.
@@ -2052,7 +2161,18 @@ class InventoryControl:
         """
         out, did = [], []
         for g in guns:
-            if self.plate_ink(g) < PLATE_INK_MIN:
+            ink = self.plate_ink(g)
+            if ink > PLATE_INK_MAX:
+                # Not a name plate — the spawner panel is over this crop. See
+                # PLATE_INK_MAX. Refusing beats dropping: every click here goes
+                # into the panel, and the batch would report success having
+                # moved nothing.
+                self._log(f'gun {g} plate reads {ink} ink, far above any real '
+                          f'plate ({PLATE_INK_MIN}..~900) — the spawner panel '
+                          f'is over the rack. Close it before clearing.')
+                return batch(out, dropped=did, ok=False,
+                             error=f'spawner panel over the rack (ink {ink})')
+            if ink < PLATE_INK_MIN:
                 continue
             out.append(self.drop_weapon(g))
             did.append(g)
@@ -2063,7 +2183,14 @@ class InventoryControl:
         return self.drag(at_ground(row), at_inv(), retries=retries)
 
     def clear_ground(self, retries=1, passes=4):
-        """Put everything on the floor into the backpack. -> BATCH record.
+        """L1 — Move the whole floor into 库存, up to `passes` passes,
+        re-reading between gestures. -> BATCH. The stop condition is the ROW
+        IDENTITY, not the count: the panel is a 12-row window that refills
+        from below as rows leave.
+
+        ⚠ A FULL 库存 BLINDS THE PER-DRAG CHECK — with both lists at 12 rows
+        drag() stops counting and returns ok unverified, so only the
+        pass-level compare catches it. clear_inventory() is the mirror.
 
         Repeats until a pass moves nothing, for the same reason stock.tidy()
         does: the list shows 12 rows and rows below scroll up as the ones
@@ -2076,10 +2203,11 @@ class InventoryControl:
         panel other things fall into while you work (a swap displaces a part,
         a dropped gun lands there).
 
-        `verified` on every step is False: panel to panel has no slot to read
-        back. The batch as a whole IS verified, by the row count reaching zero
-        -- which is the caller-side re-detection that MOVES's `verified: False`
-        is asking for, done here once instead of by every caller.
+        `verified` is True per step now: panel to panel has no SLOT to read,
+        but drag() counts the two lists' rows (panel_counts), which is what
+        caught "12 dragged, 0 moved". The batch is verified a second way, by
+        the row count reaching zero -- keep both: a per-drag count cannot see
+        a row that left and came back, and the total cannot say which drag.
         """
         out = []
         rows = None
@@ -2119,7 +2247,13 @@ class InventoryControl:
                      rows_left=rows or 0)
 
     def clear_inventory(self, retries=1, passes=4):
-        """Put everything in 库存 on the floor. -> BATCH record.
+        """L1 — Throw all of 库存 on the floor, up to `passes` passes.
+        -> BATCH. Always row 0 and re-read each pass: rows scroll up, so a
+        row index from one detection pass is stale by the next gesture.
+
+        ⚠ A DRAG CAN REPORT SUCCESS HAVING MOVED NOTHING — measured at 12
+        rows dragged, 12 `dragged`, 0 items moved. The pass-level row
+        compare is the verdict here, never the steps. clear_ground() mirrors.
 
         The mirror of clear_ground(), and it exists because a FULL 库存 stops
         the spawner delivering anything at all. That failure is silent from the
@@ -2167,7 +2301,18 @@ class InventoryControl:
                      rows_left=rows or 0)
 
     def transfer(self, src_gun, dst_gun, slots=None, retries=1):
-        """Move src_gun's attachments onto dst_gun. -> BATCH record.
+        """L1 — Move src_gun's attachments onto dst_gun, via 库存. -> BATCH.
+        Every half is slot-verified; the finished kit on dst_gun is not.
+
+        ⚠ BROKEN AS OF 2026-08-07, and it has no callers to have noticed:
+        `worn` holds ASSET names off loadout(), while TabView.find() compares
+        `Item.key`, the catalogue key — disjoint namespaces, so find() is
+        always None and every slot takes the 'vanished after unequipping'
+        branch. Fix before use; the shape below is what it is meant to do.
+
+        ⚠ IT UNEQUIPS FIRST, so a failed second half leaves src_gun BARE and
+        the part loose in 库存, where PUBG bolts it onto the next gun that
+        arrives. ensure_kit() is the one that decides ok by reading the gun.
 
         VIA THE BACKPACK, ON PURPOSE, and this is the interesting part.
 
@@ -2182,9 +2327,12 @@ class InventoryControl:
         measured: unequip (drag out, works) then equip (right-click in, 4/4).
 
         Twice the gestures, and worth it until somebody measures the other
-        one. tools/probe_transfer.py is the probe that would; when it says
-        the direct drag lands, change MOVES's evidence and switch the default
-        here, not the other way round.
+        one. THE EXPERIMENT THAT WOULD, spelled out because no file holds it
+        any more: drag slot->slot directly, N times, and read BOTH ends back
+        -- source empty AND destination filled. Reading only the source
+        cannot tell "it moved" from "it fell on the floor". If that lands,
+        change MOVES's evidence and switch the default here, not the other
+        way round.
 
         Only slots dst_gun actually HAS are attempted — an attachment released
         over a slot that is not drawn goes on the floor.
@@ -2194,7 +2342,15 @@ class InventoryControl:
         loadout = self.loadout()
         if loadout is None:
             return batch([], error='the Tab screen never came up')
-        worn = {s: a for s, a in loadout['slots'][src_gun].items() if a}
+        # ⚠ ASSET NAMES, AND find() COMPARES CATALOGUE KEYS. loadout() hands
+        # back what _slot_states read -- 'Muzzle_Compensator_Large_C' -- while
+        # TabView.find matches Item.key, which is 'comp_ar'. The two sets are
+        # disjoint, so find() was ALWAYS None and every slot took the
+        # "vanished after unequipping" branch: source gun stripped bare, parts
+        # loose in 库存, target gun wearing nothing, and no rollback. It had
+        # zero callers, which is the only reason it never cost a run.
+        worn = {s: (_BY_ASSET.get(a) or a)
+                for s, a in loadout['slots'][src_gun].items() if a}
         dst_weapon = loadout['guns'].get(dst_gun)
         want = [s for s in (slots or SLOT_NAMES) if s in worn]
         skipped = []
@@ -2233,7 +2389,14 @@ class InventoryControl:
 
     def build(self, gun, view=None, weapon=None, replace=False,
               require_weapon=True, **kw):
-        """Fit `gun` with everything compatible that is loose on screen.
+        """L1 — Fit `gun` with everything compatible that is loose on screen.
+        Every drag is verified; the GUN never is. ensure_kit() is the L2.
+
+        ⚠ IT ONLY ADDS. An occupied slot is SKIPPED, not replaced, unless
+        replace=True, and PUBG has already auto-fitted the pack onto the gun
+        — so ok=True is compatible with a gun wearing parts nobody asked for,
+        and with nothing having been fitted at all (a part skipped at plan
+        time produces no step, so it cannot make `ok` false).
 
         The whole loop: look, plan against the catalogue, drag, re-look. Pass
         a `view` to plan off a detection pass you already have.
@@ -2278,7 +2441,12 @@ class InventoryControl:
 
     def run_plan(self, gun, drags, weapon=None, redetect=True,
                  stop_on_fail=False):
-        """Execute plan_equip()'s output against weapon slot `gun`.
+        """L1 — Run plan_equip()'s drags against weapon slot `gun`. Equips
+        only: it can add a part, never take one off, and never re-reads.
+
+        ⚠ RETURNS A BARE LIST, the one method here that is neither STEP nor
+        BATCH — an all-failed list is still truthy, so read every rec['ok'].
+        build() wraps it in batch(); ensure_kit() decides ok by the readback.
 
         redetect  True (default) re-reads the screen before every drag and
                   re-finds the attachment by name, so the plan survives rows
@@ -2318,7 +2486,12 @@ class InventoryControl:
 
     def ensure_kit(self, gun, want, weapon=None, restock=None, retries=1,
                    settle=KIT_SETTLE, look=None):
-        """Make weapon `gun` wear exactly `want`, doing as little as possible.
+        """L2 — Make weapon `gun` wear exactly `want`, as few moves as
+        possible. `ok` is the READBACK; build() reports on its drags alone.
+
+        ⚠ ok=False can mean UNREADABLE, not unfitted: an AMBIGUOUS slot buys
+        only two backdrop nudges, and eleven cells of the 2026-08-05
+        factorial were binned with the part fitted the whole time.
 
             ac.ensure_kit(2, {'muzzle': 'comp_ar', 'grip': None, 'stock': None})
 
@@ -2391,6 +2564,25 @@ class InventoryControl:
                 # there right-clicks the part onto the wrong gun -- so the
                 # belief is dropped and re-earned with one keypress.
                 self.held = None
+                # ⚠ TAKE THE GUN IN HAND *HERE*, WHILE TAB IS STILL SHUT.
+                #
+                # hold() presses 1/2, and those keys are swallowed while the
+                # inventory is up -- so it brackets itself with a close and a
+                # reopen. Called at its old site below, after the reopen on the
+                # next line, that bracket is a second round trip through a
+                # state we are standing in right now: journal blocks of
+                # `False -> True -> True -> False -> True`, 49 of them, five
+                # Tab presses to accomplish one keypress.
+                #
+                # Pressing here costs nothing extra. `held` was just cleared,
+                # so the press was going to happen either way; hold() sees
+                # was_open False, skips both toggles, and the call below then
+                # returns on `self.held == gun` without touching Tab at all.
+                #
+                # Measured over the whole shared journal before this change:
+                # 1679 Tab rows / 1836 real presses, 975 of them (58%) inside
+                # blocks that ended in the state they began in.
+                self.hold(gun)
                 if not self.ensure_tab(True):
                     out['error'] = 'Tab would not reopen after the restock'
                     return out
@@ -2407,12 +2599,30 @@ class InventoryControl:
                           f'to dragging, which is the gesture that measured '
                           f'0/4 (see docs/game_quirks.md)')
 
+            # ⚠ THE CONDITION USED TO BE `rec['attempts'] > 0`, i.e. re-read
+            # only after a step that had to RETRY -- and that is backwards.
+            # What moves the rows is a step that WORKS: an equip takes its
+            # part out of the inventory list and everything below it scrolls
+            # up (stock.py says so where tidy explains why it repeats). So the
+            # positions this plan holds are stale from the first success on,
+            # and every later step aims at a row that has shifted -- at
+            # nothing, or at a different part.
+            #
+            # Reported on 2026-08-07 from watching it: "每次背包里要先看一下,
+            # 再说拖动还是装上什么的,不然拖的都不对呢,对着空拖". It also
+            # matches this repo's own standing rule, 拖拽一次一验 -- verifying
+            # only after a whole burst turns a timing problem into what looks
+            # like a geometry one.
+            #
+            # Now: re-read after ANY step that did something. A step that
+            # failed outright changed nothing and does not need it.
             stale = False
             for step in plan['steps']:
                 rec = self._kit_run(gun, step, weapon, retries,
                                     look if stale else None, view)
                 out['steps'].append(rec)
-                stale = stale or rec['attempts'] > 0
+                stale = (stale or rec['attempts'] > 0
+                         or bool(rec.get('ok')))
 
             if out['steps'] and settle:
                 # Every step was polled to a verified state already; this only
@@ -2475,8 +2685,38 @@ class InventoryControl:
         mouse = self.pointer.pico
         if mouse is None:
             return False
+        # ⚠ TAB MUST COME DOWN FIRST, and until 2026-08-07 it did not, so this
+        # function moved NOTHING and said it had. Measured by
+        # mean absolute pixel change of the slot block over 600 counts of
+        # yaw, four rounds each -- and the `still` arm is what makes it an
+        # answer rather than a number:
+        #
+        #     still (no input at all)      0.32     <- the noise floor
+        #     nudge (Tab up, as it was)    0.29     <- below the floor
+        #     turn  (same counts, Tab down) 22.78   <- 70x the floor
+        #
+        # The docstring above already named the reason -- with Tab up the raw
+        # counts land on the CURSOR -- and drew the wrong conclusion from it:
+        # that the move should be small, rather than that it does not happen.
+        # ViewDriver.turn() closes Tab for exactly this reason.
+        #
+        # So the AMBIGUOUS re-read loop in ensure_kit was re-reading the SAME
+        # picture twice and reporting the same ambiguity, which is why every
+        # vector and mp5k magazine cell died at "holds something the templates
+        # cannot separate". That is the same eleven cells this repo lost on
+        # 2026-08-05 -- the fix written then was correct and never ran.
+        #
+        # The Tab toggle is the cost, and it is paid only here, on a path that
+        # otherwise loses a whole cell.
+        was_up = bool(self.tab_open())
+        if was_up and not self.ensure_tab(False):
+            self._log('could not lower the Tab screen to move the backdrop')
+            return False
         mouse.move(counts, 0)
         time.sleep(NUDGE_SETTLE_S)
+        if was_up and not self.ensure_tab(True):
+            self._log('the backdrop moved but the Tab screen would not reopen')
+            return False
         return True
 
     def _kit_plan(self, gun, want, weapon, look):
@@ -2628,13 +2868,42 @@ class InventoryControl:
                 return f'{weapon} has no {dst[2]} slot'
         return None
 
-    def _frame(self):
+    def _frame(self, park=True):
         """A Tab-screen frame, cursor out of the way first.
+
+        THE RULE, so a new call site does not inherit the move by accident:
+        park belongs to the DETECTION, not to the grab. Park when the read is a
+        template match over a region the cursor could be sitting on --
+        _slot_states, _read_guns, items.detect -- because a hovered tile draws
+        a tooltip over itself and the match then finds the tooltip. Do NOT park
+        for reads that cannot be fooled by one: panel_rows is a Laplacian
+        occupancy count and tab_open is a saturation test.
+
+        Audited 2026-08-06 across all sixteen call sites: the only two that fed
+        nothing but panel_rows were drag()'s before-count and _await_panel's
+        poll, and both now pass park=False.
 
         The cursor sits on the drop target the moment a drag ends, and a
         hovered slot draws a tooltip over itself.
+
+        `park=False` GRABS WITHOUT MOVING THE CURSOR, and there is exactly one
+        caller: _await_panel, which is counting ROWS. panel_rows() is a
+        Laplacian occupancy test, not a template match -- the tooltip that
+        park() exists to hide cannot change a row count, so the move buys
+        nothing there and is not free:
+
+          it yanks the cursor to PARK_XY (200, 1380) in the instant after the
+          button came up, on EVERY poll iteration, while the drop is still
+          settling. The operator watched it happen and called it as the cause
+          of drops not landing -- "你点那一下,导致很多这个拖不到地上".
+
+        That is a hypothesis, not a measurement, and it is being changed
+        because the move was unjustified HERE regardless of whether it is the
+        cause. If landing rates do not move, park() was innocent and the
+        journal will say so: `moved` and `poll` are now recorded on every drag.
         """
-        self.park()
+        if park:
+            self.park()
         return self.grabber.grab()
 
     def _read_guns(self, frame):
@@ -2658,7 +2927,7 @@ class InventoryControl:
                     for s, it in slots.items()}
                 for g, slots in worn.items()}
 
-    def _stamp(self, kind, src, dst, attempt=0, **fields):
+    def _stamp(self, kind, src, dst, attempt=0, started=None, **fields):
         """The half of a journal line that every gesture has. See DRAG_LOG.
 
         `gap_s` is the point of the whole exercise. "Sometimes the second drop
@@ -2671,7 +2940,15 @@ class InventoryControl:
         separated by equips, weapon switches and panel toggles, and a gap that
         only counted drags described a sequence that never happened.
         """
-        now = time.perf_counter()
+        # ⚠ `started` IS WHEN THE GESTURE BEGAN, not when it was journalled,
+        # and the difference is not cosmetic. A drag is stamped AFTER its
+        # verification poll, so without this its gap_s carries its own poll
+        # time -- 0.1 s when the drop landed, 1.1 s when it did not. Analysed
+        # on 2026-08-07 that produced a perfect step: 276 drags under 1.2 s
+        # with ZERO failures, 28 over 1.8 s with zero successes. The step was
+        # the poll, not the game. A field used to predict an outcome must not
+        # be measured after that outcome is known.
+        now = time.perf_counter() if started is None else started
         prev = _LAST_GESTURE_END[0]
         rec = {'kind': kind, 't': round(time.time(), 3), 'pid': PID,
                'proc': PROC,
@@ -2680,11 +2957,54 @@ class InventoryControl:
                'attempt': attempt + 1,
                'gap_s': None if prev is None else round(now - prev, 3)}
         rec.update(fields)
+        rec.update(self._churn(kind, fields, now))
         journal(rec)
         _LAST_GESTURE_END[0] = time.perf_counter()
 
-    def _journal(self, src, dst, p0, p1, panels, attempt, rows0, gesture,
-                 moved):
+    # A close followed by an open this fast, with no gesture between, cannot
+    # have had anything happen out there. Measured 2026-08-06 across the shared
+    # journal: 767 close-then-open pairs, of which 162 were hold()'s legitimate
+    # bracket (the 1/2 keypress lives inside it) and 276 were real spawner
+    # visits at 5-15 s. The remaining 329 had a MEDIAN GAP OF 0.69 s -- 658 Tab
+    # presses and 169 s of wall clock spent leaving the inventory and coming
+    # straight back.
+    CHURN_S = 2.0
+
+    def _churn(self, kind, fields, now):
+        """Flag a leave-and-return that accomplished nothing. -> dict
+
+        WHAT THIS ADDS OVER COUNTING IT AFTERWARDS IS THE CALLER. The pattern
+        was measurable from the journal already -- what was not measurable was
+        WHO did it, because a Tab row records the press and not the code that
+        asked for it. Every fix tonight had to be guessed at from block shapes;
+        this turns the next one into a lookup.
+
+        Emitted as fields on the offending OPEN row rather than as a row of its
+        own, so the evidence and the event cannot drift apart the way
+        `cum_counts` and the curve did.
+        """
+        if kind != 'tab':
+            # Any real gesture means the trip out was for something.
+            self._since_close = None
+            return {}
+        if not fields.get('want'):
+            # Stamp WHO closed it, here, while the stack still says so.
+            self._since_close = (now, _calling_frame())
+            return {}
+        t0, who_closed = self._since_close or (None, None)
+        self._since_close = None
+        if t0 is None or now - t0 >= self.CHURN_S:
+            return {}
+        # BOTH SIDES. The first version recorded only who reopened, and that
+        # is the half that cannot be acted on: "harvest.py:735 apply reopened
+        # it" does not say whether apply was wrong to want it or whether
+        # something else was wrong to shut it. The pair does.
+        return {'churn': {'gap_s': round(now - t0, 3),
+                          'closed_by': who_closed, 'by': _calling_frame()}}
+
+
+    def _journal(self, src, dst, p0, p1, attempt, rows0, gesture,
+                 moved, started=None, src_key='(not recorded)'):
         """One line for a drag: the gesture, the geometry and the outcome."""
         # Pointer.__init__ creates last_drag as {} and drag() only ever
         # reassigns it to a dict, so neither a getattr default nor an `or {}`
@@ -2694,14 +3014,26 @@ class InventoryControl:
         # drag with no geometry.
         d = self.pointer.last_drag
         self._stamp(
-            'drag', src, dst, attempt,
+            'drag', src, dst, attempt, started=started,
             want={'grab': list(p0), 'release': list(p1)},
             got={'grab': d.get('grab'), 'held': d.get('held'),
                  'release': d.get('release')},
             place={'grab': d.get('grab_place'), 'dst': d.get('dst_place')},
             steps=d.get('steps'), drag_s=round(d.get('s') or 0.0, 3),
+            # How far the cursor kept moving AFTER the button came up. The two
+            # endpoints were both already recorded and nobody could compare
+            # them without hand arithmetic per record, so the quantity that
+            # decides `failed_at` was never plottable. It is the drift itself,
+            # not either position, that says whether PLACE_TOL = 2 px is a
+            # sane bound while Tab is up -- and the answer so far is no: the
+            # failing records sit at 4-5 px held, 9 px after release.
+            drift=(None if not (d.get('held') and d.get('release')) else
+                   [d['release'][0] - d['held'][0],
+                    d['release'][1] - d['held'][1]]),
+            tab_open=bool(self.tab_open()),
             gesture=bool(gesture), failed_at=d.get('failed_at'),
             rows_before=list(rows0) if rows0 else None,
+            src_key=src_key,
             poll=self.last_poll if moved is not None else None,
             moved=moved)
         self.last_poll = None
@@ -2768,7 +3100,10 @@ class InventoryControl:
         self.last_poll = []
         t0 = time.time()
         while True:
-            f = self._frame()
+            # No park: see _frame. Counting rows does not care about a
+            # tooltip, and moving the cursor here moves it out from under a
+            # drop that has not finished landing.
+            f = self._frame_for('rows')
             n_dst = panel_rows(f, dst_p)
             n_src = panel_rows(f, src_p) if src_p is not None else None
             self.last_poll.append([round(time.time() - t0, 3), n_src, n_dst])
@@ -2800,7 +3135,7 @@ class InventoryControl:
         """
         deadline = time.perf_counter() + timeout
         while True:
-            states = self._slot_states(self._frame())
+            states = self._slot_states(self._frame_for('slots'))
             out = []
             for gun, slot, want in checks:
                 seen = states[gun][slot]
@@ -2878,8 +3213,6 @@ def main():
                                    '(nearby,inventory)')
     ap.add_argument('--retries', type=int, default=1)
     ap.add_argument('--countdown', type=int, default=5)
-    ap.add_argument('--backend', default='auto',
-                    choices=('auto', 'pico', 'sendinput'))
     args = ap.parse_args()
 
     if args.points:
@@ -2906,7 +3239,7 @@ def main():
         print('[!] ABORT: could not focus the game.')
         return 1
 
-    ac = InventoryControl(args.backend)
+    ac = InventoryControl()
     try:
         if not ac.sync():
             return 1

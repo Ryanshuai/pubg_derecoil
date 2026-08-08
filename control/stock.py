@@ -28,7 +28,7 @@ comes back as `unknown` and is left strictly alone. That is what keeps ammo,
 meds and the guns themselves out of this, none of which have templates.
 
 WHY THIS IS control/ AND NOT calibration/
-    It was calibration/stocktake.py until 2026-08-02, and everything in it is
+    It lived under calibration/ until 2026-08-02, and everything in it is
     a driver: it presses Tab, reads the screen, drags parts onto the floor and
     clicks through the spawner panel. calibration/'s own criterion ("needs to
     know what is happening in the game -> control/") put the whole file here.
@@ -54,13 +54,13 @@ from collections import Counter
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from detector.attachment_catalog import ATTACHMENTS, ROSTER
-from detector.cropper import win32_cap
+from capture.cropper import win32_cap
 from detector.geometry import detail
 from detector.tab_layout import equip_region
 from control.focus import ensure_focus, game_focused
 
 # Worn vs not, off the character's backpack slot. Measured on the reference
-# captures (temp_debug/probe_backpack_slot.py): a backpack draws its artwork at
+# captures (a scratch probe, no longer on disk — see tools/probe_backpack_depth.py, which is the surviving one): a backpack draws its artwork at
 # ~2900 Laplacian variance, an empty slot shows the blurred world behind the
 # panel at ~44. Same test tab_items uses for an undrawn weapon slot, and the
 # same reason — there is no template to match when there is no UI on screen.
@@ -90,7 +90,14 @@ def backpack_worn(crop=None):
 
 
 def open_tab(ac, label='the backpack'):
-    """Tab open, focused, and InventoryControl synced. False with a reason.
+    """L1 — ensure_tab(True) plus ac.sync(), with the FOREGROUND named in the
+    failure. The fifth Tab entry point, and the reason it exists is sync():
+    "opened but would not sync" is a real state ensure_tab cannot see.
+    tab_up() (L2) is what you want unless you need that message.
+
+    ⚠ IT NEVER CLOSES. Every close is somebody else's — read_stock's
+    finally, tidy's `leave`, restock, tab_up, gun.ensure_inventory_closed —
+    and it is the reopening half of 12 of the journal's 104 churn records.
 
     This docstring has been wrong twice, so here is what each claim was.
 
@@ -234,7 +241,13 @@ class Stock:
 
 
 def read_stock(ac, close=True):
-    """Open the Tab screen, read it, and (by default) close it again.
+    """L1 — Open the Tab screen, read the pack and the two guns, shut it.
+    -> Stock | None. `read` in the name is half the story: it PRESSES Tab,
+    takes the foreground and parks the cursor. tab_open() is the R.
+
+    ⚠ close=True SHUTS THE SCREEN EVEN IF IT WAS ALREADY OPEN — it is not
+    tab_up()'s as-found contract. Inside a held session pass close=False, or
+    you shut a screen the caller is holding and it re-opens 0.2 s later.
 
     Returns a Stock, or None if the screen could not be reached. Pass
     close=False to keep it up for a drag that follows.
@@ -271,8 +284,15 @@ def _view_sig(stock):
                  for i in stock.view.inventory)
 
 
-def tidy(ac, want, drop_unwanted=True, verbose=True, keep=1):
-    """Throw the surplus on the floor. Returns (n_dropped, final Stock|None).
+def tidy(ac, want, drop_unwanted=True, verbose=True, keep=1,
+         leave='shut'):
+    """L1 — One bounded sweep: drop every duplicate and unwanted part it can
+    SEE. Not "the pack is clean" — the list shows 12 rows, nothing scrolls
+    it, and TIDY_PASSES is the only stop. restock() is the caller.
+
+    ⚠ `leave` DEFAULTS TO 'shut', so calling this mid-kitting closes a Tab
+    screen somebody upstream is holding and the next read re-opens it 0.2 s
+    later. Pass leave='as-found' inside a tab_up() session.
 
     Drops bottom-up within a pass: pulling row i out shifts only the rows
     below it, so a descending order stays valid without re-reading between
@@ -306,9 +326,22 @@ def tidy(ac, want, drop_unwanted=True, verbose=True, keep=1):
     item and watching a previously invisible row take its place -- and
     TIDY_PASSES is the bound.
 
-    Leaves the Tab screen SHUT, whatever state it was found in. Not tab_up():
-    the caller's next move is the spawner panel or the range, and both of
-    those swallow a screen left up.
+    `leave` DECIDES THE END STATE, and it used to be hard-coded shut. The
+    reason given was "the caller's next move is the spawner panel or the
+    range, and both of those swallow a screen left up" -- which bakes a guess
+    about the CALLER into this function's contract, and the guess is wrong on
+    the busiest path there is: ensure_kit calls this mid-kitting and its next
+    move is to re-read the plan and fit parts, with the screen up.
+
+    Measured 2026-08-06 over the shared gesture journal: 184 blocks of four or
+    more consecutive Tab toggles with no gesture between them, 1477 key
+    presses -- 80% of every Tab press in the corpus. The commonest shapes are
+    literal alternation (OCOCOOCOCOO), one open-read-close per helper, five
+    helpers deep, before the first click of a weapon.
+
+    'shut' keeps the old behaviour for callers heading to the spawner or the
+    range. 'as-found' is tab_up()'s contract: leave it however it was found,
+    so a caller that holds the screen for a whole weapon keeps it.
     """
     dropped = 0
     stock = None
@@ -364,12 +397,20 @@ def tidy(ac, want, drop_unwanted=True, verbose=True, keep=1):
                       f"{len(targets)} — expected when the pack is deeper "
                       "than the window; continuing")
     finally:
-        ac.ensure_tab(False)
+        if leave == 'shut':
+            ac.ensure_tab(False)
     return dropped, stock
 
 
 def spawn_missing(sc, keys, backpack=None, verbose=True):
-    """Spawn everything wanted in ONE pass through the panel.
+    """L1 — One panel trip that clicks exactly the keys handed to it. THE NAME
+    LIES: it computes no shortfall and never looks in the pack — that is
+    stock.missing()'s job, upstream in restock().
+
+    ⚠ ok MEANS THE CLICKS LANDED ON THE PLANNED NODES, not that anything
+    reached the backpack. Give it a key twice and you own two.
+    ⚠ The panel is closed on the way out, always: the caller's next screen
+    is Tab, and the spawner panel swallows Tab.
 
     One `give_many` for the whole list, not a loop over `give_*`. Each
     individual give_ returns the panel to fully collapsed, so N items from N
@@ -390,6 +431,40 @@ def spawn_missing(sc, keys, backpack=None, verbose=True):
     wanted = ([backpack] if backpack else []) + list(keys)
     if not wanted:
         return True
+
+    # ⚠ THE GUN GOES LAST, IN ITS OWN TRIP, and the ordering is a measurement
+    # rather than a preference. A spawned weapon arrives WEARING a factory kit
+    # ("刷出来的枪不是裸枪", tools/CLAUDE.md), and what happens to the parts
+    # already in the pack depends on which arrived first:
+    #
+    #   parts spawned, THEN the gun    the game fits the pack's parts to it;
+    #                                  the requested magazine wins
+    #   gun and parts in one trip      the gun keeps its factory magazine and
+    #                                  the requested one sits in the pack
+    #
+    # Measured 2026-08-07, m416, four cells. The three that spawned
+    # `give_many(['ext_ar', 'm416'])` all fired 40 rounds -- the factory
+    # quickext_ar -- while the slot read back `ext_ar`, because the two icons
+    # are close enough that the template calls both the same. The one that
+    # spawned the parts first and `give_many(['m416'])` after fired 42.
+    #
+    # THE COST OF GETTING IT WRONG IS NOT A RETRY. Nothing downstream can see
+    # it: every field of the cell record is identical to a good one, the round
+    # count is the only witness, and one such cell drove the stored m416 curve
+    # down 536 counts before anyone looked (docs/game_quirks.md).
+    #
+    # Two trips cost one extra sync and one extra collapse. The batching this
+    # function exists for is preserved WITHIN each trip, which is where the
+    # 2N-category-clicks saving came from.
+    guns = [k for k in wanted if k in ROSTER]
+    if guns and len(guns) != len(wanted):
+        parts = [k for k in wanted if k not in ROSTER]
+        if verbose:
+            print(f"      [stock] parts first, gun last — a gun spawned "
+                  f"alongside its parts keeps its FACTORY magazine and the "
+                  f"slot readback cannot tell (docs/game_quirks.md)")
+        ok = spawn_missing(sc, parts, backpack=None, verbose=verbose)
+        return spawn_missing(sc, guns, backpack=None, verbose=verbose) and ok
     try:
         # Sync for STABILITY only, not for a full row count.
         #
@@ -434,10 +509,29 @@ def spawn_missing(sc, keys, backpack=None, verbose=True):
     return res['ok']
 
 
-def restock(ac, sc, want, backpack=BACKPACK,
+def restock(ac, sc, want, backpack=BACKPACK, leave='shut',
             drop_unwanted=True, verbose=True, also=(), loose_only=False,
             per=1):
-    """Look, top up, tidy. True when the pack holds one of everything wanted.
+    """L2 — The pack holds one of everything in `want`, read back off the
+    screen. True is the GOAL, not the three legs.
+
+    ⚠ IT SAID L1 UNTIL 2026-08-07, AND BOTH CHANGES THAT MOVED IT WERE REAL
+    DEFECTS RATHER THAN RE-GRADING. First it claimed the goal and checked
+    nothing, so it was demoted to L1 and the docstring rewritten to say "NOT
+    that the pack now holds `want`". Then the post-read went in on the main
+    path — and the UNREADABLE path still returned spawn_missing's ok, which
+    is give_many's ok, which means "the clicks landed on the planned nodes".
+    Both paths look in the pack now, and only then is the L2 true.
+
+    A path that cannot see the pack returns False. That is the whole content
+    of the promotion: harvest treats False as "skip this weapon", and a weapon
+    skipped costs one cell, while a weapon measured against parts that are not
+    on it costs a wrong number nothing downstream can detect.
+
+    ⚠ `want` DOUBLES AS THE KEEP-LIST. One key that is not in ATTACHMENTS
+    makes every real part read as surplus and the whole backpack goes on the
+    floor — which is what a {slot: key} table did the first time.
+    ⚠ Forward `leave`; the default 'shut' closes a screen you may hold.
 
     `want` is the set of catalogue keys this run needs on hand. Everything
     else nameable in 库存 is surplus from an earlier run and goes on the floor
@@ -473,8 +567,31 @@ def restock(ac, sc, want, backpack=BACKPACK,
         # screen has to be down either way — comma does nothing while it is up.
         print("      [!] could not read the backpack — spawning the whole "
               "parts list blind, duplicates and all")
-        ac.ensure_tab(False)
-        return spawn_missing(sc, sorted(want), backpack=backpack)
+        ac.ensure_tab(False)          # comma does nothing while Tab is up
+        if not spawn_missing(sc, sorted(want), backpack=backpack):
+            return False
+        # ⚠ AND THEN LOOK, because spawn_missing's ok is give_many's ok, and
+        # give_many proves CLICKS LANDED ON THE PLANNED NODES. It does not
+        # prove anything arrived: a full backpack silently drops the item on
+        # the floor, and a mis-synced panel clicks a stale layout. Returning
+        # that ok was the last place this function could still answer True to
+        # a question it had not asked.
+        #
+        # The re-read is a second chance at the thing that just failed, and it
+        # usually works: the first read is taken with the spawner about to be
+        # driven, this one after the panel has closed and the screen settled.
+        stock = read_stock(ac, close=(leave == 'shut'))
+        if stock is None:
+            print("      [!] still cannot read the backpack after spawning — "
+                  "reporting failure rather than the spawner's click count. "
+                  "'I cannot see the pack' is not 'the pack is right'.")
+            return False
+        short = [k for k in want if not stock.have(k)]
+        if short:
+            print(f"      [stock] spawned blind and {', '.join(sorted(short))} "
+                  f"still is not there")
+            return False
+        return True
     if verbose:
         print(f"      [stock] backpack: {stock.summary()}")
 
@@ -498,7 +615,8 @@ def restock(ac, sc, want, backpack=BACKPACK,
     batch = sorted(need) + [k for k in also if k]
     if batch or not stock.backpack:
         # Tab and the spawner panel cannot share the screen.
-        ac.ensure_tab(False)
+        if leave == 'shut':
+            ac.ensure_tab(False)
         if not spawn_missing(sc, batch,
                              backpack=None if stock.backpack else backpack,
                              verbose=verbose):
@@ -508,12 +626,35 @@ def restock(ac, sc, want, backpack=BACKPACK,
 
     # Tidy last. Anything spawned above was missing, so it cannot be a
     # duplicate, and doing it here means the drop pass sees the final contents.
+    # ⚠ FORWARD `leave`. It was not, and that alone reopened the screen once
+    # per weapon: restock honoured 'as-found' while tidy kept its own default
+    # of 'shut', so tidy closed in its finally and the very next read opened
+    # again 0.2 s later. Named by the churn log as
+    # `stock.py:382 tidy -> stock.py:117 open_tab`.
     n, stock = tidy(ac, want, drop_unwanted=drop_unwanted,
-                    verbose=verbose, keep=per)
+                    verbose=verbose, keep=per, leave=leave)
     if stock is None:
         return False
     if verbose and n:
         print(f"      [stock] dropped {n}, backpack now {stock.summary()}")
+
+    # ⚠ THE POST-READ, and it is the whole difference between a gate and a
+    # sequence of hopeful steps. Until 2026-08-07 this returned True after
+    # running its three legs and never looked in the pack again, while its
+    # own first line claimed "True when the pack holds one of everything
+    # wanted". Neither leg can support that: the unreadable branch spawns
+    # blind by design, and spawn_missing's ok comes from give_many, which
+    # proves clicks landed on the planned NODES — not that anything arrived.
+    # harvest calls this once per weapon and treats False as "skip the
+    # weapon", so a claim it could not keep was worth exactly nothing.
+    #
+    # `stock` is the reading tidy already took, so this costs no screen time.
+    short = [k for k in want if not stock.have(k)]
+    if short:
+        print(f"      [stock] STILL SHORT of {', '.join(sorted(short))} "
+              f"after restocking — the spawner clicked but nothing arrived "
+              f"(a full 库存, or no backpack)")
+        return False
     return True
 
 
@@ -536,7 +677,7 @@ def weapon_in_hand(timeout_s=3.0):
     mode readers need.
     """
     from detector.ammo_detector import AmmoDetector
-    from detector.cropper import capture_screen
+    from capture.cropper import capture_screen
     from config import HUD_REGIONS
     det = AmmoDetector()
     y, x, h, w = HUD_REGIONS['ammo']
