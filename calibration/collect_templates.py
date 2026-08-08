@@ -49,12 +49,12 @@ because a second click would equip whatever slid into that row.
 Turning happens with Tab CLOSED: with it open the mouse drives a cursor, not
 the view, and every capture comes back identical.
 
-Output: docs/attachments/runs/<stamp>/, a run in the shared CaptureRun format
+Output: calibration/artifacts/attachments/runs/<stamp>/, a run in the shared CaptureRun format
 (calibration/capture_run.py). `manifest.json`'s facts carry the `bad` list,
 which is the work queue for the calibrate-template skill. Runs written before
 2026-08-03 carry an index.json instead and read back through the same API.
 
-The directory does not move under docs/runs/ for the same reason capture_ads
+The directory does not move under calibration/artifacts/runs/ for the same reason capture_ads
 stays put: a run's path is already load-bearing elsewhere (see capture_run.py),
 and the skill that consumes these is pointed at this one. What unifies is the
 manifest.
@@ -102,7 +102,7 @@ from calibration.range_session import get_session
 from calibration.sweep import Rig
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT_ROOT = os.path.join(ROOT, 'docs', 'attachments', 'runs')
+OUT_ROOT = os.path.join(ROOT, 'calibration', 'artifacts', 'attachments', 'runs')
 
 TARGETS = ('slots', 'rows', 'plate', 'type')
 
@@ -1720,7 +1720,7 @@ def main():
 
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     # path=, so --out keeps working and the run keeps this root — see the
-    # module docstring for why it does not move under docs/runs/.
+    # module docstring for why it does not move under calibration/artifacts/runs/.
     run = CaptureRun.create(KIND, stamp=stamp,
                             path=args.out or os.path.join(OUT_ROOT, stamp),
                             note=('--as-is, operator-labelled' if args.as_is

@@ -7,26 +7,17 @@ import config
 # ⚠ UNDER calibration/, NOT under docs/, AND THAT IS THE POINT.
 #
 # calibration/CLAUDE.md says every product goes to docs/ and never next to the
-# source. That rule is right for MEASUREMENTS -- 2.7 GB of frames and runs that
-# nothing should version. Curves are not measurements. They are the ARTIFACT
-# the runtime loads: control/match.py calls upload_pattern() on every weapon,
+# source. That rule is right for MEASUREMENTS -- frames and runs that nothing
+# should version. Curves are not measurements. They are the ARTIFACT the
+# runtime loads: control/match.py calls upload_pattern() on every weapon,
 # attachment and posture change, and with no curve the tool simply does not
-# compensate.
-#
-# docs/ is line 19 of .gitignore in its entirety, so the old docs/recoil/curves/
-# had no history at all. On 2026-08-08 it was deleted during a cleanup and every
-# weapon's curve went with it -- 40 guns, unrecoverable, while `git status`
-# stayed clean because git had never heard of the directory. There was nothing
-# to revert to.
-#
-# So: measurements -> docs/ (gitignored, regenerable by re-measuring).
-#     artifacts the runtime loads -> calibration/artifact/ (versioned).
-CURVE_DIR = os.path.join(os.path.dirname(__file__), '..',
-                         'calibration', 'artifact', 'curves')
+# compensate. config.CURVES_DIR carries the full account of what that cost
+# once.
+CURVE_DIR = config.CURVES_DIR
 
 
 # Weapon RPM (rounds per minute) from PUBG Wiki -- a STARTING GUESS, not a
-# measurement, and wrong on a third of the roster. docs/recoil/weapon_rpm.json
+# measurement, and wrong on a third of the roster. calibration/artifacts/recoil/weapon_rpm.json
 # holds what the HUD ammo counter actually said and is merged over this table
 # below; see MEASURED_RPM_PATH.
 WEAPON_RPM = {
@@ -54,7 +45,7 @@ WEAPON_RPM = {
 # 164-count final bullet against a 93-count plateau: that spike was four rounds
 # of accumulated phase, not recoil.
 MEASURED_RPM_PATH = os.path.join(os.path.dirname(__file__), '..',
-                                 'docs', 'recoil', 'weapon_rpm.json')
+                                 'calibration', 'artifacts', 'recoil', 'weapon_rpm.json')
 
 
 def load_measured_rpm(path=MEASURED_RPM_PATH):
@@ -124,7 +115,7 @@ def load_curves():
     # ⚠ A MISSING CURVE_DIR USED TO TAKE THE WHOLE PROCESS DOWN, from inside
     # Weapon.__init__ -- so nothing that builds a Weapon could even start, and
     # the traceback pointed at os.listdir rather than at the fact that
-    # docs/recoil/curves/ is gitignored and therefore one `rm` from gone.
+    # calibration/artifacts/recoil/curves/ is gitignored and therefore one `rm` from gone.
     # Happened 2026-08-08. Returning {} is not a silent fallback: every caller
     # then gets an empty pattern, and arm() has always refused that.
     if not os.path.isdir(CURVE_DIR):

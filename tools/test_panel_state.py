@@ -1,6 +1,6 @@
 """Check `expansions()` against the ground truth in the checked-in run shots.
 
-Every colN_rowMM_open.png under docs/spawner/runs/ is a frame whose correct
+Every colN_rowMM_open.png under calibration/artifacts/spawner/runs/ is a frame whose correct
 answer is written in its name, and every 00_baseline.png must read as nothing
 expanded. Offline: no game, no hardware, no Pico.
 
@@ -27,9 +27,9 @@ NAME_RE = re.compile(r'col(\d+)_row(\d+)_open\.png$')
 
 
 def main():
-    runs = sorted(glob.glob(os.path.join(ROOT, 'docs', 'spawner', 'runs', '*')))
+    runs = sorted(glob.glob(os.path.join(ROOT, 'calibration', 'artifacts', 'spawner', 'runs', '*')))
     if not runs:
-        raise SystemExit('no runs under docs/spawner/runs/')
+        raise SystemExit('no runs under calibration/artifacts/spawner/runs/')
 
     # The coordinates under test are the ones production uses. This read
     # find_menu(base) + column_boxes(menu) per run, which is the RECALIBRATE

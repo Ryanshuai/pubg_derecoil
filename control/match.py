@@ -258,7 +258,7 @@ class Dispatcher(DaemonLoop):
 
         The delays were never the problem, which is worth stating because they
         were the obvious suspect. Measured 2026-08-05 over six backdrops
-        (tools/probe_posture_trace.py, docs/posture/traces/20260805_094215):
+        (tools/probe_posture_trace.py, calibration/artifacts/posture/traces/20260805_094215):
         with the sight ALREADY UP, the icon follows a posture key in 34..68 ms
         and was readable in 3786 of 3787 samples. With the sight down it was
         readable in none, across a full 2000 ms window, in every round. So the

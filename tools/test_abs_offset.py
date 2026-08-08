@@ -20,7 +20,7 @@ Fifty counts is not much. A magazine walks the view by its whole residual, so
 after three or four the view is out of range of its own reference and every
 recentre falls back to the running total. That is the "cannot place the view
 against the cell's reference" line, and it appeared on eight of nine magazines
-in docs/impulse/ab_aug_0803_0050.json.
+in calibration/artifacts/impulse/ab_aug_0803_0050.json.
 
 The fix is pre-shifting, which measure_pair's own docstring already names as
 the caller's job: roll the reference by the offset the integral predicts, and
@@ -87,7 +87,7 @@ def usable_frames(limit=40):
     """Frames big enough to slice a shifted band out of."""
     out = []
     need = RECOIL_BAND_Y + RECOIL_PATCH_H + max(SHIFTS_PX)
-    for p in sorted(glob.glob(os.path.join(ROOT, 'docs', 'ads', 'runs',
+    for p in sorted(glob.glob(os.path.join(ROOT, 'calibration', 'artifacts', 'ads', 'runs',
                                            '**', '*.jpg'), recursive=True)):
         img = cv2.imread(p)
         if img is None or img.shape[0] < need or img.shape[1] < SCREEN_W:

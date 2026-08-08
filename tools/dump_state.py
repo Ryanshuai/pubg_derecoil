@@ -20,7 +20,7 @@ sys.path.insert(0, ROOT)
 from control.evidence import dump_state
 from control.session import ensure_ready
 
-OUT = os.path.join(ROOT, 'docs', 'state_dumps')
+OUT = os.path.join(ROOT, 'calibration', 'artifacts', 'state_dumps')
 
 
 def main():

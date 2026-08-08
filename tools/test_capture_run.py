@@ -3,7 +3,7 @@
     pixi run runs
 
 Offline: no game, no hardware, and it WRITES NOTHING under docs/. The synthetic
-runs go to a temp directory; the real ones under docs/ads/runs are opened
+runs go to a temp directory; the real ones under calibration/artifacts/ads/runs are opened
 read-only, because those 867 frames cost tens of minutes of game time each and
 cannot be re-made.
 
@@ -16,7 +16,7 @@ WHAT IT GUARDS, and why each one is worth a test rather than a comment:
                                        not against a number written here.
 
   legacy labels are NEVER ground truth The reason this whole format exists.
-                                       docs/ads/runs holds two runs whose
+                                       calibration/artifacts/ads/runs holds two runs whose
                                        labels are known-wrong — one is 64
                                        frames of shoulder aim filed as ADS,
                                        one is 40 frames of the wrong weapon
@@ -83,8 +83,8 @@ def frame(v=7):
 
 def t_real_ads():
     """Every stored ADS run, against its own index.jsonl."""
-    print('\nlegacy ADS runs under docs/ads/runs (read-only)')
-    dirs = sorted(glob.glob(os.path.join(ROOT, 'docs', 'ads', 'runs', '*',
+    print('\nlegacy ADS runs under calibration/artifacts/ads/runs (read-only)')
+    dirs = sorted(glob.glob(os.path.join(ROOT, 'calibration', 'artifacts', 'ads', 'runs', '*',
                                          'index.jsonl')))
     check('there are legacy ADS runs to read', bool(dirs), f'{len(dirs)} runs')
     total = 0
@@ -110,7 +110,7 @@ def t_real_ads():
     # truth, a template or a detector could be fitted to frames that are
     # documented as wrong.
     for stamp in ('20260801_222936', '20260802_015545'):
-        d = os.path.join(ROOT, 'docs', 'ads', 'runs', stamp)
+        d = os.path.join(ROOT, 'calibration', 'artifacts', 'ads', 'runs', stamp)
         run = CaptureRun.load_dir(d)
         has_scope = any(lab.get('slot') == 'scope'
                         for e in run.entries for lab in e['labels'])
@@ -121,7 +121,7 @@ def t_real_ads():
 
 def t_readonly():
     print('\na legacy run is read-only')
-    d = os.path.join(ROOT, 'docs', 'ads', 'runs', '20260802_012217')
+    d = os.path.join(ROOT, 'calibration', 'artifacts', 'ads', 'runs', '20260802_012217')
     run = CaptureRun.load_dir(d)
     check('load_dir marks it readonly', run.readonly)
     try:

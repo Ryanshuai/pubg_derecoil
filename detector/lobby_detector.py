@@ -43,7 +43,7 @@ from config import (LOBBY_BAR_MAX, LOBBY_BAR_ROI, LOBBY_ERROR_MIN_SCORE,
 from capture.cropper import RegionGrabber, win32_cap
 from detector.geometry import cut
 
-_TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'training_data',
+_TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'templates',
                          'pubg_assets', 'lobby')
 EXIT_TMPL_PATH = os.path.join(_TMPL_DIR, 'exit_to_lobby_mask.png')
 MENU_TMPL_PATH = os.path.join(_TMPL_DIR, 'system_menu_mask.png')

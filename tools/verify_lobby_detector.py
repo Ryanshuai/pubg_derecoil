@@ -1,4 +1,4 @@
-"""Offline regression for LobbyDetector against docs/lobby/.
+"""Offline regression for LobbyDetector against calibration/artifacts/lobby/.
 
 Ground truth is asserted per shot rather than eyeballed. Add a row whenever a
 new state gets captured — the states listed under "not covered" at the bottom
@@ -31,7 +31,7 @@ from detector.lobby_detector import (LobbyState, _search_roi, bar_max,
                                      reconnect_visible)
 
 ASSETS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                      'docs', 'lobby')
+                      'calibration', 'artifacts', 'lobby')
 
 #            file, expected state, expected is_results_screen, note
 CASES = [
@@ -140,7 +140,7 @@ def main():
     for name, expect, expect_results, note in CASES:
         frame = cv2.imread(os.path.join(ASSETS, name))
         if frame is None:
-            print(f'{name:<18} MISSING from docs/lobby/')
+            print(f'{name:<18} MISSING from calibration/artifacts/lobby/')
             bad += 1
             continue
         got = classify_frame(frame)

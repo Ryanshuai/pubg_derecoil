@@ -2,7 +2,7 @@
 
     pixi run night --weapons ar --mags 5            start (or resume)
     pixi run night --weapons ar --dry               print the plan and contract
-    pixi run night --report docs/runs/<ts>          the morning read
+    pixi run night --report calibration/artifacts/runs/<ts>          the morning read
 
 There is no agent in the middle, and that is the design rather than an
 omission. Anthropic's own guidance puts it first: plain code is preferable for
@@ -41,8 +41,8 @@ from harness.manifest import Manifest, USABLE, FAILED, cell_id  # noqa: E402
 from harness.verdict import judge, PROBE_FOR                    # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# NOT docs/runs/. That directory belongs to calibration/capture_run.py, whose
-# shape is docs/runs/<kind>/<stamp>/ and whose contents are SCANS OF THE TAB
+# NOT calibration/artifacts/runs/. That directory belongs to calibration/capture_run.py, whose
+# shape is calibration/artifacts/runs/<kind>/<stamp>/ and whose contents are SCANS OF THE TAB
 # SCREEN -- tools/test_tab_open.py reads the whole tree as ground truth for
 # "the Tab screen was up in this frame".
 #
@@ -307,7 +307,7 @@ def main():
         RUNS, f'night_{datetime.now():%Y%m%d_%H%M}')
 
     # --dry before anything is created. A dry run that leaves a run directory
-    # behind puts a phantom night in docs/runs/ with every cell unmeasured,
+    # behind puts a phantom night in calibration/artifacts/runs/ with every cell unmeasured,
     # which is indistinguishable from a real run that died before its first
     # cell -- the one state the manifest exists to report accurately.
     if args.dry:

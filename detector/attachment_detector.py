@@ -48,7 +48,7 @@ from detector.geometry import detail
 
 SLOT_NAMES = ['scope', 'muzzle', 'grip', 'magazine', 'stock']
 
-TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'training_data',
+TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'templates',
                         'pubg_assets', 'Item', 'Attachment')
 
 TMPL_SIZE = 48
@@ -130,7 +130,7 @@ AMBIGUOUS = '?'
 
 # Is a slot drawn at all? A slot the weapon does not have is not rendered, and
 # an empty slot draws nothing either, so both show the blurred world behind the
-# panel. MSE alone does not reject that: on docs/tab_live_aug_vss.png, whose
+# panel. MSE alone does not reject that: on calibration/artifacts/tab_live_aug_vss.png, whose
 # second gun has no magazine, the magazine position matched
 # Magazine_SR_ExtendedQuick_Mag_Vss below the 450 empty threshold and the gun
 # read as wearing a magazine it did not have.

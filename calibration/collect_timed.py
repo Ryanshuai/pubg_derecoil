@@ -12,7 +12,7 @@ name that was typed.
 
 WHAT ONE MAGAZINE PRODUCES
 --------------------------
-One line in docs/recoil/samples/<weapon>__<config>.jsonl, holding every frame's
+One line in calibration/artifacts/recoil/samples/<weapon>__<config>.jsonl, holding every frame's
 present time and view shift, plus THE CURVE THAT WAS PLAYING, read back from
 the firmware rather than assumed. Nothing is filtered here: a magazine that
 looks bad is a magazine the fitter's clustering will put outside the main
@@ -166,7 +166,7 @@ def read_config(weapon=None):
     return out
 
 
-# The key `travel()` and docs/pitch/pitch_travel.json use for "not looking
+# The key `travel()` and calibration/artifacts/pitch/pitch_travel.json use for "not looking
 # through anything". Spelled once, here, because the one thing that must not
 # happen is this move reading a ruler measured through a sight.
 HIP_SIGHT = 'hipfire'
@@ -202,7 +202,7 @@ def aim_and_scope(rig, posture):
         red_dot.standing   3400 counts stop to stop
         hipfire.standing   8034                        2.36x
 
-    Both numbers were already in docs/pitch/pitch_travel.json. Nothing was
+    Both numbers were already in calibration/artifacts/pitch/pitch_travel.json. Nothing was
     missing; the wrong one was being read.
 
     And the damage is not "it rises 42% as far", which is how it was reported

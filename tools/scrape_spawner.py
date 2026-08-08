@@ -14,8 +14,8 @@ press/pointer.py. This file is only the capture flow around them.
 
 Usage (from the repo root)
     # offline, no game needed
-    python tools/scrape_spawner.py --from docs/spawner/runs/*/00_baseline.png
-    python tools/scrape_spawner.py --recrop docs/spawner/runs/<stamp>
+    python tools/scrape_spawner.py --from calibration/artifacts/spawner/runs/*/00_baseline.png
+    python tools/scrape_spawner.py --recrop calibration/artifacts/spawner/runs/<stamp>
     python tools/scrape_spawner.py --build-icons <spawner screenshot>
 
     # live, no clicking: grab the panel and dump the detected layout
@@ -27,7 +27,7 @@ Usage (from the repo root)
     python tools/scrape_spawner.py --limit 3                # rows per column
     python tools/scrape_spawner.py --start-from col2_row03  # resume an abort
 
-Runs land in docs/spawner/runs/<timestamp>/. Per category it writes
+Runs land in calibration/artifacts/spawner/runs/<timestamp>/. Per category it writes
 <key>_open.png (full screen), <key>_submenu.png (just the region the expansion
 changed) and, from the baseline, <key>_label.png so each capture can be tied
 back to a category without OCR. summary.json records what happened to every
@@ -57,7 +57,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 # Runs are kept under docs/, not a scratch dir: the captures are the record of
 # what the spawner offers and later work builds on them.
-DATA_DIR = os.path.join(ROOT, 'docs', 'spawner')
+DATA_DIR = os.path.join(ROOT, 'calibration', 'artifacts', 'spawner')
 OUT_ROOT = os.path.join(DATA_DIR, 'runs')
 
 OPEN_WAIT = 0.45       # submenu slide-open animation

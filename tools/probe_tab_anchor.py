@@ -33,28 +33,28 @@ from config import HUD_REGIONS, TAB_COUNT_MAX, TAB_COUNT_MIN, TAB_PIXEL_THRESH
 from detector.tab_layout import type_ink
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TMPL_DIR = os.path.join(ROOT, 'docs', 'training_data', 'pubg_assets', 'tab')
+TMPL_DIR = os.path.join(ROOT, 'data', 'templates', 'pubg_assets', 'tab')
 
 # The glyph is drawn well above the threshold; the point of masking is to
 # score only the strokes, so a uniformly bright crop cannot match.
 GLYPH_THRESH = TAB_PIXEL_THRESH
 SEARCH = 8              # +- px searched around the nominal position
 
-# THE HEADER IS NOT ALWAYS THE SAME GLYPHS. docs/tab_inventory*.png render
-# 类型; docs/lobby/in_game_tab.png renders "Type". Same screen, same place,
+# THE HEADER IS NOT ALWAYS THE SAME GLYPHS. calibration/artifacts/tab_inventory*.png render
+# 类型; calibration/artifacts/lobby/in_game_tab.png renders "Type". Same screen, same place,
 # different client language — and a single-language template scores the other
 # one at 0.27, below the brightest negative. One template per language, and
 # the score is the best of them, so the anchor survives a language switch
 # instead of silently deciding the inventory is closed.
 SOURCES = {
     'zh': os.path.join(ROOT, 'docs', 'tab_inventory.png'),
-    'en': os.path.join(ROOT, 'docs', 'lobby', 'in_game_tab.png'),
+    'en': os.path.join(ROOT, 'calibration', 'artifacts', 'lobby', 'in_game_tab.png'),
 }
-POSITIVES = ('docs/lobby/in_game_tab.png', 'docs/tab_inventory.png',
-             'docs/tab_inventory_2.png')
-NEGATIVES = ('docs/lobby/in_game.png', 'docs/lobby/lobby.png',
-             'docs/lobby/play_normal.png', 'docs/lobby/results.png',
-             'docs/lobby/system_menu.png')
+POSITIVES = ('calibration/artifacts/lobby/in_game_tab.png', 'calibration/artifacts/tab_inventory.png',
+             'calibration/artifacts/tab_inventory_2.png')
+NEGATIVES = ('calibration/artifacts/lobby/in_game.png', 'calibration/artifacts/lobby/lobby.png',
+             'calibration/artifacts/lobby/play_normal.png', 'calibration/artifacts/lobby/results.png',
+             'calibration/artifacts/lobby/system_menu.png')
 
 
 def _gray(path):
@@ -158,7 +158,7 @@ def main():
     for st, ink, sc, who, p in rows:
         print(f'{st:6} {ink:5d} {sc:7.3f} {who or "-":>5}  {p}')
 
-    frames = sorted(glob.glob(os.path.join(ROOT, 'docs', 'ads', 'runs',
+    frames = sorted(glob.glob(os.path.join(ROOT, 'calibration', 'artifacts', 'ads', 'runs',
                                            '**', '*.jpg'), recursive=True))
     inks, scores = [], []
     for p in frames[::args.stride]:

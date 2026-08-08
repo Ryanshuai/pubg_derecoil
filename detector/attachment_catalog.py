@@ -13,8 +13,8 @@ different confidence:
 
   SLOTS                 — measured, all 40. calibration/scan_compat.py:
       spawn, open Tab, read each slot's tile with SlotDetector. Captures in
-      docs/compat/runs/20260802_155222/ (the first 30) and
-      docs/runs/slot_scan/20260804_131048 + _131534 (the rest), so any row can
+      calibration/artifacts/compat/runs/20260802_155222/ (the first 30) and
+      calibration/artifacts/runs/slot_scan/20260804_131048 + _131534 (the rest), so any row can
       be rechecked offline.
 
       The 2026-08-02 pass overturned two wiki/guess entries, both of the
@@ -118,7 +118,7 @@ ROSTER = {
     'mg3':      ('LMG', 'MG3'),
 
     # 狙击步枪, col1_row02, in the order the submenu draws them. Read off
-    # docs/spawner/runs/20260801_210656/col1_row02_submenu.png — the scrape is
+    # calibration/artifacts/spawner/runs/20260801_210656/col1_row02_submenu.png — the scrape is
     # the source of truth for what the game currently offers, and the order is
     # what give_many's entry index counts.
     'kar98k':   ('SR',  'Kar98k'),
@@ -359,7 +359,7 @@ SLOTS = {
     'mk14':     {'slots': ('scope', 'muzzle', 'magazine', 'stock'), 'conf': 'measured'},
     # Fixed PSO-1 optic and integral suppressor; only mag + cheek pad are free.
     'vss':      {'slots': ('magazine', 'stock'), 'conf': 'measured'},
-    # Read off docs/tab_inventory_2.png, which has an Mk12 in slot 2: scope,
+    # Read off calibration/artifacts/tab_inventory_2.png, which has an Mk12 in slot 2: scope,
     # muzzle, grip and magazine boxes are drawn, the stock position is blank.
     'mk12':     {'slots': ('scope', 'muzzle', 'grip', 'magazine'), 'conf': 'measured'},
     'dragunov': {'slots': ('scope', 'muzzle', 'magazine', 'stock'), 'conf': 'measured'},
@@ -369,7 +369,7 @@ SLOTS = {
     # threshold of 36, while its other three tiles read 96..120). The wiki
     # listed one. Scanned 2026-08-02.
     'ump45':    {'slots': ('scope', 'muzzle', 'grip', 'magazine'), 'conf': 'measured'},
-    # docs/tab_inventory_2.png, slot 1: scope/muzzle/magazine/stock drawn, the
+    # calibration/artifacts/tab_inventory_2.png, slot 1: scope/muzzle/magazine/stock drawn, the
     # grip position blank — which is also what confirms an unowned slot is
     # simply not rendered rather than shifted away.
     'uzi':      {'slots': ('scope', 'muzzle', 'magazine', 'stock'), 'conf': 'measured'},
@@ -405,7 +405,7 @@ SLOTS = {
     #
     # 2026-08-02's scan covered 30 weapons; ROSTER has 40. Scanned the rest
     # 2026-08-04 (calibration/scan_compat.py --only ..., run
-    # docs/runs/slot_scan/20260804_131048, 147s).
+    # calibration/artifacts/runs/slot_scan/20260804_131048, 147s).
     #
     # `scope` IS DELIBERATELY ABSENT FROM EVERY ENTRY BELOW, and that is not
     # the same as "no sight fits". SlotDetector returns `unknown` there for

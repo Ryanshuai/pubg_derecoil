@@ -1,8 +1,8 @@
 """Pin "is the Tab screen up" against every stored full-screen shot.
 
-Ground truth is which directory a shot lives in — docs/ads/runs/** was captured
-while shooting, Tab shut; docs/compat/runs/**, docs/runs/** and
-docs/tab_inventory*.png are captures OF the Tab screen. Offline: no game, no
+Ground truth is which directory a shot lives in — calibration/artifacts/ads/runs/** was captured
+while shooting, Tab shut; calibration/artifacts/compat/runs/**, calibration/artifacts/runs/** and
+calibration/artifacts/tab_inventory*.png are captures OF the Tab screen. Offline: no game, no
 hardware.
 
     pixi run tab-open
@@ -36,7 +36,7 @@ The floor gap is 91..190 and only exists once the count band has passed: over
 ALL Tab-shut frames the floor runs 27..227, because a dark crop with no ink is
 dark too. TAB_DARK_FLOOR_MAX = 150 sits in the middle of the conditional gap.
 
-NOT IN THE CORPUS: docs/tab_full_check.png. It looks like a 3440x1440 Tab
+NOT IN THE CORPUS: calibration/artifacts/tab_full_check.png. It looks like a 3440x1440 Tab
 capture and is not one — it is a black canvas with two rectangles pasted on it
 (a montage of attachment icons composited over gameplay, plus the Tab regions'
 bounding box), so 'type' reads as literally all zeros. It was labelled "Tab up"
@@ -91,11 +91,11 @@ def truth(path):
         return p.endswith('_open.png')
     if '/ads/runs/' in p:
         return False                       # gameplay frames, Tab shut
-    if '/compat/runs/' in p or '/docs/runs/' in p:
+    if '/compat/runs/' in p or '/calibration/artifacts/runs/' in p:
         return True                        # scans OF the Tab screen
     if 'tab_inventory' in p:
         return True
-    # docs/tab_full_check.png deliberately falls through to None -- see the
+    # calibration/artifacts/tab_full_check.png deliberately falls through to None -- see the
     # module docstring. It is a composite, not a capture.
     return None
 
@@ -111,7 +111,7 @@ def corpus():
     the count band; the band is fine and the file is empty.
 
     That is not hypothetical. 2026-08-05 this gate went red on 7 shots, all
-    from docs/runs/bare_tiles/ (2026-08-04), every one a whole frame averaging
+    from calibration/artifacts/runs/bare_tiles/ (2026-08-04), every one a whole frame averaging
     5.6..7.7 where a real capture averages 52. The diagnosis on screen pointed
     at a threshold nobody had touched.
 

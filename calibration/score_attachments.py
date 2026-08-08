@@ -81,7 +81,7 @@ BASELINE. 930/1040 = 0.894.
 
 Every remaining row miss is an UNDER-read. That is why the target is in
 COUNTED now: a corpus whose failures are all refusals is one the ratchet can
-hold. docs/tab_inventory.png's twelve hand-read rows stay as `reference rows`,
+hold. calibration/artifacts/tab_inventory.png's twelve hand-read rows stay as `reference rows`,
 scored separately — they are the only row truth in the repository that no
 collector produced.
 """
@@ -104,8 +104,8 @@ from detector.tab_items import ROW_MSE_MAX, ROW_MARGIN_MIN
 from detector.tab_layout import icon_box
 from calibration.solve_template import solve
 
-RUNS = os.path.join(ROOT, 'docs', 'attachments', 'runs')
-TMPL_DIR = os.path.join(ROOT, 'docs', 'training_data', 'pubg_assets', 'Item',
+RUNS = os.path.join(ROOT, 'calibration', 'artifacts', 'attachments', 'runs')
+TMPL_DIR = os.path.join(ROOT, 'data', 'templates', 'pubg_assets', 'Item',
                         'Attachment')
 TAG = 'solved'
 
@@ -125,10 +125,10 @@ CUT = (ad.OFFSET_Y, ad.OFFSET_Y + ad.TMPL_SIZE,
 ASSET = {k: v['asset'] for k, v in ATTACHMENTS.items() if v.get('asset')}
 KEY_OF = {v: k for k, v in ASSET.items()}
 
-# docs/tab_inventory.png, read off the screenshot by eye — the only 库存 truth
+# calibration/artifacts/tab_inventory.png, read off the screenshot by eye — the only 库存 truth
 # in the repository that no collector produced and no template touched. Two
 # rows hold the same part, which is a fact about the screenshot.
-REF_SHOT = os.path.join(ROOT, 'docs', 'tab_inventory.png')
+REF_SHOT = os.path.join(ROOT, 'calibration', 'artifacts', 'tab_inventory.png')
 REF_ROWS = ['scope_2x', 'scope_4x', 'red_dot', 'holo', 'ext_sr', 'quickext_sr',
             'flash_sr', 'laser', 'thumb_grip', 'thumb_grip', 'flash_smg',
             'duckbill']

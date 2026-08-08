@@ -10,7 +10,7 @@ screenshot reads — 0 measured in game. This measures them.
     pixi run python calibration/scan_compat.py --report <run_dir>   # offline
 
 Per weapon: spawn it into slot 2, open Tab, screenshot, read the five slots
-with SlotDetector, close Tab. Runs land in docs/runs/slot_scan/<stamp>/ in the shared CaptureRun format
+with SlotDetector, close Tab. Runs land in calibration/artifacts/runs/slot_scan/<stamp>/ in the shared CaptureRun format
 (calibration/capture_run.py), one full-screen capture per weapon, so every
 claim here can be re-checked offline and other skills can consume the same
 captures without driving the game again.

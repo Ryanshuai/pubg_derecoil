@@ -3,7 +3,7 @@
 The eyes for control/map.py; the hands are there. Per the package rule this
 runs on a stored PNG -- no game, no hardware:
 
-    python detector/map_detector.py docs/map/map_400m.png
+    python detector/map_detector.py calibration/artifacts/map/map_400m.png
     python detector/map_detector.py --selftest
 
 TWO INDEPENDENT SIGNALS say the map is up, and both are positive -- the map
@@ -26,7 +26,7 @@ false positive" -- and the first live frame taken after writing that broke it,
 reading map_open=True with the map shut, off a marker at (3222, 1227) in the
 bottom-right minimap. Not an edge case: the minimap is up whenever the big map
 is not, so the probe was true unconditionally. MINIMAP_BOX is blanked before
-any search. Both frames are in docs/map/ and both are in selftest(), which is
+any search. Both frames are in calibration/artifacts/map/ and both are in selftest(), which is
 the point: a corpus holding only the frame a probe was written against can
 only ever agree with it.
 
@@ -95,7 +95,7 @@ MARKER_AREA_MAX = 2000     # anything bigger is not a 25 px disc
 MARKER_SIDE = (15, 35)     # both w and h; the disc measures 23x24
 MARKER_FILL_MIN = 0.6      # area / (w*h); the disc is 0.81
 
-# The left panel's selection border, measured on docs/map/map_400m.png: two
+# The left panel's selection border, measured on calibration/artifacts/map/map_400m.png: two
 # vertical strokes at x=80, 4x49 and 4x46, 320 px between them. Both stored
 # frames with the map shut read 0 px in this strip.
 PANEL_YELLOW_MIN = 60      # 5x under the measured 320, well over the 0 of both
@@ -273,8 +273,8 @@ def highlight_box(frame):
 # selftest() says which one is missing rather than reporting a pass over an
 # empty corpus. Re-grab REFERENCE with the map open and the cursor ON the 200m
 # range (highlight_box needs the hover); grab NEGATIVE in a plain match.
-REFERENCE = os.path.join(_ROOT, 'docs', 'map', 'map_400m.png')
-NEGATIVE = os.path.join(_ROOT, 'docs', 'map', 'ingame_minimap.png')
+REFERENCE = os.path.join(_ROOT, 'calibration', 'artifacts', 'map', 'map_400m.png')
+NEGATIVE = os.path.join(_ROOT, 'calibration', 'artifacts', 'map', 'ingame_minimap.png')
 
 
 def selftest():

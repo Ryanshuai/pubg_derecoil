@@ -7,7 +7,7 @@ where I expect them".
 
 Templates are binary masks of the glyphs' opaque bright pixels; see the
 Spawner screen section of config.py for why nothing else about the tile is
-usable, and docs/spawner/README.md for the measurements.
+usable, and calibration/artifacts/spawner/README.md for the measurements.
 """
 import os
 
@@ -19,7 +19,7 @@ from config import (SPAWNER_ICON_ANCHORS, SPAWNER_ICON_W, SPAWNER_ICON_H,
                     SPAWNER_MIN_SCORE)
 from capture.cropper import anchor_box
 
-ASSET_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'training_data',
+ASSET_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'templates',
                          'pubg_assets')
 TMPL_NAME = 'spawner_icon_{}_mask.png'
 N_ICONS = len(SPAWNER_ICON_ANCHORS)

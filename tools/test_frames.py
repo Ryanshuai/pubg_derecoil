@@ -68,10 +68,10 @@ def raises(name, exc, fn):
 # Tab screen, one wearing a fixed scope, the spawner panel up. Two frames that
 # look alike cannot show a stale buffer.
 SHOTS = [
-    'docs/compat/runs/20260802_155222/m416.png',
-    'docs/compat/runs/20260802_155222/vss.png',
-    'docs/training_epuipment.png',
-    'docs/lobby/in_game.png',
+    'calibration/artifacts/compat/runs/20260802_155222/m416.png',
+    'calibration/artifacts/compat/runs/20260802_155222/vss.png',
+    'calibration/artifacts/training_epuipment.png',
+    'calibration/artifacts/lobby/in_game.png',
 ]
 
 # A realistic region set: the per-frame HUD, the Tab name plates and slot

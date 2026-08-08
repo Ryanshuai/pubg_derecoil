@@ -46,7 +46,7 @@ from detector.attachment_catalog import canonical, fits, has_slot
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-PATH = os.path.join(ROOT, 'docs', 'compat', 'kit_facts.json')
+PATH = os.path.join(ROOT, 'calibration', 'artifacts', 'compat', 'kit_facts.json')
 
 # Separate cells that must fail the same (weapon, slot, part) before it is
 # believed to be impossible rather than unlucky.

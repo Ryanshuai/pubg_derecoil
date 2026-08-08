@@ -1,6 +1,6 @@
 """Solve an attachment's icon and alpha out of paired captures. Offline.
 
-    pixi run python calibration/solve_template.py docs/attachments/runs/<stamp>
+    pixi run python calibration/solve_template.py calibration/artifacts/attachments/runs/<stamp>
     pixi run python calibration/solve_template.py <run> --write
 
 Reads the (backdrop, filled) pairs calibration/collect_templates.py's
@@ -56,7 +56,7 @@ sys.path.insert(0, ROOT)
 import cv2
 import numpy as np
 
-TMPL_DIR = os.path.join(ROOT, 'docs', 'training_data', 'pubg_assets', 'Item',
+TMPL_DIR = os.path.join(ROOT, 'data', 'templates', 'pubg_assets', 'Item',
                         'Attachment')
 
 # Below this the pixel is treated as fully transparent and its colour is not
@@ -402,7 +402,7 @@ def main():
         pass
 
     run = args.run or sorted(glob.glob(
-        os.path.join(ROOT, 'docs', 'attachments', 'runs', '*')))[-1]
+        os.path.join(ROOT, 'calibration', 'artifacts', 'attachments', 'runs', '*')))[-1]
     man = json.load(open(os.path.join(run, 'manifest.json'), encoding='utf-8'))
     print(f'run: {os.path.relpath(run, ROOT)}\n')
 

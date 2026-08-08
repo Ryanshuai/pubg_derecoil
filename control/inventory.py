@@ -325,7 +325,7 @@ DRAG_TIMING = {'drop': DROP_WAIT}
 # the question is what their gestures did — not what they logged, since a run
 # that fails silently logs nothing. Every line carries `pid` and `proc`.
 DRAG_LOG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
-    __file__))), 'docs', 'drag', 'journal.jsonl')
+    __file__))), 'calibration', 'artifacts', 'drag', 'journal.jsonl')
 
 # Tab is a toggle and swallows 1/2 while it is up, so hold() has to close it,
 # switch, and reopen. That used to be two fixed 0.45 s sleeps.
@@ -432,7 +432,7 @@ KIT_SETTLE = 0.6
 # With a real backdrop change behind each retry the number finally means
 # something, and 2 is too few for the tightest pair in the corpus: mp5k's
 # ext_smg against quickext_smg lost a cell to `templates cannot separate` on
-# the very next run, having survived two nudges. docs/recoil's own measurement
+# the very next run, having survived two nudges. calibration/artifacts/recoil's own measurement
 # says one view in seven is ambiguous for that pair, so three views leave ~0.3%
 # and five leave ~0.006%.
 #
@@ -468,7 +468,7 @@ GUN_SLOT_WATCH_S = 1.2
 PLATE_INK_MIN = 200
 # ⚠ AND AN UPPER BOUND, because the low one only separates "gun" from "empty"
 # and there is a third thing this crop can be showing: the SPAWNER PANEL, which
-# is drawn over the Tab screen. Measured off docs/drag/journal.jsonl on
+# is drawn over the Tab screen. Measured off calibration/artifacts/drag/journal.jsonl on
 # 2026-08-07, the same field on the same gestures:
 #
 #     empty slot                        0
@@ -1863,7 +1863,7 @@ class InventoryControl(Driver):
                 self._log(f'gun{gun}: plate ink {plate0} -> {plate1} across '
                           f'that right-click — THE WEAPON LEFT THE RACK, and '
                           f'the empty slot below reads exactly like a clean '
-                          f'unequip. See docs/drag/journal.jsonl.')
+                          f'unequip. See calibration/artifacts/drag/journal.jsonl.')
             if cleared:
                 rec['ok'] = True
                 self._log(f'{loc_str(src)} -> 库存: right-clicked '

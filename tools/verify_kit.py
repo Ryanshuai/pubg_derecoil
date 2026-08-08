@@ -39,7 +39,7 @@ from calibration.sweep import Rig
 from control.kitting import Kitter, BACKPACK, SCOPE_PART
 
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                   'docs', 'kit_checks')
+                   'calibration', 'artifacts', 'kit_checks')
 
 
 def shot(path):

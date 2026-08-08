@@ -10,7 +10,7 @@ import os
 import cv2
 import numpy as np
 
-ASSETS_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'training_data',
+ASSETS_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'templates',
                           'pubg_assets', 'posture')
 POSTURE_CLASSES = ['standing', 'crouching', 'prone']
 

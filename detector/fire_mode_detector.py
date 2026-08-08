@@ -3,7 +3,7 @@
 ⚠ THERE WAS A 4 MB MobileNet HERE UNTIL 2026-08-08, and it went because it was
 measured, not because it felt old. It sat behind the forest as a fallback ("RF
 first, and only fall through to the net when it abstains"), and on the whole
-docs/mismatch/fire_mode corpus — 859 crops, every one of them a case somebody
+calibration/artifacts/mismatch/fire_mode corpus — 859 crops, every one of them a case somebody
 collected BECAUSE something disagreed — this is what the fallback did:
 
     RF abstained (said 'bg')                    3 / 859   0.35%
@@ -16,7 +16,7 @@ of background plates and 12 MB of labelled crops to train on, and it kept torch
 in the detector import graph — robot.py's device line existed for this class
 alone.
 
-⚠ THE HONEST LIMIT ON THAT NUMBER: docs/mismatch/fire_mode is a mismatch and
+⚠ THE HONEST LIMIT ON THAT NUMBER: calibration/artifacts/mismatch/fire_mode is a mismatch and
 hard-case sink, not a representative frame sample (87.8% of it reads
 single_bot_sniper). The abstention rate on ordinary frames is probably lower
 still, but nobody has an unbiased sample, so 0.35% is a ceiling measured on the

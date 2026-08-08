@@ -143,7 +143,7 @@ EMA_APPLY_MIN = 60.0
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Runs are measurements, not source: they land under docs/ with the rest of
 # what this repo has measured, never next to the script that wrote them.
-RUNS = os.path.join(os.path.dirname(HERE), 'docs', 'recoil', 'runs')
+RUNS = os.path.join(os.path.dirname(HERE), 'calibration', 'artifacts', 'recoil', 'runs')
 
 # Which part fills each slot under test, per weapon class. A class that has no
 # part for a slot skips every config naming it, rather than silently measuring

@@ -417,8 +417,8 @@ if __name__ == '__main__':
         pass
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    shots = sys.argv[1:] or [os.path.join(root, 'docs', 'tab_inventory.png'),
-                             os.path.join(root, 'docs', 'tab_inventory_2.png')]
+    shots = sys.argv[1:] or [os.path.join(root, 'calibration', 'artifacts', 'tab_inventory.png'),
+                             os.path.join(root, 'calibration', 'artifacts', 'tab_inventory_2.png')]
     det = TabItemDetector()
     for path in shots:
         frame = cv2.imread(path)

@@ -336,9 +336,9 @@ def main():
 
 
 def report(rows, raw, args):
-    # docs/k/, not next to this script: the json and the plot are measurements.
+    # calibration/artifacts/k/, not next to this script: the json and the plot are measurements.
     out_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'docs', 'k')
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'calibration', 'artifacts', 'k')
     os.makedirs(out_dir, exist_ok=True)
     tag = args.label or datetime.now().strftime('%m%d_%H%M')
 

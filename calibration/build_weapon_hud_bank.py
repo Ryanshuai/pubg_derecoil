@@ -31,7 +31,7 @@ from detector.attachment_catalog import ROSTER
 from detector.weapon_hud_detector import DIMS, feature, BANK_PATH
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CORPUS = os.path.join(ROOT, 'docs', 'training_data', 'Manual', 'weapon_hud')
+CORPUS = os.path.join(ROOT, 'data', 'templates', 'Manual', 'weapon_hud')
 
 # The corpus was foldered under the retired CNN's class names. 98k IS kar98k --
 # the same gun under two spellings, and the reason a roster-filtered run once

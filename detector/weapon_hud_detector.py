@@ -43,7 +43,7 @@ import cv2
 import numpy as np
 
 DIMS = 64
-BANK_PATH = os.path.join(os.path.dirname(__file__), '..', 'docs', 'training_data',
+BANK_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'templates',
                          'weapon_hud_bank.npz')
 
 # Cosine gap between the best weapon and the runner-up.
@@ -147,7 +147,7 @@ class WeaponHudDetector:
           * 5590 LABELLED occupied crops: min 17.1, p1 46.0. Nothing real sits
             below 17, so a floor under that cannot reject a gun -- 0.00% of
             those 5590 fall below 10.
-          * unlabelled HUD plates from docs/ads/runs: 12% sit at <=10, which
+          * unlabelled HUD plates from calibration/artifacts/ads/runs: 12% sit at <=10, which
             the line above proves cannot be occupied plates.
 
         12 sits in the gap. Raising it costs real reads fast (50 -> 1.32%,

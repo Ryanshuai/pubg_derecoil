@@ -67,10 +67,10 @@ Layout, under <run root>/<kind>/<stamp>/:
                        subdirectory and may be .jpg — see `add`.
 
 WHERE A RUN LIVES IS PART OF ITS MEANING, so `create` takes an explicit `path`
-and two producers use it. docs/runs/ is the default root, but
-tools/test_tab_open.py reads the directory as ground truth: `docs/ads/runs/**`
-is gameplay with Tab SHUT, `docs/runs/**` is a capture OF the Tab screen.
-Filing an ADS run under docs/runs/ would silently relabel 400 frames in that
+and two producers use it. calibration/artifacts/runs/ is the default root, but
+tools/test_tab_open.py reads the directory as ground truth: `calibration/artifacts/ads/runs/**`
+is gameplay with Tab SHUT, `calibration/artifacts/runs/**` is a capture OF the Tab screen.
+Filing an ADS run under calibration/artifacts/runs/ would silently relabel 400 frames in that
 corpus and fail a regression that has nothing to do with this module. What
 unifies is the manifest, not the path.
 
@@ -78,8 +78,8 @@ READING THE TWO PRE-CaptureRun FORMATS
 --------------------------------------
 `load_dir` also reads the two run shapes that predate this module:
 
-    docs/ads/runs/<stamp>/          index.jsonl (one JSON per frame) + meta.json
-    docs/attachments/runs/<stamp>/  index.json  ({..., 'crops': [...]})
+    calibration/artifacts/ads/runs/<stamp>/          index.jsonl (one JSON per frame) + meta.json
+    calibration/artifacts/attachments/runs/<stamp>/  index.json  ({..., 'crops': [...]})
 
 An adapter, deliberately, and NOT a one-time conversion. Those 610 frames are
 unreproducible without tens of minutes of game time, and a converter would
@@ -102,14 +102,14 @@ import time
 import cv2
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RUNS_ROOT = os.path.join(ROOT, 'docs', 'runs')
+RUNS_ROOT = os.path.join(ROOT, 'calibration', 'artifacts', 'runs')
 
 # Roots that hold runs but are not under RUNS_ROOT, for the same reason `create`
 # takes a path: their directory names are load-bearing elsewhere. Listed here so
 # `index()` — the "what has already been captured?" question every skill is told
 # to ask before driving the game — covers them whatever format they are in.
-EXTRA_ROOTS = (os.path.join(ROOT, 'docs', 'ads', 'runs'),
-               os.path.join(ROOT, 'docs', 'attachments', 'runs'))
+EXTRA_ROOTS = (os.path.join(ROOT, 'calibration', 'artifacts', 'ads', 'runs'),
+               os.path.join(ROOT, 'calibration', 'artifacts', 'attachments', 'runs'))
 
 LABEL_REQUESTED = 'requested'
 LABEL_DETECTED = 'detected'
@@ -293,7 +293,7 @@ class CaptureRun:
 
     @classmethod
     def _from_ads(cls, path):
-        """docs/ads/runs/<stamp>/ — index.jsonl + meta.json.
+        """calibration/artifacts/ads/runs/<stamp>/ — index.jsonl + meta.json.
 
         One record per frame: file, scope, state (hip/ads/hip_after), t_ms,
         weapon, slot, and `verified` (what the scope slot read back, when
@@ -331,7 +331,7 @@ class CaptureRun:
 
     @classmethod
     def _from_attachments(cls, path):
-        """docs/attachments/runs/<stamp>/ — index.json.
+        """calibration/artifacts/attachments/runs/<stamp>/ — index.json.
 
         `crops` is the per-capture list; everything else at the top level
         (targets, gun, angles, unreachable, and the `bad` rebuild queue the

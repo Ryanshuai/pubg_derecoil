@@ -14,59 +14,58 @@ __pycache__
 *.mp4
 *.mkv
 temp_debug
-docs
-# `InGameScreenshot` was a fourth line here until 2026-08-08. Its six sinks are
-# `docs/mismatch/` now, so `docs` already covers them — one exception fewer.
 
-# ── one exception, and it is about the code RUNNING, not about history ──
-# The rule is "does a clean clone RUN", not "is it small". These trees are the
-# TEMPLATES the detectors load at import — lobby tabs by glyph, weapon name
-# plates, fire-mode / posture / type icons, the ADS crosshair. Without them a
-# fresh checkout has no lobby chain (read_page returns None, so ensure_mode ->
-# press_play -> ensure_in_match refuses to act), no weapon-name OCR and no
-# posture. ~1 MB total, and NOT rebuildable: rebuilding needs a corpus that is
-# itself ignored (and as of 2026-08-08 several of those corpora are deleted).
+# ── measurement corpora: ignored, and regenerable by measuring again ──
+# 2.7 GB of frames, runs and logs. They used to live in `docs`, which is why
+# that word meant "2.7 GB of captures plus five markdown files" and why the
+# five had no history worth speaking of. The name now says what it is, and it
+# sits under the layer that PRODUCES it.
 #
-# ⚠ TWO THINGS THIS BLOCK GOT WRONG BEFORE 2026-08-08, both found by moving the
-# tree under docs/ — a move is what forces every ignore rule to be re-applied,
-# so it is the event that shows you what the rules were actually doing:
+# ⚠ THIS IS A WHITELISTED PATH, NOT A LICENCE FOR calibration/. The rule
+# calibration/CLAUDE.md states -- "artifacts go under docs/, not next to the
+# source; a script that regresses to writing beside the code makes git status
+# dirty, and that is the mechanism that finds it" -- still holds, and this is
+# now its ONE legal sink. Anything else a script writes into calibration/
+# still shows up dirty, which is the whole point.
+calibration/artifacts
+
+# ── what a clean clone must RUN with, therefore versioned ──
+# data/ is the counterpart: everything the runtime or a gate LOADS. Curves
+# (with no curve the tool does not compensate), detector templates (with no
+# templates a fresh checkout has no lobby chain, no weapon-name OCR and no
+# posture), the measured scale tables, and the two gate baselines.
 #
-#   1. It said "these 24 files". `git ls-files` said 106, across ocr_white/,
-#      pubg_assets/{fire_mode,posture,type,lobby}/ and lobby/tabs/ (36, not 24).
-#   2. Only lobby/tabs/*.png was ever un-ignored. THE OTHER 70 WERE TRACKED BY
-#      INERTIA — .gitignore does not apply to files already in the index, so
-#      they had been added before the rules existed and simply never left.
-#      Nothing would have re-added them; a clean clone kept working purely
-#      because nobody had cause to re-add.
+# ⚠ THE GLOBAL *.png / *.jpg / *.npz RULES ABOVE MATCH AT EVERY DEPTH, so the
+# templates need explicit re-inclusion or they vanish from a clone while
+# `git status` stays clean. That failure has already happened once in this
+# repo, to the curves: docs/ was ignored wholesale, a cleanup deleted
+# docs/recoil/curves/, and 40 weapons' curves went with it with nothing to
+# revert to. Re-includes are per-rule, not per-tree.
+!data/
+!data/**/
+!data/**/*.png
+!data/**/*.jpg
+!data/**/*.npz
+!data/**/*.json
+!data/**/*.jsonl
+!data/**/*.md
+
+# (data/templates/highlight_eval/ is 15 MB of labelled eval corpus and is NOT
+#  a template the runtime loads -- it is a corpus, so by the rule above it
+#  belongs in calibration/artifacts/. Left where it is for now; moving it is a
+#  separate change and it is small enough not to force one today.)
 #
-# So the rules now say what the index already contained, which is also what the
-# stated criterion asks for. `git check-ignore -v <file>` names the winning rule
-# when this needs debugging.
-!docs/
-docs/*
-!docs/training_data/
-docs/training_data/*
-!docs/training_data/ocr_white/
-!docs/training_data/pubg_assets/
-docs/training_data/pubg_assets/*
-!docs/training_data/pubg_assets/fire_mode/
-!docs/training_data/pubg_assets/posture/
-!docs/training_data/pubg_assets/type/
-!docs/training_data/pubg_assets/lobby/
-docs/training_data/pubg_assets/lobby/*
-!docs/training_data/pubg_assets/lobby/tabs/
-# ⚠ AND the files, explicitly. Re-including the DIRECTORY is not enough:
-# line 10's `*.png` matches at every depth and would take them straight back
-# out. Re-includes are per-rule, not per-tree — that is the second rule that
-# has to be beaten.
-!docs/training_data/ocr_white/*.png
-!docs/training_data/pubg_assets/*.png
-!docs/training_data/pubg_assets/fire_mode/*.png
-!docs/training_data/pubg_assets/posture/*.png
-!docs/training_data/pubg_assets/type/*.png
-!docs/training_data/pubg_assets/lobby/*.png
-!docs/training_data/pubg_assets/lobby/tabs/*.png
-!docs/training_data/pubg_assets/*.npz
+# ⚠ weapon_hud_bank.npz IS TRACKED, 2.8 MB, and it took a decision to get
+# there. It is DERIVED -- calibration/build_weapon_hud_bank.py builds it --
+# but its corpus (Manual/weapon_hud, 128 MB) was deleted on 2026-08-08, so
+# "just rebuild it" stopped being true and it became an unrebuildable ignored
+# file, which is the worst of both. detector/weapon_hud_detector.py loads it
+# at import, so a clone without it has no weapon-HUD identification at all.
+#
+# .githooks/pre-commit refuses NEW files over 2 MB, on size rather than on any
+# argument about what a file means, precisely so that this cannot happen by
+# drift. Getting it in took `--no-verify` and an explicit human decision --
+# which is the hook working as designed, not being worked around.
 
 # (highlight_eval/ and weapon_hud_bank.npz stay OUT: 15 MB of labelled eval
 #  corpus and a 2.9 MB PCA bank. The bank is derived — but ⚠ as of 2026-08-08

@@ -30,7 +30,7 @@ BOOTSTRAPPING, AND WHY IT IS NOT CIRCULAR. The first templates for a language
 have to be cut by position, because that is all there is before templates
 exist. That is safe ONLY when a human has looked at the strip and confirmed
 each run is the label the position claims — `--dump` writes that strip. It was
-done once for zh on docs/state_dumps/0805_091011/before.png: 开始游戏 通行证
+done once for zh on calibration/artifacts/state_dumps/0805_091011/before.png: 开始游戏 通行证
 战绩 仓库 藏匿处 工坊 商店, then the icon. Afterwards the templates are the
 authority and position is not consulted again.
 
@@ -81,8 +81,8 @@ BARS = (('top', LOBBY_TOP_BAR_ROI, TOP_TABS),
         ('sub', LOBBY_SUB_BAR_ROI, SUB_TABS))
 
 # Every full-screen lobby capture the repo keeps, for --verify.
-VERIFY_GLOBS = ('docs/lobby/*.png', 'docs/state_dumps/*/before.png',
-                'docs/lobby/runs/*/*.png')
+VERIFY_GLOBS = ('calibration/artifacts/lobby/*.png', 'calibration/artifacts/state_dumps/*/before.png',
+                'calibration/artifacts/lobby/runs/*/*.png')
 
 
 def _mask(gray, roi, box):
@@ -241,7 +241,7 @@ def main():
     ap.add_argument('shot', nargs='?', help='full-screen lobby capture')
     ap.add_argument('--tag', default='zh', help='UI language tag, e.g. zh, en')
     ap.add_argument('--write', action='store_true')
-    ap.add_argument('--dump', default=os.path.join(ROOT, 'docs', 'debug',
+    ap.add_argument('--dump', default=os.path.join(ROOT, 'calibration', 'artifacts', 'debug',
                                                    'lobby_tab_templates.png'))
     ap.add_argument('--verify', action='store_true')
     args = ap.parse_args()

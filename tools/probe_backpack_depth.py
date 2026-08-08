@@ -58,7 +58,7 @@ from control.inventory import InventoryControl
 from control.stock import read_stock
 from detector.tab_layout import INV_ROWS
 
-OUT = os.path.join(ROOT, 'docs', 'stock')
+OUT = os.path.join(ROOT, 'calibration', 'artifacts', 'stock')
 
 # Sixteen DISTINCT parts, four more than the window. Distinct on purpose: with
 # duplicates a row scrolling up looks identical to the row it replaced, which

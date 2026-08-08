@@ -46,9 +46,9 @@ cv2.setNumThreads(1)
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Runs are measurements, not source: they land under docs/ with the rest of
 # what this repo has measured, never next to the script that wrote them.
-RUNS = os.path.join(os.path.dirname(HERE), 'docs', 'recoil', 'runs')
+RUNS = os.path.join(os.path.dirname(HERE), 'calibration', 'artifacts', 'recoil', 'runs')
 # Where GunDriver.dump() puts the crops behind a failed decision.
-FAIL_DIR = os.path.join(os.path.dirname(HERE), 'docs', 'fail')
+FAIL_DIR = os.path.join(os.path.dirname(HERE), 'calibration', 'artifacts', 'fail')
 
 # Warn when a magazine's view excursion eats this much of the headroom above
 # the aim. Past it the burst is finishing where tracking is already only

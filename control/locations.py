@@ -186,7 +186,7 @@ def at_gun(gun):
     which is an attachment slot on that gun.
 
     The drag point is the boxed slot number at the left end of the row --
-    tab_layout.gun_tag_point, measured off docs/tab_inventory.png. That is the
+    tab_layout.gun_tag_point, measured off calibration/artifacts/tab_inventory.png. That is the
     handle for the weapon itself; the name plate beside it and the attachment
     tiles below it are not.
     """

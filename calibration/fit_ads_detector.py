@@ -29,7 +29,7 @@ from detector.ads_detector import AdsDetector, CROP_R, TEMPLATE_PATH, THRESHOLD
 from dl_models.icon_merging import dewhite
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RUNS = os.path.join(ROOT, 'docs', 'ads', 'runs')
+RUNS = os.path.join(ROOT, 'calibration', 'artifacts', 'ads', 'runs')
 
 # Where each template comes from: (run, predicate over one frame's record).
 FIT = {

@@ -42,7 +42,7 @@ from detector.attachment_catalog import SLOTS
 from detector.attachment_detector import AttachmentDetector, MSE_EMPTY_TH
 
 RUNS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                    'docs', 'attachments', 'runs')
+                    'calibration', 'artifacts', 'attachments', 'runs')
 
 # `{key}__{slot}__{weapon}__{tag}bg.png`. The weapon is in the NAME and not in
 # the facts -- _shot() never passed it -- so it is parsed back out here. A name

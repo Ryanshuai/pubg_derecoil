@@ -200,14 +200,14 @@ AIM_FRAC = 0.50
 #
 # So this is an empirical aim fraction, not a claim about where the clamps are.
 # Re-check it by eye after any change to the bracket rule or the step size:
-# docs/pitch/standing_level.png is written by tools/probe_pitch_range.py and is
+# calibration/artifacts/pitch/standing_level.png is written by tools/probe_pitch_range.py and is
 # the only thing that can say.
 # ⚠ 0.47 -> 0.45 on 2026-08-06, by eye, at the operator's call while watching
 # the campaign. It is an AIM fraction and always has been -- the two bullets
 # above already say the bracket's top end contributes ~155 counts of it and
 # that the count ruler is not flat -- so there is no derivation that says 0.47
 # was right and 0.45 is wrong, or the reverse. What decides it is
-# docs/pitch/standing_level.png, and that file is written by
+# calibration/artifacts/pitch/standing_level.png, and that file is written by
 # tools/probe_pitch_range.py, not by this run. RE-SHOOT IT before treating
 # either number as level.
 MIDLINE_FRAC = 0.45
@@ -275,11 +275,11 @@ def _load_pitch_range():
     Measured once by tools/probe_pitch_range.py. Empty falls back to the
     ground-to-sky band scan in calibrate_pitch().
 
-    It lives under docs/pitch/ next to the per-step screenshots it was read
+    It lives under calibration/artifacts/pitch/ next to the per-step screenshots it was read
     off, because it is measured FACT, not calibration policy -- same reason
-    weapon_rpm.json sits in docs/recoil/ and kit_facts.json in docs/compat/.
+    weapon_rpm.json sits in calibration/artifacts/recoil/ and kit_facts.json in calibration/artifacts/compat/.
     """
-    path = os.path.join(_ROOT, 'docs', 'pitch', 'pitch_range.json')
+    path = os.path.join(_ROOT, 'calibration', 'artifacts', 'pitch', 'pitch_range.json')
     try:
         return {k: v for k, v in json.load(open(path, encoding='utf-8')).items()
                 if not k.startswith('_')}
@@ -289,7 +289,7 @@ def _load_pitch_range():
 
 PITCH_RANGE = _load_pitch_range()
 
-_TRAVEL_PATH = os.path.join(_ROOT, 'docs', 'pitch', 'pitch_travel.json')
+_TRAVEL_PATH = os.path.join(_ROOT, 'calibration', 'artifacts', 'pitch', 'pitch_travel.json')
 
 
 def _load_travel():
@@ -444,7 +444,7 @@ class ViewDriver:
         ADS IS A TAP, NOT A HOLD. Holding the right button down is
         shoulder aim -- a third state, see detector/ads_detector.py -- and the
         sight picture never appears; it is the
-        RELEASE that switches into it. Run docs/ads/runs/20260801_222936 is 64
+        RELEASE that switches into it. Run calibration/artifacts/ads/runs/20260801_222936 is 64
         frames of that mistake — iron sights and a red dot came out with
         hip-to-"ADS" differences of 31.45 and 31.48, which was the gun coming
         up rather than a scope. Toggling back out is a SECOND call, and
@@ -1345,7 +1345,7 @@ class ViewDriver:
         pitches measure different recoil, and nothing recorded which was which.
 
         The bottom clamp is absolute, so an offset from it is absolute. See
-        docs/pitch/pitch_range.json for where the numbers come from.
+        calibration/artifacts/pitch/pitch_range.json for where the numbers come from.
 
         ⚠ IT DOES NOT PUT THE VIEW LEVEL WHEN THE STORED NUMBER CAME FROM THE
         TRACKABLE BAND. That method centred on wherever the texture was, i.e.

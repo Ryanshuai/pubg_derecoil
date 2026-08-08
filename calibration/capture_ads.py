@@ -75,19 +75,19 @@ Usage (from the repo root)
     python calibration/capture_ads.py --scopes scope_6x,scope_8x
 
     # offline: what separates ADS from hip, per scope and across all of them
-    python calibration/capture_ads.py --report docs/ads/runs/<stamp>
+    python calibration/capture_ads.py --report calibration/artifacts/ads/runs/<stamp>
 
-Runs land in docs/ads/runs/<timestamp>/: one directory per scope, plus a
+Runs land in calibration/artifacts/ads/runs/<timestamp>/: one directory per scope, plus a
 manifest.json in the shared CaptureRun format (calibration/capture_run.py).
 Runs captured before 2026-08-03 carry index.jsonl + meta.json instead and are
 read through the same API — see load_dir there. They are not converted: those
 frames cost tens of minutes of game time each and cannot be re-made, so a
 converter would only produce a lossy copy of an irreplaceable original.
 
-STILL IN docs/ads/runs/, NOT docs/runs/ads/, and that is not inertia. The
+STILL IN calibration/artifacts/ads/runs/, NOT calibration/artifacts/runs/ads/, and that is not inertia. The
 directory a frame lives in is ground truth for a different regression:
-tools/test_tab_open.py reads docs/ads/runs/** as "gameplay, Tab shut" and
-docs/runs/** as "a capture OF the Tab screen". Moving these would silently
+tools/test_tab_open.py reads calibration/artifacts/ads/runs/** as "gameplay, Tab shut" and
+calibration/artifacts/runs/** as "a capture OF the Tab screen". Moving these would silently
 relabel 400 frames in that corpus. The format is what unifies; the path is
 already load-bearing.
 
@@ -138,7 +138,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 # Under docs/, not a scratch dir: these frames are the record the ADS detector
 # gets designed against and every later revision gets re-checked against.
-OUT_ROOT = os.path.join(ROOT, 'docs', 'ads', 'runs')
+OUT_ROOT = os.path.join(ROOT, 'calibration', 'artifacts', 'ads', 'runs')
 
 # ════════════════════════════════════════════════════════════
 # What gets captured
@@ -1249,7 +1249,7 @@ def run(args):
 
     stamp = time.strftime('%Y%m%d_%H%M%S')
     # path=, so the run keeps this root rather than CaptureRun's default — see
-    # the module docstring: docs/ads/runs/** is what tools/test_tab_open.py
+    # the module docstring: calibration/artifacts/ads/runs/** is what tools/test_tab_open.py
     # calls "Tab shut". quality=None with --png, which is how CaptureRun is
     # told to write losslessly.
     run = CaptureRun.create('ads', stamp=stamp,
@@ -1463,7 +1463,7 @@ def report(run_dir, cell=80, top=8):
     """Offline, and it must keep reading the runs captured before CaptureRun.
 
     Hence load_dir rather than a hand-rolled index.jsonl parse: the eleven runs
-    under docs/ads/runs are the only ADS data that exists and re-capturing one
+    under calibration/artifacts/ads/runs are the only ADS data that exists and re-capturing one
     costs tens of minutes of game time, so --report has to work on both shapes
     from the same code path — not from a branch that only one of them exercises.
     """

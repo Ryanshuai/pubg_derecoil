@@ -27,7 +27,7 @@ from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-PATH = os.path.join(ROOT, 'docs', 'recoil', 'weapon_rpm.json')
+PATH = os.path.join(ROOT, 'calibration', 'artifacts', 'recoil', 'weapon_rpm.json')
 
 # A fitted interval is believed only if the fit itself is tight. The poll runs
 # every few frames, so a transition is located to within ~25 ms; over 40 rounds

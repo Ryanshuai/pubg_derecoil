@@ -32,7 +32,7 @@ except (AttributeError, OSError):
 
 from config import HUD_REGIONS, SCREEN_H, SCREEN_W
 
-DEFAULT_BASELINE = os.path.join(ROOT, 'docs', 'regression_baseline.json')
+DEFAULT_BASELINE = os.path.join(ROOT, 'data', 'regression_baseline.json')
 
 # Labels must match exactly; floats get a tolerance. phaseCorrelate is an FFT
 # reduction over 128x128 float32, so a library rebuild moves the sub-pixel
@@ -328,7 +328,7 @@ def main():
 
     # Corpus coverage is reported apart from value drift, because they are
     # different failures and the loud one hides the quiet one. 47 of the
-    # baseline's 52 frames live under docs/spawner/runs/, which is run product
+    # baseline's 52 frames live under calibration/artifacts/spawner/runs/, which is run product
     # and stays out of git -- so a fresh clone is missing them and every one
     # would land in _diff as "only in baseline", burying an actual reading
     # that moved. Only the overlap is diffed; what is absent is named.

@@ -4,7 +4,7 @@
     pixi run python tools/fit_pitch_level.py --postures standing,crouching,prone --write
 
 WHAT IS WRONG NOW. `ViewDriver.goto_level(posture)` reads `level_up` out of
-docs/pitch/pitch_range.json, and that file has NO USABLE ENTRIES — its own
+calibration/artifacts/pitch/pitch_range.json, and that file has NO USABLE ENTRIES — its own
 `_note` says so. So goto_level returns 0, every cell falls back to
 `calibrate_pitch()`, and that scan is the thing being replaced:
 
@@ -79,7 +79,7 @@ from control.spawner import SpawnerControl                         # noqa: E402
 from control.stock import ensure_weapon_in_hand                    # noqa: E402
 from press.pico_mouse import other_agents                          # noqa: E402
 
-OUT = os.path.join(ROOT, 'docs', 'pitch', 'pitch_range.json')
+OUT = os.path.join(ROOT, 'calibration', 'artifacts', 'pitch', 'pitch_range.json')
 # Yaw between bearings, in counts. Four of these walks most of the way round.
 BEARING_COUNTS = 2600
 

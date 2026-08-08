@@ -3,7 +3,7 @@
 Geometry only: every function takes a grey full-screen frame and returns
 coordinates. No clicking, no capture, no game state. The driver is
 `LobbyControl.ensure_mode`; the measurements are in the Lobby section of
-config.py and docs/lobby/README.md.
+config.py and calibration/artifacts/lobby/README.md.
 
     from detector.lobby_nav import read_mode, read_page
     page, _, _ = read_page(gray)          # 'PLAY'
@@ -59,7 +59,7 @@ SUB_TABS = ('NORMAL', 'RANKED', 'ARCADE', 'TRAINING', 'CUSTOM')
 # The only sub tab anything here is allowed to start. See the module docstring.
 SAFE_MODE = 'TRAINING'
 
-TAB_TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'training_data',
+TAB_TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'templates',
                             'pubg_assets', 'lobby', 'tabs')
 TAB_TMPL_MIN = LOBBY_TAB_TMPL_MIN
 

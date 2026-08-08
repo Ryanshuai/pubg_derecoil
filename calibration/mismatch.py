@@ -8,9 +8,9 @@ a data labeller, and left disk writes sitting next to the code that has to hit
 a firing window.
 
 What it produces is deliberate training data, not noise:
-    docs/mismatch/highlight_mismatch/
-    docs/mismatch/weapon_hud_mismatch/
-    docs/mismatch/attachment_mismatch/
+    calibration/artifacts/mismatch/highlight_mismatch/
+    calibration/artifacts/mismatch/weapon_hud_mismatch/
+    calibration/artifacts/mismatch/attachment_mismatch/
 Those directories are the point of this module. Nothing here filters them
 down — a disagreement is exactly the case worth keeping.
 
@@ -113,7 +113,7 @@ class MismatchCollector:
 
         Filename: gt_{name}_{hl}_pred_{name}_{hl}_{hash6}.png
         """
-        save_dir = os.path.join('docs', 'mismatch', f'{detect_name}_mismatch')
+        save_dir = os.path.join('calibration', 'artifacts', 'mismatch', f'{detect_name}_mismatch')
         os.makedirs(save_dir, exist_ok=True)
 
         hl_gt = self.state.highlight_gt
@@ -155,7 +155,7 @@ class MismatchCollector:
         if not w.name:
             return
         filtered = validate_attachments(w.name, detected)
-        save_dir = os.path.join('docs', 'mismatch', 'attachment_mismatch')
+        save_dir = os.path.join('calibration', 'artifacts', 'mismatch', 'attachment_mismatch')
         for slot_name in ('muzzle', 'grip'):
             if detected.get(slot_name) and detected[slot_name] != filtered.get(slot_name, ''):
                 crop_key = f'att_{gun_id}_{slot_name}'

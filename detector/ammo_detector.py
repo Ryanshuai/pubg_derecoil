@@ -33,7 +33,7 @@ import os
 import cv2
 import numpy as np
 
-ASSETS_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'training_data',
+ASSETS_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'templates',
                           'pubg_assets', 'ammo')
 
 # The glyphs are fully opaque, the bar behind them is not. Measured on the

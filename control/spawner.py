@@ -20,14 +20,14 @@ detector/spawner_layout.py, taken off two capture runs that agreed to the
 pixel. Recognising the panel every time is the fallback, not the path: it
 reads UI text through a translucent overlay, so facing bright terrain the
 weapons column simply does not exist and a run dies with the panel plainly on
-screen. See docs/spawner/README.md section 2b.
+screen. See calibration/artifacts/spawner/README.md section 2b.
 
 Constants for the GEOMETRY, never for the STATE. Whether the panel is up and
 which category is expanded is read fresh every time -- the game drops
 connections, pops dialogs, and another agent shares this window. read()
 answers both from ONE frame with no baseline to compare against, which is what
 lets a sequence move sideways between categories instead of collapsing back to
-the root between every item. Measurements in docs/spawner/README.md section
+the root between every item. Measurements in calibration/artifacts/spawner/README.md section
 3b; `pixi run panel-state` checks it against 44 ground-truthed frames offline,
 and `pixi run spawner-plan` checks the coordinate arithmetic with no frames at
 all.
@@ -120,7 +120,7 @@ def shoot_parked(settle=0.10, park=True):
 
 # ── goto()'s path log ────────────────────────────────────────────────────
 # Is this menu an accordion (opening one category closes the last) or does it
-# let several stand open? Nobody knows: every capture in docs/spawner/runs/
+# let several stand open? Nobody knows: every capture in calibration/artifacts/spawner/runs/
 # expands from a collapsed panel, so the question has never been posed to the
 # game. The answer decides whether a same-column category switch costs 1 click
 # or 2, which is docs/refactor_plan.md section 2's whole cost table.
@@ -142,7 +142,7 @@ def shoot_parked(settle=0.10, park=True):
 # transition that costs a click, a screenshot and a poll. Failures are
 # swallowed -- a full disk must not take down a harvest run over telemetry.
 GOTO_LOG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        'docs', 'spawner', 'goto_paths.jsonl')
+                        'calibration', 'artifacts', 'spawner', 'goto_paths.jsonl')
 
 
 def record_goto(rec, col, row, path=None):
@@ -173,7 +173,7 @@ CATEGORY_OF_CLASS = {
 }
 # Column 1's other rows are not weapons this project drives: row 6 手枪,
 # row 7 可投掷物品, row 8 近战, row 9 其他. Labels read off
-# docs/spawner/runs/20260801_210656/col1_row*_label.png.
+# calibration/artifacts/spawner/runs/20260801_210656/col1_row*_label.png.
 
 # Same for attachments. Verified entry by entry against the captured submenus:
 # 弹匣 / 枪口 / 枪托 / 瞄准镜 match ATTACHMENTS' order exactly.
@@ -243,7 +243,7 @@ GEAR = {
 # `layout=` to SpawnerControl to drive off a file instead, which is for the
 # scrape tool and for a resolution this repo has not measured.
 LAYOUT_PATH = os.path.join(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__))), 'docs', 'spawner', 'layout.json')
+    os.path.abspath(__file__))), 'calibration', 'artifacts', 'spawner', 'layout.json')
 
 
 class Category:
@@ -272,7 +272,7 @@ def builtin_layout():
     THE PRIMARY PATH. No file, no frame, no game, and nothing that can fail:
     the panel's geometry was measured twice and did not move, so it is code.
     Provenance and the reasoning are in detector/spawner_layout.py's
-    measured-layout block and docs/spawner/README.md section 2b.
+    measured-layout block and calibration/artifacts/spawner/README.md section 2b.
     """
     return _as_categories(*known_layout())
 
@@ -392,7 +392,7 @@ def plan(keys, weapon_times=1):
     # before every move -- and getting it wrong does not miss harmlessly, the
     # stale coordinate lands on a submenu entry and spawns something nobody
     # asked for. Measured on live_two_open.png: 7 entries pushed MAGAZINE from
-    # y=349 to y=709. docs/spawner/README.md section 3b.
+    # y=349 to y=709. calibration/artifacts/spawner/README.md section 3b.
     items.sort(key=lambda s: (s['category'][0], -s['category'][1], s['index']))
     return gear + items
 
@@ -492,7 +492,7 @@ def check_against_run(run_dir):
 
     Offline — no game. `spawn()` makes the same comparison live and refuses to
     click on a mismatch, but by then a run is already half done; this answers
-    the same question from docs/spawner/runs/<stamp>/ before anything moves.
+    the same question from calibration/artifacts/spawner/runs/<stamp>/ before anything moves.
 
     It is what found 箭袋 (十字弩): 握把 expanded to 7 entries where the
     catalogue accounted for 6, which had silently shifted 斜向握把 down a slot.
@@ -981,7 +981,7 @@ class SpawnerControl(Driver):
 
         Deliberately does NOT assume whether this menu is an accordion (opening
         one category closes the last) or lets several stand open. That has
-        never been measured -- every capture in docs/spawner/runs/ expands from
+        never been measured -- every capture in calibration/artifacts/spawner/runs/ expands from
         a collapsed panel -- and guessing either way costs a click or a wrong
         state. So: click the target first and read back. On an accordion that
         is one click and done; if it is not, the read-back says so and this
@@ -1133,7 +1133,7 @@ class SpawnerControl(Driver):
         carried SUBMENU_ENTRY_DY/PITCH/CLICK_DX since it was written, with the
         note "that is why the spawner does not need a screenshot per click" —
         this is the caller finally taking it. Re-measured 2026-08-04 across all
-        42 stored category expansions in docs/spawner/runs/: every entry in
+        42 stored category expansions in calibration/artifacts/spawner/runs/: every entry in
         every category of every column fits cat_y + 44 + k*50.72 to within
         3.1 px, and the entry centre x is column_left + 252.7 for all three.
 
@@ -1647,9 +1647,9 @@ def main():
         if run == 'latest':
             runs = sorted(glob.glob(os.path.join(
                 os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                'docs', 'spawner', 'runs', '*')))
+                'calibration', 'artifacts', 'spawner', 'runs', '*')))
             if not runs:
-                print('no scrape runs under docs/spawner/runs/')
+                print('no scrape runs under calibration/artifacts/spawner/runs/')
                 return 1
             run = runs[-1]
         print(f'checking against {os.path.relpath(run)}\n')

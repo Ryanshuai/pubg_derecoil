@@ -9,7 +9,7 @@ stop. Level is halfway between. Nothing in here interprets the scene: no sky,
 no horizon, no terrain. The only question asked of the screen is "did anything
 change", and the only ruler is mouse counts, which are exact.
 
-Output goes to docs/pitch/pitch_range.json, which control/aim.py's goto_level()
+Output goes to calibration/artifacts/pitch/pitch_range.json, which control/aim.py's goto_level()
 reads: home to the bottom stop, rise by level_up, done. That replaces the
 ground-to-sky band scan, which was slow, visible, and not repeatable — it kept
 whatever pitch happened to have texture, so it came back 100..1900 in one run
@@ -19,7 +19,7 @@ different recoil.
 WHY NOT THE HORIZON. This file used to find level by locating the sky/terrain
 boundary and rising until it crossed the screen centre. That detector was
 broken in two independent ways, each fatal, measured 2026-08-04 on
-docs/pitch/standing_1700.png (a frame whose boundary is plainly at y≈600):
+calibration/artifacts/pitch/standing_1700.png (a frame whose boundary is plainly at y≈600):
 
   * it excluded the screen's left and right quarters "so the HUD down either
     edge does not vote" — but the COMPASS STRIP runs across the top CENTRE,
@@ -102,7 +102,7 @@ from config import SCREEN_W, SCREEN_H
 from capture.cropper import win32_cap
 from calibration.sweep import Rig, POSTURES
 
-OUT = os.path.join(ROOT, 'docs', 'pitch')
+OUT = os.path.join(ROOT, 'calibration', 'artifacts', 'pitch')
 STORE = os.path.join(OUT, 'pitch_range.json')
 
 # --sight names a MEASUREMENT PROFILE; this names the part that gets fitted.
@@ -299,7 +299,7 @@ def probe(rig, posture, step=None, yaw=0, base='standing', store=True):
     shots = {}
     # store: THIS is the separate measurement run, and its whole purpose is
     # that no calibration run ever has to do it. ViewDriver.goto_midline reads
-    # docs/pitch/pitch_travel.json and does not measure.
+    # calibration/artifacts/pitch/pitch_travel.json and does not measure.
     #
     # ⚠ AND --selftest MUST PASS store=False. It drives this same function
     # against a SYNTHETIC scene, and on 2026-08-06 the first version of this

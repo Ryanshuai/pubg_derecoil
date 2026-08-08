@@ -93,7 +93,7 @@ class FakeWorld:
 
 
 def a_frame():
-    for p in sorted(glob.glob(os.path.join(ROOT, 'docs', 'ads', 'runs',
+    for p in sorted(glob.glob(os.path.join(ROOT, 'calibration', 'artifacts', 'ads', 'runs',
                                            '**', '*.jpg'), recursive=True)):
         img = cv2.imread(p)
         if img is not None and img.shape[0] >= 1200 and img.shape[1] >= 2700:

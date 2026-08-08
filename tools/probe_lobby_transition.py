@@ -18,7 +18,7 @@ The full run is four phases and needs no babysitting between them:
             "F is not the right key" from "the popup swallowed it".
     settle  keep sampling after IN_GAME, to catch a state that flickers back.
 
-Full-screen shots and states.csv land in docs/lobby/runs/<n>/, so a transition
+Full-screen shots and states.csv land in calibration/artifacts/lobby/runs/<n>/, so a transition
 only has to be captured once to be replayable offline.
 """
 import argparse
@@ -37,7 +37,7 @@ from detector.lobby_detector import LobbyState, bar_max, classify, ping_fraction
 from control.focus import game_focused
 
 RUNS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                    'docs', 'lobby', 'runs')
+                    'calibration', 'artifacts', 'lobby', 'runs')
 
 
 def sample(frame):

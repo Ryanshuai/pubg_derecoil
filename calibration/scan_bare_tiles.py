@@ -27,9 +27,9 @@ THE SCOPE POSITION DRAWS NO TILE and reads `unknown` forever. It is scanned
 anyway -- config.py already records 71 edges of "weapon render showing
 through" there, which is this same effect measured and left alone.
 
-Lands in docs/runs/bare_tiles/<stamp>/ with one full screen per weapon, so
+Lands in calibration/artifacts/runs/bare_tiles/<stamp>/ with one full screen per weapon, so
 every number here is re-checkable offline, and writes the per-weapon summary
-to docs/compat/bare_tiles.json -- a conclusion, not raw data, so it goes in
+to calibration/artifacts/compat/bare_tiles.json -- a conclusion, not raw data, so it goes in
 git under the rule in calibration/CLAUDE.md.
 """
 import argparse
@@ -65,7 +65,7 @@ from detector.tab_layout import SLOT_NAMES
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KIND = 'bare_tiles'
-OUT = os.path.join(ROOT, 'docs', 'compat', 'bare_tiles.json')
+OUT = os.path.join(ROOT, 'calibration', 'artifacts', 'compat', 'bare_tiles.json')
 
 PLATE_INK_MIN = 200     # collect_templates' band: 0 empty, 679-901 with a gun
 RISE_MIN = 3.0          # AKM measured 29.8 fitted -> 346.6 bare, a 11.6x rise

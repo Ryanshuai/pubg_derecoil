@@ -10,8 +10,8 @@ from capture.cropper import win32_cap
 # cwd -- which only ever worked when the process happened to start at the repo
 # root.
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DISTANCE_PATH = os.path.join(_ROOT, 'docs', 'ballistics', 'distance_dict.json')
-TIME_PATH = os.path.join(_ROOT, 'docs', 'ballistics', 'time_dict.json')
+DISTANCE_PATH = os.path.join(_ROOT, 'calibration', 'artifacts', 'ballistics', 'distance_dict.json')
+TIME_PATH = os.path.join(_ROOT, 'calibration', 'artifacts', 'ballistics', 'time_dict.json')
 
 
 def detect_bullet(img_uint8):

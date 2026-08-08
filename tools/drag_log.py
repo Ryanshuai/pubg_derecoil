@@ -1,6 +1,6 @@
 """What separates the gestures that landed from the ones that did not.
 
-Reads docs/drag/journal.jsonl, which control/inventory.py appends to on every
+Reads calibration/artifacts/drag/journal.jsonl, which control/inventory.py appends to on every
 gesture. Offline; the game does not have to be running, and it does not have to
 have been YOUR run — the journal is shared, always on, and stamped with the pid
 of whoever wrote each line.
@@ -53,7 +53,7 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-LOG = os.path.join(ROOT, 'docs', 'drag', 'journal.jsonl')
+LOG = os.path.join(ROOT, 'calibration', 'artifacts', 'drag', 'journal.jsonl')
 
 # Ink on a weapon name plate, below which the rack row is empty. A COPY of
 # control.inventory.PLATE_INK_MIN, deliberately: this reader imports nothing,

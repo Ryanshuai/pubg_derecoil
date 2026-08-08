@@ -1411,7 +1411,7 @@ SELFTEST = (
     # method of the same name; each one is a plain JSON/dict reader.
     ('control/spawner.py:load_layout', False,
      'reads a scrape file. Its `.get(` is a dict, not the repo method'),
-    ('control/aim.py:_load_travel', False, 'reads docs/pitch JSON'),
+    ('control/aim.py:_load_travel', False, 'reads calibration/artifacts/pitch JSON'),
     ('control/match.py:Dispatcher._cond_met', False, 'evaluates a condition'),
     # ⚠ THESE TWO PIN THE HOMONYM RULE, and they are a matched pair on
     # purpose: one must come back R and the other must NOT, and the naive
@@ -1830,7 +1830,7 @@ def why(ref):
     return 0
 
 
-SNAPSHOT = ROOT / 'docs' / 'surface_levels.json'
+SNAPSHOT = ROOT / 'data' / 'surface_levels.json'
 
 
 def _levels():

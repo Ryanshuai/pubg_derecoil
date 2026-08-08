@@ -1,7 +1,7 @@
 """Press a key, get a full screenshot — without alt-tabbing out of the game.
 
     pixi run python tools/snap_on_key.py            # C shoots, Esc quits
-    pixi run python tools/snap_on_key.py --key V --out docs/tab/runs/drop_point
+    pixi run python tools/snap_on_key.py --key V --out calibration/artifacts/tab/runs/drop_point
 
 Polled with GetAsyncKeyState rather than read from stdin, so the game keeps
 focus the whole time: leaving the window is exactly what a screenshot of the

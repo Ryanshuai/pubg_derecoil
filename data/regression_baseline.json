@@ -1,0 +1,2648 @@
+{
+ "n_frames": 52,
+ "results": {
+  "docs/spawner/layout_probe.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/00_baseline.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.99534,
+    0.993457,
+    0.988933
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.002608,
+    "dy": -0.058696,
+    "mad": 1.839687,
+    "n_valid": 4,
+    "per_patch_dy": [
+     -11.2316,
+     26.5301,
+     -1.9585,
+     0.0015,
+     0.0146,
+     -0.1189,
+     -5.6842
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/00_layout.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.99534,
+    0.993457,
+    0.988933
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.0,
+    "dy": 0.0,
+    "mad": 0.0,
+    "n_valid": 7,
+    "per_patch_dy": [
+     0.0,
+     0.0,
+     -0.0,
+     0.0,
+     0.0,
+     0.0,
+     -0.0
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col1_row01_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": "Stock_SniperRifle_CheekPad_C"
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.99592,
+    0.993457,
+    0.989774
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.008429,
+    "dy": 0.001797,
+    "mad": 0.001518,
+    "n_valid": 7,
+    "per_patch_dy": [
+     0.0015,
+     0.0031,
+     -0.0161,
+     0.0018,
+     -0.0244,
+     0.0033,
+     0.0263
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col1_row02_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.996501,
+    0.994048,
+    0.990616
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.003824,
+    "dy": -0.015437,
+    "mad": 0.024047,
+    "n_valid": 7,
+    "per_patch_dy": [
+     0.0397,
+     0.0086,
+     -0.1329,
+     -0.0017,
+     -0.0211,
+     -0.0154,
+     -0.0402
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col1_row03_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.996501,
+    0.994048,
+    0.990616
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.008248,
+    "dy": -0.009067,
+    "mad": 0.021656,
+    "n_valid": 7,
+    "per_patch_dy": [
+     -0.0405,
+     -0.0183,
+     0.0373,
+     -0.0024,
+     0.0126,
+     -0.0091,
+     -0.0475
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col1_row04_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.99592,
+    0.993457,
+    0.99146
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.004992,
+    "dy": -0.003441,
+    "mad": 0.010888,
+    "n_valid": 7,
+    "per_patch_dy": [
+     -0.0885,
+     -0.084,
+     -0.1175,
+     0.0043,
+     0.0074,
+     0.0069,
+     -0.0034
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col1_row05_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.99592,
+    0.993457,
+    0.990616
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.009339,
+    "dy": -0.004487,
+    "mad": 0.013042,
+    "n_valid": 7,
+    "per_patch_dy": [
+     0.0556,
+     0.0327,
+     -0.0544,
+     -0.0067,
+     -0.0045,
+     -0.0095,
+     0.0086
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col1_row06_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.997082,
+    0.994048,
+    0.990616
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.002151,
+    "dy": -0.000665,
+    "mad": 0.014814,
+    "n_valid": 7,
+    "per_patch_dy": [
+     -0.0366,
+     -0.0031,
+     -0.0314,
+     0.0043,
+     0.0268,
+     0.0141,
+     -0.0007
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col1_row07_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.997664,
+    0.994048,
+    0.99146
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.005129,
+    "dy": 0.002691,
+    "mad": 0.023712,
+    "n_valid": 7,
+    "per_patch_dy": [
+     0.0085,
+     -0.0708,
+     -0.0345,
+     0.0027,
+     -0.0244,
+     0.0033,
+     0.0264
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col1_row08_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.997664,
+    0.995232,
+    0.99146
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.006202,
+    "dy": -0.008104,
+    "mad": 0.011002,
+    "n_valid": 7,
+    "per_patch_dy": [
+     -0.0336,
+     -0.0081,
+     -0.1755,
+     -0.0029,
+     0.0056,
+     -0.0019,
+     -0.0191
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col1_row09_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.997664,
+    0.995232,
+    0.99146
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.016182,
+    "dy": 0.005406,
+    "mad": 0.024523,
+    "n_valid": 7,
+    "per_patch_dy": [
+     0.0299,
+     -0.0328,
+     0.0631,
+     -0.0061,
+     0.0054,
+     -0.0034,
+     0.0362
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col1_row10_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.998247,
+    0.994639,
+    0.99146
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.001467,
+    "dy": 0.002819,
+    "mad": 0.005849,
+    "n_valid": 7,
+    "per_patch_dy": [
+     -0.0354,
+     0.0087,
+     -0.1366,
+     0.0061,
+     0.0028,
+     0.006,
+     -0.0596
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col2_row01_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.998831,
+    0.994048,
+    0.99146
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.010627,
+    "dy": 0.007056,
+    "mad": 0.00724,
+    "n_valid": 6,
+    "per_patch_dy": [
+     -3.1569,
+     0.066,
+     -0.0027,
+     0.0067,
+     0.0074,
+     0.0092,
+     -0.0005
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col2_row02_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.998247,
+    0.994048,
+    0.99146
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.009837,
+    "dy": 0.006299,
+    "mad": 0.076313,
+    "n_valid": 4,
+    "per_patch_dy": [
+     26.385,
+     -17.1269,
+     31.0769,
+     -0.0036,
+     0.0162,
+     -0.013,
+     0.0925
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col2_row03_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.998247,
+    0.994048,
+    0.99146
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.006341,
+    "dy": -0.012231,
+    "mad": 0.03217,
+    "n_valid": 4,
+    "per_patch_dy": [
+     -7.7909,
+     -7.8974,
+     -8.262,
+     0.0009,
+     -0.0253,
+     0.0024,
+     -0.0298
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col2_row04_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.998247,
+    0.994639,
+    0.99146
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.002925,
+    "dy": -0.003055,
+    "mad": 0.009604,
+    "n_valid": 4,
+    "per_patch_dy": [
+     -4.1972,
+     -58.1621,
+     -8.4294,
+     0.0018,
+     -0.0035,
+     -0.0027,
+     -0.0078
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col2_row05_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.998247,
+    0.994639,
+    0.99146
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.002907,
+    "dy": -0.002319,
+    "mad": 0.012921,
+    "n_valid": 4,
+    "per_patch_dy": [
+     -25.3741,
+     -8.7075,
+     33.6066,
+     -0.0044,
+     0.0103,
+     -0.002,
+     -0.0026
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col3_row01_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.998247,
+    0.994639,
+    0.99146
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.00033,
+    "dy": 0.002489,
+    "mad": 0.008872,
+    "n_valid": 6,
+    "per_patch_dy": [
+     -0.2573,
+     -0.1501,
+     -22.9086,
+     0.0008,
+     0.0042,
+     0.007,
+     0.0096
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col3_row02_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.997664,
+    0.994639,
+    0.99146
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.007286,
+    "dy": -0.007793,
+    "mad": 0.013756,
+    "n_valid": 7,
+    "per_patch_dy": [
+     -0.026,
+     -0.0017,
+     0.0244,
+     0.003,
+     -0.0215,
+     -0.0078,
+     -0.0328
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col3_row03_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.997664,
+    0.994639,
+    0.99146
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.005791,
+    "dy": 0.004554,
+    "mad": 0.022372,
+    "n_valid": 7,
+    "per_patch_dy": [
+     0.0269,
+     -0.0659,
+     0.0298,
+     -0.0052,
+     0.0046,
+     0.0037,
+     0.0476
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col3_row04_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.997664,
+    0.994639,
+    0.99146
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.002099,
+    "dy": 0.002506,
+    "mad": 0.012564,
+    "n_valid": 7,
+    "per_patch_dy": [
+     0.0075,
+     0.0446,
+     0.0242,
+     0.0025,
+     -0.0101,
+     -0.007,
+     -0.053
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col3_row05_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.998247,
+    0.994639,
+    0.99146
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.001605,
+    "dy": 0.014163,
+    "mad": 0.010802,
+    "n_valid": 7,
+    "per_patch_dy": [
+     -0.0027,
+     0.0258,
+     0.025,
+     0.0048,
+     0.0142,
+     0.0048,
+     0.0253
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_205423/col3_row06_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    0.998831,
+    0.995232,
+    0.99146
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.001102,
+    "dy": 0.0038,
+    "mad": 0.016422,
+    "n_valid": 7,
+    "per_patch_dy": [
+     0.0202,
+     0.1066,
+     0.0593,
+     -0.0039,
+     0.0038,
+     -0.0079,
+     -0.2626
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/00_baseline.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.002,
+    "dy": 0.062452,
+    "mad": 1.682355,
+    "n_valid": 5,
+    "per_patch_dy": [
+     5.5681,
+     1.7448,
+     -20.5506,
+     -0.0027,
+     -0.0152,
+     0.0625,
+     4.8002
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/00_layout.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.0,
+    "dy": 0.0,
+    "mad": 0.0,
+    "n_valid": 7,
+    "per_patch_dy": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col1_row01_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.001382,
+    "dy": -0.002462,
+    "mad": 0.012667,
+    "n_valid": 6,
+    "per_patch_dy": [
+     0.0296,
+     0.5641,
+     -0.1271,
+     -0.0008,
+     -0.0041,
+     -0.0057,
+     0.0119
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col1_row02_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.002747,
+    "dy": 0.007235,
+    "mad": 0.018499,
+    "n_valid": 6,
+    "per_patch_dy": [
+     0.0512,
+     -0.8677,
+     -0.0144,
+     0.0008,
+     0.0041,
+     0.0103,
+     0.0502
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col1_row03_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.0,
+    "dy": 0.0074,
+    "mad": 0.0074,
+    "n_valid": 7,
+    "per_patch_dy": [
+     0.0407,
+     0.1804,
+     0.152,
+     0.0,
+     0.0,
+     0.0042,
+     0.0074
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col1_row04_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.000518,
+    "dy": 0.001012,
+    "mad": 0.004172,
+    "n_valid": 7,
+    "per_patch_dy": [
+     0.001,
+     0.4124,
+     0.0407,
+     -0.0011,
+     -0.0015,
+     -0.0032,
+     0.039
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col1_row05_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.000199,
+    "dy": -0.038731,
+    "mad": 0.034559,
+    "n_valid": 7,
+    "per_patch_dy": [
+     -0.0527,
+     -0.1767,
+     -0.126,
+     0.0011,
+     -0.0042,
+     -0.0052,
+     -0.0387
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col1_row06_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.001213,
+    "dy": -0.000648,
+    "mad": 0.006595,
+    "n_valid": 7,
+    "per_patch_dy": [
+     -0.0724,
+     -0.2069,
+     0.0055,
+     -0.0006,
+     0.0003,
+     -0.0072,
+     0.0804
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col1_row07_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.010176,
+    "dy": 0.00063,
+    "mad": 0.018981,
+    "n_valid": 7,
+    "per_patch_dy": [
+     -0.0184,
+     0.4112,
+     -0.0671,
+     0.0006,
+     0.0061,
+     0.0054,
+     -0.0358
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col1_row08_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.004792,
+    "dy": -0.004139,
+    "mad": 0.008694,
+    "n_valid": 7,
+    "per_patch_dy": [
+     -0.0128,
+     -0.0355,
+     0.0068,
+     -0.0008,
+     -0.0041,
+     -0.013,
+     0.0033
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col1_row09_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.000188,
+    "dy": 0.000247,
+    "mad": 0.007185,
+    "n_valid": 7,
+    "per_patch_dy": [
+     -0.078,
+     -0.2915,
+     0.1785,
+     0.0002,
+     0.0042,
+     0.0036,
+     -0.0069
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col1_row10_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.009915,
+    "dy": 0.000526,
+    "mad": 0.031181,
+    "n_valid": 7,
+    "per_patch_dy": [
+     0.0351,
+     0.1591,
+     -0.0763,
+     0.0005,
+     -0.0002,
+     0.0069,
+     -0.0307
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col2_row01_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.002189,
+    "dy": 0.008973,
+    "mad": 0.019118,
+    "n_valid": 6,
+    "per_patch_dy": [
+     -0.5204,
+     0.3131,
+     0.0873,
+     -0.0006,
+     -0.0034,
+     -0.01,
+     0.0185
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col2_row02_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.01051,
+    "dy": 0.001043,
+    "mad": 0.063683,
+    "n_valid": 4,
+    "per_patch_dy": [
+     -3.4639,
+     -3.9487,
+     -47.5424,
+     -0.0005,
+     0.0026,
+     -0.0073,
+     0.0564
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col2_row03_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.000366,
+    "dy": -0.009776,
+    "mad": 0.048052,
+    "n_valid": 4,
+    "per_patch_dy": [
+     -7.7995,
+     -7.8568,
+     -8.2497,
+     0.0007,
+     -0.0078,
+     -0.0117,
+     -0.0474
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col2_row04_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.001067,
+    "dy": 0.003583,
+    "mad": 0.026205,
+    "n_valid": 4,
+    "per_patch_dy": [
+     -4.2217,
+     -57.0471,
+     -8.5515,
+     -0.0007,
+     0.0078,
+     0.0127,
+     -0.0135
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col2_row05_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.005749,
+    "dy": -0.001042,
+    "mad": 0.036322,
+    "n_valid": 4,
+    "per_patch_dy": [
+     1.4151,
+     -8.7929,
+     30.7808,
+     0.0005,
+     -0.0026,
+     0.0043,
+     -0.0358
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col3_row01_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.000887,
+    "dy": -0.007789,
+    "mad": 0.022805,
+    "n_valid": 5,
+    "per_patch_dy": [
+     -0.4111,
+     -27.0513,
+     -26.2489,
+     -0.0002,
+     -0.0009,
+     -0.0078,
+     -0.023
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col3_row02_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.004792,
+    "dy": 0.039743,
+    "mad": 0.038958,
+    "n_valid": 7,
+    "per_patch_dy": [
+     0.0664,
+     0.0397,
+     0.1129,
+     0.0008,
+     0.0041,
+     -0.0013,
+     0.0821
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col3_row03_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.001013,
+    "dy": -0.000583,
+    "mad": 0.005673,
+    "n_valid": 7,
+    "per_patch_dy": [
+     -0.0558,
+     0.3279,
+     -0.0995,
+     -0.0006,
+     -0.0034,
+     0.0051,
+     0.0006
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col3_row04_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -0.002068,
+    "dy": -0.006843,
+    "mad": 0.0068,
+    "n_valid": 7,
+    "per_patch_dy": [
+     -0.0236,
+     -0.1088,
+     0.1491,
+     -0.0,
+     -0.0023,
+     -0.0107,
+     -0.0068
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col3_row05_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.001823,
+    "dy": -0.00016,
+    "mad": 0.00948,
+    "n_valid": 7,
+    "per_patch_dy": [
+     0.0093,
+     -0.0783,
+     0.0835,
+     -0.0002,
+     0.0019,
+     -0.0054,
+     -0.015
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/spawner/runs/20260801_210656/col3_row06_open.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.004792,
+    "dy": 0.004139,
+    "mad": 0.024574,
+    "n_valid": 7,
+    "per_patch_dy": [
+     -0.022,
+     0.4299,
+     -0.1037,
+     0.0008,
+     0.0041,
+     0.0166,
+     0.0287
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/tab_inventory.png": {
+   "attachment": {
+    "1": {
+     "grip": "Lower_Foregrip_C",
+     "magazine": "Magazine_ExtendedQuickDraw_Large_C",
+     "muzzle": "Muzzle_Compensator_Large_C",
+     "scope": "Upper_DotSight_01_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "Magazine_Extended_Large_C",
+     "muzzle": "Muzzle_Suppressor_Medium_C",
+     "scope": "Upper_Scope6x_C",
+     "stock": "Stock_SniperRifle_CheekPad_C"
+    }
+   },
+   "fire_mode": null,
+   "highlight": 1,
+   "posture": null,
+   "spawner_class": false,
+   "spawner_scores": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "tab_type": true,
+   "tab_weapon": [
+    "g36c",
+    "sks"
+   ],
+   "view_tracker": {
+    "dx": 1.289809,
+    "dy": -23.415619,
+    "mad": 17.242881,
+    "n_valid": 6,
+    "per_patch_dy": [
+     -40.3554,
+     -18.9965,
+     -27.8348,
+     -36.2393,
+     -6.2066,
+     38.2997,
+     10.0395
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/tab_inventory_2.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "Magazine_ExtendedQuickDraw_Medium_C",
+     "muzzle": "Muzzle_Compensator_Medium_C",
+     "scope": "Upper_DotSight_01_C",
+     "stock": "Stock_SniperRifle_CheekPad_C"
+    },
+    "2": {
+     "grip": "Lower_Sniper_CheekPad_Vss_setting",
+     "magazine": "Magazine_Extended_Large_C",
+     "muzzle": "Muzzle_Suppressor_Medium_C",
+     "scope": "Upper_Scope6x_C",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 1,
+   "posture": null,
+   "spawner_class": false,
+   "spawner_scores": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "tab_type": true,
+   "tab_weapon": [
+    "uzi",
+    "mk12"
+   ],
+   "view_tracker": {
+    "dx": 0.02726,
+    "dy": -0.072384,
+    "mad": 0.07878,
+    "n_valid": 5,
+    "per_patch_dy": [
+     -10.7892,
+     2.8155,
+     -0.1122,
+     0.0303,
+     0.0064,
+     -0.0724,
+     -0.0758
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/tab_layout.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "Magazine_ExtendedQuickDraw_Medium_C",
+     "muzzle": "",
+     "scope": "Upper_DotSight_01_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "Magazine_ExtendedQuickDraw_Medium_C",
+     "muzzle": "",
+     "scope": "",
+     "stock": "Stock_SniperRifle_CheekPad_C"
+    }
+   },
+   "fire_mode": null,
+   "highlight": 1,
+   "posture": null,
+   "spawner_class": false,
+   "spawner_scores": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "tab_type": true,
+   "tab_weapon": [
+    "g36c",
+    "sks"
+   ],
+   "view_tracker": {
+    "dx": 0.416625,
+    "dy": -0.449411,
+    "mad": 0.525174,
+    "n_valid": 5,
+    "per_patch_dy": [
+     11.1674,
+     -2.6931,
+     -1.3835,
+     -0.0303,
+     -0.5606,
+     -0.4494,
+     0.0758
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/tab_live_aug_vss.png": {
+   "attachment": {
+    "1": {
+     "grip": "Lower_Foregrip_C",
+     "magazine": "Magazine_ExtendedQuickDraw_Large_C",
+     "muzzle": "Muzzle_Compensator_Large_C",
+     "scope": "Upper_DotSight_01_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "Magazine_SR_ExtendedQuick_Mag_Vss_setting",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 1,
+   "posture": null,
+   "spawner_class": false,
+   "spawner_scores": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "tab_type": true,
+   "tab_weapon": [
+    "aug",
+    ""
+   ],
+   "view_tracker": {
+    "dx": 0.815905,
+    "dy": 17.543185,
+    "mad": 14.712218,
+    "n_valid": 7,
+    "per_patch_dy": [
+     32.2554,
+     28.4139,
+     1.1939,
+     0.0108,
+     17.5432,
+     29.0676,
+     0.1463
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  },
+  "docs/training_epuipment.png": {
+   "attachment": {
+    "1": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "Muzzle_Suppressor_SniperRifle_C",
+     "scope": "SideRail_DotSight_RMR_C",
+     "stock": ""
+    },
+    "2": {
+     "grip": "",
+     "magazine": "",
+     "muzzle": "",
+     "scope": "",
+     "stock": ""
+    }
+   },
+   "fire_mode": null,
+   "highlight": 2,
+   "posture": null,
+   "spawner_class": true,
+   "spawner_scores": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "tab_type": false,
+   "tab_weapon": [
+    "",
+    ""
+   ],
+   "view_tracker": {
+    "dx": -7.820736,
+    "dy": 2.350551,
+    "mad": 18.319935,
+    "n_valid": 7,
+    "per_patch_dy": [
+     2.3506,
+     -19.9562,
+     -14.535,
+     36.1772,
+     -40.7655,
+     20.6705,
+     10.1817
+    ]
+   },
+   "weapon_dl": [
+    "",
+    ""
+   ]
+  }
+ },
+ "versions": {
+  "cv2": "5.0.0",
+  "numpy": "2.5.1",
+  "python": "3.12.13",
+  "torch": "2.13.0+cu130"
+ }
+}

@@ -43,7 +43,7 @@ sys.path.insert(0, ROOT)
 from calibration.sweep import Rig                                # noqa: E402
 from control.session import ensure_ready                         # noqa: E402
 
-OUT_DIR = os.path.join(ROOT, 'docs', 'holes')
+OUT_DIR = os.path.join(ROOT, 'calibration', 'artifacts', 'holes')
 
 # A hole darkens the wall. 18 is well clear of frame-to-frame noise on a still
 # scene (measured floor ~4) and well under the 40+ a real mark makes.

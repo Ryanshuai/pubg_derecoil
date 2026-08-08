@@ -1,6 +1,6 @@
 """Tab-screen geometry — where to grab an attachment and where to drop it.
 
-Reference capture: docs/tab_inventory.png (3440x1440, 2026-08-01).
+Reference capture: calibration/artifacts/tab_inventory.png (3440x1440, 2026-08-01).
 Measured by two scratch probes (inventory rows from the text bands; slot
 boxes from their borders). Neither is on disk any more, so the constants
 below are the whole record of what they found.
@@ -31,7 +31,7 @@ from config import (HUD_REGIONS, SCREEN_W, SCREEN_H,
 # a bogus 66 px pitch. The icon block is centred; the text is not.
 #
 # 附近 appearing does NOT shift 库存 — the two panels have fixed, independent
-# x ranges (checked against docs/tab_inventory.png, where 附近 is empty).
+# x ranges (checked against calibration/artifacts/tab_inventory.png, where 附近 is empty).
 # ════════════════════════════════════════════════════════════
 
 ROW_Y_FIRST = 199               # centre of row 0, both panels
@@ -40,7 +40,7 @@ ROW_H = 82
 
 # Icon box, calibrated against AttachmentDetector's own metric rather than
 # eyeballed: a scratch calibrator (gone) swept centre and size over the 12
-# known rows of docs/tab_inventory.png and keeps what classifies most of them.
+# known rows of calibration/artifacts/tab_inventory.png and keeps what classifies most of them.
 # 80 px is the box that puts the artwork at the same relative size the weapon
 # slots present it at, so the same 63x63 templates apply after a resize.
 ICON_W = 80
@@ -58,7 +58,7 @@ INV_ROWS = 12                   # rows visible at 1440p before scrolling
 # Measured 2026-08-02 by holding a drag over each panel without releasing and
 # screenshotting (tools/snap_on_key.py stamps the cursor in): the game draws a
 # dashed border around whatever would accept the drop, and it is invisible any
-# other way. The two shots are in docs/tab/runs/drop_point/.
+# other way. The two shots are in calibration/artifacts/tab/runs/drop_point/.
 #
 # This exists because reusing a row point as a release point is wrong and
 # fails quietly. `unequip()` released at the ICON-COLUMN centre of a computed
@@ -146,7 +146,7 @@ def att_slot_point(weapon_slot, slot):
 # where PUBG's auto-fit bolts them onto the next pair, and a run labelled BARE
 # comes back wearing a foregrip nobody asked for.
 #
-# Measured off docs/tab_inventory.png: the box spans x 2216..2259, y 123..158
+# Measured off calibration/artifacts/tab_inventory.png: the box spans x 2216..2259, y 123..158
 # on weapon 1, which is immediately left of HUD_REGIONS['gun_name_1'] (x from
 # 2275) and shares its vertical band. The row pitch is 302 px, matching the
 # 301 between att_1_muzzle (y=316) and att_2_muzzle (y=617) to within a pixel.
@@ -224,7 +224,7 @@ def _masks():
         import cv2
         from config import TAB_ANCHOR_LANGS
         d = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..',
-                         'docs', 'training_data', 'pubg_assets', 'tab')
+                         'data', 'templates', 'pubg_assets', 'tab')
         _MASKS = {}
         for lang in TAB_ANCHOR_LANGS:
             m = cv2.imread(os.path.join(d, f'type_header_{lang}.png'),

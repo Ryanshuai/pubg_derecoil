@@ -50,7 +50,7 @@ def check(name, got, want):
         FAILS.append(name)
 
 
-SCRATCH = os.path.join(ROOT, 'docs', 'tab', 'truth', '_selftest')
+SCRATCH = os.path.join(ROOT, 'calibration', 'artifacts', 'tab', 'truth', '_selftest')
 
 print('\n=== the sidecar round-trips, and keeps what it was not told to read ===')
 img = np.zeros((8, 8, 3), np.uint8)
@@ -115,7 +115,7 @@ print('\n=== ...AND THE CHECK CAN FAIL. This is the point. ===')
 # "3/3 correct" reads the same whether the checker discriminates or just
 # returns whatever was expected. Feed each one a crop that is NOT its answer
 # and require a mismatch. Without this the whole pass is decoration.
-CROPS = os.path.join(ROOT, 'docs', 'tab', 'truth')
+CROPS = os.path.join(ROOT, 'calibration', 'artifacts', 'tab', 'truth')
 cks = _checkers()
 g1 = cv2.imread(os.path.join(CROPS, 'tab_inventory_gun_name_1.png'))
 g2 = cv2.imread(os.path.join(CROPS, 'tab_inventory_gun_name_2.png'))

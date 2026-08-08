@@ -252,8 +252,8 @@ def selftest():
         return [None, [[_place(g)] for _, g in glyphs]]
 
     s40 = state('temp_debug/screen_3440x1440_20260802_022612.png')
-    s5 = state('docs/ads/runs/20260802_015545/iron/ads_v0_t0040.jpg')
-    s8 = state('docs/ads/runs/20260801_222936/iron/ads_v0_t0040.jpg')
+    s5 = state('calibration/artifacts/ads/runs/20260802_015545/iron/ads_v0_t0040.jpg')
+    s8 = state('calibration/artifacts/ads/runs/20260801_222936/iron/ads_v0_t0040.jpg')
 
     cases = [
         ('truthful: 40 labelled 40',            [s40], 40, False),

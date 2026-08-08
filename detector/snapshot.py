@@ -2,7 +2,7 @@
 
     from detector.snapshot import snap
 
-    snap(crop, 'docs/tab/runs/x/muzzle.png', kind='crop', screen='tab',
+    snap(crop, 'calibration/artifacts/tab/runs/x/muzzle.png', kind='crop', screen='tab',
          roi=(316, 2409, 63, 63), parent='00_baseline.png',
          source='calibrate-template/attachment',
          labels=[{'target': 'attachment', 'value': 'comp_ar',
@@ -19,7 +19,7 @@ if it is under docs/ and happens to be full-screen, which means:
 
   * the rule is implicit — it lives in a glob and a size comparison, so which
     shots count depends on where they landed rather than on what they are
-  * CROPS ARE ENTIRELY WASTED. docs/spawner/runs/*/col1_row01_label.png and
+  * CROPS ARE ENTIRELY WASTED. calibration/artifacts/spawner/runs/*/col1_row01_label.png and
     its kind outnumber the full-screen shots several times over, and they are
     exactly what template matching wants. None of them are in the harness.
   * the assertion is only ever "same as last time", which catches a library

@@ -32,7 +32,7 @@ TMPL_THRESHOLD = 0.85
 # the nearest wrong answer is either a rounding error or a fifth of the scale.
 TIE_MARGIN = 0.05
 
-TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'training_data', 'ocr_white')
+TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'templates', 'ocr_white')
 _OPEN_KERNEL = np.ones((3, 3), np.uint8)
 
 
@@ -53,7 +53,7 @@ def _template_match(crop, templates):
     plate can hold more text than its template covers — the game prints
     'Micro UZI 冲锋枪' where the template is only 'Micro UZI' — and dividing
     by every white pixel on the plate charges the template for glyphs it was
-    never meant to explain. Measured on docs/tab_inventory*.png, that scored
+    never meant to explain. Measured on calibration/artifacts/tab_inventory*.png, that scored
     the correct UZI at 0.575, under the 0.85 threshold, so the gun read as
     unnamed; windowed it scores 0.995.
 

@@ -58,12 +58,12 @@ def points(script, act):
 
 # ══════════════════════════════════════════════════════════════════════
 print('\n=== the constants still ARE the measurement ===')
-# docs/spawner/layout.json is what tools/scrape_spawner.py wrote from the two
+# calibration/artifacts/spawner/layout.json is what tools/scrape_spawner.py wrote from the two
 # capture runs (20260801_205423 and 20260801_210656, which agreed to the
 # pixel). The constants in detector/spawner_layout.py are a hand-copy of it,
 # and a hand-copy is exactly the thing that silently rots: one mistyped y and
 # every click in that column lands on the row above.
-LAYOUT_JSON = os.path.join(ROOT, 'docs', 'spawner', 'layout.json')
+LAYOUT_JSON = os.path.join(ROOT, 'calibration', 'artifacts', 'spawner', 'layout.json')
 if os.path.exists(LAYOUT_JSON):
     with open(LAYOUT_JSON, encoding='utf-8') as f:
         recorded = json.load(f)
@@ -179,7 +179,7 @@ check('gear leads', [s['kind'] for s in steps][0], 'gear')
 
 print('\n=== plan(): same column BOTTOM ROW FIRST ===')
 # A submenu pushes every category BELOW it down, measured at
-# docs/spawner/live_two_open.png: 7 open entries moved MAGAZINE from y=349 to
+# calibration/artifacts/spawner/live_two_open.png: 7 open entries moved MAGAZINE from y=349 to
 # y=709. Going bottom-up, the next category is always ABOVE what is open and
 # its measured y is still valid. Top-down, the second click lands on a submenu
 # entry -- which does not miss, it SPAWNS SOMETHING NOBODY ASKED FOR, and it
@@ -214,7 +214,7 @@ check('both entry clicks are the same point',
 
 print('\n=== weapon_times=2 buys a second click, and only for weapons ===')
 # It converges the rack on slot 2 from any starting state, at the cost of a
-# gun on the floor. Not the default -- see docs/spawner/README.md section 5.
+# gun on the floor. Not the default -- see calibration/artifacts/spawner/README.md section 5.
 one = click_plan(plan(['m416', 'comp_ar']))
 two = click_plan(plan(['m416', 'comp_ar'], weapon_times=2))
 check('one extra entry click in total',
@@ -305,7 +305,7 @@ except KeyError:
 check('a weapon not in ROSTER is refused, not indexed', got, 'refused')
 
 # The other direction, which no lint can see: the counts here are transcribed
-# from the spawner's own submenus (docs/spawner/runs/), so a name added to
+# from the spawner's own submenus (calibration/artifacts/spawner/runs/), so a name added to
 # ROSTER without one being added to the game shows up as a length that no
 # longer matches. Update these ONLY against a fresh screenshot.
 SPAWNER_ROWS = {'AR': 13, 'SR': 5, 'DMR': 7, 'SG': 5, 'SMG': 8, 'LMG': 2}
@@ -330,7 +330,7 @@ check('empty list', click_plan(plan([])), [])
 
 # ══════════════════════════════════════════════════════════════════════
 print('\n=== the layout loads with no file and no screen ===')
-# It used to come from docs/spawner/layout.json, and a missing file left
+# It used to come from calibration/artifacts/spawner/layout.json, and a missing file left
 # self.menu None -- every give_* answered "not synced" with the panel plainly
 # on screen. builtin_layout() has nothing to fail on.
 menu, boxes = builtin_layout()

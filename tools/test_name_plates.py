@@ -50,7 +50,7 @@ import cv2                                                    # noqa: E402
 from detector.weapon_template_detector import (                # noqa: E402
     TMPL_THRESHOLD, TabWeaponDetector, _template_match)
 
-RUNS = os.path.join(ROOT, 'docs', 'attachments', 'runs')
+RUNS = os.path.join(ROOT, 'calibration', 'artifacts', 'attachments', 'runs')
 
 # Below this the corpus itself is the problem, not the detector — say so
 # rather than passing on three crops.

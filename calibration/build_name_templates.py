@@ -56,7 +56,7 @@ from detector.weapon_template_detector import (                # noqa: E402
     TMPL_DIR, TMPL_THRESHOLD, TabWeaponDetector, _template_match,
     _white_text_mask)
 
-RUNS = os.path.join(ROOT, 'docs', 'attachments', 'runs')
+RUNS = os.path.join(ROOT, 'calibration', 'artifacts', 'attachments', 'runs')
 
 # A pixel is text when this fraction of the backgrounds agree it is. Not a
 # majority (0.5) and not unanimity (1.0): antialiasing makes the outermost

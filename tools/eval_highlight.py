@@ -26,7 +26,7 @@ sys.path.insert(0, ROOT)
 
 from detector.highlight_detector import _combined_max   # noqa: E402
 
-EVAL = os.path.join(ROOT, 'docs', 'training_data', 'highlight_eval')
+EVAL = os.path.join(ROOT, 'data', 'templates', 'highlight_eval')
 BASELINE = 254      # of 254 pairs; raise this if it ever improves
 
 

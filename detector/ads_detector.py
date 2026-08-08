@@ -76,7 +76,7 @@ import numpy as np
 from dl_models.icon_merging import dewhite
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TEMPLATE_PATH = os.path.join(HERE, '..', 'docs', 'training_data', 'pubg_assets',
+TEMPLATE_PATH = os.path.join(HERE, '..', 'data', 'templates', 'pubg_assets',
                              'ads_crosshair.npz')
 
 # The crop is centred on the screen centre and has to hold the outermost tick

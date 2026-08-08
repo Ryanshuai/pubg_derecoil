@@ -48,7 +48,7 @@ is wrong and the probe says so instead of reporting numbers.
     pixi run python tools/probe_posture_trace.py
     pixi run python tools/probe_posture_trace.py --shots 0   # numbers only
 
-Output: docs/posture/traces/<stamp>/{trace.jsonl, *.png}
+Output: calibration/artifacts/posture/traces/<stamp>/{trace.jsonl, *.png}
 """
 import argparse
 import json
@@ -73,7 +73,7 @@ from detector.posture_detector import (MIN_AREA,                   # noqa: E402
 from press.pico_mouse import (get_mouse, other_agents,            # noqa: E402
                               HID_KEY_C, HID_KEY_Z)
 
-OUT_ROOT = os.path.join(ROOT, 'docs', 'posture', 'traces')
+OUT_ROOT = os.path.join(ROOT, 'calibration', 'artifacts', 'posture', 'traces')
 WATCH_S = 2.0
 SAMPLE_HZ = 60
 # A transition has to clear this much accumulated camera travel to count as

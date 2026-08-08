@@ -8,7 +8,7 @@ bottom-right buttons without hardcoding where they sit.
 
 Everything here reads a full-screen BGR frame and returns coordinates. Driving
 the mouse to those coordinates is control/spawner.py; capturing
-the whole menu to disk is tools/scrape_spawner.py. See docs/spawner/README.md
+the whole menu to disk is tools/scrape_spawner.py. See calibration/artifacts/spawner/README.md
 for the measurements behind every threshold.
 """
 import cv2
@@ -60,13 +60,13 @@ BOX_LEFT_PAD = 20      # how far left of the chevron a column's box starts
 # Provenance — two independent capture runs, which agreed to the pixel on all
 # 21 categories:
 #
-#   docs/spawner/runs/20260801_205423   first run, 20/21
-#   docs/spawner/runs/20260801_210656   clean run, 21/21
+#   calibration/artifacts/spawner/runs/20260801_205423   first run, 20/21
+#   calibration/artifacts/spawner/runs/20260801_210656   clean run, 21/21
 #
-# tools/scrape_spawner.py merged them into docs/spawner/layout.json, which is
+# tools/scrape_spawner.py merged them into calibration/artifacts/spawner/layout.json, which is
 # kept as the record of the measurement; `pixi run spawner-plan` asserts these
 # constants still reproduce it entry for entry. Measurements and method are in
-# docs/spawner/README.md sections 2 and 2b.
+# calibration/artifacts/spawner/README.md sections 2 and 2b.
 #
 # Why constants and not recognition. find_menu() has to separate UI text from
 # terrain through a translucent panel, so what it can read depends on which way
@@ -118,7 +118,7 @@ def category_point(col, row):
 
     A measured constant, not a search: no frame, no panel, no game. Valid
     whenever nothing ABOVE this row in the SAME column is expanded, which is
-    what visiting a column bottom-up guarantees -- see docs/spawner/README.md
+    what visiting a column bottom-up guarantees -- see calibration/artifacts/spawner/README.md
     section 3b, and plan()'s ordering in control/spawner.py.
     """
     if col not in COLUMN_BOX:
@@ -135,7 +135,7 @@ def known_layout():
 
     -> ({col: [{'row', 'y', 'click_x'}, ...]}, {col: (x0, x1)})
 
-    Same shape as docs/spawner/layout.json, so a caller can take either. This
+    Same shape as calibration/artifacts/spawner/layout.json, so a caller can take either. This
     one cannot fail: no file to be missing, no frame to be misread.
     """
     menu = {c: [{'row': r, 'y': CATEGORY_Y[r - 1],
@@ -156,20 +156,20 @@ SUBMENU_CENTRE_TOL = 45  # entries are centred; categories are left-aligned
 # clicked column's box. Measured over a full 21-category run: a real expansion
 # moves 489..21096 px (the floor is the last row of a column, whose submenu has
 # two entries and nothing below it to push down), while an untouched column
-# drifts by at most ~75. The run and both bounds are in docs/spawner/README.md
+# drifts by at most ~75. The run and both bounds are in calibration/artifacts/spawner/README.md
 # §3 — the 60-line probe that produced them was deleted 2026-08-08, because
 # re-running it can only reprint that table.
 CHANGE_MIN = 200
 
 # How far below its category row the submenu's first entry starts. Measured
-# over 42 ground-truthed frames across both runs in docs/spawner/runs/ (the
+# over 42 ground-truthed frames across both runs in calibration/artifacts/spawner/runs/ (the
 # file name colN_rowMM_open.png IS the answer): +35..+37, never outside.
 #
 # This is what makes the panel readable WITHOUT the collapsed baseline. The
 # same 42 frames also showed the category rows do not move when something
 # expands -- the submenu draws over its neighbours rather than pushing them
 # down -- so one collapsed reading of the categories stays valid forever, and
-# a frame can say which node it is at on its own. See docs/spawner/README.md
+# a frame can say which node it is at on its own. See calibration/artifacts/spawner/README.md
 # section 3b.
 SUBMENU_OFFSET = 36
 SUBMENU_OFFSET_TOL = 12

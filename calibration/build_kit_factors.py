@@ -21,10 +21,12 @@ They do not. Measured 2026-08-05, eight weapons, 28 cells:
   * posture x kit interacts with OPPOSITE SIGNS on two ARs (m416 +13.8/+21.6%,
     m762 -6.2/-7.0%, all >3.7 sigma), so one correction curve cannot cover it
 
-A product of per-slot numbers cannot represent any of that. A table can, and
-`docs/recoil/factor_model.md` had already reached the same conclusion for the
-two weapons it had complete data on: "mp5k / vector: don't multiply, and you
-don't need to -- all eight configurations are measured in the table."
+A product of per-slot numbers cannot represent any of that. A table can. The
+same conclusion had already been reached for the two weapons with complete
+data, in a factor_model.md that is NOT on disk any more: "mp5k / vector: don't
+multiply, and you don't need to -- all eight configurations are measured in
+the table." The quote is kept because it is the finding; the file it was in
+went with the corpus.
 
 WHAT IS KEYED, AND WHY IT IS `want` RATHER THAN THE CONFIG LABEL. The label
 collides: measuring vert_grip and thumb_grip both produce cells named `grip`,
@@ -44,7 +46,7 @@ than most of the effects here -- `ratio()` widens the error bar and marks the
 row when it happens, and every source below carries its own same-run bare so
 it should not.
 
-⚠ SOURCES ARE LISTED, NOT GLOBBED. docs/recoil/runs/ held 121 files including
+⚠ SOURCES ARE LISTED, NOT GLOBBED. calibration/artifacts/recoil/runs/ held 121 files including
 runs taken before the magnification factor reached the curve, before posture
 was re-checked per magazine, and before a magazine fired into the pitch clamp
 was caught. Those produce confident wrong numbers, and a glob would eat them
@@ -103,7 +105,7 @@ RECOIL_SLOTS = ('muzzle', 'grip', 'stock')
 # number that could be anywhere.
 #
 # The one row this excludes is vss/cheek_pad at 0.8161 +- 0.2304 (rel 0.28,
-# 0.80 sigma from identity). docs/recoil/factor_model.md already says of it
+# 0.80 sigma from identity). The since-deleted factor_model.md said of it
 # "it establishes nothing"; shipping it would mean compensating as though the
 # part removes 18% of the recoil when the same data is consistent with it
 # removing none. Every other measured row is at rel <= 0.031, so this floor is
@@ -121,17 +123,17 @@ DISAGREE_REL = 0.027
 # (b13c174), reload waited out before ADS (52a12be), clamp magazine kept out
 # of the EMA (242ba14), weapon identity verified (ece73d2).
 SOURCES = [
-    ('docs/recoil/runs/ortho8_0805.jsonl',
+    ('calibration/artifacts/recoil/runs/ortho8_0805.jsonl',
      '8-weapon full factorial, 28 cells, 6 magazines each, same-run bares'),
-    ('docs/recoil/runs/grips_m762_thumb_grip_0805.jsonl', 'm762 grip axis'),
-    ('docs/recoil/runs/grips_m762_tilted_grip_0805.jsonl', 'm762 grip axis'),
-    ('docs/recoil/runs/grips_m762_half_grip_0805.jsonl', 'm762 grip axis'),
-    ('docs/recoil/runs/grips_m762_light_grip_0805.jsonl', 'm762 grip axis'),
-    ('docs/recoil/runs/grips_m762_laser_0805.jsonl',
+    ('calibration/artifacts/recoil/runs/grips_m762_thumb_grip_0805.jsonl', 'm762 grip axis'),
+    ('calibration/artifacts/recoil/runs/grips_m762_tilted_grip_0805.jsonl', 'm762 grip axis'),
+    ('calibration/artifacts/recoil/runs/grips_m762_half_grip_0805.jsonl', 'm762 grip axis'),
+    ('calibration/artifacts/recoil/runs/grips_m762_light_grip_0805.jsonl', 'm762 grip axis'),
+    ('calibration/artifacts/recoil/runs/grips_m762_laser_0805.jsonl',
      'm762 grip axis -- the null with a positive control in the same run'),
-    ('docs/recoil/runs/posture_x_kit_0805_m762.jsonl',
+    ('calibration/artifacts/recoil/runs/posture_x_kit_0805_m762.jsonl',
      'm762 posture x kit, the interaction a single posture factor cannot hold'),
-    ('docs/recoil/runs/vss_still2_0805.jsonl',
+    ('calibration/artifacts/recoil/runs/vss_still2_0805.jsonl',
      'vss cheek_pad, measured with NOTHING touching the pitch between '
      'magazines -- 0.7620 +- 0.0676 (3.5 sigma) against the same cell\'s '
      '0.8161 +- 0.2304 (0.80 sigma) when the aim was homed into the ground. '
@@ -151,11 +153,11 @@ SOURCES = [
     # backdrop it claims to move, the retry re-finds its row instead of
     # clicking a shifted one, and an early outlier is re-judged once there is
     # a distribution to judge it against.
-    ('docs/recoil/runs/harvest_red_dot_0807_0805.jsonl',
+    ('calibration/artifacts/recoil/runs/harvest_red_dot_0807_0805.jsonl',
      'famas muzzle=brake_ar, own same-run bare'),
-    ('docs/recoil/runs/harvest_red_dot_0807_0810.jsonl',
+    ('calibration/artifacts/recoil/runs/harvest_red_dot_0807_0810.jsonl',
      'famas muzzle=flash_ar, own same-run bare'),
-    ('docs/recoil/runs/harvest_red_dot_0807_0822.jsonl',
+    ('calibration/artifacts/recoil/runs/harvest_red_dot_0807_0822.jsonl',
      'famas muzzle=supp_ar, own same-run bare -- 0.975, and the suppressor '
      'measured 1.0016 +- 0.0040 across six other weapons, so this is the '
      'seventh point on that identity rather than a famas oddity'),
@@ -654,7 +656,7 @@ def main():
     print(f'\nwrote {OUT}')
 
     # The flat record store. JSONL because that is what a record is in this
-    # repo (docs/recoil/runs, docs/drag/journal) and because appending one
+    # repo (calibration/artifacts/recoil/runs, calibration/artifacts/drag/journal) and because appending one
     # measurement should not mean rewriting a tree.
     with open(RECORDS, 'w', encoding='utf-8') as f:
         for rec in records(table):
