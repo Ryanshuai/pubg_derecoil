@@ -7,6 +7,27 @@
  * Razer DeathAdder V3: sends set_polling_rate2 twice (arg=0x00, 0x01)
  * after mount. The command is accepted but may need OS-level bInterval
  * override to take full effect. interval_override=1 forces 1ms polling.
+ *
+ * ⚠ MEASURED 2026-08-08: IT DOES NOT TAKE EFFECT. The two ends run at
+ * different rates and only one of them is 1 kHz:
+ *
+ *     Pico -> PC   (device, bInterval=1)   986 Hz   median 1.01 ms, n=14
+ *     mouse -> Pico (this PIO host)        125 Hz   median 8.00 ms, n=325
+ *                                                   p10 7.92, p90 8.10
+ *
+ * The 0.18 ms spread across p10..p90 says that is a hard quantisation, not
+ * noise. Method: drive CMD_MOVE (bypasses the host path entirely) for the
+ * first, drag the physical mouse for the second, and time the cursor's steps
+ * on the PC in both cases. So the comment further down about the accumulator
+ * being "updated from FIFO at 125Hz" is CURRENT, and this paragraph's claim
+ * of 1000 Hz was aspirational.
+ *
+ * ⚠ IT DOES NOT MISALIGN THE COMPENSATION, and that is worth stating because
+ * it looks like it should. fire_start_ms is stamped in send_hid_output on the
+ * OUTGOING report, and the game learns the trigger from that same report --
+ * so the 8 ms delays the shot and its compensation together. What it costs is
+ * the player's finger-to-shot latency, and it means passing a 1 kHz mouse
+ * through this device downgrades it to 125 Hz.
  */
 
 #include <stdlib.h>
@@ -18,6 +39,7 @@
 #include "pico/bootrom.h"
 #include "hardware/clocks.h"
 #include "pio_usb.h"
+#include "interval_override.h"   /* last_periodic_interval — see CMD_RAZER_READ */
 #include "tusb.h"
 
 static inline uint32_t board_millis(void) {
@@ -25,18 +47,12 @@ static inline uint32_t board_millis(void) {
 }
 
 /* ── Protocol commands (PC → Pico via CDC) ─────────────── */
-#define CMD_PATTERN_UPLOAD 0x10
-#define CMD_PATTERN_CLEAR  0x11
-#define CMD_RECOIL_ENABLE  0x12
-#define CMD_MOVE           0x13
-#define CMD_CLICK          0x14
-#define CMD_MOVE_CLICK     0x15
-#define CMD_AIM_MODE       0x16
-#define CMD_SET_DELTA      0x17  /* PC sends latest aim delta each frame */
-#define CMD_KEY            0x18  /* [0x18][hid_keycode][duration_ms_u16] */
-#define CMD_PATTERN_READ   0x19  /* [0x19] -> [pat] lines: what is actually stored */
-#define CMD_RECOIL_SIM     0x1A  /* [0x1A][iters_u16] -> [sim] line: jitter totals */
-#define CMD_REBOOT_BOOTSEL 0xFF
+/* CMD_*, CMD_*_LEN, MAX_PATTERN_POINTS and pattern_point_t all come from
+ * protocol.h, which is GENERATED from protocol/protocol.toml — the one file
+ * this firmware and press/pico_mouse.py both read. They used to be typed out
+ * in both places and kept in step by a comment; see protocol.toml for what
+ * that cost. Do not add a #define for a wire value here: add it there. */
+#include "protocol.h"
 
 /* Why the two readbacks exist.
  *
@@ -76,14 +92,7 @@ static inline uint32_t board_millis(void) {
 #define HID_ITF_KBD   1
 
 /* ── Recoil pattern storage ────────────────────────────── */
-#define MAX_PATTERN_POINTS 300
-
-typedef struct {
-    int16_t  dx;
-    int16_t  dy;
-    uint16_t t_ms;
-} pattern_point_t;
-
+/* MAX_PATTERN_POINTS and pattern_point_t: protocol.h */
 static pattern_point_t pattern[MAX_PATTERN_POINTS];
 static volatile uint16_t pattern_len = 0;
 static volatile bool recoil_enabled = true;
@@ -157,7 +166,34 @@ static void razer_send_poll_cmd(uint8_t arg) {
     tuh_control_xfer(&xfer);
 }
 
-static void razer_get_cb(tuh_xfer_t *xfer) { (void)xfer; }
+/* ⚠ THIS USED TO BE `(void)xfer;` — the mouse's answer was fetched and thrown
+ * away. The firmware asks "what is your polling rate now", the mouse replies,
+ * and nothing read it; which is why the file header could only say the command
+ * "is accepted but may need an OS-level override to take full effect". That
+ * sentence was a guess about a reply that was already on the wire.
+ *
+ * Measured 2026-08-08: the mouse is set to 1000 Hz in Synapse and arrives at
+ * the PC through this device at 125 Hz. Whether the SET fails, is unsupported,
+ * or succeeds and something downstream ignores it, is exactly what byte 0 of
+ * this reply says — and the argument bytes say which rate encoding is in use,
+ * so nobody has to remember whether 0x08 means 1000 (divisor of 8000, the
+ * polling_rate2 table) or 125 (divisor of 1000, the classic one). Reading it
+ * beats recalling it; I got that encoding wrong twice in one evening. */
+static volatile bool    razer_resp_valid = false;
+static volatile uint8_t razer_resp_len = 0;
+static uint8_t          razer_resp[16];   /* status + id + args, the useful head */
+
+static void razer_get_cb(tuh_xfer_t *xfer) {
+    if (!xfer || xfer->result != XFER_RESULT_SUCCESS || !xfer->buffer) {
+        razer_resp_len = 0;
+        razer_resp_valid = true;      /* a failed GET is an answer too */
+        return;
+    }
+    uint8_t n = sizeof(razer_resp);
+    for (uint8_t i = 0; i < n; i++) razer_resp[i] = xfer->buffer[i];
+    razer_resp_len = n;
+    razer_resp_valid = true;
+}
 
 static void razer_recv_response(void) {
     /* GET_REPORT via raw control xfer (reads mouse's response) */
@@ -622,7 +658,18 @@ static void service_reports(void) {
                        (unsigned)bullet_duration(i));
         pat_dump_next++;
     } else {
-        len = snprintf(msg, sizeof(msg), "[pat] end\r\n");
+        /* The enable flag rides out on the end line, and it is the only way
+         * anyone can ask for it: CMD_RECOIL_ENABLE is a one-way write, so
+         * FireDriver.disarm() had no confirmation to check and returned True
+         * whether or not the byte arrived. press/pico_mouse._write swallows
+         * SerialTimeoutException -- the CDC backpressure it documents as
+         * normal -- so a dropped disarm left the pattern running silently,
+         * and calibration/sweep.py's `--no-comp` guard (`if not disarm():
+         * raise`) could never fire. Appended rather than given its own
+         * command so an old host still parses this line: the token is extra,
+         * and the host's end-of-dump test is a prefix match. */
+        len = snprintf(msg, sizeof(msg), "[pat] end %u\r\n",
+                       (unsigned)(recoil_enabled ? 1 : 0));
         pat_dump_active = false;
     }
     tud_cdc_write(msg, len);
@@ -676,13 +723,15 @@ static void process_cdc(void) {
     while (pos < cdc_len) {
         uint8_t cmd = cdc_buf[pos];
         if (cmd == CMD_PATTERN_UPLOAD) {
-            if (pos + 3 > cdc_len) break;
+            if (pos + CMD_PATTERN_UPLOAD_LEN > cdc_len) break;
             uint16_t n = (uint16_t)(cdc_buf[pos+1] | (cdc_buf[pos+2] << 8));
-            uint32_t total = 3 + (uint32_t)n * 6;
+            uint32_t total = CMD_PATTERN_UPLOAD_LEN
+                           + (uint32_t)n * PATTERN_POINT_SIZE;
             if (pos + total > cdc_len) break;
             uint16_t count = (n > MAX_PATTERN_POINTS) ? MAX_PATTERN_POINTS : n;
             for (uint16_t i = 0; i < count; i++) {
-                uint32_t off = pos + 3 + i * 6;
+                uint32_t off = pos + CMD_PATTERN_UPLOAD_LEN
+                             + i * PATTERN_POINT_SIZE;
                 pattern[i].dx   = (int16_t)(cdc_buf[off]   | (cdc_buf[off+1] << 8));
                 pattern[i].dy   = (int16_t)(cdc_buf[off+2] | (cdc_buf[off+3] << 8));
                 pattern[i].t_ms = (uint16_t)(cdc_buf[off+4] | (cdc_buf[off+5] << 8));
@@ -691,30 +740,30 @@ static void process_cdc(void) {
             pos += total;
         } else if (cmd == CMD_PATTERN_CLEAR) {
             pattern_len = 0;
-            pos += 1;
+            pos += CMD_PATTERN_CLEAR_LEN;
         } else if (cmd == CMD_RECOIL_ENABLE) {
-            if (pos + 2 > cdc_len) break;
+            if (pos + CMD_RECOIL_ENABLE_LEN > cdc_len) break;
             recoil_enabled = (cdc_buf[pos+1] != 0);
-            pos += 2;
+            pos += CMD_RECOIL_ENABLE_LEN;
         } else if (cmd == CMD_MOVE) {
-            if (pos + 5 > cdc_len) break;
+            if (pos + CMD_MOVE_LEN > cdc_len) break;
             int16_t dx = (int16_t)(cdc_buf[pos+1] | (cdc_buf[pos+2] << 8));
             int16_t dy = (int16_t)(cdc_buf[pos+3] | (cdc_buf[pos+4] << 8));
             mouse_accum_x += dx;
             mouse_accum_y += dy;
-            pos += 5;
+            pos += CMD_MOVE_LEN;
         } else if (cmd == CMD_CLICK) {
             /* [0x14][buttons][duration_ms_u16_le] */
-            if (pos + 4 > cdc_len) break;
+            if (pos + CMD_CLICK_LEN > cdc_len) break;
             inject_buttons = cdc_buf[pos+1];
             uint32_t now_ms = board_millis();
             inject_start_ms = now_ms;
             uint16_t dur = (uint16_t)(cdc_buf[pos+2] | (cdc_buf[pos+3] << 8));
             inject_end_ms = now_ms + dur;
-            pos += 4;
+            pos += CMD_CLICK_LEN;
         } else if (cmd == CMD_MOVE_CLICK) {
             /* [0x15][dx_i16][dy_i16][buttons][delay_ms_u16][duration_ms_u16] = 10 bytes */
-            if (pos + 10 > cdc_len) break;
+            if (pos + CMD_MOVE_CLICK_LEN > cdc_len) break;
             int16_t dx = (int16_t)(cdc_buf[pos+1] | (cdc_buf[pos+2] << 8));
             int16_t dy = (int16_t)(cdc_buf[pos+3] | (cdc_buf[pos+4] << 8));
             mouse_accum_x += dx;
@@ -725,27 +774,43 @@ static void process_cdc(void) {
             uint32_t now_ms = board_millis();
             inject_start_ms = now_ms + delay;
             inject_end_ms = now_ms + delay + dur;
-            pos += 10;
+            pos += CMD_MOVE_CLICK_LEN;
         } else if (cmd == CMD_AIM_MODE) {
-            /* [0x16][0/1] */
-            if (pos + 2 > cdc_len) break;
+            if (pos + CMD_AIM_MODE_LEN > cdc_len) break;
             aim_mode = (cdc_buf[pos+1] != 0);
             aim_dx = 0;
             aim_dy = 0;
-            pos += 2;
+            pos += CMD_AIM_MODE_LEN;
         } else if (cmd == CMD_SET_DELTA) {
-            /* [0x17][dx_i16_le][dy_i16_le] = 5 bytes */
-            if (pos + 5 > cdc_len) break;
+            if (pos + CMD_SET_DELTA_LEN > cdc_len) break;
             aim_dx = (int16_t)(cdc_buf[pos+1] | (cdc_buf[pos+2] << 8));
             aim_dy = (int16_t)(cdc_buf[pos+3] | (cdc_buf[pos+4] << 8));
-            pos += 5;
+            pos += CMD_SET_DELTA_LEN;
         } else if (cmd == CMD_KEY) {
-            /* [0x18][hid_keycode][duration_ms_u16_le] = 4 bytes */
-            if (pos + 4 > cdc_len) break;
+            if (pos + CMD_KEY_LEN > cdc_len) break;
             key_code = cdc_buf[pos+1];
             uint16_t dur = (uint16_t)(cdc_buf[pos+2] | (cdc_buf[pos+3] << 8));
             key_end_ms = board_millis() + dur;
-            pos += 4;
+            pos += CMD_KEY_LEN;
+        } else if (cmd == CMD_RAZER_READ) {
+            /* [0x1B] -> "[razer] <state> <len> <b0> <b1> ..." — the mouse's own
+             * answer to the polling-rate SET, verbatim. byte 0 is the Razer
+             * status (0x02 ok / 0x01 busy / 0x03 fail / 0x05 not supported)
+             * and the argument bytes carry the rate it actually holds. Sent as
+             * raw bytes rather than decoded: the decode is the thing in doubt. */
+            char msg[128];
+            int ml = snprintf(msg, sizeof(msg),
+                              "[razer] state %d valid %d bInterval %u ep %02x len %u",
+                              razer_state, (int)razer_resp_valid,
+                              (unsigned)last_periodic_interval,
+                              (unsigned)last_periodic_ep,
+                              (unsigned)razer_resp_len);
+            for (uint8_t i = 0; i < razer_resp_len && ml < (int)sizeof(msg) - 6; i++)
+                ml += snprintf(msg + ml, sizeof(msg) - ml, " %02x", razer_resp[i]);
+            ml += snprintf(msg + ml, sizeof(msg) - ml, "\r\n");
+            tud_cdc_write(msg, ml);
+            tud_cdc_write_flush();
+            pos += CMD_RAZER_READ_LEN;
         } else if (cmd == CMD_PATTERN_READ) {
             /* [0x19] -> "[pat] n <len>", then one line per bullet, "[pat] end" */
             char hdr[32];
@@ -755,14 +820,13 @@ static void process_cdc(void) {
             tud_cdc_write_flush();
             pat_dump_next = 0;
             pat_dump_active = true;
-            pos += 1;
+            pos += CMD_PATTERN_READ_LEN;
         } else if (cmd == CMD_RECOIL_SIM) {
-            /* [0x1A][iters_u16_le] */
-            if (pos + 3 > cdc_len) break;
+            if (pos + CMD_RECOIL_SIM_LEN > cdc_len) break;
             uint16_t iters = (uint16_t)(cdc_buf[pos+1] | (cdc_buf[pos+2] << 8));
             if (iters > 2000) iters = 2000;   /* bounded: this runs inline */
             run_recoil_sim(iters);
-            pos += 3;
+            pos += CMD_RECOIL_SIM_LEN;
         } else if (cmd == CMD_REBOOT_BOOTSEL) {
             reset_usb_boot(0, 0);
         } else {

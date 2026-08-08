@@ -5,8 +5,9 @@ gesture. See Pointer.move() vs Pointer.move_to().
 Placement is always SetCursorPos: the spawner and Tab screens are UI, where
 the game's cursor follows the system cursor. The *button* is a different
 matter — it goes through the Pico as a real HID report, which the game sees
-even under raw input. SendInput is the fallback when no Pico is attached, and
-it is a genuinely worse one; see press/soft_mouse.py.
+even under raw input. There is no fallback: a SendInput backend existed until
+2026-08-08, and under raw input its clicks and turns reached the game as
+nothing at all. See press/pico_mouse.get_mouse().
 
 Focus is not handled here: taking and holding the game window is its own
 closed loop, so it lives in control/focus.py. Call ensure_focus() from there
@@ -15,18 +16,19 @@ before driving anything through this module.
 import ctypes
 import time
 
-_MOUSEEVENTF_LEFTDOWN = 0x0002
-_MOUSEEVENTF_LEFTUP = 0x0004
-_MOUSEEVENTF_RIGHTDOWN = 0x0008
-_MOUSEEVENTF_RIGHTUP = 0x0010
+# ⚠ FOUR _MOUSEEVENTF_* CONSTANTS STOOD HERE (2026-08-08). They fed the
+# `else:` half of click / _press / _release -- a mouse_event() software path
+# taken when there was no Pico. `self.pico` cannot be falsy any more (the
+# constructor raises instead of handing back a Pointer with no device), so
+# those branches were unreachable and these were their only readers.
 
 MOVE_WAIT = 0.12       # cursor settle before the button goes down
 
 # A UI click is three waits, and every one of them is on the critical path of
 # every calibration run: the spawner alone fires a dozen per kit.
 #
-# Measured 2026-08-02 (tools/probe_click_speed.py, right-click equips read back
-# off the weapon slot). settle held at 5/5 all the way down to 0, hold_ms down
+# Measured 2026-08-02 (right-click equips READ BACK off the weapon slot --
+# the gesture reporting ok proves nothing here). settle held at 5/5 all the way down to 0, hold_ms down
 # to 10 ms, after down to 0.02 -- but after=0 lands 0/5, because the click is
 # handed to the Pico asynchronously and returning immediately races the CDC
 # write. The values here sit one notch above each measured floor.
@@ -60,7 +62,7 @@ DRAG_GRAB_WAIT = 0.04   # button down -> first move: the UI has to latch the
 # reads as the cursor leaving rather than as a drag, and the item is let go
 # somewhere in the middle. `the drops are not landing`, from the outside.
 #
-# MEASURED AGAINST A HAND (temp_debug/record_human_drag.py, 34 real drags of
+# MEASURED AGAINST A HAND (a scratch recorder, gone; 34 real drags of
 # 390-464 px, cursor sampled at 1 kHz): median 18-25 px per position update,
 # max 51, arriving every 7.7 ms. So a step of 24 px every 8 ms IS the human
 # gesture, and the same 1600 px now takes ~67 updates instead of 10.
@@ -128,7 +130,7 @@ PLACE_TOL = 2           # px; SetCursorPos is exact, so this only absorbs a
 # ⚠ TESTED AND IT IS NOT THE CAUSE. Default 0. The reasoning above is sound
 # and the mechanism is real — the reports genuinely are not sent — but the
 # game does not need them to accept a drag. A/B, alternating arms so burst
-# position could not confound it (tools/probe_drag_nudge.py):
+# position could not confound it:
 #
 #   one drag per staging      nudge=0  8/8      nudge=2  7/8
 #   six drags back to back    nudge=0  11/12    nudge=2  11/12
@@ -171,10 +173,9 @@ def cursor_pos():
     Pointer, and constructing one TAKES THE PICO — a serial port shared with
     every other agent driving this game. So a script that only wants to read
     the cursor cannot afford the object, and three of them
-    (`snap_on_key`, `probe_drag_cursor`, `probe_human_drag`) each wrote their
-    own `POINT` struct rather than pay for it. `probe_human_drag`'s reason is
-    the sharpest: it records a HUMAN dragging, so touching the device is the
-    one thing it must not do.
+    each wrote their own `POINT` struct rather than pay for it. The sharpest
+    case was a probe that recorded a HUMAN dragging: touching the device is
+    the one thing it must not do. `snap_on_key` is the one still here.
 
     Symmetric with `move_cursor` above, which exists for the same reason —
     park the cursor before a screenshot without owning a device.
@@ -194,44 +195,38 @@ class Pointer:
     for the first and close to useless for the second.
     """
 
-    def __init__(self, backend='auto'):
-        self.pico = None
-        if backend in ('auto', 'pico'):
-            try:
-                from press.pico_mouse import PicoMouse, get_mouse
-                mouse = get_mouse()
-                # get_mouse() honours config.MOUSE_BACKEND and can hand back a
-                # SoftMouse, whose click()/press are no-ops (Pico-only
-                # features). Taking it would leave every click silently doing
-                # nothing while this still printed "backend = pico".
-                if not isinstance(mouse, PicoMouse):
-                    raise RuntimeError(f'{type(mouse).__name__} cannot click; '
-                                       f'set config.MOUSE_BACKEND = "pico"')
-                self.pico = mouse
-            except Exception as e:
-                if backend == 'pico':
-                    raise
-                # "unplugged" and "someone else has it" are not the same
-                # problem and must not get the same answer. Falling back to
-                # SendInput when ANOTHER AGENT holds the port means: I cannot
-                # have the device, so I will drive the mouse of whoever does.
-                # That is worse than failing -- park() alone moves the cursor,
-                # and the run being disturbed is mid-magazine with no way to
-                # tell that its numbers just went wrong.
-                #
-                # Seen 2026-08-03: a verify run started while a harvest held
-                # COM10, fell back here, and went on to move the cursor and
-                # try to toggle Tab under it.
-                from press.pico_mouse import other_agents
-                busy = other_agents()
-                if busy:
-                    raise RuntimeError(
-                        f'the Pico is held by another agent ({busy}), and '
-                        f'SendInput would drive the same mouse it is using. '
-                        f'Refusing rather than interfering — wait for it, and '
-                        f'do not kill it. ({e})')
-                print(f'[pointer] no Pico ({e}); falling back to SendInput')
-        self.backend = 'pico' if self.pico else 'sendinput'
+    def __init__(self):
+        # ⚠ NO FALLBACK, AND NO `backend` PARAMETER. Both existed until
+        # 2026-08-08: 'auto' would catch a failure here and drive the cursor
+        # through SendInput instead.
+        #
+        # It had to go for a reason stronger than "SendInput does not work on
+        # PUBG" (it does not -- the game reads the trigger and aiming off raw
+        # HID). "Unplugged" and "someone else has it" are not the same
+        # problem, and the fallback gave them the same answer: I cannot have
+        # the device, so I will drive the mouse of whoever does. That is worse
+        # than failing -- park() alone moves the cursor, and the run being
+        # disturbed is mid-magazine with no way to tell its numbers just went
+        # wrong.
+        #
+        # Seen 2026-08-03: a verify run started while a harvest held COM10,
+        # fell back to SendInput, and went on to move the cursor and try to
+        # toggle Tab under it. The check below survives that incident; the
+        # fallback it used to guard does not.
+        from press.pico_mouse import get_mouse, other_agents
+        try:
+            self.pico = get_mouse()
+        except Exception as e:
+            busy = other_agents()
+            if busy:
+                raise RuntimeError(
+                    f'the Pico is held by another agent ({busy}). Wait for '
+                    f'it, and do not kill it. ({e})') from e
+            raise
+        # ⚠ `self.backend` STOOD HERE as `'pico' if self.pico else
+        # 'sendinput'` and is gone (2026-08-08). With one backend left it
+        # was the constant 'pico', and it was being written into capture
+        # metadata as if it distinguished runs.
         # What the last placement, click and drag actually did. Read by
         # InventoryControl's gesture journal; a gesture that "failed" and one
         # that was never really sent look identical from outside, and these are
@@ -246,10 +241,9 @@ class Pointer:
         self.last_place = {}
         self.last_click = {}
         self.last_drag = {}
-        print(f'[pointer] click backend = {self.backend}')
 
     @classmethod
-    def opened(cls, backend='auto', retries=PICO_RETRIES, retry_s=PICO_RETRY_S):
+    def opened(cls, retries=PICO_RETRIES, retry_s=PICO_RETRY_S):
         """A Pointer with a Pico behind it, retried, and fatal if it never arrives.
 
         Two separate lessons. The retry: the CDC port stays locked for about a
@@ -260,31 +254,31 @@ class Pointer:
         The refusal: falling back to SendInput used to be a printed warning
         that the run then sailed straight past, into the operator prompt, ready
         to spend four minutes producing frames the game never acted on. A
-        degraded backend is not a degraded run here, it is a worthless one, so
-        it takes an explicit --backend sendinput to get it.
+        degraded backend is not a degraded run here, it is a worthless one.
 
-        Both lessons are the DEVICE's rather than any one caller's, which is
-        why they live here and not in the tool that learned them: PUBG reads
-        raw HID, so a synthetic right-click or view move is ignored no matter
-        who sent it. Plain Pointer() stays the constructor for callers that
-        genuinely tolerate SendInput — a UI click through SetCursorPos does
-        land — and this is the one for callers that do not.
+        ⚠ THAT HALF IS NOW PLAIN Pointer()'s JOB. The SendInput backend was
+        deleted on 2026-08-08 (PUBG reads raw HID, so its clicks and view
+        moves were ignored no matter who sent them), and with it the
+        `--backend sendinput` escape hatch this method used to refuse. What
+        is left here that Pointer() does not do is THE RETRY, which is a
+        different lesson and still a live one.
         """
         for i in range(retries):
-            p = cls(backend)
-            if p.pico or backend == 'sendinput':
-                return p
+            try:
+                return cls()
+            except Exception as e:
+                last = e
             if i + 1 < retries:
                 print(f'[pointer] no Pico yet — retrying in {retry_s:g}s '
                       f'({i + 1}/{retries - 1})', flush=True)
                 time.sleep(retry_s)
         raise NoPico(
-            f'no Pico after {retries} tries. The game reads raw input, so '
-            f'a SendInput right-click is ignored and every "ads" frame would '
-            f'be hip fire. If the port came back "access denied", something '
-            f'else has it — this Pico is shared, so check whether another '
-            f'agent is mid-run before taking it. Otherwise check the cable, '
-            f'or pass --backend sendinput to capture without it anyway.')
+            f'no Pico after {retries} tries. There is no software fallback: '
+            f'the game reads raw input, so a synthetic right-click is ignored '
+            f'and every "ads" frame would be hip fire. This Pico is shared — '
+            f'if the last error says access denied, another agent is mid-run, '
+            f'so wait for it rather than killing it. Otherwise check the '
+            f'cable.\n    last error: {last}') from last
 
     def move_to(self, x, y):
         ctypes.windll.user32.SetCursorPos(int(x), int(y))
@@ -297,25 +291,19 @@ class Pointer:
         game reads the two off different paths — which is why SetCursorPos is
         enough for the Tab screen and useless for turning.
 
-        SendInput here is the same bad fallback it is for the button (PUBG
-        takes raw HID for aiming), but it is press/'s bad fallback in ONE
-        place. It used to be a ctypes.windll.user32.mouse_event copied into
-        whichever tool needed to turn the view, which bypassed this whole
-        layer and, worse, used the legacy API rather than the SendInput path
-        in press/soft_mouse.py that carries the 64-bit INPUT alignment fix.
+        ⚠ TURNING HAS NO SOFTWARE PATH AT ALL. Before this was press/'s
+        job, it was a ctypes.windll.user32.mouse_event copied into whichever
+        tool needed to turn the view -- bypassing this layer entirely and
+        using the legacy API. That copy was replaced by a SendInput fallback
+        here, and the fallback was deleted on 2026-08-08: PUBG takes raw HID
+        for aiming, so every one of those paths turned the view by exactly
+        zero degrees while appearing to work.
         """
         if not dx and not dy:
             return
-        if self.pico:
-            # The firmware accumulates the delta and drains it at 127/report,
-            # so an arbitrarily large jump is safe to send in one packet.
-            self.pico.move(int(dx), int(dy))
-        else:
-            # Private on purpose: _send_move is the struct that got the
-            # alignment right. Re-deriving it here is how a second copy of
-            # that bug gets born.
-            from press.soft_mouse import _send_move
-            _send_move(int(dx), int(dy))
+        # The firmware accumulates the delta and drains it at 127/report, so
+        # an arbitrarily large jump is safe to send in one packet.
+        self.pico.move(int(dx), int(dy))
 
     def click(self, buttons=0x01, hold_ms=CLICK_HOLD_MS, after=0.0):
         """Press and release wherever the cursor already is.
@@ -328,18 +316,9 @@ class Pointer:
         `after` only means anything on the Pico path — see click_at, where the
         measurement behind it is written down.
         """
-        if self.pico:
-            self.pico.click(buttons, hold_ms)
-            if after:
-                time.sleep(after)
-        else:
-            down = (_MOUSEEVENTF_RIGHTDOWN if buttons & 0x02
-                    else _MOUSEEVENTF_LEFTDOWN)
-            up = (_MOUSEEVENTF_RIGHTUP if buttons & 0x02
-                  else _MOUSEEVENTF_LEFTUP)
-            ctypes.windll.user32.mouse_event(down, 0, 0, 0, 0)
-            time.sleep(hold_ms / 1000.0)
-            ctypes.windll.user32.mouse_event(up, 0, 0, 0, 0)
+        self.pico.click(buttons, hold_ms)
+        if after:
+            time.sleep(after)
 
     def cursor_pos(self):
         # 方法保留是因为这一层的每个调用点都已经握着一个 Pointer；实现只有
@@ -352,7 +331,7 @@ class Pointer:
         SetCursorPos is instant; raw HID reports that arrive AFTER it are not,
         and they move the cursor again. The Pico is a passthrough, so reports
         keep arriving from whatever the firmware was last asked to send —
-        measured on the Tab screen (tools/probe_drag_cursor.py):
+        measured on the Tab screen:
 
             move(900,0) with Tab ALREADY up   ->  cursor drift (450, 0)
             same move with Tab shut first     ->  cursor drift (0, 0)
@@ -426,16 +405,10 @@ class Pointer:
     # ── Drag ──
 
     def _press(self, buttons=0x01):
-        if self.pico:
-            self.pico.click(buttons, DRAG_HOLD_MS)
-        else:
-            ctypes.windll.user32.mouse_event(_MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        self.pico.click(buttons, DRAG_HOLD_MS)
 
     def _release(self, buttons=0x01):
-        if self.pico:
-            self.pico.click(buttons, 0)   # ends the hold on the next report
-        else:
-            ctypes.windll.user32.mouse_event(_MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        self.pico.click(buttons, 0)   # ends the hold on the next report
 
     def drag(self, src, dst, settle=MOVE_WAIT, steps=None,
              grab=DRAG_GRAB_WAIT, hover=DRAG_HOVER_WAIT,
@@ -495,11 +468,11 @@ class Pointer:
                 # button is down. See DRAG_NUDGE_COUNTS — without it the whole
                 # travel is invisible to raw input and the gesture reads as a
                 # click. Alternating sign keeps the net displacement at zero.
-                if self.pico and nudge:
+                if nudge:
                     self.pico.move(nudge if i % 2 else -nudge, 0)
                 time.sleep(DRAG_STEP_WAIT)
                 now = time.perf_counter()
-                if self.pico and now - last_arm >= DRAG_REARM_S:
+                if now - last_arm >= DRAG_REARM_S:
                     self.pico.click(buttons, DRAG_HOLD_MS)
                     last_arm = now
             # Hold the target the same way the source is held. A release 76 px
@@ -507,9 +480,8 @@ class Pointer:
             # from, and reads as "the drop did not land" rather than as a
             # cursor problem. Re-arm first and keep the settle short: place()
             # must not outlast DRAG_HOLD_MS or the button comes up mid-travel.
-            if self.pico:
-                self.pico.click(buttons, DRAG_HOLD_MS)
-                last_arm = time.perf_counter()
+            self.pico.click(buttons, DRAG_HOLD_MS)
+            last_arm = time.perf_counter()
             self.place(tx, ty, settle=hover, tries=PLACE_TRIES_HELD)
             self.last_drag.update(dst_place=dict(self.last_place),
                                   held=self.cursor_pos())

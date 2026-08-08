@@ -63,7 +63,16 @@ add_executable(pico_mouse
     ${PICO_TINYUSB_PATH}/src/portable/raspberrypi/pio_usb/hcd_pio_usb.c
 )
 
-target_include_directories(pico_mouse PRIVATE src)
+# ../protocol is press/protocol, carrying protocol.h — GENERATED from the
+# protocol.toml beside it by tools/gen_protocol.py, and committed. It is on the include path rather than
+# copied in so that there is exactly one file: a copy would compile fine while
+# disagreeing with what press/pico_mouse.py sends, which is the whole failure
+# this indirection exists to make impossible.
+#
+# The generator is deliberately NOT wired in as a build step — the Pico build
+# must not require Python. `pixi run gen-protocol --check` is what catches a
+# stale header, and it runs from flash.py before it writes anything.
+target_include_directories(pico_mouse PRIVATE src ${CMAKE_CURRENT_LIST_DIR}/../protocol)
 
 target_compile_definitions(pico_mouse PRIVATE PIO_USB_USE_TINYUSB)
 

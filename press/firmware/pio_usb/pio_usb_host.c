@@ -304,6 +304,17 @@ void __not_in_flash_func(pio_usb_host_frame)(void) {
 
             if (is_periodic) {
               uint8_t interval_override_local = interval_override;
+              /* What the DEVICE asked for, before the override replaces it.
+               * Recorded because "the override is wired" and "the polling is
+               * 1 ms" turned out to be different statements: measured
+               * 2026-08-08, override is 1 here and the mouse still reaches the
+               * PC at 125 Hz. This says whether the endpoint enumerated at
+               * bInterval 1 (so the device is willing and the limit is in this
+               * host) or at 8 (so it enumerated slow and never applied the
+               * polling-rate command it acknowledged). Two different repairs,
+               * and nothing could tell them apart from outside. */
+              last_periodic_interval = ep->interval;
+              last_periodic_ep = ep->ep_num;
               ep->interval_counter = (interval_override_local ? interval_override_local : ep->interval) - 1;
             }
           }

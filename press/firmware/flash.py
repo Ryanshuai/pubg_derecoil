@@ -9,8 +9,8 @@ the ~15 s the Pico spends in the bootloader. If flashing fails the Pico stays
 in BOOTSEL and the mouse stays dead until it is flashed again (which still
 works — BOOTSEL is a ROM bootloader and cannot be bricked).
 
-    python pico_firmware/flash.py
-    python pico_firmware/flash.py --uf2 path/to/other.uf2
+    python press/firmware/flash.py
+    python press/firmware/flash.py --uf2 path/to/other.uf2
 """
 import argparse
 import os
@@ -21,7 +21,16 @@ import time
 import serial
 import serial.tools.list_ports as lp
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.abspath(__file__))            # press/firmware
+ROOT = os.path.dirname(os.path.dirname(HERE))                # repo root
+sys.path.insert(0, ROOT)   # run as `python press/firmware/flash.py`
+
+try:            # the refusal messages below carry em-dashes; cp936 dies
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+except (AttributeError, OSError):
+    pass
+from press.protocol import CMD_REBOOT_BOOTSEL  # noqa: E402
+
 DEFAULT_UF2 = os.path.join(HERE, 'build', 'pico_mouse.uf2')
 PICOTOOL = os.path.expanduser(
     r'~\.pico-sdk\picotool\2.2.0-a4\picotool\picotool.exe')
@@ -56,6 +65,30 @@ def main():
     if not os.path.exists(args.uf2):
         print(f"[!] no uf2 at {args.uf2}  — build first (ninja in build/)")
         return 1
+
+    # ⚠ CHECKED HERE BECAUSE THIS IS THE LAST MOMENT IT IS CHEAP. protocol.h is
+    # generated and committed, and the Pico build deliberately does not run the
+    # generator (its toolchain must not need Python). So a protocol.toml edit
+    # that was never regenerated compiles perfectly into a .uf2 that disagrees
+    # with what press/pico_mouse.py sends — and the symptom is on the wire,
+    # after the mouse has already been taken down for 15 s.
+    gen = os.path.join(ROOT, 'tools', 'gen_protocol.py')
+    if subprocess.run([sys.executable, gen, '--check']).returncode != 0:
+        print("[!] the generated protocol files are stale, so this .uf2 may "
+              "not match what the PC sends. Nothing was flashed.")
+        print("    Run: pixi run gen-protocol   then rebuild before flashing.")
+        return 1
+
+    # And the .uf2 must have been built FROM that header. --check above only
+    # proves protocol.h matches the .toml; a header regenerated after the last
+    # build leaves a stale .uf2 that --check calls clean.
+    header = os.path.join(ROOT, 'press', 'protocol', 'protocol.h')
+    if os.path.getmtime(args.uf2) < os.path.getmtime(header):
+        print(f"[!] {os.path.basename(args.uf2)} is older than protocol.h — "
+              "it was built before the current wire contract.")
+        print("    Rebuild (ninja in build/) before flashing. Nothing was "
+              "flashed.")
+        return 1
     if not os.path.exists(PICOTOOL):
         print(f"[!] picotool not found at {PICOTOOL}")
         return 1
@@ -72,7 +105,8 @@ def main():
             print("[!] no Pico found — neither running firmware nor BOOTSEL.")
             return 1
         print(f"state    : running firmware on {port}")
-        print("           sending CMD_REBOOT_BOOTSEL (0xFF) ...")
+        print(f"           sending CMD_REBOOT_BOOTSEL "
+              f"(0x{CMD_REBOOT_BOOTSEL:02X}) ...")
         print("           >>> the mouse will stop responding now <<<")
         # Opening and writing fail for opposite reasons and must not share a
         # handler. A refused OPEN means something else owns the port and the
@@ -89,7 +123,7 @@ def main():
                   "\"Name like '%python%'\" | Select ProcessId, CommandLine")
             return 1
         try:
-            s.write(bytes([0xFF]))
+            s.write(bytes([CMD_REBOOT_BOOTSEL]))
             s.flush()
             s.close()
         except Exception as e:

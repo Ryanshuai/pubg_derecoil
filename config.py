@@ -1,3 +1,5 @@
+import os
+
 # ════════════════════════════════════════════════════════════
 # Screen
 # ════════════════════════════════════════════════════════════
@@ -15,12 +17,10 @@ HUD_REGIONS = {
     'weapon_2':   (1262, 2808, 53, 206),   # slot2 (top, key 2)
     'fire_mode':  (1317, 1626, 43, 56),
     'posture':    (1301, 1373, 66, 66),
-    # Rounds left in the magazine. Automated training-range calibration uses
-    # it for both ends of the cycle: the count going static means the mag is
-    # empty, and it jumping back up means the reload finished — far more
-    # robust than timing the fire/reload durations by weapon. Sized to fit
-    # three digits (100-round drums) with the count right-aligned; stops
-    # short of the spare-ammo symbol at x=1760.
+    # Rounds left in the magazine — both ends of the calibration cycle: static
+    # count = mag empty, count jumping back up = reload done. Far more robust
+    # than timing fire/reload per weapon. Fits three digits (100-round drums)
+    # right-aligned; stops short of the spare-ammo symbol at x=1760.
     'ammo':       (1318, 1670, 48, 90),
 
     # Tab inventory
@@ -108,16 +108,13 @@ RECOIL_PATCH = 128             # width. Sets nothing about range: recoil is
 # per magazine) — paid on a worker while the game reloads, so free in practice.
 # Squaring it instead would cost 7.6x for the same limit.
 #
-# The cost of height is intra-patch gain error: pitch is a pure translation
-# only on the centre line, growing as (y/f)^2 away from it. At f~1720 the
-# patch edge at y=+-128 is off by 0.55%, ~0.2% averaged over the patch —
-# negligible against the 5% effects being measured.
+# The cost of height is intra-patch gain error — the same (y/f)^2 as above,
+# now within the patch. At f~1720 the edge at y=+-128 is off by 0.55%, ~0.2%
+# averaged over the patch, negligible against the 5% effects being measured.
 RECOIL_PATCH_H = 256
-# HEIGHT IS RANGE. measure_pair calls a reading out of range when it lands more
-# than half a patch height from the prediction, so 256 buys +-128 px per frame
-# pair. That is ample at 1x and it is NOT ample through a scope: the sight
-# magnifies the picture, so one bullet's kick covers 2-4x the pixels, and the
-# correlator starts refusing readings it should have made.
+# +-128 px is ample at 1x and NOT ample through a scope: the sight magnifies
+# the picture, so one bullet's kick covers 2-4x the pixels and measure_pair
+# starts refusing readings it should have made.
 #
 # Measured 2026-08-04, one bare magazine each, mp5k/m416 standing:
 #
@@ -160,8 +157,22 @@ RECOIL_MAD_FLOOR = 0.5
 # every per-scope slider at its default 50.
 # RE-RUN AFTER CHANGING ANY SENSITIVITY SLIDER OR THE MOUSE DPI.
 #
+# THE THREE AIM STATES are defined in detector/ads_detector.py: hip fire (腰射,
+# button not touched), shoulder aim (肩射 / tactical aim, button HELD, third
+# person, a state of its own), ADS (开镜, button tapped -- it is a toggle).
+# `hipfire` below means the FIRST of those.
+#
 #   sight     K        R^2       CV     patches
 #   hipfire   ~0.50    -         -      7     (TPP, no weapon; needs redo armed)
+#
+# ⚠ THAT PARENTHESIS IS LOAD-BEARING. control/aim.py positions the pitch from
+# hip fire for every optic (goto_midline). It is NOT a reason to distrust the
+# pitch work — that travel is in COMMANDED COUNTS and K enters only `predict`,
+# a tolerance on "did the picture change", never the answer. It does invalidate
+# any counts-to-pixels claim about hip fire: redo it armed first. Labels lie
+# easily here — calibrate_k's `--ads` held the right button, which is SHOULDER
+# AIM, so four runs carried the wrong state; and an ADS-verified red dot
+# re-measured 1.29 against the 1.5474 below.
 #   red_dot   1.5474   0.99999   0.3%   7
 #   2x        1.8254   0.99948   2.0%   3
 #   3x        1.8802   0.99977   1.4%   3
@@ -198,10 +209,10 @@ RECOIL_MAD_FLOOR = 0.5
 # while looking through the VSS's fixed 4x lifts the view barely a third of
 # the way and leaves it pointed at the ground.
 RECOIL_SIGHT_PROFILES = {
-    'hipfire': {'K': 0.50,   'mag': 1, 'keepout': 330,
-                'patch_xs': (980, 1120, 1260, 2050, 2240, 2430, 2620)},
-    'red_dot': {'K': 1.5474, 'mag': 1, 'keepout': 330,
-                'patch_xs': (980, 1120, 1260, 2050, 2240, 2430, 2620)},
+    'hipfire': {'K': 0.50,   'mag': 1, 'keepout': RECOIL_KEEPOUT,
+                'patch_xs': RECOIL_PATCH_XS},
+    'red_dot': {'K': 1.5474, 'mag': 1, 'keepout': RECOIL_KEEPOUT,
+                'patch_xs': RECOIL_PATCH_XS},
     '2x':      {'K': 1.8254, 'mag': 2, 'keepout': 60,
                 'patch_xs': (1390, 1530, 1850),
                 'patch_h': 384},
@@ -223,95 +234,56 @@ RECOIL_SIGHT_PROFILES = {
     # line, weak texture lets the line win. So "tested clean once" is not
     # evidence; these three were verified on the weak-texture aim.
     # Only 1260..1460 and 1990..2150 are usable, which fits just two
-    # non-overlapping 128 patches — hence the overlap below. Dropping to
-    # patch=96 would give three clean non-overlapping ones at 1262/1362/1995
-    # (range 3P/8=36px vs 5.6px/frame needed), but ViewTracker takes one
-    # global patch size, so that needs a per-profile override first.
+    # non-overlapping 128 patches — hence the overlap below.
     #
-    # NONE OF THIS IS WHY THE VSS NEVER PRODUCED A CELL, and the wrong guess is
-    # recorded because these coordinates are the obvious suspect and are not
-    # the culprit. Measured 2026-08-04: four VSS magazines, `0 tracked samples`
-    # on every one. Not "few" — zero, so no patch was ever read and no property
-    # of these columns could have mattered.
+    # THE PLACEMENT IS NOT WHAT AILS THIS PROFILE. Recorded because these
+    # coordinates are the obvious suspect, and have now been acquitted three
+    # times over:
     #
-    # The cause was in calibration/sweep.py: FireDriver took the tracker BY
-    # VALUE at construction and set_sight() never updated it, so a stale
-    # 7-patch tracker asked a freshly-rebuilt 3-region frame for recoil_3..6,
-    # slice_frame() returned None and MagazineRecorder.push() dropped every
-    # frame. Only this profile has a different patch COUNT, so only the VSS
-    # broke. Fixed there; these coordinates were never exercised.
+    #  - `0 tracked samples` on four magazines was calibration/sweep.py, not
+    #    geometry: FireDriver took the tracker BY VALUE at construction and
+    #    set_sight() never updated it, so a stale 7-patch tracker asked a
+    #    rebuilt 3-region frame for recoil_3..6, slice_frame() returned None
+    #    and every frame was dropped. Only this profile has a different patch
+    #    COUNT, so only the VSS broke. These columns had never been read.
+    #  - Once read they look fine: 14 magazines at mean_mad 0.4-2.2, with
+    #    n_low_gate 1 and n_out_of_range 1 across the lot
+    #    (docs/recoil/runs/vss_after_fix_0804b.jsonl). mean_mad is how far the
+    #    patches disagree WITH EACH OTHER, so a patch on the scope tube or two
+    #    seeing the same pixels is precisely what it would show.
+    #  - The appealing fix — 1265/1330 overlap by 63 px, so they vote together
+    #    in the median measure_pair rejects outliers against, and the odd one
+    #    out loses even when it is right — was tried and does not help.
+    #    patch=96 at (1262, 1362, 1995), three disjoint windows still clear of
+    #    the PSO-1 line:
     #
-    # THEY HAVE NOW BEEN READ, AND THEY LOOK FINE. The first VSS run after
-    # that fix (docs/recoil/runs/vss_after_fix_0804b.jsonl, 14 magazines)
-    # reports mean_mad 0.4-2.2 with n_low_gate 1 and n_out_of_range 1 across
-    # the lot. mean_mad is how far the three patches disagree WITH EACH OTHER,
-    # so bad placement — a patch on the scope tube, or two seeing the same
-    # pixels — is precisely what it would show, and it does not.
+    #        128px overlapping   27.5% rejected/patch   mad 1.37   low_gate 1
+    #         96px disjoint      24.4%                      1.62            9
     #
-    # THE COUNT IS THE PROBLEM, NOT THE PLACEMENT, and that makes the
-    # patch-size override above the FIX rather than the optimisation it is
-    # written as. measure_pair rejects a patch by distance from the MEDIAN of
-    # the patches (view_tracker.py: `np.abs(dys_a - med) > thresh`), and a
-    # median over three is not robust — least of all when two of the three
-    # overlap by 63 px and therefore vote together. The odd one out loses even
-    # when it is the correct one.
-    #
-    # Measured across every weapon fired on 2026-08-04, as the share of
-    # individual patch readings thrown away (n_rejected is per PATCH, so it
-    # divides by the profile's patch count):
-    #
-    #     vss      3 patches   27%      <- this profile
-    #     vector   7           14%
-    #     ump45/aug/mp5k 7     6-7%
-    #     m416     7            2.4%
-    #     akm      7            1.7%
-    #
-    # Eleven times the m416. What survives is too sparse to be stable:
-    # cum_counts over one cell's magazines ran 760/906/808 in the best case and
-    # 740/141/-273 in the worst.
-    #
-    # So: three non-overlapping 96 px patches at 1262/1362/1995, which needs
-    # ViewTracker to take the size per profile instead of globally. Until then
-    # the VSS records data and none of it is trustworthy.
-    # ⚠ THE 96px NON-OVERLAPPING VERSION WAS TRIED AND DOES NOT HELP. The
-    # paragraph above proposes it and the reasoning is appealing — 1265/1330
-    # overlap by 63 px, so they vote together in the median measure_pair
-    # rejects outliers against, and the third patch loses every disagreement.
-    # Measured 2026-08-04 with patch=96 at (1262, 1362, 1995), three disjoint
-    # windows still clear of the PSO-1 line:
-    #
-    #                       rejected/patch   mean_mad   low_gate
-    #     128px overlapping     27.5%          1.37         1
-    #      96px disjoint        24.4%          1.62         9
-    #
-    # Rejection barely moved, patch disagreement got slightly worse, and the
-    # narrower windows fall under the texture gate nine times as often. The
-    # magazines stayed just as wild (cum_counts 770 / 37 / -148 in one cell).
-    # Reverted; ViewTracker still takes `patch` per profile, which is worth
-    # keeping — the plumbing was missing and now is not.
+    #    Narrower windows fall under the texture gate nine times as often and
+    #    the magazines stayed just as wild (cum_counts 770 / 37 / -148 in one
+    #    cell). Reverted; ViewTracker still takes `patch` per profile, which is
+    #    worth keeping.
     #
     # WHAT DOES TRACK IT IS HOW FAR THE VIEW MOVES BETWEEN FRAMES. Rejection
-    # rate against median px/frame (cum_px / n_frames, both recorded per
-    # magazine), over every weapon fired on 2026-08-04:
+    # rate (per PATCH, so it divides by the profile's patch count) against
+    # median px/frame, over every weapon fired on 2026-08-04:
     #
     #     vss     26.5%   4.48 px/frame        mp5k/mg3/m249  5-6%   0.1-0.5
     #     vector  13.5%   1.11                 ace32/m416/akm 2-3%   0.3-1.0
-    #     ump45/aug 7%    0.6-0.8
-    #
-    #     r = +0.91 across ten weapons
+    #     ump45/aug 7%    0.6-0.8              r = +0.91 across ten weapons
     #
     # The VSS is the extreme on BOTH axes, at four times the next worst, and it
     # is the only 4x profile — the same view rotation drags the world four
     # times further across the screen. That is consistent with all three
     # geometry theories failing: where the patches sit was never the variable.
     #
-    # NOT YET A MECHANISM. Inter-frame displacement is what correlates; why it
-    # makes patches DISAGREE (the rejection test is |dy - median| > thresh, and
-    # a pure rotation should move them all alike) is unexplained. Motion blur
-    # scaling with magnification is the obvious guess and is exactly the kind
-    # of guess this weapon has already killed three of. The same axis is worth
-    # checking against the magazines lost to fire-rate disagreement — vector is
-    # second worst on both.
+    # NOT YET A MECHANISM. Why inter-frame displacement makes patches DISAGREE
+    # (the test is |dy - median| > thresh, and a pure rotation should move them
+    # all alike) is unexplained. Motion blur scaling with magnification is the
+    # obvious guess and is exactly the kind this weapon has already killed
+    # three of. Worth checking the same axis against the magazines lost to
+    # fire-rate disagreement — vector is second worst on both.
     'vss_pso1': {'K': 1.875, 'mag': 4, 'keepout': 200,
                  'patch_xs': (1265, 1330, 2010)},
 }
@@ -525,18 +497,16 @@ DETECT_TABLE = [
     #   tab_weapon    @ -50 ms   read the gun names off a buffered past frame
     #   tab_attachment@ -50 ms   ditto for the ten slots
     #
-    # The negative delays worked, but they are why every captured frame had to
-    # include the Tab regions: DXGI takes one bounding box, and reaching back
-    # in time means always having been looking. That was 5.46 ms of every
-    # frame. TabWatch keeps the reading fresh while the panel is up instead,
-    # so the last one taken IS the final state when it closes.
+    # The negative delays worked, and they are exactly why every captured frame
+    # had to carry the Tab regions (see FRAME_REGIONS): reaching back in time
+    # means always having been looking. TabWatch keeps the reading fresh while
+    # the panel is up instead, so the last one taken IS the final state when it
+    # closes.
     #
-    # What stays here is what reads the GAMEPLAY HUD, which is captured every
-    # frame anyway. `cond: 'tab_open'` still means "this was the Tab CLOSING":
-    # the screen does not go away for another 77-128 ms, so a measured
-    # tab_open is still True at this instant, exactly as the toggled one was.
-    #
-    # Step 2: after Tab UI closes, refresh HUD state
+    # What stays here reads the GAMEPLAY HUD, captured every frame anyway.
+    # `cond: 'tab_open'` still means "this was the Tab CLOSING": the screen does
+    # not go away for another 77-128 ms, so a measured tab_open is still True at
+    # this instant, exactly as the toggled one was.
     {'key': 'tab', 'event': 'press', 'detect': 'fire_mode',
      'regions': ['fire_mode'], 'delay': 300,
      'cond': 'tab_open', 'result': 'fire_mode'},
@@ -659,10 +629,9 @@ TAB_TYPE_SAT_MAX = 0.015
 # ── Tab anchor: is the inventory actually up? ─────────────────────────────
 # The ink window above is NOT a safe answer to that on its own. It looks
 # perfect on hand-picked negatives — lobby, results, ESC menu and plain
-# gameplay all measure exactly 0 — and fails on real frames: of 96 sampled
-# ADS captures, 13 carry ink and one lands inside 150..400. Nine measure
-# exactly 738, which is 41x18, the whole crop saturated. HUD_REGIONS['type']
-# sits over the training range's bright sky and ADS magnifies it into frame.
+# gameplay all measure exactly 0 — and fails on the same ADS sky as above: of
+# 96 sampled ADS captures, 13 carry ink, one lands inside 150..400, and nine
+# measure exactly 738, which is 41x18, the whole crop saturated.
 #
 # A count cannot tell "the glyph is drawn" from "everything here is white".
 # Glyph IoU can, and bounds that failure by construction: a saturated crop
@@ -724,19 +693,17 @@ TAB_SLOT_RING_HALF = 3         # ring half-width about the border
 TAB_SLOT_RING_PAD = 10         # window margin around the tile
 TAB_SLOT_PRESENT_MIN = 36.0    # midpoint of 26.0 .. 46.0
 #
-# WHY THE PADDING, PRECISELY. The tile measures 66x66 and starts one pixel up
-# and left of HUD_REGIONS['att_*'] — measured on a stripped M416's muzzle and
-# grip, where an empty tile is a clean blob. (magazine and stock could not be
-# measured the same way: their connected component merges with a bright
-# neighbour, giving 69x94 and 94x95. Two agreeing slots, not five.)
+# WHY THE PADDING. The tile starts one pixel up and left of the interior, and
+# only muzzle and grip could be measured that way: magazine and stock merge
+# their connected component with a bright neighbour, giving 69x94 and 94x95.
+# Two agreeing slots, not five.
 #
 # So HUD_REGIONS['att_*'] is 63x63 of tile INTERIOR, and the interior is flat.
 # Anything measuring texture inside it — edges, std — reads the same for a
-# tile that is empty and for no tile at all, because neither has any texture.
-# The padding is not there to catch a border 16px away; it is there to reach
-# the BACKGROUND OUTSIDE the tile, so the judgement becomes "is this patch
-# brighter than what surrounds it" instead of "what does this patch look
-# like". Presence is a contrast, and a contrast needs both sides.
+# tile that is empty and for no tile at all. The padding reaches the
+# BACKGROUND OUTSIDE the tile, so the judgement becomes "is this patch
+# brighter than what surrounds it". Presence is a contrast, and a contrast
+# needs both sides.
 #
 # ⚠ SCOPE HAS NO TILE AT ALL, so none of this applies to it and it always
 # returns 'unknown'. Confirmed by eye across three captures: an empty scope
@@ -750,11 +717,11 @@ TAB_SLOT_PRESENT_MIN = 36.0    # midpoint of 26.0 .. 46.0
 # scope CONTENTS come from AttachmentDetector, which reads the VSS as ''
 # correctly. Nearly every weapon has one, so little is blocked — but never let
 # 'unknown' collapse into 'absent'.
-# Window for slot_contrast(), the superseded diagnostic. The presence
-# threshold it used to carry lived here too and silently shadowed the ring
-# one above — same name, defined later, so 36.0 became 6.0 and a G36C's
-# absent stock (ring 8.3) read as present. Keep one threshold per judgement.
-TAB_SLOT_PAD = 16
+# ⚠ ONE THRESHOLD PER JUDGEMENT. slot_contrast()'s window (TAB_SLOT_PAD = 16)
+# stood here until 2026-08-07 and went with the function; what must not go is
+# why it was dangerous. The presence threshold it ALSO carried lived here too
+# and silently shadowed TAB_SLOT_PRESENT_MIN above — same name, defined later,
+# so 36.0 became 6.0 and a G36C's absent stock (ring 8.3) read as present.
 TAB_SLOT_NO_TILE = ('scope',)
 
 # OCCUPANCY — Canny edges inside the interior. The tile is flat, an icon is
@@ -775,17 +742,16 @@ TAB_SLOT_FILLED_EDGES = 120
 #   empty tiles    min 891    p50 2750                24 measurable of 281
 TAB_SLOT_MATCH_MAX = 150
 
-# Mismatch polling (ms)
 MISMATCH_POLL_INTERVAL = 500   # ms between mismatch polls
-GT_SETTLE_TIME = 500           # ms wait after GT change before polling (HUD animation)
+GT_SETTLE_TIME = 500           # ms after a GT change before polling (HUD animation)
 
 # ════════════════════════════════════════════════════════════
 # Spawner screen — the training range's item-spawner panel
 #
 # Identified by the three save-loadout / load-loadout / equip-lv3 button
 # glyphs at the bottom right, which appear on no other screen. Measured over
-# three captures with different scenes behind the panel (tools/
-# probe_button_icons.py): the glyphs are achromatic (|max-min| over B,G,R <= 2
+# three captures with different scenes behind the panel (docs/spawner/
+# README.md §4): the glyphs are achromatic (|max-min| over B,G,R <= 2
 # on bright px), a flat ~221 grey rather than pure white, and their bright
 # pixels are fully opaque — they shift by <= 6 grey levels across scenes,
 # while the glyphs' dark parts are alpha-blended and shift by up to 86. Hence
@@ -955,6 +921,30 @@ LOBBY_MENU_THRESH = 190
 LOBBY_MENU_SEARCH = 24
 LOBBY_MENU_MIN_SCORE = 0.55
 
+# ESC IN THE LOBBY RAISES THE SAME MENU 315 px LOWER, and until 2026-08-07
+# nothing here could see it. Same title, same glyphs, same x, same 85.3 px
+# pitch — only the block is centred on the screen instead of sitting near the
+# top, and the fourth entry reads RESTART LOBBY instead of LEAVE TRAINING:
+#   title 465..529, then RESUME 607 / SETTINGS 693 / KEY GUIDE 778 /
+#   RESTART LOBBY 863 / EXIT TO DESKTOP 949
+# The SAME template scores 0.999 at both positions, so this is a second search
+# window, not a second template.
+#
+# ⚠ WITHOUT IT THE STATE IS A LIE, and in the expensive direction: the lobby
+# is letterboxed with or without the menu over it, so bar_max reads 0 and the
+# frame classifies as LOBBY (measured on the capture: bar_max 0, ping_frac
+# 0.000). press_play() then clicks PLAY into a modal that swallows it, which
+# is the same shape as the ERROR and RECONNECT dialogs already handled here —
+# a screen that sits OVER the lobby and eats the one click the pump retries.
+LOBBY_MENU_TITLE_ROI_IN_LOBBY = (465, 570, 66, 402)   # (y, x, h, w)
+
+# ⚠ EXIT TO DESKTOP EXISTS ON BOTH MENUS, at two different y, and it is the
+# only entry that does. LEAVE TRAINING / RESTART LOBBY are at least unique to
+# their own screen; this one is the same word at 634 in a match and 949 in the
+# lobby, so a coordinate that is right on one is a live quit-the-game click on
+# the other. Nothing here clicks it — control/lobby.py quits by terminating
+# the process, which works from screens that have no menu at all.
+
 # Only the training range's menu has been captured. A real match almost
 # certainly renders a different fourth entry ("LEAVE MATCH" or similar), so
 # the entry coordinates below are training-range-only until one is measured.
@@ -1018,11 +1008,11 @@ LOBBY_RECONNECT_XY = (1730, 906)
 # 200m range is a lane off to the side of that.
 #
 # Boxes are (x0, y0, x1, y1) of the highlight's own bounds, measured off
-# docs/map/map_400m.png by detector/map_detector.highlight_box(). The click
-# target is the box centre -- a CONSTANT, not a per-run measurement, for the
-# same reason the spawner's entry points are constants (detector/CLAUDE.md:
-# nothing on the driving path may depend on recognising the thing it drives).
-# highlight_box() is how these get re-measured when a patch moves the map.
+# docs/map/map_400m.png by map_detector.highlight_box(), which is also how
+# they get re-measured when a patch moves the map. The click target is the box
+# centre -- a CONSTANT, not a per-run measurement, for the same reason the
+# spawner's entry points are constants (detector/CLAUDE.md: nothing on the
+# driving path may depend on recognising the thing it drives).
 MAP_RANGE_BOXES = {
     '200m': (1937, 460, 1999, 622),
 }
@@ -1055,8 +1045,8 @@ MAP_RANGE_SPAWN = {
 # x[3050,3405) y[1050,1405). Padded by 20 px, then out to the screen edge.
 #
 # ⚠ _BOX, NOT _ROI. Every *_ROI in this file is (y, x, h, w) -- the row-major
-# order detector/geometry.cut() exists to enforce, and getting it wrong does
-# not raise, it silently returns a different rectangle. This one is corner
+# order detector/geometry.py's cut() exists to enforce, and getting it wrong
+# does not raise, it silently returns a different rectangle. This one is corner
 # points like MAP_RANGE_BOXES, because it is tested against and sliced with,
 # never cut(). The suffix is the only thing that says which convention a
 # constant follows, so it has to stay honest.
@@ -1077,13 +1067,6 @@ MAP_LEFT_PANEL_W = 420
 MAP_PARK_XY = (450, 1200)
 
 # ════════════════════════════════════════════════════════════
-# Alpha blending (for highlight hypothesis test)
-# ════════════════════════════════════════════════════════════
-
-ALPHA_HL = 0.80     # highlighted weapon icon opacity
-ALPHA_LO = 0.405    # non-highlighted weapon icon opacity
-
-# ════════════════════════════════════════════════════════════
 # Training / assets
 # ════════════════════════════════════════════════════════════
 
@@ -1098,63 +1081,206 @@ ASSET_DIR = {
 HARD_CASE_CONF = (0.3, 0.5)
 
 # ════════════════════════════════════════════════════════════
+# Calibration artifacts — what the measurement layers wrote down
+# ════════════════════════════════════════════════════════════
+
+# ⚠ THESE FOUR LIVED IN press/ UNTIL 2026-08-08, AND NOTHING IN press/ EVER
+# OPENED ONE. Every reader and writer is in detector/ or calibration/, reaching
+# sideways through a '..' into a layer it does not own:
+#
+#     detector/weapon.py: os.path.join(dirname(__file__), '..', 'press', ...)
+#
+# A '..' in a path is the same smell as a '..' in an import -- it names a
+# neighbour by POSITION instead of by contract, and it survives that neighbour
+# being renamed without saying anything. (press/ was in fact reorganised the
+# same day, absorbing protocol/ and firmware/; these paths would have kept
+# resolving and kept being wrong about who owns what.)
+#
+# Ownership, now that position no longer implies it:
+#
+#     calibration/ WRITES them      build_kit_factors.py --write
+#     detector/    READS them       weapon.py, weapon_attachments.py
+#     press/       never touches them at all
+#
+# The paths live here because config.py is the one module every layer is
+# already allowed to import -- tools/check_layering.py exempts it by name.
+
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+
+WEAPON_SCALES_PATH  = os.path.join(DATA_DIR, 'weapon_scales.json')
+POSTURE_SCALES_PATH = os.path.join(DATA_DIR, 'posture_scales.json')
+KIT_FACTORS_PATH    = os.path.join(DATA_DIR, 'kit_factors.json')
+KIT_RECORDS_PATH    = os.path.join(DATA_DIR, 'kit_records.jsonl')
+
+# ════════════════════════════════════════════════════════════
 # Mouse / Pico
 # ════════════════════════════════════════════════════════════
 
-MOUSE_BACKEND = 'pico'
+# MOUSE_BACKEND was here and is gone (2026-08-08). It chose between the Pico
+# and a SendInput backend; PUBG reads the trigger and aiming off raw HID, so
+# that backend's click/aim/recoil were no-ops on the only game this repo
+# drives. Nothing ever set it to 'soft', Pointer rejected that backend on
+# sight, and three error messages still recommended it to anyone without a
+# Pico. press/pico_mouse.get_mouse() carries the full account.
 PICO_PORT = None
 MOUSE_DPI = 2000
 GAME_SENSITIVITY = 30
 COUNTS_PER_RECOIL_UNIT = 0.4
 COUNTS_PER_PIXEL = 0.5
 
+# ⚠ NOT A WIRE CONSTANT, which is why it is here and not in
+# protocol/protocol.toml: the FIRMWARE HAS NEVER HEARD OF IT. This is
+# when the PC schedules the curve relative to the click; the Pico just
+# plays back what it was handed. It lived in press/pico_mouse.py AND
+# a since-deleted soft_mouse module as two literal 13s, joined by "Match
+# PicoMouse.RECOIL_FIRE_DELAY_MS" -- two backends for the same game,
+# so a measurement that moved one had to be remembered into the other.
+# Both now read this.
+
+# How long after the click the pattern should START. Positive = later.
+#
+# This used to be RECOIL_LEAD_FRAC = 0.30, shifting the pattern 30% of a
+# bullet interval EARLIER, on the reasoning that USB and frame latency put
+# the compensation behind the recoil. Both the sign and the units were
+# wrong, and it was never measured.
+#
+# Write P for the input-and-render delay (command issued -> that command
+# visible on screen), C for the capture delay (visible -> we notice), W for
+# the weapon's own trigger-to-round delay, T for the bullet interval.
+#
+# Measured on the AUG, 2026-08-02, red dot, training range:
+#
+#   tools/probe_input_latency.py   L = P + C     = 38 ms   (n=44, sd 4.8)
+#   tools/probe_shot_latency.py    S = W + P + C = 51 ms   (n=36, sd 8.1)
+#                                  W = S - L     = 13 ms
+#
+# S is taken from the AMMO COUNTER, not from the view starting to move.
+# Both were recorded and the counter is the sound one: it changes as a
+# step, so the first frame that shows it is the answer, while the recoil
+# ramps in (0.9 counts in the first 7 ms of a bullet, 2.7 in the middle) so
+# any motion threshold fires a frame or two late. The measured gap between
+# them was one-sided -- 7 taps of 16 landed in the same frame and NOT ONE
+# put the recoil first -- which is the shape of a detection bias, not of
+# two events happening at different times. They are simultaneous.
+#
+# That simultaneity is load-bearing twice over. It is why fit_curve can
+# anchor its bins on the first counter change and have the capture latency
+# cancel out; and it is why the derivation below closes.
+#
+# The firmware schedules pattern point k at t_k after the click, and those
+# counts reach the screen at t_k + P. Round k's recoil reaches the screen
+# at W + P + k*T. Setting them equal:
+#
+#     t_k = W + k*T
+#
+# P and C are GONE. Neither the render pipeline nor the capture chain
+# enters the offset at all -- only the weapon's own delay does. The same
+# cancellation covers the spread: the firmware pours point k out over
+# [t_k, t_k + T], which lands on screen over [W + k*T, W + (k+1)*T], and
+# that is exactly the window the round's own recoil occupies.
+#
+# Two earlier values were wrong for two different reasons, and both looked
+# like "the first shot is not compensated":
+#
+#   RECOIL_LEAD_FRAC = 0.30 shifted the pattern EARLIER by a fraction of an
+#   interval. Wrong sign, wrong units, never measured.
+#
+#   36 ms came from S = 72, measured with a coarse motion threshold on the
+#   ramping recoil. Re-measured off the counter it is 51, and W is 13.
+#
+# Milliseconds, not a fraction of the interval: USB transport, input
+# sampling and a fire animation do not get faster because the gun does.
+# ⚠ 21 WAS TRIED AND REVERTED, 2026-08-07 — and what it measured is worth
+# more than the value. m416 bare, shadow, per-bullet residual:
+#
+#                  n    bullet 0        bullet 41       middle   |per-bullet|
+#     13 ms       17   +8.9 +-1.25     +11.9 +-4.08     -1.04       497
+#     21 ms       20   +1.5 +-0.91     +30.3 +-2.70     -0.33       527
+#
+# THE OFFSET TRADES THE FIRST BULLET AGAINST THE LAST. Moving it later
+# nulls bullet 0 (4.8 sigma, and +1.5 +-0.91 is indistinguishable from
+# zero) and makes bullet 41 WORSE by the same kind of margin (3.8 sigma).
+# The middle does not care either way, which is what says this is phase
+# and not amplitude.
+#
+# ⚠ THE SYMMETRIC STORY IS WRONG. "Starts early so it also ends early"
+# predicts both ends move together; they move OPPOSITE. What fits: the
+# pattern shifted later has its tail fall past the last round, and the
+# firmware stops when firing stops, so that tail is never delivered at
+# all. Bullet 41 does not get over-compensated, it gets truncated.
+#
+# So neither end is reachable by this constant alone, and 13 stays because
+# it loses less: +7.4 gained on bullet 0 against +18.4 given up on 41.
+# The ends belong to the delivery gain (75% at bullet 0, 63% at 39,
+# measured by an A/B impulse probe that was deleted with the
+# bullet-bucket coordinate on 2026-08-08 -- THESE TWO NUMBERS ARE NOW
+# THE ONLY RECORD OF IT), which is a different repair.
+#
+# ⚠ AND DO NOT RE-DERIVE THIS FROM S_recoil. probe_shot_latency reports
+# "pattern start offset = S_recoil - L = 21" and that is the same coarse
+# motion threshold recorded below as having produced the wrong 36. On the
+# counter, W = S_ammo - L = 54.3 - 38 = 16.3, and 13 is inside L's own
+# +-5.1 ms. Measured 2026-08-07, m416, 40 taps: paired gap median 0.0 ms,
+# with 5 of 40 taps reading recoil 12-17 ms LATE and none early.
+RECOIL_FIRE_DELAY_MS = 13
+
+
 # ════════════════════════════════════════════════════════════
 # Debug / detection
 # ════════════════════════════════════════════════════════════
 
-DEBUG_HOT_RELOAD = False
+# ⚠ ON, AND NO LONGER A DEBUG SETTING. Weapon.set_seq() re-reads the curves
+# when they have changed on disk, so a calibration run that improves a curve
+# reaches the game on the next weapon switch instead of on the next restart.
+# Asked for on 2026-08-07 -- "每次开枪都是最新的曲线" -- after a night of
+# --apply passes produced better curves that the live process never saw.
+#
+# It was off because the reload was unconditional and read EVERY json in
+# docs/recoil/curves, including 991 timestamped backups: 163 ms on a path that
+# runs at every weapon, attachment and posture change. Now backups are skipped
+# (they are not curves, and they were also silently competing to BE the curve
+# -- see load_curves) and a directory stat decides whether to parse anything:
+#
+#     load_curves        163 ms  ->  27 ms
+#     the change check                3.1 ms, and only that when nothing moved
+DEBUG_HOT_RELOAD = True
 CONF_BODY = 0.85
 CONF_HEAD = 0.3
 CONF_BODY_RECOIL = 0.9
 
 # ════════════════════════════════════════════════════════════
-# Legacy compat — used by dl_models/icon_layout.py, training code
+# Legacy compat — x1/y1/x2/y2 boxes. NOTHING READS THEM ANY MORE.
 # ════════════════════════════════════════════════════════════
-
-WEAPON_HUD_1 = {
-    'x1': 2808, 'x2': 3014, 'y1': 1336, 'y2': 1406, 'icon_offset_y': 9,
-}
-WEAPON_HUD_2 = {
-    'x1': 2808, 'x2': 3014, 'y1': 1253, 'y2': 1323, 'icon_offset_y': 9,
-}
-IN_TAB = {
-    'x1': 937, 'y1': 129, 'x2': 978, 'y2': 147,
-}
+#
+# The last consumer, dl_models/icon_layout.py, went on 2026-08-08 with the
+# fire-mode CNN it synthesised training data for (2 answers in 859 crops — see
+# detector/fire_mode_detector.py). So the two dicts below have zero readers,
+# which is exactly what IN_TAB / GUN_NAME_1 / GUN_NAME_2 / ATTACHMENT_SLOTS /
+# ALPHA were deleted for the day before. They are kept for a different reason:
+# they are the ONLY surviving record of these two boxes in x1/y1/x2/y2 form,
+# and the coordinates themselves are still live under HUD_REGIONS.
+#
+# ⚠ NEVER INFER FROM THEIR PRESENCE THAT SOMETHING USES THEM. That inference is
+# what kept the dead entries alive: this header used to claim "used by
+# dl_models/icon_layout.py, training code", true of FIRE_MODE and of nothing
+# else, and unfalsifiable from anywhere outside dl_models/.
+#
+# Nothing measured was lost in that deletion. The four were FIELD-FOR-FIELD
+# HUD_REGIONS['type'], ['gun_name_1'], ['gun_name_2'] and ['att_N_*'], and
+# ALPHA was a third copy of two highlight opacities nothing read — the live
+# judgement is HighlightDetector, scored as a PAIR (`pixi run highlight`).
+#
+# WEAPON_HUD_1/2 were NOT duplicates and are recorded rather than dropped: same
+# x 2808..3014, but y 1336..1406 and 1253..1323 — 70 px tall against the
+# current 53 — with an `icon_offset_y: 9` that has no equivalent in
+# HUD_REGIONS. An older, taller crop of the same thing. If a weapon-HUD crop
+# ever needs the icon's offset inside its box, that 9 is where it was measured.
 FIRE_MODE = {
     'x1': 1626, 'y1': 1317, 'x2': 1682, 'y2': 1360,
 }
+# Kept alongside it deliberately: it is the same box as HUD_REGIONS['posture']
+# in the other spelling, and the pair is the two HUD icons. Splitting them
+# would leave the next reader wondering which convention the survivor is in.
 POSTURE = {
     'x1': 1373, 'y1': 1301, 'x2': 1439, 'y2': 1367,
-}
-ATTACHMENT_SLOTS = {
-    1: {
-        'scope':    (2581, 153, 2644, 216),
-        'muzzle':   (2219, 316, 2282, 379),
-        'grip':     (2355, 316, 2418, 379),
-        'magazine': (2502, 316, 2565, 379),
-        'stock':    (2785, 316, 2848, 379),
-    },
-    2: {
-        'scope':    (2581, 455, 2644, 518),
-        'muzzle':   (2219, 617, 2282, 680),
-        'grip':     (2355, 617, 2418, 680),
-        'magazine': (2502, 617, 2565, 680),
-        'stock':    (2785, 617, 2848, 680),
-    },
-}
-GUN_NAME_1 = {'x1': 2275, 'x2': 2525, 'y1': 123, 'y2': 168}
-GUN_NAME_2 = {'x1': 2275, 'x2': 2525, 'y1': 425, 'y2': 470}
-ALPHA = {
-    'weapon_highlighted': 0.80,
-    'weapon_non_highlighted': 0.405,
 }

@@ -47,164 +47,52 @@ ultralytics = "*"           # human_detection RT-DETR/YOLO
 robot = "python robot.py"
 sweep = "python calibration/sweep.py"
 calibrate-k = "python calibration/calibrate_k.py"
-auto-calibrate = "python calibration/auto_calibrate.py"
 spawner = "python control/spawner.py"
 stocktake = "python control/stock.py"
 collect = "python calibration/collect_templates.py"
 attach = "python control/inventory.py"
 capture-ads = "python calibration/capture_ads.py"
 fit-ads = "python calibration/fit_ads_detector.py"
-train = "python dl_models/train.py"
-# Cold-start check: compiles everything, builds every detector, grabs frames,
-# looks for the Pico. Touches no game window.
 smoke = "python tools/smoke_check.py"
-# Parses imports only — no game, no hardware. Keeps detector/ runnable on a
-# stored PNG and press/ ignorant of the game.
 layering = "python tools/check_layering.py"
-# Reads the spawner panel's node off checked-in shots whose file names are the
-# ground truth. Offline, and the thing that lets the panel be driven without
-# returning to a collapsed baseline between actions.
+surface = "python tools/surface.py"
 panel-state = "python tools/test_panel_state.py"
-# Player marker and range highlights on the in-match map, off one stored frame.
-# Offline. Two-sided by construction: half the cases paint the marker OUT, and
-# they are the half that matters -- the area-only gate this replaced accepted
-# the left panel's selection border (167 px) and only ever returned the marker
-# because the marker outweighed it.
-map-detect = "python detector/map_detector.py --selftest"
-# Drives TabWatch's state machine against a scripted screen. Offline. Covers
-# the two cases the old toggle got wrong: a Tab key the game swallowed, and
-# the screen changing with no key at all.
 tab-watch = "python tools/test_tab_watch.py"
-# The predicate UNDER that state machine, scored on every stored full-screen
-# shot. Offline. Two-sided: the count band alone called 15 of 868 ADS frames
-# "inventory open" because the 'type' region sits over the training range's
-# sky, and a dozen `cond: '!tab_open'` entries gate on this -- including
-# whether recoil compensation runs at all.
 tab-open = "python tools/test_tab_open.py"
 name-plates = "python tools/test_name_plates.py"
-# HighlightDetector, scored the way it is USED: a highlighted and a plain crop
-# of the SAME weapon go in as a pair, and the pair is right when the highlighted
-# one wins. Offline, 254 pairs over 26 weapons. It is in the per-keypress path,
-# and it was the one script in tools/ that nothing anywhere named -- an offline
-# check with no task is one nobody runs.
 highlight = "python tools/eval_highlight.py"
-# Every attachment template against every ground-truth crop, with the margin.
-# Offline. A drifted icon does not read as nothing -- it reads as its nearest
-# neighbour, confidently, which is how Lower_ThumbGrip_C spent an unknown
-# number of runs reporting `laser`. --write rebuilds the .solved variants out
-# of the paired captures first.
+setup-verdict = "python tools/test_setup_verdict.py"
 attachments = "python calibration/score_attachments.py"
-# What separates the drags that landed from the ones that did not: cursor
-# placement, row counts, and the gap since the previous drag, side by side.
-# Reads the journal control/inventory.py writes on every gesture. A drop can
-# miss in three different places and they need three different fixes.
 drag-log = "python tools/drag_log.py"
-# control/inventory.py's address vocabulary. Pure tuples, pure functions, no game.
-# Exists because at_gun() shipped with a grab point and a drop_weapon() while
-# _reject() had never heard of it, so every gun drop was refused.
 locations = "python tools/test_locations.py"
-# The measurement maths: a recording -> per-bullet counts -> a verdict on the
-# magazine. Property checks on synthetic traces, plus a replay of every
-# magazine ever logged — a logged one was accepted when it ran, so one that is
-# refused today means a gate moved.
-analysis = "python tools/test_analysis.py"
-# Reads the newest run under docs/recoil/runs/ with no arguments, so "what
-# did that run say" is one word. Name files with --jsonl to pool them.
-factors = "python calibration/analyse_factors.py"
-# The fire loop's exception path: a lost foreground raises through the middle
-# of a burst, and the button it was holding has to come back up. Offline —
-# proving it on the real game is the one run that would leave the trigger down
-# if the guard were broken.
+collect-timed = "python calibration/collect_timed.py"
 fire = "python tools/test_fire_guard.py"
-# A scheduled detection that read nothing has to ask again -- the posture icon
-# is only PAINTED while the sight is up, so None there means "not yet", not
-# "unreadable". Offline. Covers the requeue landing in the deque
-# _process_pending is building rather than the one it is about to discard,
-# which is a bug that leaves _run_detect correct in isolation.
 detect-retry = "python tools/test_detect_retry.py"
-# The spawner's declarative surface: what a caller asks for -> the clicks it
-# turns into. Pure planning, no panel and no game — the coordinates are
-# measured constants, so the plan is checkable without looking at anything.
 spawner-plan = "python tools/test_spawner_plan.py"
-# InventoryControl.ensure_kit: current slots + wanted slots -> the shortest
-# sequence of drags. Pure diff, offline.
 kit = "python tools/test_ensure_kit.py"
-# The shared frame source: region grabs blitted back to screen coordinates,
-# and the flush-N-then-read idiom. Offline, against stored PNGs.
 frames = "python tools/test_frames.py"
-# The capture-run format, and the two hand-rolled run shapes that predate it.
-# Offline; writes nothing under docs/. Guards three things that all fail
-# SILENTLY: an adapter returning zero entries looks like a run that captured
-# nothing; a legacy label promoted to ground truth would let a template be
-# fitted to the 64 frames of shoulder aim filed as ADS; and save() on a legacy
-# run would put a second index beside 867 frames that cannot be re-captured.
-# Also executes scope_label() / label_for(), so "requested vs detected vs
-# nobody looked" is a decision table rather than a paragraph.
 runs = "python tools/test_capture_run.py"
-# The unattended layer: the cell manifest and the usability thresholds, on
-# made-up records. Offline. Both fail silently when they are wrong — a
-# manifest that loses a cell and a threshold that passes a missing field both
-# look exactly like a good night.
 harness = "python tools/test_harness.py"
-# The unattended run itself. --dry prints the plan and the contract and
-# touches nothing; without it, the run needs the game.
 night = "python harness/night.py"
-# Firmware acceptance, on the bench: no game, no window, no cursor movement.
-# Run it after every flash and before any calibration run — a curve is measured
-# THROUGH the firmware, so a fault in there is copied into every stored curve
-# while the residual stays clean. Verified to catch both bugs it guards against
-# by reintroducing them (2026-08-03).
 verify-pico = "python tools/verify_pico.py"
-# Which round the compensation actually lands on, differenced against an
-# all-zero baseline so the game's own recoil cancels. Needs the game.
-# The k=0 case is why it exists: probe_impulse_align finds the spike as the
-# most-negative round, which round 12 wins easily and round 0 does not.
-impulse-ab = "python tools/probe_impulse_ab.py"
-# How far the view can wander and still be placed against its reference.
-# Offline, on stored full-screen frames whose ground truth is exact (the
-# shifted patch is sliced from the same image, not synthesised). Guards the
-# pre-shift in aim.absolute_offset and the roll budget that bounds it.
 abs-offset = "python tools/test_abs_offset.py"
-# recenter()'s convergence, against a stored screenshot and a number saying
-# where the view points. Offline. Written after the absolute loop discarded
-# _move_tracked()'s return value and spun for four tries on every magazine —
-# a pure arithmetic bug that cost a live run to find.
 recenter = "python tools/test_recenter.py"
-# Is the spawner menu an accordion? Reads the log goto() keeps as a side
-# effect of every real transition, so the sample is traffic the panel actually
-# saw rather than whatever a probe author thought to try. Offline. The split it
-# makes is the point: a one-click transition from a COLLAPSED panel proves
-# nothing, and counting paths without that split looks like evidence.
-goto-paths = "python tools/report_goto_paths.py"
-# Sidecar metadata, and the ground-truth crop assertions it buys. Offline.
-# The half of the check that matters is that it CAN FAIL: "3/3 correct" looks
-# the same whether the checker discriminates or returns the expected answer by
-# construction, so each one is also fed a crop it must NOT match. Template
-# drift is silent (detector/CLAUDE.md's first iron law) and only a
-# compare-against-truth pass sees it.
 snaps = "python tools/test_snapshot.py"
-# The two offline suites that existed with no way to run them. A test nobody
-# invokes rots silently and then reads as coverage, which is worse than not
-# having it -- test_stocktake.py had already been migrated onto
-# control.stock by 5n without anyone being able to see that it still passed.
 stocktake-test = "python tools/test_stocktake.py"
-# The ONLY offline regression for the lobby state machine (detector/CLAUDE.md
-# says so). 8 cases: lobby, training range, Tab open, the exit-confirm dialog,
-# two error overlays, the results screen, and the ESC menu -- that last one
-# because every pixel probe reads a system menu as "in the match" while the
-# keys all go to the menu, which silently voided a whole harvest run.
 lobby-detector = "python tools/verify_lobby_detector.py"
-# What the game says right now, photographed. Reads, never drives — opens the
-# Tab screen and closes it. Needs the game. The frame lands BEFORE any key is
-# pressed, which is the whole design: "the Tab screen would not open" is a
-# sentence about the screen, and the first version discarded the screen to
-# say it. Same code path harness/adapter.dump uses at 04:00.
 dump-state = "python tools/dump_state.py"
-# Names used but never defined. Parses; runs nothing. Python resolves a global
-# at CALL time, so a name only mentioned inside a method survives import, every
-# import-only check, and any test that does not take that branch -- and then
-# raises NameError minutes into a live run. That is not hypothetical: SLOT_NAMES
-# went unimported in collect_templates and killed a collection two rounds in,
-# past `layering`, past `runs`, past a clean import. Verified to catch it by
-# putting it back.
 names = "python tools/check_names.py"
+gen-protocol = "python tools/gen_protocol.py"
+protocol-check = "python tools/gen_protocol.py --check"
+gestures = "python tools/check_gestures.py"
+params = "python tools/check_params.py"
+surface-check = "python tools/surface.py --check"
+surface-drift = "python tools/surface.py --drift"
+map-detect = "python detector/map_detector.py --selftest"
+# 18 assertions on data/kit_factors.json, which is now UNREBUILDABLE (its
+# reader and every source run are gone) and is read by weapon_attachments on
+# every import. Had no task until 2026-08-08 — the file that could have caught
+# its own builder breaking was the one nobody could run.
+kit-factors = "python calibration/build_kit_factors.py --selftest"
+placement = "python tools/test_range_placement.py"
+fit-time = "python calibration/fit_time_curve.py --selftest"
