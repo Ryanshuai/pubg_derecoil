@@ -14,21 +14,72 @@ __pycache__
 *.mp4
 *.mkv
 temp_debug
-training_data
-InGameScreenshot
 docs
+# `InGameScreenshot` was a fourth line here until 2026-08-08. Its six sinks are
+# `docs/mismatch/` now, so `docs` already covers them — one exception fewer.
 
-# RT-DETR/YOLO weights, 189 MB each. Downloaded or trained, never edited.
-human_detection/*.pt
+# ── one exception, and it is about the code RUNNING, not about history ──
+# The rule is "does a clean clone RUN", not "is it small". These trees are the
+# TEMPLATES the detectors load at import — lobby tabs by glyph, weapon name
+# plates, fire-mode / posture / type icons, the ADS crosshair. Without them a
+# fresh checkout has no lobby chain (read_page returns None, so ensure_mode ->
+# press_play -> ensure_in_match refuses to act), no weapon-name OCR and no
+# posture. ~1 MB total, and NOT rebuildable: rebuilding needs a corpus that is
+# itself ignored (and as of 2026-08-08 several of those corpora are deleted).
+#
+# ⚠ TWO THINGS THIS BLOCK GOT WRONG BEFORE 2026-08-08, both found by moving the
+# tree under docs/ — a move is what forces every ignore rule to be re-applied,
+# so it is the event that shows you what the rules were actually doing:
+#
+#   1. It said "these 24 files". `git ls-files` said 106, across ocr_white/,
+#      pubg_assets/{fire_mode,posture,type,lobby}/ and lobby/tabs/ (36, not 24).
+#   2. Only lobby/tabs/*.png was ever un-ignored. THE OTHER 70 WERE TRACKED BY
+#      INERTIA — .gitignore does not apply to files already in the index, so
+#      they had been added before the rules existed and simply never left.
+#      Nothing would have re-added them; a clean clone kept working purely
+#      because nobody had cause to re-add.
+#
+# So the rules now say what the index already contained, which is also what the
+# stated criterion asks for. `git check-ignore -v <file>` names the winning rule
+# when this needs debugging.
+!docs/
+docs/*
+!docs/training_data/
+docs/training_data/*
+!docs/training_data/ocr_white/
+!docs/training_data/pubg_assets/
+docs/training_data/pubg_assets/*
+!docs/training_data/pubg_assets/fire_mode/
+!docs/training_data/pubg_assets/posture/
+!docs/training_data/pubg_assets/type/
+!docs/training_data/pubg_assets/lobby/
+docs/training_data/pubg_assets/lobby/*
+!docs/training_data/pubg_assets/lobby/tabs/
+# ⚠ AND the files, explicitly. Re-including the DIRECTORY is not enough:
+# line 10's `*.png` matches at every depth and would take them straight back
+# out. Re-includes are per-rule, not per-tree — that is the second rule that
+# has to be beaten.
+!docs/training_data/ocr_white/*.png
+!docs/training_data/pubg_assets/*.png
+!docs/training_data/pubg_assets/fire_mode/*.png
+!docs/training_data/pubg_assets/posture/*.png
+!docs/training_data/pubg_assets/type/*.png
+!docs/training_data/pubg_assets/lobby/*.png
+!docs/training_data/pubg_assets/lobby/tabs/*.png
+!docs/training_data/pubg_assets/*.npz
 
-# (weapon_hud_bank.npz needs no rule of its own — it lives under training_data/,
-#  which line 17 already covers. Rebuild it with tools/build_weapon_hud_bank.py.)
+# (highlight_eval/ and weapon_hud_bank.npz stay OUT: 15 MB of labelled eval
+#  corpus and a 2.9 MB PCA bank. The bank is derived — but ⚠ as of 2026-08-08
+#  its corpus (Manual/weapon_hud, 128 MB) is DELETED, so "rebuild it with
+#  calibration/build_weapon_hud_bank.py" is no longer true. It is now an
+#  unrebuildable ignored file, which is the worst of both; if that matters,
+#  the fix is to track it, not to pretend the corpus is coming back.)
 
 
 .claude/settings.local.json
 .pixi/
 
-pico_firmware/.vscode
+press/firmware/.vscode
 
 
 # agent-refactor skill 的状态与产物（队列、可达图、扫描结果、差分 spec）
