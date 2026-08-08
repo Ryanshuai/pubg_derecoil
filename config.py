@@ -1074,8 +1074,20 @@ MAP_PARK_XY = (450, 1200)
 # task. The 'weapon' entry pointed at a directory deleted on 2026-08-05 (see
 # detector/weapon_hud_detector.py on why extracted art cannot be a template
 # source), and 'attachment' / 'tab_detect' fed checkpoints nothing loaded.
+# ⚠ AND `fire_mode` HAS NO READER EITHER, which is the part worth writing down
+# rather than the path. `grep ASSET_DIR` finds exactly one other definition --
+# detector/spawner_detector.py's own, an absolute join that is correct -- and
+# zero readers of this one. So this dict survived the deletion of three of its
+# four entries by being the kind of thing nobody greps.
+#
+# Its path was ALSO wrong from 2026-08-08: the templates moved to
+# data/templates/ with the rest of the checked-in assets, and a dead constant
+# is exactly what a path migration cannot fix, because nothing fails when it
+# is missed. Corrected rather than deleted only because deleting a config entry
+# is the one edit that a dynamic reader would survive silently; if the next
+# person confirms nothing reads it, it should go.
 ASSET_DIR = {
-    'fire_mode':  'training_data/pubg_assets/fire_mode',
+    'fire_mode':  'data/templates/pubg_assets/fire_mode',
 }
 
 HARD_CASE_CONF = (0.3, 0.5)
@@ -1111,6 +1123,24 @@ WEAPON_SCALES_PATH  = os.path.join(DATA_DIR, 'weapon_scales.json')
 POSTURE_SCALES_PATH = os.path.join(DATA_DIR, 'posture_scales.json')
 KIT_FACTORS_PATH    = os.path.join(DATA_DIR, 'kit_factors.json')
 KIT_RECORDS_PATH    = os.path.join(DATA_DIR, 'kit_records.jsonl')
+
+# The compensation curves the runtime loads on every weapon/attachment/posture
+# change, and the templates the detectors load at import.
+#
+# ⚠ CURVES ARE NOT MEASUREMENTS, and the distinction is what this directory
+# is for. Measurements go to calibration/artifacts/ -- gitignored, and
+# regenerable by measuring again. Curves and templates are the ARTIFACTS the
+# runtime loads: with no curve the tool simply does not compensate, and with
+# no templates a fresh clone has no lobby chain, no weapon-name OCR and no
+# posture.
+#
+# The curves lived under docs/ once, which is line 19 of .gitignore in its
+# entirety, so they had no history at all. On 2026-08-08 a cleanup deleted
+# docs/recoil/curves/ and every weapon's curve went with it -- 40 guns,
+# unrecoverable, while `git status` stayed clean because git had never heard
+# of the directory. There was nothing to revert to.
+CURVES_DIR = os.path.join(DATA_DIR, 'curves')
+TEMPLATES_DIR = os.path.join(DATA_DIR, 'templates')
 
 # ════════════════════════════════════════════════════════════
 # Mouse / Pico
