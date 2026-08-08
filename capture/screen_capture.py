@@ -5,7 +5,7 @@ Each frame is timestamped and stored in a deque covering ~1 second.
 Other threads read from the buffer, never call the grabber directly.
 
 The backend is DXGI Desktop Duplication when available, otherwise a banded
-GDI grabber. See detector.cropper.
+GDI grabber. See capture.cropper.
 
 Measured against the live game on a 16-core machine:
 
@@ -24,7 +24,7 @@ from daemon_loop import DaemonLoop
 from collections import deque
 
 from config import FRAME_REGIONS, HUD_REGIONS
-from detector.cropper import make_grabber
+from capture.cropper import make_grabber
 
 
 class ScreenCapture(DaemonLoop):
@@ -58,15 +58,10 @@ class ScreenCapture(DaemonLoop):
         self._interval = 1.0 / target_fps
         self._prefer_dxgi = prefer_dxgi
         self._dxgi_fps = dxgi_fps
-        self._running = False
-        self._thread = None
         # Measured loop stats, updated once per second by the capture thread
         self.fps = 0.0
         self.grab_ms = 0.0
         self.backend = None
-
-    # ── Thread lifecycle ──
-
 
     # ── Capture loop ──
 

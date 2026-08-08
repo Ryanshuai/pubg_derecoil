@@ -298,6 +298,131 @@ class DXGIGrabber:
             pass
 
 
+class DXGISyncGrabber:
+    """DXGI with no capture thread, and every frame carrying the instant the
+    compositor PRESENTED it.
+
+        g = DXGISyncGrabber(tracker.regions())
+        t, crops = g.grab_timed()      # (None, None) when no new frame yet
+
+    WHY A SECOND DXGI GRABBER
+    -------------------------
+    DXGIGrabber above runs bettercam's capture thread, and that thread does two
+    things this measurement cannot have:
+
+      - `video_mode=True` COPIES THE PREVIOUS FRAME when the compositor has
+        produced nothing, and signals it as new. Measured on a static desktop:
+        3 seconds, 9 frames actually presented, and the threaded path would
+        have handed over roughly 500. MagazineRecorder catches those by
+        comparing pixels, but that is a repair downstream of a fabrication.
+      - The frame is stamped by the CALLER, before a blocking wait for a frame
+        that does not exist yet. See capture/dxgi_time.
+
+    The synchronous path has neither problem by construction: `_grab` returns
+    None when nothing new was presented, and `LastPresentTime` says exactly
+    when the frame that WAS returned came from.
+
+    ⚠ ONE CAMERA PER OUTPUT, PROCESS-WIDE. bettercam's factory hands the same
+    object to every create() for a given (device, output), so a ScreenBuffer on
+    the threaded path and one of these cannot coexist in one process -- the
+    second start()/grab() drives the same camera and the first one's frames
+    stop making sense. The rig picks one.
+
+    ⚠ AND grab_timed() RETURNS (None, None) OFTEN. That is not an error, it is
+    the honest answer "the screen has not changed since you last asked". A
+    caller that treats it as a failure will conclude the capture is broken
+    while looking at a still scene.
+    """
+
+    def __init__(self, regions, output_idx=0, timeout_ms=8):
+        import bettercam
+
+        from capture import dxgi_time
+        dxgi_time.enable()
+        # 0 would spin: measured 33 000 polls a second against 66 at 8 ms.
+        # It is module-global because the patch is, and the note above says why
+        # only one grabber may be live anyway.
+        dxgi_time.TIMEOUT_MS = timeout_ms
+        self._dt = dxgi_time
+
+        self.regions = regions
+        self.left = min(r[1] for r in regions.values())
+        self.top = min(r[0] for r in regions.values())
+        right = max(r[1] + r[3] for r in regions.values())
+        bottom = max(r[0] + r[2] for r in regions.values())
+        self._region = (self.left, self.top, right, bottom)
+        self._members = [
+            (name, r[0] - self.top, r[1] - self.left, r[2], r[3])
+            for name, r in regions.items()
+        ]
+        self._cam = bettercam.create(output_idx=output_idx,
+                                     region=self._region,
+                                     output_color="BGRA")
+        self._closed = False
+        # Frames the compositor made while we were busy. Not an error and not
+        # jitter: it is the sampling rate falling below the refresh rate, and
+        # it is the only way to know that from inside.
+        self.n_missed = 0
+        self.n_frames = 0
+
+    def grab_timed(self):
+        """(present_time_s, {name: BGR}) or (None, None) if nothing new."""
+        img = self._cam.grab()
+        if img is None:
+            return None, None
+        t = self._dt.present_s()
+        if t is None:
+            # A frame with no usable stamp is not a frame we can place on the
+            # time axis, and MODEL.md's axis is the whole measurement. Dropping
+            # it costs one sample; keeping it with a guessed time puts a real
+            # displacement at a wrong instant, which is worse and invisible.
+            return None, None
+        self.n_frames += 1
+        acc = self._dt.accumulated()
+        if acc > 1:
+            self.n_missed += acc - 1
+        out = {}
+        for name, dy, dx, h, w in self._members:
+            out[name] = img[dy:dy + h, dx:dx + w, :3].copy()
+        return t, out
+
+    def grab(self):
+        """Blocking, for callers that only want pixels. Loops until a frame."""
+        while True:
+            t, out = self.grab_timed()
+            if out is not None:
+                return out
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        cam, self._cam = self._cam, None
+        try:
+            cam.release()
+        except Exception:
+            pass
+        # Same factory eviction as DXGIGrabber.close -- see the long note
+        # there. Without it the next create() gets this camera back.
+        try:
+            import gc
+
+            import bettercam
+            for key, inst in list(bettercam.DXFactory._camera_instances.items()):
+                if inst is cam:
+                    del bettercam.DXFactory._camera_instances[key]
+            del cam, inst
+            gc.collect()
+        except Exception:
+            pass
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
 def make_grabber(regions, prefer_dxgi=True, dxgi_fps=0):
     """Return (grabber, paced) for `regions`.
 
@@ -381,8 +506,8 @@ def anchor_box(anchors, icon_w, icon_h, search=0):
     region here.
 
     Transcribed verbatim, quirk included, from the two copies it replaces
-    (calibration/harvest.py's Panel.__init__ and calibration/state.py's
-    Probe.__init__, which were character-for-character identical). The quirk:
+    (one in the recoil sweep, since deleted, and calibration/state.py's
+    Probe.__init__ — the two were character-for-character identical). The quirk:
     the origin is clamped at 0 but the height and width are not reduced to
     match, so an anchor set within `search` of the top or left edge yields a
     box that reaches `search` px further than the margin asks for. Kept
