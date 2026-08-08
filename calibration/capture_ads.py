@@ -50,7 +50,8 @@ scope onto the gun -> read the slot back -> Tab -> for each of ten views, tap
 the right button, frames, tap it again -> Tab again for the next scope.
 
 ADS is a toggle, and it is the *release* that switches into the sight —
-holding the right button down is hip aim and no scope ever appears. Run
+holding the right button down is SHOULDER AIM -- a third state, see
+detector/ads_detector.py -- and no scope ever appears. Run
 20260801_222936 is 64 frames of that mistake. Hence --probe: three frames and
 a side-by-side picture, before committing to four hundred.
 
@@ -117,10 +118,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cv2
 import numpy as np
 
-from capture_run import CaptureRun, LABEL_DETECTED, LABEL_REQUESTED
+from calibration.capture_run import CaptureRun, LABEL_DETECTED, LABEL_REQUESTED
 from config import HUD_REGIONS, SCREEN_W, SCREEN_H
 from detector.attachment_catalog import ATTACHMENTS
-from detector.cropper import FocusLost, ScreenBuffer
+from capture.cropper import FocusLost, ScreenBuffer
 from control.aim import ViewDriver, NoPico
 from control.focus import game_focused
 from control.session import ensure_ready
@@ -195,7 +196,7 @@ HIP_SETTLE = 0.20        # before the pre-press hip frame
 
 TAP_MS = 70              # right button down-up. ADS is a toggle: it is the
                          # release that switches into the sight, and holding
-                         # the button is hip aim, so this must be a real tap.
+                         # the button is shoulder aim, so this must be a real tap.
 TAP_SETTLE = 0.04        # let the report land before timing anything from it
 
 # One view's hip frame against its own hip_after frame, downsampled. Held
@@ -544,18 +545,13 @@ class Aimer:
     switch that stayed here, and why.
     """
 
-    def __init__(self, backend='auto'):
+    def __init__(self):
         # This is where the Pico gets opened for the whole run, retries and
         # all (press/pointer.py's Pointer.opened). Everything built after it —
         # InventoryControl included — goes through get_mouse()'s singleton and
         # finds the port already up, so the retry only ever has to happen once
         # and it happens before the operator is asked to switch to the game.
-        self.view = ViewDriver.open_loop(backend, _FRAMES)
-        self.backend = self.view.backend
-        if self.backend != 'pico':
-            print('[aim] WARNING: no Pico, and --backend sendinput says to go '
-                  'anyway. PUBG reads raw input and will very likely ignore '
-                  'this — check the first ADS frame before trusting a run.')
+        self.view = ViewDriver.open_loop(_FRAMES)
         self.yaw = 0
         self.pitch = 0
 
@@ -589,7 +585,7 @@ class Aimer:
         """Tap into the sight, sample, tap back out. -> [(want_ms, got_ms, img)]
 
         ADS here is a toggle, not a hold: holding the right button down is
-        hip/shoulder aim and the sight picture never appears. Run
+        shoulder aim and the sight picture never appears. Run
         20260801_222936 is 64 frames of exactly that mistake — iron sights and
         a red dot came out with hip-to-"ADS" differences of 31.45 and 31.48,
         because what was being measured was the gun coming up, not a scope.
@@ -819,7 +815,7 @@ class AttachEquip:
         return False, (got if want else None)
 
 
-def open_inventory(backend='auto'):
+def open_inventory():
     """One InventoryControl for the whole run, or None if it will not build.
 
     Shared rather than one per user, and there are three: AttachEquip drives
@@ -834,7 +830,7 @@ def open_inventory(backend='auto'):
     """
     try:
         from control.inventory import InventoryControl
-        return InventoryControl(backend=backend)
+        return InventoryControl()
     except Exception as e:
         print(f'[equip] control/inventory.py unavailable ({e})')
         return None
@@ -1098,7 +1094,7 @@ def timing_run(args):
     noise floor. Where each flattens is the number to use; the gap between
     plateau and floor is what SCOPE_STUCK_DIFF has to sit inside.
     """
-    aimer = Aimer(args.backend)
+    aimer = Aimer()
     stamp = time.strftime('%Y%m%d_%H%M%S')
     out_dir = os.path.join(OUT_ROOT, f'timing_{stamp}')
     os.makedirs(out_dir, exist_ok=True)
@@ -1155,7 +1151,6 @@ def timing_run(args):
         _strip(curve, os.path.join(out_dir, name))
     with open(os.path.join(out_dir, 'timing.json'), 'w', encoding='utf-8') as f:
         json.dump(dict(stamp=stamp, weapon=args.weapon, watch_ms=args.timing_ms,
-                       backend=aimer.backend,
                        ads_settle_ms=t_up, ads_plateau=plateau,
                        hip_settle_ms=t_down, hip_floor=floor,
                        ads=[[round(t, 1), round(d, 2)] for t, d, _ in up],
@@ -1273,8 +1268,8 @@ def run(args):
 
     # Everything that talks to the console happens before the operator is
     # asked to switch away — once the game is in front they cannot read it.
-    aimer = Aimer(args.backend)
-    inv = open_inventory(args.backend)
+    aimer = Aimer()
+    inv = open_inventory()
     equip = make_equipper(args.equip, inv, slot or 1)
     verifier = None
 
@@ -1401,7 +1396,7 @@ def run(args):
             view_seed=VIEW_SEED, view_offsets=views,
             ads_sample_ms=list(sample_ms), steady_ms=STEADY_MS,
             hip_after_ms=HIP_AFTER_MS,
-            format='png' if args.png else 'jpg', backend=aimer.backend,
+            format='png' if args.png else 'jpg',
             equipper=equip.name, scopes_requested=scopes, scopes_done=done,
             frames=len(run.entries))
         run.save()
@@ -1609,8 +1604,6 @@ def main():
                          '(default 2200)')
     ap.add_argument('--png', action='store_true',
                     help='lossless frames (~6x the disk of the JPEG default)')
-    ap.add_argument('--backend', default='auto',
-                    choices=('auto', 'pico', 'sendinput'))
     args = ap.parse_args()
 
     if args.report:

@@ -43,7 +43,7 @@ for _s in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
-from capture_run import CaptureRun, LABEL_DETECTED
+from calibration.capture_run import CaptureRun, LABEL_DETECTED
 from detector.attachment_catalog import ROSTER, SLOTS
 from control.lobby import LobbyControl
 from detector.slot_detector import SlotDetector
@@ -164,7 +164,6 @@ def main():
     ap.add_argument('--start-from', default=None)
     ap.add_argument('--report', default=None, metavar='RUN_DIR',
                     help='offline: re-print the diff from a finished run')
-    ap.add_argument('--backend', default='auto')
     ap.add_argument('--countdown', type=int, default=6)
     args = ap.parse_args()
 
@@ -191,12 +190,9 @@ def main():
 
     # One call replaces the focus check AND the ensure_in_match below it, and
     # adds the two this scan was missing: Tab and the spawner panel both eat
-    # the keypresses it is about to send. Its last step moves to the 200m lane,
-    # off the compound where the traffic is.
+    # the keypresses it is about to send. Its match leg also moves to the 200m
+    # lane, off the compound where the traffic is.
     #
-    # ⚠ ensure_ready takes no backend, so its control objects come up on
-    # 'auto'. That only matters for --backend sendinput, which cannot press a
-    # key at all (can_key is False) and so could never have run this scan.
     ready = ensure_ready(label='scan_compat', countdown_s=args.countdown)
     if not ready['ok']:
         print(f'could not get the game ready — failed at {ready["failed"]!r}')
@@ -204,8 +200,8 @@ def main():
 
     from control.inventory import InventoryControl
     from control.spawner import SpawnerControl
-    sc = SpawnerControl(args.backend)
-    ac = InventoryControl(args.backend, verbose=False)
+    sc = SpawnerControl()
+    ac = InventoryControl(verbose=False)
     if not (sc.can_press() and ac.can_press()):
         print('no Pico — the spawner panel and Tab are both opened by keypress')
         return 1
@@ -241,7 +237,7 @@ def main():
             print(f'FAILED: {r["error"]}')
             # A spawn failure is usually a panel left in the wrong state.
             # Re-establish rather than carrying it into the next weapon.
-            with LobbyControl(args.backend, verbose=False) as lc2:
+            with LobbyControl(verbose=False) as lc2:
                 lc2.ensure_in_match()
 
     bad = report(records)

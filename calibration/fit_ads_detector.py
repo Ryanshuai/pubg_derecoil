@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cv2
 import numpy as np
 
-from capture_run import CaptureRun
+from calibration.capture_run import CaptureRun
 from detector.ads_detector import AdsDetector, CROP_R, TEMPLATE_PATH, THRESHOLD
 from dl_models.icon_merging import dewhite
 

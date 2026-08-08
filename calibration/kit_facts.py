@@ -21,7 +21,7 @@ What DOES happen automatically is in-flight degradation: a slot that will not
 take its part is dropped from the config and the cell is measured without it,
 so a stale catalogue costs a slot rather than a whole weapon's data.
 
-    from kit_facts import KitFacts
+    from calibration.kit_facts import KitFacts
     kf = KitFacts()
     kf.note_failure('famas', 'grip', 'vert_grip')
     kf.refuted('famas', 'grip', 'vert_grip')   # enough evidence to go look?

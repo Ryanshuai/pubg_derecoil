@@ -25,12 +25,21 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
 
+# The window title is printed, the client is Chinese, and the default Windows
+# console codec is cp1252 -- so the ONE probe that exists to explain a failed
+# run used to die with a UnicodeEncodeError before printing a single line.
+# Diagnostics must not be able to fail on what they are diagnosing.
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+except (AttributeError, OSError):
+    pass
+
 from control.focus import foreground
 
 from config import (HUD_REGIONS, RECOIL_SIGHT_PROFILES,
                     TAB_PIXEL_THRESH, TAB_COUNT_MIN, TAB_COUNT_MAX,
                     TAB_DARK_FLOOR_MAX)
-from detector.cropper import ScreenBuffer
+from capture.cropper import ScreenBuffer
 from detector.posture_detector import PostureDetector
 from detector.spawner_detector import ICON_BOX, SpawnerDetector
 from detector.tab_detector import TabTypeDetector
@@ -136,7 +145,7 @@ def pico_state():
     return m, m.human_available()
 
 
-def show(p, args):
+def show(p):
     focused, exe, title = foreground()
     s = p.read()
 
@@ -192,7 +201,7 @@ def main():
     try:
         while True:
             print()
-            show(p, args)
+            show(p)
             if args.tab:
                 read_tab(p)
             if not args.watch:

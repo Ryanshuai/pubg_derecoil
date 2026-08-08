@@ -4,7 +4,9 @@
 
 一个 `ensure_*` 都不该有。想让游戏做点什么，去 `control/`。
 
-⚠ **「不该有」指的是不该自己实现，不是不该调。** 2026-08-06 起这一层的六个入口（`harvest` / `sweep` / `collect_templates` / `scan_compat` / `calibrate_k` / `capture_ads`）开场统一调 `control.session.ensure_ready()`——那是 `control/` 的东西，正是 `pixi run layering` 第 9 条要求的方向。它现在是**五步**：焦点 → 在局内 → Tab 收起 → 刷新器面板收起 → **走到 200m 靶道**。最后一步不是「游戏听不听得见我」而是「有没有人会撞我」：出生点是主场地，人多的服上有车穿过，而**被撞掉的弹匣不会自己报告**——轨迹里只是混进了别人的物理，每一道闸照样绿。
+⚠ **「不该有」指的是不该自己实现，不是不该调。** 这一层每个驱动游戏的入口（`collect_timed` / `collect_templates` / `scan_compat` / `scan_fits` / `calibrate_k` / `capture_ads`，以及 `harness/night.py`）开场统一调 `control.session.ensure_ready()`——那是 `control/` 的东西，正是 `pixi run layering` 第 9 条要求的方向。它是**五步**：进程起着 → 焦点 → 在局内 → Tab 收起 → 刷新器面板收起。
+
+⚠ **「走到 200m 靶道」以前是这里的第六步，2026-08-08 搬进了 `LobbyControl.ensure_in_match()`。** 它不是「游戏听不听得见我」而是「有没有人会撞我」：出生点是主场地，人多的服上有车穿过，而**被撞掉的弹匣不会自己报告**——轨迹里只是混进了别人的物理，每一道闸照样绿。搬家的理由是这一层付的账：`AutoSession.enter()` 回到局内**不经过 `ensure_ready`**，于是那个「已经在靶道了」的标志留着不动，下一次 `ensure_ready` 跳过一次从未发生的传送，**一轮 harvest 的后半程 45 分钟全在车流里打完**。现在**移动角色的模块就是知道角色被移动过的模块**，`ensure_ready` 只把 `range_name` 透传下去。
 
 判据跟 `control/CLAUDE.md` 那条是同一条，只是落在这一层：
 
@@ -20,7 +22,7 @@ pixi run layering      # 第 6 条：calibration/ 不 import press.*
 
 这条不是洁癖。**每一份平行驱动最后都跟它复制的那份 `control/` 版本漂开了**，而漂开的症状不是报错，是一批看起来很正常的错数字：
 
-- `auto_calibrate` 自带的 `analyse` 把玩家自己的鼠标动作记成了后坐力，从第一帧而不是第一发起算。它跟共用版本并存了很久，两边打印的残差不可比而没人知道。
+- `auto_calibrate` 自带一份 `analyse`，把玩家自己的鼠标动作记成了后坐力，从第一帧而不是第一发起算。它跟共用版本并存了很久，两边打印的数不可比而没人知道。**两个文件 2026-08-08 都随旧坐标删掉了**，这条留着是因为形状会复发：并行实现漂开的症状不是报错，是一批看起来很正常的错数字。
 - `harvest` 手按 R 换弹之后 **把 `wait_reload()` 的返回值丢掉了**。换弹卡住 = 一个打不满的弹匣 = 一格被污染的数据，而日志一句话都不会说。同文件另外三处 `wait_reload()` 一直都在检查。
 
 ### 欠账账本是个棘轮
@@ -59,15 +61,38 @@ self.ac.pointer.drag(src, dst)       # ✗ 绕过了 _reject()
 
 | | 干什么 |
 |---|---|
-| **实验设计** | `harvest.py`（后坐力主 sweep）· `sweep.py`（`Rig` 装配壳 + CLI）· `weapon_axis.py`（**标杆：全文零硬件调用**）· `scan_compat.py` / `scan_fits.py`（槽位/配件兼容性）· `collect_templates.py` · `capture_ads.py` |
-| **分析** | `analysis.py`（**除 numpy 什么都不拉**）· `fit_curve.py` · `analyse_factors.py` · `bullet_detect.py` |
+| **实验设计** | `collect_timed.py`（打进样本库；拿**已经在手上**的枪，不刷不装）· `sweep.py`（只剩 `Rig` 装配壳）· `scan_compat.py` / `scan_fits.py`（槽位/配件兼容性）· `collect_templates.py` · `capture_ads.py` |
+| **分析** | `samples.py`（样本库，**永不删除**）· `fit_time_curve.py`（聚类 + 一次性全量拟合，`--selftest` 离线）· `bullet_detect.py` |
 | **落盘 / 事实存储** | `capture_run.py`（`CaptureRun` 格式）· `rpm_store.py` · `kit_facts.py` |
-| **模板构建 / 审计** | `solve_template.py` · `score_attachments.py` · `build_name_templates.py` · `build_lobby_tab_templates.py` · `audit_curves.py` |
-| **状态与库存** | `state.py`（只读探针）· `mismatch.py` |
+| **模板构建 / 审计** | `solve_template.py` · `score_attachments.py` · `build_name_templates.py` · `build_lobby_tab_templates.py` · `build_weapon_hud_bank.py` · `audit_curves.py` |
+| **状态与库存** | `state.py`（只读探针）· `mismatch.py` · `scan_slot_bleed.py` |
+| **后坐力事实** | `build_kit_factors.py`（→ `data/kit_factors.json`，`pixi run kit-factors`）· `probe_hole_pattern.py` |
 
 **最后那一行 2026-08-06 从 `tools/` 搬过来，判据是本文件第一句的第三样东西：「产物怎么落盘」。** 它们全都 `--write` 一份检测器当事实读的模板或掩膜，也全都**不碰游戏、不碰硬件**（`press` / `control` import 数为 0，所以搬进来不动规则 6）。留在 `tools/` 的代价是实的：那一层的自我描述是「这里没有别人 import 的东西」，而 `score_attachments` 一直在 import `solve_template`，`scan_compat` / `scan_fits` 至今还 import `tools.drive_screen`——**一个声称没有出边的层长出了出边，就没人再检查它的出边。**
 
-`drive_screen.py` **没有**跟着搬，虽然两个 calibration 模块 import 它。它整份都在做 `ensure_focus` → `ensure_in_match` → 开面板 → 验证，也就是本文件第 5 行禁止的那件事（「一个 `ensure_*` 都不该有」）。按同一条判据它该去 `control/`，不是这里。
+### 2026-08-08 又搬了四个，同一条判据，外加一条新的
+
+`build_kit_factors` · `build_weapon_hud_bank` · `scan_slot_bleed` · `probe_hole_pattern`。前三个是 2026-08-06 那批的直接续集（`--write` 一份别人当事实读的产物，不碰游戏不碰硬件）；`probe_hole_pattern` 是**测量本身**——弹孔散布是整条标定链之外唯一的那个数，链内每个数都是拿链自己的输出判的。
+
+**新的那一条判据，是被一次搬错买来的：**
+
+> **规则 6 的检查器只解析 import 语句。一条 `sys.path.insert` 拼出来的边它看不见。**
+
+`probe_ammo_ocr` 搬过来又搬回去了。AST 上它只 import `config` + `detector`，跟上面三个长得一样干净；而它的 `--selftest` 里有 `sys.path.insert(ROOT/'tools')` + `from collect_ammo_digits import validate`，`collect_ammo_digits` import `press`。**搬进来那一刻规则 6 就破了，而 `pixi run layering` 是绿的。**
+
+`fit_pitch_level` / `probe_pitch_range` 那一对同理留在 `tools/`：`fit_pitch_level` 直接 import `press.pico_mouse.other_agents`，那是「有没有别的 agent 占着 Pico」的守卫，而 `ensure_ready` **不含**这一项——为了搬家删掉它就是真丢一道闸。
+
+⚠ 收益是立刻兑现的，而且正说明为什么该搬：`check_params` 扫 `control/calibration/harness/press/detector`，**不扫 `tools/`**。`probe_hole_pattern` 一进来就被咬出一个没人读的 `mag_size`。**它在 `tools/` 里躺着的时候，没有任何机器在看它。**
+
+`drive_screen.py` **没有**跟着搬，虽然两个 calibration 模块 import 它。2026-08-07 之前的理由是「它整份都在做 `ensure_focus` → `ensure_in_match` → 开面板 → 验证」——**那半句现在不成立了**：焦点和局内那两条腿已经从 `drive()` 里拿掉，挪进它自己的 `main()`（整个五步 `ensure_ready`，并且把「正在拍的那块屏幕」那条腿关掉，否则会把要拍的东西关了）。`drive()` 现在只剩「开这一块屏、验它开了、拍、关」。
+
+⚠ 它挂在规则 9 的 DEBT 上挂了一年，**理由是假的**：那条写着「`scan_compat` 一轮调 `drive()` 30 次，放 `ensure_ready` 会传送 30 次」。`scan_compat` import 的是 `SCREENS` 不是 `drive`，全仓 `grep 'drive('` 只有一个调用方（它自己的 `main`），而且 `scan_compat` 2026-08-06 起就已经开场调 `ensure_ready` 了。三条全是一次 grep 就能验的，一条都没验过。**账本里的理由是一个关于代码的断言**，棘轮只验「这个文件还违不违规」，没有任何东西验那段散文。
+
+### `calibration/` 内部一律写 `calibration.X`（规则 10）
+
+裸的 `from sweep import Rig` 和 `from calibration.sweep import Rig` 并存会**把文件加载两遍**，两个名字、两份类、两份模块级常量。2026-08-07 实测：`harness/adapter.py` 建的是 `calibration.sweep.Rig`，交给当时的 `calibration/harvest.py`，而后者持有的是 `sweep.Rig`——**整个无人值守夜晚两个 `Rig` 类不是同一个**。鸭子类型把它藏到有人问身份为止，而那时症状说不出成因。
+
+58 处已改（`import rpm_store` 要写成 `from calibration import rpm_store`，否则局部名不再绑定）。`sys.path.insert` 那几行**故意留着**——删它是另一件更险的事，而只要它们在，规则 10 就是唯一挡着第二份 `sweep.py` 的东西。
 
 `analysis.py` 那条「除 numpy 什么都不拉」是可验证的收益，不是形容词：以前查一个 `fit_interval` 要先 import 一个 Pico 后端、一个 torch 的火力模式检测器和 win32gui。离线回归 `pixi run analysis`（合成 trace 的属性检查 + 411 个历史弹匣回放）。
 
@@ -105,44 +130,41 @@ AKM 自己的弹匣画在它的 magazine 贴片框里，裸枪也有 395 个 Can
 
 判据换成**正向识别配件**（`detector/slot_detector.py` 有数字和取舍），`scope` 位也一起接上——它以前恒 `unknown` 而 `unequip` 放行 `unknown`，是同一条路径的另一半。
 
-## `the correlator lost the view` / `view position is no longer known` — 在**倍率镜**上，这句话是假的
+## 后坐力分析：坐标换了，这一节的旧内容整体退场
 
-**2026-08-05：`build_weapon` 从来不设 `scope`，所以每一轮采集在任何倍率下都在发红点的曲线。**
+**规格在 `MODEL.md`，它是主法则。** 拟合的是 `y_true(t)`——**时间**的函数，不是
+弹号的函数。这一节原来有 150 行讲弹桶、`np.interp` 边界、末发离散、EMA 的三种
+被否掉的改法，`analyse()` 2026-08-08 删掉之后**它们描述的东西已经不存在了**。
 
-`Weapon.set_seq` 里 `factor = scope_factor * naked_scale * att_f * posture_f`，而 `scope_factor` 只有 `set('scope', …)` 会写。`build_weapon` 设 name / posture / muzzle / grip——**没有 scope**，于是它恒为 1。
+不是「过时了懒得改」，是**它们问的问题没有指称对象了**：
 
-PUBG 按倍率缩放开镜灵敏度：4x 下一个 count 转的角度约 1/4，抵消同样的角位移要约 4 倍 counts。所以：
+| 旧问题 | 现在 |
+|---|---|
+| 第 k 发的位移记进了第几个桶 | 没有桶 |
+| `np.interp` 的 `right=` 钳位把末发分给谁 | 不存在 |
+| 火循环 `span/(n−1)` 的 5% 误差累积成 2 发 | 不出现在模型里 |
+| 弹药计数器和点击两个原点差 `W = 13 ms` | 只剩点击一个，而且是本仓库自己发的 |
+| 这一格收敛了吗 | **整个消失**。剩下的只有「样本够不够」，那是个可以直接数的量 |
 
-| aug bare，42 发 | 发出去的曲线 | 实测真值 | 残差 |
-|---|---|---|---|
-| 红点 | 1741 | 1812 | **+4%** |
-| **4x** | 1741（**该是 6964**） | 6347 | **+265%** |
+⚠ **有两条教训跟坐标无关，所以搬到这里留着**，它们是这一层反复付账的那两个
+形状：
 
-**症状伪装成了别的东西**，这是它藏得住的原因：补偿只有 1/4 → 残差 +265% → 一梭把视角推 **2692 counts** → 参考图块（容量 **68**）wrap → 报出来是「相关器丢了视角」「俯仰带扫不出来」。**看起来像检测器坏了，其实是补偿发小了。**
+**一、`build_weapon` 从来不设 `scope`，于是每一轮在任何倍率下都在发红点的曲线。**
+`Weapon.set_seq` 里 `factor = scope_factor * ...`，而 `scope_factor` 只有
+`set('scope', …)` 会写。症状**伪装成了检测器故障**：补偿只有 1/4 → 视角被推
+2692 counts → 参考图块（容量 68）wrap → 报「相关器丢了视角」。**看起来像检测器
+坏了，其实是补偿发小了。** 这是「症状指向错误的方向」在这一层最贵的一次。
 
-⚠ **vss 是同一件事，不是特例。** 它自带的 PSO-1 在 `_SCOPE_TO_MAG` 里就是 4x。它的曲线前 22 发 324、实测 1058，比值 **3.26**。2026-08-05 为它试了 **8 次**，否掉 **7 个**解释，还写了一整节「它的曲线是外部导入从没拟合过」——**那节是错的**。被否掉的七个（别再走）：3-patch 剖面、`horizon_row()` 坏了、少传 `--home`、「昨天 red_dot 能跑」、视角朝向没纹理、开镜时不可跟踪、`pitch_range.json` 被清空。
+**二、聚合量看不见它要管的那个维度**，同一个晚上犯了三次，每次那个数都是**算
+对的**：读了按大小排序的表头当分布（真值中位 0.78 而不是 0.93–0.99）、用端点
+比值当增益（中段其实 0.98 不是 0.92）、只看末点就说 `y_true` 是倒 U（t ≤ 2.4 s
+其实单调）。三次的完整记录在 `MODEL.md` §5之二和 §6，留着当样本。
 
-**这也是「scope 轴是四个轴里唯一 0 次测量」的真正原因**：不是没人测，是**一测就死，而死法看起来像别的问题**。
+⚠ **`docs/recoil/curves/` 里 1184 条旧曲线 2026-08-08 全部删除**，不是归档。
+一条在「按弹药计数器分桶」的坐标里拟合、却在「按点击对齐」的网格上播放的曲线，
+不是一个可以继续迭代的起点。`detector/weapon.py` 现在读 `curves_time/`，那里没有
+曲线的枪就**不压枪**——这是诚实的状态，不是回归。
 
-修法取**读回来的**镜（`att['scope']`）而不是 `--sight` 请求的——装配会静默失败，而补偿要匹配枪上真有的东西。红点档不受影响（factor 1.0，`curve_sum` 一字未变）。
-
-## 打在俯仰限位上的弹匣会流进 EMA，把曲线推到负值
-
-**EMA 本身不是不稳的那一环。** 它是 `alpha = 1/(k+1)` 的 running mean，带 floor、`PRIOR_MAGS=5` 的先验、`ALPHA_MAX=0.5`——对 vss 实际只用 0.167。发散的是**喂进去的东西**：
-
-```
-1. 一格漂出参考范围 → reaim 失败 → tracking_lost → 正确弃格 ✓
-2. 下一轮 harvest 是新进程 → tracking_lost 复位
-   set_reference() 在视角当前所在处取基准 —— 而那是限位上
-3. mag 0 打在限位上，视角不动 → 读出 32.1 counts / 22 发（真值 ~1058）
-4. --apply 照单全收 → 下一轮残差 −85.7%
-```
-
-`tracking_lost` 守的是 **1..n 号弹匣，0 号从来没人守**，而 `tracking_confirmed()`（推一个已知量、看读数跟不跟）早就存在、用在 `recenter` 内部和两个探针里，**就是没用在取格起点**。现在 `harvest` 和 `sweep` 在打第一梭前都验一次。
-
-兜底在 `analysis.magazine_fault`：隐含后坐力（曲线+残差 = 真实后坐力，是个物理量）**每发不得低于 `IMPLIED_PER_BULLET_MIN`**。⚠ 这个下限第一次设成 5.0 被 `pixi run analysis` 拒收——它是从四把枪外推的，**一把 LMG 都没有**，而 m249 每发 4.7、mg3 2.5–2.7。现改 2.0，余量薄（2.5 对 1.5），**是兜底不是判据**。
-
-`docs/recoil/curves/vss_att.0802_BROKEN_negative.bak.json` 是 8 月 2 日同一个循环跑到 −307 留下的。**同一个坑踩了两次**，第二次的证据就躺在第一次的备份文件名里。
 
 ## 库存行采集不碰模板，也不碰枪（`rows_only`）
 

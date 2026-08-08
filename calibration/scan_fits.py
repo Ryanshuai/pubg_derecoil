@@ -60,11 +60,11 @@ for _s in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
-from capture_run import CaptureRun
+from calibration.capture_run import CaptureRun
 from detector.attachment_catalog import ATTACHMENTS, ROSTER, SLOTS, fits
-from control.lobby import LobbyControl
 from detector.slot_detector import SlotDetector
-from control.focus import ensure_focus, focus_keeper
+from control.focus import focus_keeper
+from control.session import ensure_ready
 from tools.drive_screen import SCREENS
 
 KIND = 'fit_scan'
@@ -100,7 +100,6 @@ def main():
                     help='skip pairs fits() already rejects (527 not 967) — '
                          'faster, but cannot find slots the table under-lists')
     ap.add_argument('--report', default=None)
-    ap.add_argument('--backend', default='auto')
     ap.add_argument('--countdown', type=int, default=6)
     args = ap.parse_args()
 
@@ -133,18 +132,27 @@ def main():
         return 1
     print(f'{len(weapons)} weapons, {len(plan)} drags planned')
 
-    if not ensure_focus(countdown_s=args.countdown, label='scan_fits'):
-        print('could not focus the game')
+    # Was focus + a match, open-coded — two of the five legs, and this script
+    # opens and closes BOTH of the screens the other three are about. It is
+    # the least likely of the four to be hurt by the ones it was missing (it
+    # drags rather than fires, so the spawn compound cannot ruin a magazine
+    # it never shoots), and it goes through the gate anyway: the argument for
+    # one door is that nobody has to decide which legs their script needs.
+    #
+    # ⚠ THE NOTE HERE WAS ABOUT `args.backend` NOT BEING FORWARDED to
+    # ensure_ready, and the parameter it worried about is gone (2026-08-08,
+    # with the SendInput backend). What it said about the real requirement
+    # still holds and is now the whole story: the Pico requirement is
+    # checked directly below by can_press().
+    rec = ensure_ready(label='scan_fits', countdown_s=args.countdown)
+    if not rec['ok']:
+        print(f"not ready: failed at {rec.get('failed')!r}")
         return 1
-    with LobbyControl(args.backend) as lc:
-        if not lc.ensure_in_match()['ok']:
-            print('not in a match')
-            return 1
 
     from control.inventory import InventoryControl
     from control.spawner import SpawnerControl
-    sc = SpawnerControl(args.backend)
-    ac = InventoryControl(args.backend)
+    sc = SpawnerControl()
+    ac = InventoryControl()
     if not (sc.can_press() and ac.can_press()):
         print('no Pico — the spawner panel and Tab are both opened by keypress')
         return 1

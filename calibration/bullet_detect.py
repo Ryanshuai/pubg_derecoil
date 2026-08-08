@@ -4,7 +4,7 @@ import json
 import os
 from scipy.ndimage import gaussian_filter1d
 
-from detector.cropper import win32_cap
+from capture.cropper import win32_cap
 
 # Absolute, because these used to be opened as "calibration\..." relative to the
 # cwd -- which only ever worked when the process happened to start at the repo

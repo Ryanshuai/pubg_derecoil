@@ -21,7 +21,7 @@ are edges", which the weapon's own magazine produces and which no threshold
 can separate, because the edges are real and they are a magazine. That turns
 the question into "how well does an empty tile match the bank", and the
 existing corpus cannot answer it: its 281 empty tiles cover sks, uzi and
-vector, none of which bleeds (tools/scan_slot_bleed.py).
+vector, none of which bleeds (calibration/scan_slot_bleed.py).
 
 THE SCOPE POSITION DRAWS NO TILE and reads `unknown` forever. It is scanned
 anyway -- config.py already records 71 edges of "weapon render showing
@@ -47,8 +47,14 @@ for _s in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
-from capture_run import CaptureRun
-from config import HUD_REGIONS, TAB_SLOT_FILLED_EDGES
+from calibration.capture_run import CaptureRun
+from config import (HUD_REGIONS, TAB_SLOT_FILLED_EDGES,
+                    # ⚠ WAS MISSING. Used twice in report()'s `if bad_mse:`
+                    # branch, i.e. only when the scan has something to say --
+                    # so the NameError sat there waiting for the one run whose
+                    # output mattered. Found by `pixi run names` on 2026-08-07,
+                    # not by a run.
+                    TAB_SLOT_MATCH_MAX)
 from control.session import ensure_ready
 from control.focus import focus_keeper
 from control.inventory import at_ground
@@ -65,7 +71,7 @@ PLATE_INK_MIN = 200     # collect_templates' band: 0 empty, 679-901 with a gun
 RISE_MIN = 3.0          # AKM measured 29.8 fitted -> 346.6 bare, a 11.6x rise
 
 
-def read_one(ac, det, slots, frame, gun, weapon):
+def read_one(det, slots, frame, gun, weapon):
     """Both readers on all five tiles. -> {slot: {...}}"""
     sc = slots.scores(frame, gun)
     out = {}
@@ -146,7 +152,7 @@ def scan_one(sc, ac, det, slots, weapon, run):
     # ALREADY empty, and after a spawn every slot the strip picks is genuinely
     # filled -- so the first pass is safe and the second is the bug. Nothing
     # below re-reads the tiles to decide whether to pull again.
-    fitted = read_one(ac, det, slots, frame, gun, weapon)
+    fitted = read_one(det, slots, frame, gun, weapon)
     strip = ac.strip(gun, to=at_ground())
     rec['stripped'] = [s['src'][2] for s in strip.get('steps', ())
                        if s.get('src') and s.get('ok')]
@@ -160,7 +166,7 @@ def scan_one(sc, ac, det, slots, weapon, run):
                         f'pulled {rec["stripped"]}')
         return rec
 
-    bare = read_one(ac, det, slots, frame, gun, weapon)
+    bare = read_one(det, slots, frame, gun, weapon)
     # THE SAME TILE BEFORE AND AFTER IS THE WITNESS. Counting rows in 附近 was
     # the obvious choice and it is wrong here: panel_rows counts the visible
     # WINDOW, the floor is already 12 rows deep by the third weapon, and every
@@ -268,7 +274,6 @@ def main():
     ap.add_argument('--start-from')
     ap.add_argument('--report', metavar='RUN_DIR', help='offline re-print')
     ap.add_argument('--countdown', type=int, default=6)
-    ap.add_argument('--backend', default='auto')
     ap.add_argument('--no-restart', dest='restart', action='store_false',
                     help='skip the leave-and-re-enter that clears the floor')
     args = ap.parse_args()
@@ -309,7 +314,7 @@ def main():
     # reason.
     if args.restart:
         from control.lobby import LobbyControl
-        with LobbyControl(args.backend) as lc:
+        with LobbyControl() as lc:
             if not lc.exit_to_lobby()['ok']:
                 print('could not get back to the lobby for a fresh range')
                 return 1
@@ -319,8 +324,8 @@ def main():
 
     from control.inventory import InventoryControl
     from control.spawner import SpawnerControl
-    sc = SpawnerControl(args.backend)
-    ac = InventoryControl(args.backend, verbose=False)
+    sc = SpawnerControl()
+    ac = InventoryControl(verbose=False)
     if not (sc.can_press() and ac.can_press()):
         print('no Pico — the spawner panel and Tab are both opened by keypress')
         return 1

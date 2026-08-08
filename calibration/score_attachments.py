@@ -105,7 +105,7 @@ from detector.tab_layout import icon_box
 from calibration.solve_template import solve
 
 RUNS = os.path.join(ROOT, 'docs', 'attachments', 'runs')
-TMPL_DIR = os.path.join(ROOT, 'training_data', 'pubg_assets', 'Item',
+TMPL_DIR = os.path.join(ROOT, 'docs', 'training_data', 'pubg_assets', 'Item',
                         'Attachment')
 TAG = 'solved'
 

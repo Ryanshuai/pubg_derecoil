@@ -1,33 +1,21 @@
-"""Unattended recoil calibration sweep for the training range.
+"""The rig: capture, Pico and detectors for one calibration run.
 
-Works through {weapons} x {postures}, firing magazines and measuring the
-residual left over by the current curve. Everything the game needs — ADS,
-posture, reload recovery — is driven from the Pico; the only human step is
-swapping weapons, and even that goes away once SpawnerSwitcher lands.
+    from calibration.sweep import Rig
+    rig = Rig('red_dot')
 
-    python calibration/sweep.py --weapons ar --mags 3
-    python calibration/sweep.py --weapons aug,m416 --postures standing
-    python calibration/sweep.py --weapons smg --resume
+Rig is an ASSEMBLY SHELL. It builds the frame source, the mouse and the
+detectors once, and hands them to the three closed loops in control/ —
+ViewDriver, GunDriver and FireDriver. It decides nothing about what to measure;
+that belongs to whoever is running the experiment.
 
-SHADOW MODE: results are written to JSONL and printed as suggested factors.
-Nothing is written back to weapon_scales.json / posture_scales.json — closed
-loop learning reinforces its own errors, so a human approves first.
+⚠ THIS FILE USED TO BE THE SWEEP. `calibrate_combo` fired a cell, binned the
+view motion by round against the ammo counter, and wrote an EMA-blended curve
+back to disk — 350 lines of the coordinate MODEL.md retired on 2026-08-08. The
+replacement is calibration/collect_timed.py (fire into the sample store) and
+calibration/fit_time_curve.py (one full refit over everything ever stored).
 
-Why each piece exists (all learned the hard way, see
-docs/recoil_observer_design.md):
-
-  * compensation stays ON while measuring — AUG's pattern is ~1358 counts over
-    40 rounds = 2100 px at K=1.55, so uncompensated the view ends up in the
-    sky where there is no texture to correlate. Compensated, what remains IS
-    the residual.
-  * attachments are read via Tab before every weapon — weapon_scales.json is
-    calibrated WITH compensator+grip, so a bare-gun pattern over-compensates
-    by 30%.
-  * PUBG auto-reloads and drops out of ADS doing so; measuring the next
-    magazine from the hip would apply the scoped K (1.55) to hip-fire motion
-    (0.50).
-  * posture is verified by the icon detector rather than assumed from
-    keypresses, because a missed toggle silently mislabels a whole run.
+What survived is what the new path imports: collect_timed.py line 43 is
+`from calibration.sweep import Rig`.
 """
 import argparse
 import json
@@ -44,7 +32,7 @@ import numpy as np
 from config import (HUD_REGIONS, RECOIL_SIGHT_PROFILES,
                     RECOIL_K_DEFAULT_SCOPED, SCREEN_W, SCREEN_H)
 from detector.attachment_detector import AttachmentDetector
-from detector.cropper import FocusLost, ScreenBuffer
+from capture.cropper import FocusLost, ScreenBuffer
 from detector.posture_detector import PostureDetector
 from detector.view_tracker import ViewTracker
 from detector.weapon import Weapon, WEAPON_RPM, ar, smg, mg
@@ -52,11 +40,7 @@ from detector.weapon_template_detector import TabWeaponDetector
 from press.pico_mouse import get_mouse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from weapon_switcher import get_switcher
-# The measurement maths, which needs no game and no hardware — so it lives
-# apart from the rig that does, and `pixi run analysis` can check it offline.
-# Import it from there, not from here: this module is not a re-export point.
-from analysis import analyse
+from calibration.weapon_switcher import get_switcher
 
 cv2.setNumThreads(1)
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -84,7 +68,7 @@ from control.focus import game_focused, focus_keeper  # noqa: E402
 # they are "point the view", "get the character into a known state" and "empty
 # a magazine and report what the game said", which is why they are in control/
 # and this file only decides WHICH cells to measure.
-from control.aim import ViewDriver, PROBE_COUNTS, BAND_STEP
+from control.aim import ViewDriver
 from control.gun import GunDriver
 from control.fire import FireDriver, MAX_FIRE_S  # noqa: F401  (tools import it)
 # Module level is safe: control/session.py imports only control.focus up here
@@ -96,9 +80,13 @@ from control.session import ensure_ready
 class Rig:
     """Owns the capture, the Pico and the detectors for one sweep."""
 
-    def __init__(self, sight):
+    def __init__(self, sight, prefer_dxgi=True):
         prof = RECOIL_SIGHT_PROFILES.get(sight, {})
         self.sight = sight
+        # See _build_grabber: MODEL.md's collection path owns DXGI for the
+        # burst and leaves this one on GDI, because there is only one
+        # duplication interface per output per process.
+        self.prefer_dxgi = prefer_dxgi
         self.K = prof.get('K', RECOIL_K_DEFAULT_SCOPED)
         # `patch` as well as the columns: a profile squeezed for space needs
         # narrower patches to fit non-overlapping ones, and overlapping patches
@@ -124,9 +112,10 @@ class Rig:
                            2 * CROP_R, 2 * CROP_R)
         try:
             from detector.fire_mode_detector import FireModeDetector
-            import torch
-            self.fire_det = FireModeDetector(
-                'cuda' if torch.cuda.is_available() else 'cpu')
+            # No device: the torch head went on 2026-08-08 and this is a
+            # RandomForest now. The `import torch` that used to sit here was
+            # the last one on any measurement path.
+            self.fire_det = FireModeDetector()
         except Exception as e:
             print(f"  [!] no fire-mode detector ({e}) — cannot tell a gun that "
                   f"spawned in single fire from one in full auto")
@@ -156,11 +145,6 @@ class Rig:
         # re-map per posture (harvest); pure bookkeeping, nobody here reads it.
         self.band_posture = None
 
-    # Two diagnostics print these. Aliases rather than copies: set_sight
-    # rebuilds the region set underneath and a stale copy would name the wrong
-    # backend in the log of the run that changed it.
-    grabber = property(lambda s: s.frames.grabber)
-    paced = property(lambda s: s.frames.paced)
 
     def close(self):
         # The trigger first: an exception escaping mid-burst leaves it held,
@@ -172,6 +156,18 @@ class Rig:
         self.fire.disarm()
         self.frames.close()
 
+    # ── what USED to be here ──
+    #
+    # 26 forwarders and 7 property aliases, deleted 2026-08-07. They existed
+    # so an earlier split "cost no call sites", and the price turned out to be
+    # the declaration: control/ carries a level and a warning on the first
+    # line of every public method, and a forward with no docstring of its own
+    # showed the caller none of it. `Rig.goto_level` read exactly as
+    # legitimate as `Rig.goto_midline` while being dead and disproven.
+    #
+    # Reach through the driver that owns the loop: rig.view / rig.gun /
+    # rig.fire. `grab`, `full` and `flush` stay because they are not
+    # forwarders -- Rig IS the frame source those three drivers hold.
     # ── screen reads ──
 
     def grab(self):
@@ -199,56 +195,16 @@ class Rig:
     #
     # Kept as forwards rather than made callers say `rig.view.recenter()`,
     # because the state is SHARED and mutated from both sides: harvest does
-    # `rig.pending_pitch += a['view_drift_counts']` after every magazine, and
+    # `rig.view.pending_pitch += a['view_drift_counts']` after every magazine, and
     # a copy of that number on the Rig would drift away from the one the
     # recentring loop is closing on. One owner, one value, aliases forward.
     #
     # New code should reach for `rig.view` directly; these exist so the split
     # cost no call sites.
 
-    pending_pitch = property(lambda s: s.view.pending_pitch,
-                             lambda s, v: setattr(s.view, 'pending_pitch', v))
-    tracking_lost = property(lambda s: s.view.tracking_lost,
-                             lambda s, v: setattr(s.view, 'tracking_lost', v))
-    pitch_centre = property(lambda s: s.view.pitch_centre,
-                            lambda s, v: setattr(s.view, 'pitch_centre', v))
-    use_homing = property(lambda s: s.view.use_homing,
-                          lambda s, v: setattr(s.view, 'use_homing', v))
-
-    def set_reference(self):
-        return self.view.set_reference()
-
-    def absolute_offset(self):
-        return self.view.absolute_offset()
-
-    def home_to_clamp(self, direction=+1):
-        return self.view.home_to_clamp(direction)
-
-    def track_still(self, **kw):
-        return self.view.track_still(**kw)
-
-    def tracking_confirmed(self, probe=PROBE_COUNTS):
-        return self.view.tracking_confirmed(probe)
-
-    def recenter(self):
-        return self.view.recenter()
-
-    def goto_level(self, posture):
-        return self.view.goto_level(posture)
-
-    def calibrate_pitch(self, step=BAND_STEP):
-        return self.view.calibrate_pitch(step)
-
-    def goto_pitch_centre(self):
-        return self.view.goto_pitch_centre()
-
-    def reaim(self):
-        return self.view.reaim()
 
     # ── the character: forwarded to control/gun.py ──
 
-    def ensure_ads(self, tries=3):
-        return self.gun.ensure_ads(tries)
 
     # How far to tilt when the posture icon cannot be read. Big enough to put
     # different scenery behind a 66 px HUD crop, small enough to stay well
@@ -275,22 +231,24 @@ class Rig:
         """
         self.view.turn(0, -self.POSTURE_NUDGE_COUNTS, settle_s=0.25)
 
+    def stir(self, ms=120):
+        """One step forward and back — the only thing in a run that MOVES.
+
+        A named forward for the same reason as read_posture below: the
+        layering lint parses imports, so `rig.mouse.key(HID_KEY_W, ...)`
+        from calibration would be exactly the reach it cannot see, and this
+        repo has paid for two of those already.
+
+        See GunDriver.stir for what it is testing and what would retire it.
+        """
+        return self.gun.stir(ms)
+
+
     def ensure_posture(self, target, tries=4):
         return self.gun.ensure_posture(
             target, tries,
-            nudge=self.nudge_view if self.use_homing else None)
+            nudge=self.nudge_view if self.view.use_homing else None)
 
-    def ensure_fire_mode(self, weapon, tries=6):
-        return self.gun.ensure_fire_mode(weapon, tries)
-
-    def ensure_inventory_closed(self, tries=3):
-        return self.gun.ensure_inventory_closed(tries)
-
-    def ensure_inventory_open(self, tries=3):
-        return self.gun.ensure_inventory_open(tries)
-
-    def read_loadout(self, slot=1):
-        return self.gun.read_loadout(slot)
 
     # ── the magazine: forwarded to control/fire.py ──
     #
@@ -299,47 +257,32 @@ class Rig:
     # harvest sets it; nothing in the repo ever did, so the branch behind it
     # was unreachable from the day it was written. --ammo-debug sets it now.
 
-    ammo_debug_dir = property(lambda s: s.fire.ammo_debug_dir,
-                              lambda s, v: setattr(s.fire, 'ammo_debug_dir', v))
-
-    def ammo_sig(self, frame):
-        return self.fire.ammo_sig(frame)
-
-    def read_ammo(self, frame=None):
-        return self.fire.read_ammo(frame)
-
-    def magazine_size(self, timeout_s=2.0):
-        return self.fire.magazine_size(timeout_s)
-
-    def fire_magazine(self):
-        return self.fire.fire_magazine()
-
-    def wait_reload(self):
-        return self.fire.wait_reload()
-
-    def top_up(self, settle_s=0.4):
-        return self.fire.top_up(settle_s)
 
     def arm(self, weapon):
+        # ⚠ `no_comp` SPLITS THE TWO TERMS OF true = comp + residual, which is
+        # the only way to ask which of them a bimodal cell lives in. Every cell
+        # so far has been measured with compensation ON, so a residual that
+        # comes back in two modes could be two recoils (impossible -- the gun
+        # is a constant) or two deliveries of the compensation, and no run that
+        # has both switched on at once can tell those apart. With this set the
+        # residual IS the recoil.
+        #
+        # The pattern is still UPLOADED, only not enabled: uploading is what
+        # makes curve_bullets() and the bin edges agree with an armed run, so
+        # the two are comparable bin for bin. arm() then disarm() rather than
+        # reaching for mouse.upload_pattern here -- Rig owns the Pointer and
+        # `pixi run layering` cannot see a HAL member touched through a
+        # high-level object, which is how this file would grow the next
+        # parallel driver. Nothing is fired between the two calls.
+        if getattr(self, 'no_comp', False):
+            n = self.fire.arm(weapon)
+            if not self.fire.disarm():
+                raise RuntimeError('--no-comp asked for compensation OFF and '
+                                   'the firmware would not confirm it; every '
+                                   'magazine after this would be measured '
+                                   'compensated and labelled otherwise')
+            return n
         return self.fire.arm(weapon)
-
-    def disarm(self, clear=False):
-        return self.fire.disarm(clear)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
     def _regions(self):
@@ -358,6 +301,19 @@ class Rig:
     def _build_grabber(self):
         """(Re)open the banded grabber for the current tracker patches.
 
+        ⚠ `prefer_dxgi=False` IS NOT A DOWNGRADE, it is how the two capture
+        paths coexist. DXGI allows one duplication interface per output per
+        process, so MODEL.md's collection path -- which owns a
+        DXGISyncGrabber over the patches for the whole run -- cannot also have
+        this one on DXGI. GDI can, and everything read through here (ammo,
+        fire mode, posture, attachments, gun names) is event-triggered rather
+        than per-frame: 6 ms once or twice a magazine against 1.72 ms on every
+        frame of the burst. Putting them in one DXGI box costs the opposite
+        trade -- the bounding box stretches from the patches at y=592 to the
+        HUD at y=1366 and the per-frame grab goes 1.72 -> 3.90 ms, which at a
+        6.06 ms frame budget is the difference between sampling at the refresh
+        rate and sampling at half of it.
+
         focus_fn is passed, and it is the one behaviour change worth stating:
         grab() now RAISES when the game is not in the foreground, instead of
         handing back the frozen picture PUBG leaves on screen. A run that keeps
@@ -365,7 +321,8 @@ class Rig:
         image and reports a suspiciously clean residual. Callers that fire have
         to catch FocusLost; see calibrate_combo.
         """
-        self.frames = ScreenBuffer(self._regions(), prefer_dxgi=True,
+        self.frames = ScreenBuffer(self._regions(),
+                                   prefer_dxgi=self.prefer_dxgi,
                                    focus_fn=game_focused)
 
     def set_sight(self, sight):
@@ -427,363 +384,18 @@ class Rig:
     # its two automatic fire rates — a wrong number, not an error.
     FIRE_MODE_FOR = GunDriver.FIRE_MODE_FOR
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-def calibrate_combo(rig, weapon, posture, mags, log):
-    """Measure one (weapon, posture) cell. Returns a summary dict or None."""
-    # Loadout first: opening Tab drops ADS, and posture can only be verified
-    # from ADS (the icon does not render from the hip).
-    gun_seen, att = rig.read_loadout()
-    if gun_seen is None:
-        print("    [!] inventory would not open — cannot read attachments")
-        return None
-    if gun_seen and gun_seen != weapon:
-        print(f"    [!] expected {weapon}, inventory says {gun_seen!r}")
-        return None
-
-    w = Weapon()
-    w.set('name', weapon)
-    w.set('posture', posture)
-    w.set('muzzle', (att or {}).get('muzzle', ''))
-    w.set('grip', (att or {}).get('grip', ''))
-    w.set_seq()
-    if not len(w.t_s):
-        print(f"    [!] no pattern for {weapon}")
-        return None
-    pattern_counts = float(np.sum(w.dy_s))
-
-    rig.arm(w)
-    time.sleep(0.3)
-
-    # Enters ADS as a side effect — the posture icon is the ADS indicator.
-    if not rig.ensure_posture(posture):
-        print(f"    [!] could not reach posture {posture}")
-        return None
-    # In ADS and before the first round. With homing on this lands at the
-    # middle of the measurable pitch band; with it off it stays where it is.
-    rig.flush(6)
-    if rig.use_homing:
-        rig.goto_pitch_centre()
-    rig.set_reference()
-    # Magazine 0 has no `tracking_lost` to protect it, and set_reference()
-    # takes its reference wherever the view happens to be — including against
-    # the pitch clamp, where the view does not move and the recoil reads near
-    # zero. See calibration/harvest.py's copy of this check for what that cost
-    # on the vss.
-    if not rig.tracking_confirmed():
-        print("    [!] the view does not respond to a test move — at the "
-              "pitch clamp, or the correlator has lost it. Refusing the cell.")
-        return None
-
-    rows = []
-    for i in range(mags):
-        if not focus_keeper().ok(f'{weapon}/{posture} mag {i}'):
-            break
-        if i > 0:                    # auto-reload drops us to the hip
-            # WAIT THE RELOAD OUT BEFORE CLICKING. The game does not act on
-            # the right button while it is reloading, and ensure_ads used to
-            # spend all three of its clicks inside that window. Measured
-            # 2026-08-05 on an m416, four magazines, clicking at fixed offsets
-            # after the counter stopped falling (tools/probe_ads_after_reload):
-            #
-            #   clicked  300 ms   0/4 took       clicked 2000 ms   0/4
-            #   clicked 1400 ms   0/4            clicked 2300 ms   3/4
-            #   clicked 1700 ms   0/4            clicked 2400 ms   4/4
-            #
-            # and when a click DOES take, the sight is up 102..104 ms later —
-            # against an ADS_WATCH_S of 2.5 s. So the watch was never short;
-            # it was waiting for a state change that had not been requested.
-            # Worse, right click is a toggle, so the clicks that DID land
-            # after the window paired up and cancelled.
-            #
-            # Not a constant, because reload length is per weapon: wait_reload
-            # polls the ammo counter until it climbs back and settles. It was
-            # already used at three other points in this file and in
-            # harvest.py — just not in the loop that needed it.
-            if rig.wait_reload() is None:
-                print("      [!] the reload never finished — not clicking "
-                      "into it")
-                break
-            if not rig.ensure_ads():
-                print("      [!] could not re-enter ADS after reload")
-                break
-            # POSTURE IS A PER-MAGAZINE PRECONDITION TOO, and until 2026-08-05
-            # it was checked once for the whole cell while ADS was checked
-            # every magazine. Both are assumptions the compensation multiplies
-            # by; only one was being maintained.
-            #
-            # What that cost: an m762 bare/prone cell measured 2026 counts —
-            # the STANDING figure, 2058/2103 in the same run — while the
-            # firmware pushed the prone factor of 0.50. Residual +1105, which
-            # is 117% of the compensation applied, and it passed every gate in
-            # analysis.magazine_fault. The cell then reported a prone factor
-            # of 0.9633 where the same weapon's kitted cell said 0.5502; one
-            # weapon cannot have both.
-            #
-            # Cheap enough to do every time: the icon is readable in 3786 of
-            # 3787 samples while the sight is up, and it follows a stance
-            # change in 34..68 ms (tools/probe_posture_trace.py). ADS is
-            # already up by the line above, which is exactly the condition the
-            # icon needs.
-            seen = rig.gun.read_posture()
-            if seen != posture:
-                print(f"      [!] posture is {seen!r}, not {posture!r} — the "
-                      f"stance changed mid-cell, so every magazine after this "
-                      f"would carry the wrong factor")
-                break
-            rig.reaim()
-
-        try:
-            rec, fire_s, steps, fire_end, first_shot, _ = rig.fire_magazine()
-        except FocusLost:
-            # The game left the foreground mid-burst. The frames after that
-            # are the frozen picture PUBG leaves behind, so this magazine is
-            # gone -- but the CELL is not: take the foreground back and fire
-            # another one. Before ScreenBuffer's focus_fn there was nothing to
-            # catch: the run kept grabbing the same still image and reported a
-            # suspiciously clean residual.
-            print("      [!] lost the foreground mid-magazine — discarded")
-            if not focus_keeper().ok(f'{weapon}/{posture} mag {i}'):
-                break
-            rig.flush(6)
-            continue
-        if steps == 0:
-            print(f"      mag {i}: no rounds fired (reload still running?) "
-                  f"— skipped")
-            time.sleep(1.5)
-            continue
-        a = analyse(rec.finish(), rig.K, w.bullet_interval_s, fire_end,
-                    first_shot_ts=first_shot)
-        if a is None:
-            continue
-        a.update(mag=i, fire_s=round(fire_s, 2), ammo_steps=steps,
-                 fps=round(rec.effective_fps(), 1))
-        rows.append(a)
-        rig.pending_pitch += a['view_drift_counts']
-        print(f"      mag {i}: {fire_s:.2f}s {steps:3d} steps  "
-              f"residual {a['cum_counts']:+8.1f} counts "
-              f"({100*a['cum_counts']/pattern_counts:+6.1f}% of pattern)  "
-              f"rej={a['n_rejected']} oor={a['n_out_of_range']} "
-              f"hand={a['human_counts']:+.0f}/{a['human_abs_counts']:.0f}")
-        if rig.wait_reload() is None:
-            print("      [!] auto-reload did not finish — stopping combo")
-            break
-
-    if not rows:
-        return None
-
-    cc = np.array([r['cum_counts'] for r in rows])
-    ratio = 1.0 + cc.mean() / pattern_counts
-    summary = {
-        'type': 'combo', 'weapon': weapon, 'posture': posture,
-        'sight': rig.sight, 'K': rig.K, 'n_mags': len(rows),
-        'attachments': att, 'scale': w.scale,
-        'posture_factor': w.get_posture_factor(),
-        'pattern_counts': pattern_counts,
-        'residual_counts_mean': float(cc.mean()),
-        'residual_counts_std': float(cc.std()),
-        'residual_pct': float(100 * cc.mean() / pattern_counts),
-        'implied_ratio': float(ratio),
-        'mags': rows,
-        'ts': datetime.now().isoformat(timespec='seconds'),
-    }
-    log.write(json.dumps(summary) + '\n')
-    log.flush()
-    print(f"    => residual {cc.mean():+.1f} +- {cc.std():.1f} counts "
-          f"({summary['residual_pct']:+.1f}%)   implied factor {ratio:.3f}")
-    return summary
-
-
-def load_done(path):
-    """(weapon, posture) pairs already measured, for --resume."""
-    done = set()
-    if os.path.exists(path):
-        for line in open(path):
-            try:
-                r = json.loads(line)
-            except Exception:
-                continue
-            if r.get('type') == 'combo':
-                done.add((r['weapon'], r['posture']))
-    return done
-
-
-def expand_weapons(spec):
-    groups = {'ar': sorted(ar), 'smg': sorted(smg), 'mg': sorted(mg),
-              'all': sorted(ar | smg | mg)}
-    out = []
-    for tok in spec.split(','):
-        tok = tok.strip()
-        if not tok:
-            continue
-        out.extend(groups.get(tok, [tok]))
-    seen, uniq = set(), []
-    for x in out:
-        if x in WEAPON_RPM and x not in seen:
-            seen.add(x)
-            uniq.append(x)
-    return uniq
-
-
-def main():
-    ap = argparse.ArgumentParser(
-        description='Unattended recoil calibration sweep (shadow mode).')
-    ap.add_argument('--weapons', default='ar',
-                    help="'ar', 'smg', 'mg', 'all', or names: aug,m416")
-    ap.add_argument('--postures', default=','.join(POSTURES))
-    ap.add_argument('--sight', default='red_dot',
-                    choices=sorted(RECOIL_SIGHT_PROFILES.keys()))
-    ap.add_argument('--mags', type=int, default=3,
-                    help='magazines per (weapon, posture) cell')
-    ap.add_argument('--switcher', default='manual',
-                    choices=('manual', 'spawner'))
-    ap.add_argument('--out', default='')
-    ap.add_argument('--resume', action='store_true')
-    ap.add_argument('--countdown', type=int, default=6)
-    # Keeps the ammo crops the OCR could not read mid-burst. FireDriver has
-    # had the switch and the writing code since it was split out, and its
-    # comment said harvest sets it -- nothing ever did, in any file, so the
-    # branch was unreachable and the only way to see why the counter misses
-    # about five times in a 42-round magazine stayed shut off.
-    ap.add_argument('--ammo-debug', default='', metavar='DIR',
-                    help='write unreadable ammo crops here (default: off)')
-    args = ap.parse_args()
-
-    weapons = expand_weapons(args.weapons)
-    postures = [p.strip() for p in args.postures.split(',') if p.strip()]
-    bad = [p for p in postures if p not in POSTURES]
-    if bad:
-        print(f"[!] unknown posture(s): {bad}")
-        return 1
-    if not weapons:
-        print("[!] no weapons selected")
-        return 1
-
-    out = args.out or os.path.join(
-        RUNS, f"sweep_{args.sight}_{datetime.now().strftime('%m%d_%H%M')}.jsonl")
-    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
-    done = load_done(out) if args.resume else set()
-
-    total = len(weapons) * len(postures)
-    print(f"sweep     : {len(weapons)} weapons x {len(postures)} postures "
-          f"= {total} cells, {args.mags} mags each")
-    print(f"weapons   : {', '.join(weapons)}")
-    print(f"postures  : {', '.join(postures)}")
-    print(f"sight     : {args.sight}")
-    print(f"out       : {out}")
-    if done:
-        print(f"resume    : {len(done)} cells already done, skipping")
-    print(f"est. time : ~{total * args.mags * 9 / 60:.0f} min of firing "
-          f"plus weapon swaps")
-    print("\n[SHADOW MODE] nothing is written back to the scale files.\n")
-
-    rig = Rig(args.sight)
-    if args.ammo_debug:
-        rig.ammo_debug_dir = args.ammo_debug
-        print(f"ammo dbg  : unreadable crops -> {args.ammo_debug}")
-    print(f"grabber   : {type(rig.grabber).__name__} (paced={rig.paced})  "
-          f"K={rig.K:.4f}  {len(rig.tracker.xs)} patches")
-
-    switcher = get_switcher(
-        args.switcher, verify_fn=lambda: (rig.read_loadout()[0] or ''))
-
-    # ensure_ready, not ensure_focus. The last of its five steps teleports to
-    # the 200m lane, which is both why the operator no longer aims at anything
-    # by hand (that lane faces the bays -- texture across the whole band) and
-    # why nobody drives through the middle of the run.
-    print("\n>>> Taking the foreground and moving to the 200m lane.")
-    ready = ensure_ready(label='the sweep', countdown_s=args.countdown)
-    if not ready['ok']:
-        print(f"[!] ABORT: could not get the game ready — failed at "
-              f"{ready['failed']!r}. Is PUBG running and in the training "
-              f"range?")
-        rig.close()
-        return 1
-    keeper = focus_keeper()
-
-    log = open(out, 'a')
-    log.write(json.dumps({
-        'type': 'header', 'sight': args.sight, 'K': rig.K,
-        'patch_xs': list(rig.tracker.xs), 'patch': rig.tracker.patch,
-        'band_y': rig.tracker.band_y, 'mags': args.mags,
-        'ts': datetime.now().isoformat(timespec='seconds'),
-    }) + '\n')
-
-    results = []
-    try:
-        for wi, weapon in enumerate(weapons):
-            todo = [p for p in postures if (weapon, p) not in done]
-            if not todo:
-                print(f"[{wi+1}/{len(weapons)}] {weapon}: all done, skipping")
-                continue
-
-            print(f"\n[{wi+1}/{len(weapons)}] {weapon}")
-            if not switcher.switch_to(weapon):
-                print(f"    skipped — could not equip {weapon}")
-                continue
-
-            for posture in todo:
-                if not keeper.ok(f'{weapon}/{posture}'):
-                    raise KeyboardInterrupt
-                print(f"    posture: {posture}")
-                s = calibrate_combo(rig, weapon, posture, args.mags, log)
-                if s:
-                    results.append(s)
-            rig.ensure_posture('standing')
-    except KeyboardInterrupt:
-        print("\ninterrupted")
-    finally:
-        rig.close()
-        switcher.close()
-        log.close()
-
-    report(results, out)
-    return 0
-
-
-def report(results, out):
-    if not results:
-        print("\nno cells completed")
-        return
-    print("\n" + "=" * 88)
-    print("SUGGESTED FACTORS (shadow mode — not written to disk)")
-    print("=" * 88)
-    print(f"{'weapon':<10}{'posture':<11}{'mags':>5}{'residual %':>12}"
-          f"{'implied':>9}{'now':>8}{'suggest':>9}  note")
-    print("-" * 88)
-    for r in sorted(results, key=lambda x: (x['weapon'], x['posture'])):
-        ratio = r['implied_ratio']
-        if r['posture'] == 'standing':
-            now, sug, what = r['scale'], r['scale'] * ratio, 'scale'
-        else:
-            now = r['posture_factor']
-            sug = now * ratio
-            what = f"posture[{r['posture']}]"
-        flag = ''
-        if abs(r['residual_pct']) > 40:
-            flag = '  <-- large, check the run'
-        if r['residual_counts_std'] > abs(r['residual_counts_mean']) * 0.5:
-            flag += '  <-- noisy'
-        print(f"{r['weapon']:<10}{r['posture']:<11}{r['n_mags']:>5}"
-              f"{r['residual_pct']:>+11.1f}%{ratio:>9.3f}{now:>8.3f}"
-              f"{sug:>9.3f}  {what}{flag}")
-    print(f"\n  raw -> {out}")
-    print("  review, then apply with a separate step — nothing was written.")
-
-
-if __name__ == '__main__':
-    sys.exit(main())
+# ⚠ EVERYTHING BELOW THIS POINT WENT ON 2026-08-08. calibrate_combo, the
+# resume bookkeeping, the CLI and the report were the bullet-bucket sweep:
+# fire a cell, bin the view motion by round, compare against the curve, write
+# an EMA-blended curve back. MODEL.md retired the coordinate they were written
+# in, and calibration/collect_timed.py + fit_time_curve.py are what replaced
+# them — samples in, one full refit out, no rounds and no bins.
+#
+# WHAT STAYED IS THE ASSEMBLY SHELL, and it stayed because it is the thing the
+# new path builds on: `from calibration.sweep import Rig` is line 43 of
+# collect_timed.py. Rig owns the one Pointer and the detectors and hands them
+# to the three control/ drivers — the same job robot.py does for the live
+# loop. tools/check_layering.py's rule 6 ledger says so with a predicate.
+#
+# So this file is now one class and nothing else, and `pixi run sweep` is
+# gone with the CLI it ran.

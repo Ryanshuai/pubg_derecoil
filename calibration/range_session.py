@@ -117,6 +117,14 @@ class ManualSession(RangeSession):
               "the comma menu, not a thing to stand next to.")
         print(f"    Waiting up to {timeout_s:.0f}s, checking every "
               f"{self._poll_s:.0f}s ...", flush=True)
+        # ⚠ THE ONLY CALLER OF THIS FUNCTION IN THE REPOSITORY, and it should
+        # stay that way. A human re-entering is the one mover no transition in
+        # control/lobby.py can observe: AutoSession below goes through
+        # ensure_in_match, which sees the game outside a match and re-places
+        # the character itself. This class stands and WAITS for someone else to
+        # do it, so it is the one place that has to say so.
+        from control.lobby import forget_placement
+        forget_placement()
         t0 = time.time()
         while time.time() - t0 < timeout_s:
             time.sleep(self._poll_s)
@@ -174,11 +182,35 @@ class AutoSession(RangeSession):
         return bool(r.get('ok'))
 
     def enter(self, timeout_s=300.0):
-        r = self._lc.ensure_in_match(timeout=timeout_s)
-        if not r.get('ok'):
-            print(f"    [!] could not get back into a match: {r}")
+        # ⚠ THROUGH ensure_ready, NOT ensure_in_match. This used to call the
+        # lobby driver directly, and being in a match is only ONE of the five
+        # things a magazine needs. The one it silently dropped is the range:
+        # re-entry puts the character at the SPAWN COMPOUND, which this
+        # class's own docstring says ("respawns wherever the range puts
+        # you"), and nothing walked it back. A 45-minute harvest is evicted
+        # at least twice, so the back half of every long run was fired in the
+        # middle of a populated compound -- and being rammed mid-magazine
+        # costs the magazine without announcing itself.
+        #
+        # ⚠ THERE USED TO BE A forget_range() ON THIS LINE and it is gone, not
+        # forgotten. The belief moved into LobbyControl, whose ensure_in_match
+        # teleports whenever ITS OWN pump found the game outside a match --
+        # which is precisely the situation this method is called in. The old
+        # arrangement needed the declaration because ensure_ready read the
+        # state, saw `playable` (the eviction had already been recovered by
+        # then on some paths), and skipped the teleport on a belief this
+        # re-entry had just falsified. Nothing to declare now: the module that
+        # walks the character is the module that knows it walked.
+        from control.session import ensure_ready
+        # countdown_s=0: the operator is not standing by mid-run, and the
+        # countdown exists to give a human time to alt-tab away at the start.
+        rec = ensure_ready(label='re-entering the range', countdown_s=0,
+                           verbose=True, match_timeout=timeout_s)
+        if not rec.get('ok'):
+            print(f"    [!] could not get back into the range: "
+                  f"failed at {rec.get('failed')}")
             return False
-        print(f"    back in a match after {r.get('elapsed', 0):.0f}s")
+        print("    back in the range, on the lane")
         if self._at_spawner is None:
             return True
         if self._at_spawner():

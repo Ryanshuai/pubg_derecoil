@@ -1,22 +1,36 @@
 """Weapon switching for the automated calibration sweep.
 
-The sweep needs to work through ~22 weapons x 3 postures. Producing a weapon
-from the training-range item spawner is UI automation with its own failure
-modes, and is being built separately — so it sits behind this interface.
+The sweep works through ~22 weapons x 3 postures, so something has to put each
+one in the player's hands between cells. That is a `control/` job, and this
+module is the thin seam that lets the sweep ask for it without knowing whether
+a human or the item spawner answers.
 
     IMPLEMENTORS: subclass WeaponSwitcher and satisfy the contract on
-    switch_to(). ManualSwitcher below is the human-in-the-loop fallback and
-    also documents, in code, exactly what "switched" has to mean.
+    switch_to(). Read that contract before writing one — it is deliberately
+    narrower than it used to be, and the narrowing is the point.
 
-The caller (auto_calibrate.py) does NOT configure attachments. Whatever the
-spawner gives is fine as long as it is consistent — attachments are read back
-via Tab and folded into the pattern analytically (compensator 0.85 x vertical
-grip 0.85, verified to 0.7% against measurement), so the sweep only ever needs
-to solve for the bare-weapon and posture terms.
+⚠ THIS FILE WAS A STANDING ADVERTISEMENT FOR A FUNCTION THAT ALREADY EXISTED.
+Until 2026-08-07 `SpawnerSwitcher.switch_to` raised NotImplementedError with
+the words "point --switcher at the loadout module once it lands". It had
+landed: control.stock.ensure_weapon_in_hand does exactly this job, verifies it
+against the ammo counter, and had four callers in tools/. Meanwhile sweep.py's
+--switcher defaulted to `manual`, so `pixi run sweep` printed ">>> Equip AUG"
+and WAITED SIXTY SECONDS FOR A HUMAN, once per weapon, in a project whose
+entire purpose is unattended overnight calibration.
+
+It is worth naming the shape, because it is the one this repo keeps paying
+for: the ABC's docstring was BETTER WRITTEN than the real implementation's.
+Five crisp post-conditions here; over in stock.py, a function that actually
+works and says less about itself. An agent looking for "put a gun in hand"
+reads declarations, finds this one first, and builds against the stub.
+
+The contract below is now the SMALLER of the two claims rather than the
+larger, because a promise nothing keeps is worse than no promise.
 """
 import time
 from abc import ABC, abstractmethod
 
+from detector.attachment_catalog import ROSTER
 from detector.weapon import WEAPON_RPM, ar, smg, mg
 
 
@@ -25,25 +39,40 @@ class WeaponSwitcher(ABC):
 
     @abstractmethod
     def switch_to(self, weapon, timeout_s=60.0):
-        """Equip `weapon` and return once it is ready to fire.
+        """Equip `weapon` and return once it is out. -> bool
 
         Args:
             weapon: key of detector.weapon.WEAPON_RPM, e.g. 'aug', 'm416'.
             timeout_s: give up after this long.
 
-        Returns True only when ALL of these hold:
-            - the weapon is IN HAND, not merely in the inventory
-            - its magazine is full
-            - no menu / inventory is open
-            - the player is NOT in ADS (the caller enters ADS itself, and
-              toggling from an unknown state would land in the wrong one)
-            - the player is standing (the caller drives posture from there)
+        Returns True only when BOTH of these hold, each CONFIRMED against the
+        screen rather than inferred from an action having been sent:
+            - the named weapon is IN HAND, not merely in the rack
+            - no inventory and no spawner panel is left open
 
-        Returns False if the weapon cannot be produced; the sweep will log it
-        and move on rather than abort.
+        Returns False if the weapon cannot be produced; the sweep logs it and
+        moves on to the next weapon rather than aborting the run.
 
-        Attachments are not specified — fully kitted is expected and the
-        caller reads back what is actually equipped.
+        ⚠ WHAT IT DOES NOT PROMISE, and who owns each instead. This list used
+        to be part of the promise above, and NEITHER IMPLEMENTATION HAS EVER
+        DELIVERED ANY OF IT — ManualSwitcher only ever compared a weapon name.
+        A contract that no implementor satisfies does not constrain
+        implementors; it only misleads callers.
+
+            posture       sweep.calibrate_combo calls rig.ensure_posture() per
+                          cell, and must: posture is part of what the cell IS.
+            not in ADS    same call. The posture icon only renders IN ADS, so
+                          ensure_posture enters it deliberately — a switcher
+                          that "guaranteed" not-ADS would be undone one line
+                          later.
+            full magazine FireDriver.top_up() before each magazine, which
+                          returns the round count it actually observed.
+
+        Attachments are not specified either. Whatever the spawner fits is
+        fine as long as it is READ BACK — calibrate_combo reads the loadout off
+        the Tab screen and folds the parts into the pattern analytically
+        (compensator 0.85 x vertical grip 0.85, 0.7% against measurement), so
+        the sweep only ever solves for the bare-weapon and posture terms.
         """
 
     def available(self):
@@ -60,13 +89,17 @@ class ManualSwitcher(WeaponSwitcher):
     Verification matters more than the prompt: without it a mistyped or
     forgotten swap silently attributes one weapon's recoil to another, and
     every downstream number for that weapon is wrong with no visible symptom.
+
+    ⚠ It confirms the NAME and nothing else — see the contract above for what
+    that leaves to the caller. It is the fallback for a weapon the spawner
+    cannot produce, not the default; --switcher spawner is.
     """
 
     def __init__(self, verify_fn, poll_s=4.0):
         """verify_fn() -> current weapon name ('' if unknown).
 
-        auto_calibrate passes a Tab-based reader. Keep the poll interval slow;
-        each call opens and closes the inventory.
+        sweep.py passes a Tab-based reader. Keep the poll interval slow; each
+        call opens and closes the inventory.
         """
         self._verify = verify_fn
         self._poll_s = poll_s
@@ -91,17 +124,67 @@ class ManualSwitcher(WeaponSwitcher):
 
 
 class SpawnerSwitcher(WeaponSwitcher):
-    """Drives the training-range item spawner UI.
+    """Spawns the weapon from the training-range panel and holds it.
 
-    NOT IMPLEMENTED — owned by the weapon-loadout module. Stubbed here so the
-    sweep can be wired against the real interface today and swap the
-    implementation in without touching calibration code.
+    ⚠ THERE IS NO DRIVING CODE HERE, AND THERE MUST NOT BE. Every line of it
+    is control.stock.ensure_weapon_in_hand, which was written for the probes
+    and paid for its lessons there:
+
+      - it checks WHICH gun, not merely that a gun is out. A rack left loaded
+        by the previous cell satisfies "a weapon is in hand" and hands the
+        sweep the wrong weapon — measured 2026-08-05, an hour of a failure
+        that looked like the scene rather than the loadout.
+      - it goes through ac.hold() rather than a bare 1/2 keypress, because
+        those keys are SWALLOWED while Tab is up (docs/game_quirks.md).
+      - it brackets the spawner with ensure_panel(True/False), because
+        collapse_all() on a closed panel collapses nothing and reports
+        nothing, and give_many then clicks from a stale layout.
+
+    Writing any of that again here is how the second copy starts.
+
+    THE OBJECTS ARE BUILT PER SWITCH, not held. InventoryControl's grabber
+    keeps GDI objects open and this runs a handful of times per hour, so the
+    lifetime that costs nothing is the short one. The Pico itself is a process
+    singleton (press.pico_mouse.get_mouse), so there is no port to contend
+    for with the live sweep.Rig — only the grabbers, and those are released
+    in the finally.
     """
 
+    def __init__(self, verbose=True):
+        self.verbose = verbose
+
     def switch_to(self, weapon, timeout_s=60.0):
-        raise NotImplementedError(
-            "SpawnerSwitcher is not implemented yet. Use ManualSwitcher, or "
-            "point --switcher at the loadout module once it lands.")
+        # Imported here rather than at module scope so that importing this
+        # file — which sweep.py does at startup, before it has taken the
+        # foreground — does not build a detector stack or reach for the Pico.
+        from control.inventory import InventoryControl
+        from control.spawner import SpawnerControl
+        from control.stock import ensure_weapon_in_hand
+
+        # `timeout_s` is not forwarded and that is deliberate: the step this
+        # wraps is not a wait. It opens a panel, clicks a known layout and
+        # reads the rack back, each with its own bounded retries — there is no
+        # single deadline to hand it, and passing one would suggest the caller
+        # can trade time for success here. It cannot; ManualSwitcher is the
+        # implementation where waiting longer helps.
+        with SpawnerControl() as sc:
+            ac = InventoryControl(verbose=False)
+            try:
+                slot = ensure_weapon_in_hand(ac, sc, weapon=weapon,
+                                             verbose=self.verbose)
+            finally:
+                ac.close()
+        return slot is not None
+
+    def available(self):
+        """The full-autos the spawner has a catalogue entry for.
+
+        Narrower than the base class on purpose: the default answers "which
+        weapons exist", and a switcher is asked "which can YOU produce". A
+        weapon absent from ROSTER has no panel coordinates, so give_many would
+        fail on it after the run had already committed to the cell.
+        """
+        return sorted(set(super().available()) & set(ROSTER))
 
 
 def get_switcher(kind, verify_fn=None):

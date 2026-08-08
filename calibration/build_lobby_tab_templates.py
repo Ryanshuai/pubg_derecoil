@@ -241,7 +241,7 @@ def main():
     ap.add_argument('shot', nargs='?', help='full-screen lobby capture')
     ap.add_argument('--tag', default='zh', help='UI language tag, e.g. zh, en')
     ap.add_argument('--write', action='store_true')
-    ap.add_argument('--dump', default=os.path.join(ROOT, 'temp_debug',
+    ap.add_argument('--dump', default=os.path.join(ROOT, 'docs', 'debug',
                                                    'lobby_tab_templates.png'))
     ap.add_argument('--verify', action='store_true')
     args = ap.parse_args()

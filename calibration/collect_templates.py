@@ -80,11 +80,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cv2
 import numpy as np
 
-from capture_run import CaptureRun, LABEL_REQUESTED
-from config import (HUD_REGIONS, TAB_PIXEL_THRESH, TAB_COUNT_MIN,
-                    TAB_COUNT_MAX)
+from calibration.capture_run import CaptureRun, LABEL_REQUESTED
+from config import HUD_REGIONS, TAB_COUNT_MIN, TAB_COUNT_MAX
 from detector.attachment_catalog import ATTACHMENTS, ROSTER, SLOTS, fits
-from detector.cropper import capture_screen, win32_cap
+from capture.cropper import capture_screen, win32_cap
 from detector.geometry import detail
 from detector.tab_detector import TabTypeDetector
 from detector.attachment_detector import SLOT_DETAIL_MIN, SLOT_NAMES
@@ -98,9 +97,9 @@ from control.session import ensure_ready
 from control.spawner import SpawnerControl
 from control.inventory import (InventoryControl, PLATE_INK_MIN,
                                at_ground, at_inv)
-from harvest import BACKPACK
-from range_session import get_session
-from sweep import Rig
+from control.kitting import BACKPACK
+from calibration.range_session import get_session
+from calibration.sweep import Rig
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_ROOT = os.path.join(ROOT, 'docs', 'attachments', 'runs')
@@ -561,7 +560,7 @@ class Collector:
         return {s: self.crop(frame, s).copy() for s in SLOT_NAMES}
 
     def tab(self):
-        return bool(self.rig.ensure_inventory_open()) and bool(self.ac.sync())
+        return bool(self.rig.gun.ensure_inventory_open()) and bool(self.ac.sync())
 
     def turn(self, yaw, pitch):
         """Change what shows through the panel. Tab must be shut.
@@ -569,7 +568,7 @@ class Collector:
         With Tab up the mouse drives a cursor, not the view, and every capture
         comes back identical.
         """
-        self.rig.ensure_inventory_closed()
+        self.rig.gun.ensure_inventory_closed()
         self.rig.view.turn(yaw, pitch, settle_s=SETTLE_S)
 
     def write(self, name, crop, **facts):
@@ -757,7 +756,7 @@ class Collector:
         if n:
             print(f'    labelled {n} row crop(s) from what the fits revealed')
 
-    def paired_sweep(self, weapon, key, slot, angles, tag_n, row):
+    def paired_sweep(self, weapon, key, slot, angles, row):
         """Per background, the same slot EMPTY and then FILLED. -> [entries]
 
         WHY PAIRS AND NOT JUST THE FILLED CROP. A composited crop is not the
@@ -995,7 +994,7 @@ class Collector:
             self.turn(0, -pitch)        # undo the pitch, keep the yaw
         return shots
 
-    def plate_pair(self, weapons, angles, tag_n):
+    def plate_pair(self, weapons, angles):
         """Two weapons' NAME PLATES over many backgrounds. -> [entries]
 
         TWO AT A TIME BECAUSE THE RACK HOLDS TWO. Both plates are drawn in the
@@ -1140,7 +1139,7 @@ class Collector:
         mislabelled crops and a run of empty slot captures.
 
         Both states are arranged rather than hoped for, using the measured
-        auto-fit rule (tools/probe_autofit.py, 3/3 each way):
+        auto-fit rule (measured 3/3 each way, table below):
 
             with the slot ALREADY FULL  the part lands in 库存
             with the slot EMPTY         the part lands on the gun
@@ -1156,8 +1155,8 @@ class Collector:
         # ── 1. an empty slot, so the first copy auto-fits onto the gun ──
         # To the floor, not 库存: a part sitting in the list would be a second
         # row, and this whole method rests on there being exactly one.
-        # IN HAND before anything is spawned. probe_autofit measured "empty
-        # slot -> the part lands on the gun" 3/3 with the weapon HELD, and the
+        # IN HAND before anything is spawned. "Empty slot -> the part lands
+        # on the gun" was measured 3/3 with the weapon HELD, and the
         # first run of this method got 库存 instead with an empty slot and the
         # gun merely racked. One variable between them. So the auto-fit looks
         # like the right click: it reaches the weapon in hand, not whichever
@@ -1375,7 +1374,7 @@ class Collector:
                 self.miss(key, 'could not get it off the gun to start the '
                                'pairing', slot=slot)
                 return shots
-            shots += self.paired_sweep(weapon, key, slot, angles, tag_n, row)
+            shots += self.paired_sweep(weapon, key, slot, angles, row)
 
         # ── 3. the 库存 rendering, from where paired_sweep left it ──
         # No second copy is spawned. paired_sweep ends on an unequip, so the
@@ -1430,8 +1429,7 @@ class Collector:
         rule need a detector.
 
         THE RACK IS EMPTIED TOO, not just 库存: the autofit rule puts a part
-        straight onto a racked gun whose slot is free (3/3, tools/probe_autofit
-        .py), which would leave 库存 empty and nothing to photograph.
+        straight onto a racked gun whose slot is free (3/3), which would leave 库存 empty and nothing to photograph.
         """
         shots = []
         for k in keys:
@@ -1490,7 +1488,7 @@ class Collector:
         # against. plate_pair does its own spawning for the same reason -- the
         # gun has to arrive after the backdrop is already photographed.
         if isinstance(weapon, list):
-            return self.plate_pair(weapon, angles, n)
+            return self.plate_pair(weapon, angles)
 
         if spawn:
             # The HOST only. Its parts are spawned by one_part, one at a time,
@@ -1528,7 +1526,9 @@ class Collector:
             # by reading them is using the detector it exists to test.
             #
             # The auto-fit rule makes this work, and it is why the rule was
-            # worth measuring (tools/probe_autofit.py):
+            # worth measuring. Measured 2026-08-06, and these nine trials
+            # ARE the record -- the probe that ran them was deleted once
+            # they were written down here:
             #
             #   slot EMPTY    -> the part goes straight ONTO THE GUN   3/3
             #   slot OCCUPIED -> the part goes to 库存                 3/3
@@ -1732,7 +1732,7 @@ def main():
     print(f'out      : {os.path.relpath(out_dir, ROOT)}\n')
 
     # No standing instruction any more: the spawner is a key-bound menu that
-    # opens anywhere (control/CLAUDE.md), and ensure_ready's last step puts the
+    # opens anywhere (control/CLAUDE.md), and ensure_ready's match leg puts the
     # character in the 200m lane, away from the compound traffic.
     ready = ensure_ready(label='template collection',
                          countdown_s=args.countdown)
@@ -1741,13 +1741,11 @@ def main():
               f'{ready["failed"]!r}.')
         return 1
 
+    # The `if not rig.mouse.can_key` abort that stood here went with the
+    # second backend (2026-08-08). It is not unguarded now: there is one
+    # backend, it always has key(), and Rig() raises during construction if no
+    # Pico answers -- so "no Pico" fails one line above this instead of here.
     rig = Rig('red_dot')
-    # `can_key`, not `hasattr(rig.mouse, 'key')`. Same question the two
-    # can_press() methods answer, asked before either of their objects exists.
-    if not rig.mouse.can_key:
-        print('[!] ABORT: no Pico — Tab and the spawner key cannot be pressed.')
-        rig.close()
-        return 1
     # `by` is what label_for() writes into every label. --as-is spawns nothing
     # and drags nothing: the operator named what is already on the gun, and
     # that is the only account of it there is.

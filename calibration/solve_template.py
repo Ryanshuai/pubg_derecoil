@@ -56,7 +56,7 @@ sys.path.insert(0, ROOT)
 import cv2
 import numpy as np
 
-TMPL_DIR = os.path.join(ROOT, 'training_data', 'pubg_assets', 'Item',
+TMPL_DIR = os.path.join(ROOT, 'docs', 'training_data', 'pubg_assets', 'Item',
                         'Attachment')
 
 # Below this the pixel is treated as fully transparent and its colour is not

@@ -30,13 +30,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import cv2
 import numpy as np
-import win32gui
-import win32process
 
 from config import RECOIL_PATCH
 from control.focus import game_focused
 from control.session import ensure_ready
-from detector.cropper import make_grabber
+from capture.cropper import make_grabber
 from detector.view_tracker import ViewTracker, MagazineRecorder
 from press.pico_mouse import get_mouse
 
@@ -54,35 +52,16 @@ SETTLE_S = 0.45         # pause between trials (and after the reset move)
 ADS_SETTLE_S = 0.40     # time for the scope-in animation before measuring
 
 
-def foreground_name():
-    """Window title + exe of whatever currently has focus, ascii-safe.
-
-    Diagnostics only -- what to print when the guard says no. The guard
-    itself is control.focus.game_focused(). This file used to decide with
-    `any(k in (title+exe).lower() for k in ('battlegrounds','pubg','tslgame'))`
-    and the repository is called pubg_derecoil, so an editor or a terminal
-    showing the path answered yes. The docstring below it read "without this
-    check a whole run silently reads zero -- which is exactly what happened
-    once", and the check was the thing that was broken.
-
-    That matters most here of all: K is the counts-to-degrees map every
-    recoil curve is scaled by, and an unfocused run measures zero motion
-    while reporting focused=True.
-    """
-    hwnd = win32gui.GetForegroundWindow()
-    try:
-        title = win32gui.GetWindowText(hwnd)
-    except Exception:
-        title = ''
-    exe = ''
-    try:
-        import psutil
-        _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        exe = psutil.Process(pid).name()
-    except Exception:
-        pass
-    safe = title.encode('ascii', 'backslashreplace').decode('ascii')
-    return safe, exe
+# `foreground_name()` lived here: window title + exe of whatever has focus,
+# for printing when the guard says no. Deleted 2026-08-07 with zero callers --
+# control.focus.window_info() is the same read, and control.focus.game_focused()
+# is the guard. The lesson it carried is in tools/CLAUDE.md and does not need a
+# function to hold it: this file used to DECIDE with
+# `any(k in (title+exe).lower() for k in ('battlegrounds','pubg','tslgame'))`,
+# and the repository is called pubg_derecoil, so an editor showing the path
+# answered yes. That matters most here of all -- K is the counts-to-degrees map
+# every recoil curve is scaled by, and an unfocused run measures zero motion
+# while reporting focused=True.
 
 
 def _inject(mouse, counts, n_steps, duration, t_start, log):
@@ -102,6 +81,38 @@ def _inject(mouse, counts, n_steps, duration, t_start, log):
         log.append((time.perf_counter() - t_start, sent))
 
 
+_ADS_DET = [None]
+
+
+def _scoped_now():
+    """Is the sight up, right now? Reads the crosshair's ABSENCE off a frame.
+
+    Its own grabber: the tracker's may be banded to the patch rows, and the
+    crosshair lives in the middle of the screen. 0.32 ms, and only called
+    between trials.
+    """
+    from detector.ads_detector import AdsDetector
+    from capture.cropper import capture_screen
+    if _ADS_DET[0] is None:
+        _ADS_DET[0] = AdsDetector()
+    return bool(_ADS_DET[0].scoped(capture_screen()))
+
+
+def _ensure_scoped(mouse, tries=3):
+    """Toggle until the screen says the sight is up. -> did it get there.
+
+    Not `click and assume`: right-click is a toggle, so a blind click is as
+    likely to put the sight DOWN as up, and the reading is the only thing
+    that can tell which happened.
+    """
+    for _ in range(tries):
+        if _scoped_now():
+            return True
+        mouse.click(buttons=0x02, duration_ms=60)
+        time.sleep(ADS_SETTLE_S)
+    return _scoped_now()
+
+
 def run_trial(grabber, tracker, mouse, counts, dry_run=False, ads=False):
     """Inject `counts` vertically over INJECT_S and capture throughout.
 
@@ -116,11 +127,26 @@ def run_trial(grabber, tracker, mouse, counts, dry_run=False, ads=False):
     log = []
     total = WARMUP_S + INJECT_S + COOLDOWN_S
 
+    scoped_before = scoped_after = None
     if ads:
-        # Assumes hold-to-ADS (PUBG default). Covers settle + trial + reset.
-        hold_ms = int((ADS_SETTLE_S + total + 0.35) * 1000)
-        mouse.click(buttons=0x02, duration_ms=hold_ms)
-        time.sleep(ADS_SETTLE_S)
+        # ⚠ RIGHT-CLICK IS A TOGGLE HERE, NOT A HOLD, and this used to assume
+        # the opposite: one long `click(0x02, hold_ms)` per trial. A toggle
+        # turns the sight ON for trial 1, OFF for trial 2, ON for trial 3 --
+        # so a run alternated between scoped and hip-fire and reported the
+        # mixture as one K. That is the 38-53% CV and R^2 0.72 measured on
+        # 2026-08-05, and it is why the same evening's red-dot and VSS runs
+        # disagreed by 2x when hip-fire should look identical through either.
+        #
+        # Holding right-click is not ADS in this setup either -- it is
+        # shoulder aim, a third state. So the state has to be CHECKED, not
+        # commanded: AdsDetector answers off one frame in 0.32 ms.
+        # Try to get the sight up, but do NOT refuse the trial if the check
+        # says no -- the state is RECORDED and travels with the result, which
+        # is what the reader actually needs. A gate here dropped 4 of 5 trials
+        # at 240 counts and 5 of 5 at -240 on 2026-08-05, and the detector it
+        # gates on has never been validated during large view motion, so the
+        # drops were as likely to be its own false negatives as real.
+        scoped_before = _ensure_scoped(mouse)
 
     t0 = time.perf_counter()
     th = None
@@ -136,7 +162,12 @@ def run_trial(grabber, tracker, mouse, counts, dry_run=False, ads=False):
 
     if th is not None:
         th.join(timeout=1.0)
-    return rec, log
+    if ads:
+        # AFTER as well as before: the sight can come down mid-trial, and a
+        # trial that started scoped and ended hip-fire is not a measurement of
+        # either. Recorded rather than corrected -- the caller drops it.
+        scoped_after = _scoped_now()
+    return rec, log, (scoped_before, scoped_after)
 
 
 def summarise(rec, res, log, counts):
@@ -211,7 +242,11 @@ def main():
         mouse = get_mouse()
     except Exception as e:
         print(f"\n[!] mouse backend unavailable: {e}")
-        print("    Connect the Pico, or set MOUSE_BACKEND='soft' in config.py.")
+        print("    Connect the Pico. There is no software fallback: PUBG "
+              "reads aiming off raw HID,")
+        print("    so a SendInput backend measures nothing. (It existed "
+              "until 2026-08-08 and this")
+        print("    message used to recommend it.)")
         return 1
 
     grabber, paced = make_grabber(tracker.regions())
@@ -225,8 +260,8 @@ def main():
     print(f"Per trial : {WARMUP_S}+{INJECT_S}+{COOLDOWN_S} s "
           f"(wall-clock, not frame-counted)")
     # ensure_ready rather than a countdown plus a focus check: it takes the
-    # foreground itself (the countdown survives as its fallback), and its last
-    # step moves to the 200m lane -- which is what "aim at something with
+    # foreground itself (the countdown survives as its fallback), and its match
+    # leg moves to the 200m lane -- which is what "aim at something with
     # structure" was asking a human to arrange. K is measured off the picture
     # moving, so a screen full of sky reads zero at every amount, exactly like
     # an unfocused one does.
@@ -252,8 +287,13 @@ def main():
             for sign in (+1, -1):
                 counts = amount * sign
                 for r in range(args.repeats):
-                    rec, log = run_trial(grabber, tracker, mouse, counts,
-                                         args.dry_run, args.ads)
+                    rec, log, ads_state = run_trial(
+                        grabber, tracker, mouse, counts,
+                        args.dry_run, args.ads)
+                    if args.ads and not all(ads_state):
+                        print(f"    [!] {counts:+d} #{r}: ADS "
+                              f"{ads_state[0]} -> {ads_state[1]} — kept, but "
+                              f"the state is not what was asked for")
                     focused = args.dry_run or game_focused()
                     if not focused:
                         lost_focus += 1
