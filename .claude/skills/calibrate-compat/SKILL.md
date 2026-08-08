@@ -21,7 +21,7 @@ already covers all three failure modes:
 | the part fits but the table never listed it, so it is never fitted | *nothing detects this — only a scan does* |
 
 Each entry carries `conf`. `SLOTS` is now **30/30 measured** (scanned
-2026-08-02, `docs/compat/runs/20260802_155222/`) — but only for four of the
+2026-08-02, `calibration/artifacts/compat/runs/20260802_155222/`) — but only for four of the
 five slots, since `scope` is unreadable, and `EXCLUDE` / `ONLY` /
 `GRIP_ONLY` are **still entirely inferred**. That is the remaining work.
 
@@ -71,7 +71,7 @@ run.add_observed(frame, name, weapon, read)     # a detector read it -> context
 run.labelled()                                  # ONLY the first kind
 ```
 
-Runs live in `docs/runs/<kind>/<stamp>/`. List them with
+Runs live in `calibration/artifacts/runs/<kind>/<stamp>/`. List them with
 `pixi run python calibration/capture_run.py`.
 
 **Every label carries its `source`, and that is enforced, not advised.** A

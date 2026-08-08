@@ -47,7 +47,7 @@ SEARCH = 8              # +- px searched around the nominal position
 # the score is the best of them, so the anchor survives a language switch
 # instead of silently deciding the inventory is closed.
 SOURCES = {
-    'zh': os.path.join(ROOT, 'docs', 'tab_inventory.png'),
+    'zh': os.path.join(ROOT, 'calibration', 'artifacts', 'tab_inventory.png'),
     'en': os.path.join(ROOT, 'calibration', 'artifacts', 'lobby', 'in_game_tab.png'),
 }
 POSITIVES = ('calibration/artifacts/lobby/in_game_tab.png', 'calibration/artifacts/tab_inventory.png',

@@ -2,7 +2,7 @@
 
     from detector.snapshot import snap
 
-    snap(crop, 'calibration/artifacts/tab/runs/x/muzzle.png', kind='crop', screen='tab',
+    snap(crop, 'calibration/artifacts/tab/runs/<stamp>/muzzle.png', kind='crop', screen='tab',
          roi=(316, 2409, 63, 63), parent='00_baseline.png',
          source='calibrate-template/attachment',
          labels=[{'target': 'attachment', 'value': 'comp_ar',

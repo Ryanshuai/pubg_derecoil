@@ -12,7 +12,7 @@ found must equal the label's length or nothing is written, which is what stops
 a mislabelled capture from installing a wrong template silently.
 
 The scan is the regression: it reads the ammo strip in every full-screen
-capture under docs/ and temp_debug/ and prints what came out, including the
+capture under calibration/artifacts/ and temp_debug/ and prints what came out, including the
 glyphs that matched nothing. An unreadable glyph is the signal that a digit is
 still missing from the set — not that the detector is broken.
 """
@@ -34,9 +34,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def captures():
-    paths = sorted(glob.glob(os.path.join(ROOT, 'docs', '**', '*.jpg'),
+    paths = sorted(glob.glob(os.path.join(ROOT, 'calibration', 'artifacts', '**', '*.jpg'),
                              recursive=True))
-    paths += sorted(glob.glob(os.path.join(ROOT, 'docs', '**', '*.png'),
+    paths += sorted(glob.glob(os.path.join(ROOT, 'calibration', 'artifacts', '**', '*.png'),
                               recursive=True))
     paths += sorted(glob.glob(os.path.join(ROOT, 'temp_debug', 'screen_*.png')))
     return paths

@@ -1,7 +1,7 @@
 """Diff with-UI and no-UI screenshots to find UI element regions.
 
 Usage:
-    python diff_overview.py <with_ui_path> <no_ui_path> --save-dir docs/debug
+    python diff_overview.py <with_ui_path> <no_ui_path> --save-dir calibration/artifacts/debug
 """
 import argparse
 import cv2
@@ -54,7 +54,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('with_ui', help='Screenshot with UI')
     parser.add_argument('no_ui', help='Screenshot without UI')
-    parser.add_argument('--save-dir', default='docs/debug')
+    parser.add_argument('--save-dir', default='calibration/artifacts/debug')
     parser.add_argument('--threshold', type=int, default=15)
     args = parser.parse_args()
 

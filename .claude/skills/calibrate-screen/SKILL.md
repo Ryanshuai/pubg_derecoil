@@ -1,6 +1,6 @@
 ---
 name: calibrate-screen
-description: Calibrate a game UI screen's interactive layout — where its rows, slots, list entries and weapon positions are, and how to tell the screen is even up. Use when a new screen or tab needs to be driven by clicks/drags (spawner panel, Tab inventory, a settings tab), or when an existing layout stopped matching after a game update. Produces a detector/<screen>_layout.py, an anchor check, and a docs/<screen>/README.md of the measurements. Not for what a single icon, string or digit looks like and where it is composited — that is calibrate-template.
+description: Calibrate a game UI screen's interactive layout — where its rows, slots, list entries and weapon positions are, and how to tell the screen is even up. Use when a new screen or tab needs to be driven by clicks/drags (spawner panel, Tab inventory, a settings tab), or when an existing layout stopped matching after a game update. Produces a detector/<screen>_layout.py, an anchor check, and a calibration/artifacts/<screen>/README.md of the measurements. Not for what a single icon, string or digit looks like and where it is composited — that is calibrate-template.
 argument-hint: "<screen name> - the skill opens the screen itself; or point at saved screenshots"
 ---
 
@@ -10,7 +10,7 @@ Work out where everything clickable on a game screen is, well enough that anothe
 
 Reference implementations, read whichever is closest before starting:
 `detector/spawner_layout.py` (columns of variable-length lists),
-`detector/tab_layout.py` (fixed slot grid), `docs/spawner/README.md` (what a
+`detector/tab_layout.py` (fixed slot grid), `calibration/artifacts/spawner/README.md` (what a
 finished write-up looks like).
 
 ## What this produces
@@ -18,7 +18,7 @@ finished write-up looks like).
 1. `detector/<screen>_layout.py` — geometry only: takes a full-screen BGR frame, returns coordinates. No clicking, no game state.
 2. An **anchor check** — `<Screen>Detector.classify(frame)` answering "is this screen even up?", so a caller fails loudly instead of clicking into whatever *is* on screen.
 3. Constants in `config.py` under a named section, with the measurement behind each number in the comment.
-4. `docs/<screen>/README.md` — the numbers, the separations they achieved, and the traps found.
+4. `calibration/artifacts/<screen>/README.md` — the numbers, the separations they achieved, and the traps found.
 
 ## Rule: detect the structure, don't hardcode it
 
@@ -33,7 +33,7 @@ lobby, and a run that needs a human to click first can never be unattended.
 
 ```bash
 pixi run python tools/drive_screen.py list
-pixi run python tools/drive_screen.py tab --shoot baseline    # docs/tab/baseline.png
+pixi run python tools/drive_screen.py tab --shoot baseline    # calibration/artifacts/tab/baseline.png
 pixi run python tools/drive_screen.py spawner --keep-open     # to work on it live
 ```
 
@@ -58,7 +58,7 @@ game world".
 to click until the mode tab reads `TRAINING`, because that one button starts
 whatever the sub bar has selected, and a real match **cannot currently be
 left** (`leave_entry_confirmed()` only knows the training-range ESC menu). See
-the Lobby section of `docs/lobby/README.md`.
+the Lobby section of `calibration/artifacts/lobby/README.md`.
 
 **The hardware and the window are shared.** One Pico, one game window, and
 other agents run long captures on both. `Pointer` reports which pid holds the
@@ -85,7 +85,7 @@ Pick UI furniture that exists on **no other screen** (buttons, a header). Then c
 - **Opaque?** Same pixels across ≥3 screenshots with *different scenes behind them*. Bright parts of the spawner buttons moved ≤6 grey levels; their dark parts moved up to 86 — those are alpha-blended and must stay out of the template.
 - Threshold at whatever separates the opaque part, mask it, `matchTemplate` in a small window around a fixed anchor.
 
-docs/spawner/README.md §4 is a worked example of exactly these measurements — three captures, three numbers, and what each one rules out.
+calibration/artifacts/spawner/README.md §4 is a worked example of exactly these measurements — three captures, three numbers, and what each one rules out.
 
 Report the separation, not just "it works": the spawner anchor scores 0.989–1.000 on 24 positives and 0.000 on gameplay negatives, hence a 0.55 threshold.
 
@@ -94,7 +94,7 @@ anchor counted bright pixels in the `类型` header and looked flawless — lobb
 results, ESC menu and gameplay all measured exactly 0. Swept over 96 real ADS
 captures it had a false positive, and nine frames measured exactly 738 = the
 entire 41×18 crop saturated: that header sits over the training range's bright
-sky, which ADS magnifies into it. `docs/ads/runs/**/*.jpg` is 893 frames of
+sky, which ADS magnifies into it. `calibration/artifacts/ads/runs/**/*.jpg` is 893 frames of
 free negatives; use them.
 
 **A pixel count is not an anchor.** It cannot separate "the glyph is drawn"
@@ -112,7 +112,7 @@ the strokes are there.
 `类型` in the old captures and `Type` in the current client. Each scores the
 other at 0.27 — below the brightest negative — so a single-language anchor
 reads "closed" forever after a language switch, silently. Score the best of
-several masks: `docs/training_data/pubg_assets/tab/type_header_{zh,en}.png`,
+several masks: `data/templates/pubg_assets/tab/type_header_{zh,en}.png`,
 rebuilt by `tools/probe_tab_anchor.py --write`.
 
 ## Step 2.5 — one element usually needs two windows
@@ -229,7 +229,7 @@ Detected counts must agree with a catalogue, or with a second capture:
 
 ```bash
 python -c "from control.spawner import check_against_run; \
-           check_against_run('docs/spawner/runs/<stamp>')"
+           check_against_run('calibration/artifacts/spawner/runs/<stamp>')"
 ```
 
 This is how the crossbow quiver was found: 握把 expanded to 7 entries where `attachment_catalog.ATTACHMENTS` accounted for 6, which had silently shifted every later index down one. A count check catches exactly the class of bug that otherwise shows up as "it spawned the wrong thing" hours later.
@@ -238,7 +238,7 @@ When a screen's list and a code table disagree, **fix the mapping in the driver,
 
 ## Step 7 — write it down
 
-`docs/<screen>/README.md`: every threshold with the measurement that justifies it, the traps hit, and the commands to re-run offline. Keep the captures under `docs/` — later work builds on them.
+`calibration/artifacts/<screen>/README.md`: every threshold with the measurement that justifies it, the traps hit, and the commands to re-run offline. Keep the captures under `docs/` — later work builds on them.
 
 Any game behaviour discovered along the way (a click having a side effect, a key being swallowed by the UI) goes in `docs/game_quirks.md`, not here.
 
@@ -253,4 +253,4 @@ Any game behaviour discovered along the way (a click having a side effect, a key
 - The game truncates its own long labels (`后坐补偿器 (突击步枪、精确射手...`). That is not a detection bug.
 - PowerShell's `Get-Content`/`Set-Content` read UTF-8 source as system ANSI and will mojibake every Chinese comment in the file. Use the Edit tool or Python for any file with non-ASCII.
 - All coordinates are **3440x1440**. Never 3840x2160.
-- Scratch output goes to `docs/debug/`. `temp_debug/` no longer exists.
+- Scratch output goes to `calibration/artifacts/debug/`. `temp_debug/` no longer exists.

@@ -31,7 +31,7 @@
 
 ## 干活之前先问：现在在局内吗
 
-`lobby_detector.py` + `control/lobby.py`（**已有，别重造**）。测量值全在 `docs/lobby/README.md`。
+`lobby_detector.py` + `control/lobby.py`（**已有，别重造**）。测量值全在 `calibration/artifacts/lobby/README.md`。
 
 ```python
 from control.lobby import LobbyControl
@@ -96,7 +96,7 @@ with LobbyControl() as lc:
 `import robot` 之后 `'torch' in sys.modules` 是 **False**——实测的，不是推的。
 
 最后一个是火力模式的 4 MB MobileNet，它一直挂在那个 RandomForest 后面当兜底
-（「RF 先答，只有它弃权才跑网络」）。在 `docs/mismatch/fire_mode` 整个语料上量：
+（「RF 先答，只有它弃权才跑网络」）。在 `calibration/artifacts/mismatch/fire_mode` 整个语料上量：
 
 ```
 859 张（每一张都是当初因为「有人不同意」才被收集的难例）
@@ -108,7 +108,7 @@ with LobbyControl() as lc:
 背景板 + 8.4 MB 标注裁图用来训它，以及**整个 detector import 图里的 torch**——
 `robot.py` 那行 `device = torch.device(...)` 只为这一个类存在。
 
-⚠ **那个 0.35% 的诚实边界**：`docs/mismatch/fire_mode` 是难例池不是代表性采样
+⚠ **那个 0.35% 的诚实边界**：`calibration/artifacts/mismatch/fire_mode` 是难例池不是代表性采样
 （87.8% 读成 `single_bot_sniper`）。真实帧上大概率更低，但没人有无偏样本，所以
 它是**难例上的上界**，不是平均值。
 
@@ -148,7 +148,7 @@ HUD 在很多状态下压根不画这个图标。
 
 ```
 pixi run python calibration/collect_templates.py --targets rows --keys uzi_stock,variable,scope_8x
-pixi run python calibration/solve_template.py docs/attachments/runs/<stamp> --rows --install
+pixi run python calibration/solve_template.py calibration/artifacts/attachments/runs/<stamp> --rows --install
 pixi run attachments
 ```
 
@@ -174,7 +174,7 @@ pixi run attachments
 
 **推论一：闸门绿了不等于出货路径对。** 库存行那次，`score_attachments.py` 的 `samples()` docstring 还写着「the detector's own reader resizes them to the slot size, so they arrive here the same way」——**那句话在它被改的那天就成了假的，而它正是让缺口看不见的东西**。改了取样几何就必须同时改（或删掉）那句声称两边一致的话。
 
-**推论二：新语料要含那个把它打破的样本。** 树的那一对（`docs/tab_tree_*.png`）和 12 个背景的开/关配对（`docs/tab_type/bg*`）现在都在语料里。**一个只装着已通过样本的语料，永远只会说通过。**
+**推论二：新语料要含那个把它打破的样本。** 树的那一对（`docs/tab_tree_*.png`）和 12 个背景的开/关配对（`calibration/artifacts/tab_type/bg*`）现在都在语料里。**一个只装着已通过样本的语料，永远只会说通过。**
 
 **推论三：判据要能在「不该」的一侧被打破。** `tab-open` 现在报饱和度的**两侧**余量（开 0.000 / 关 0.030，闸门 0.015），而不是只报「全对」。
 
@@ -284,7 +284,7 @@ mp5k comp+heavy        0.4767   0.4826   +1.2%   0.8500  +78.3%
 ## 踩过的坑（都有实测数字）
 
 ✅ **~~库存行的模板还是老的一套，槽位的改进没跟过去~~ —— 已修（2026-08-05），行模板从行捕获直接解。**
-症状是**「排第一却读不出来」**：`thumb_grip` 在 `docs/tab_inventory.png` 的 row9 已经是第一名、margin 1.44，MSE 却是 175，`ROW_MSE_MAX=150` 正好卡在外面。**排名对而绝对阈值不过，就是尺度错的样子**——正确的答案赢了，但赢得不够像。根因和修法见上面「两种渲染」那一节。
+症状是**「排第一却读不出来」**：`thumb_grip` 在 `calibration/artifacts/tab_inventory.png` 的 row9 已经是第一名、margin 1.44，MSE 却是 175，`ROW_MSE_MAX=150` 正好卡在外面。**排名对而绝对阈值不过，就是尺度错的样子**——正确的答案赢了，但赢得不够像。根因和修法见上面「两种渲染」那一节。
 
 **列表行位置：用图标，别用文字带。**
 标签会折行，且折行时**不在行内垂直居中**。用文字带测「附近」栏读出 15px 偏差和一个假的 66px pitch；用图标块测得到真值：首行 y=199，pitch 81.55，两个面板共用。
@@ -356,13 +356,13 @@ ads.score(frame)      # 原始余量，日志里记下来能看出是不是勉�
 
 三个坑，改这个检测器前先读：
 
-- **必须两套模板。** 腰射准星四刻度在 ±56 px，按住右键瞄准时会**收紧**。只匹配宽的那个，肩瞄会被读成开镜——而肩瞄恰恰不是开镜，`docs/ads/runs/20260801_222936` 整整 64 帧就是这个错误的现成负样本集。
+- **必须两套模板。** 腰射准星四刻度在 ±56 px，按住右键瞄准时会**收紧**。只匹配宽的那个，肩瞄会被读成开镜——而肩瞄恰恰不是开镜，`calibration/artifacts/ads/runs/20260801_222936` 整整 64 帧就是这个错误的现成负样本集。
 - **判据是「五个部件里最弱的那个」，不是「中心亮不亮」。** 要求四臂全亮才排除得掉镜子自己的准心（镜子只点亮中心）：3x 上这一项把最差情况从 53.9 压到 0.03。
 - **必须用相对量**（部件均值减环形背景）。绝对亮度版本直接失效：开镜后画面被放大、边缘更锐，逐帧 dewhite 的亮点数能到 3667，而未开镜的低对比背景下反而可能是 0。
 
 **不要把中心 crop 塞进 `config.HUD_REGIONS`。** 屏幕中心在 y≈650–790，而 HUD 那一带是 y≈1301–1440。加进去会把 DXGI 的单一 bounding box 从 y=1301 一路拉到 y=650，每帧多拷半屏——只为一个 140×140 的窗口。`AdsDetector` 自己从全帧切，或者给它单独的 grabber。
 
-模板在 `docs/training_data/pubg_assets/ads_crosshair.npz`，重新拟合和复现上表都是 `pixi run fit-ads`（`--eval-only` 只评测）。数据用 `pixi run capture-ads` 采（见下方资产表）。
+模板在 `data/templates/pubg_assets/ads_crosshair.npz`，重新拟合和复现上表都是 `pixi run fit-ads`（`--eval-only` 只评测）。数据用 `pixi run capture-ads` 采（见下方资产表）。
 
 ## 配件槽三态：用 `slot_detector`，别再自己造
 
@@ -502,7 +502,7 @@ det.scores(crop)    # {枪: 余弦}，问「是不是某把枪」时用这个
 
 三条教训，每条都是闸门先绿后错：
 
-⚠ **小地图画着一模一样的标记，而且大地图不开时它一直在。** 第一版 docstring 里写着「假阳性方向没验过」，**写完之后第一帧活体就把它打破了**：地图关着而 `map_open` 报 True，标记读在 (3222, 1227)。不是边缘情况，是**恒真**。两者互斥（开大地图会隐藏小地图），所以 `MINIMAP_BOX` 在任何搜索之前先抹掉。**两张帧现在都在 `docs/map/` 且都在 selftest 里**——只装着「写它时用的那一帧」的语料，永远只会同意它自己。
+⚠ **小地图画着一模一样的标记，而且大地图不开时它一直在。** 第一版 docstring 里写着「假阳性方向没验过」，**写完之后第一帧活体就把它打破了**：地图关着而 `map_open` 报 True，标记读在 (3222, 1227)。不是边缘情况，是**恒真**。两者互斥（开大地图会隐藏小地图），所以 `MINIMAP_BOX` 在任何搜索之前先抹掉。**两张帧现在都在 `calibration/artifacts/map/` 且都在 selftest 里**——只装着「写它时用的那一帧」的语料，永远只会同意它自己。
 
 ⚠ **面积闸门单独不够，边长才是判据。** 左侧的黄色选中边框是 4×49 / 167 px，**落在面积闸门 100–2000 里**。那一版之所以还答对，只是因为标记 445 px 排第一——闸门是装饰性的，标记一旦不在就会交出一个菜单边框。（后来那两条边框成了上面那个 panel 信号：**打破一个判据的东西是另一个判据的证据**。）
 
@@ -516,16 +516,16 @@ det.scores(crop)    # {枪: 余弦}，问「是不是某把枪」时用这个
 
 | 资产 | 内容 | 用途 |
 |---|---|---|
-| `docs/tab_inventory.png` | G36C + SKS，库存 12 行满 | Tab 检测回归，12 行真值原来钉在一个已经不在盘上的标定脚本里 |
-| `docs/tab_inventory_2.png` | Micro UZI + Mk12，「附近」栏有物品 | 地面栏 + 槽位渲染规则 |
-| `docs/training_epuipment.png` | spawner 面板 | `SpawnerDetector` 正例 |
-| `docs/training_data/highlight_eval/` | 260 高亮 + 439 非高亮，带标签 | 配对评测（脚本已不在盘上）。`errors_v4/` 是空的——**这个集里没有难例** |
-| `docs/spawner/runs/` | spawner 全部分类的菜单截图 | 游戏当前物品清单的事实来源 |
-| `docs/compat/runs/<stamp>/` | 30 把枪各一张全屏 + `summary.json` | 槽位几何回归（`scan_compat.py --report <stamp>`）。**不是模板真值集**：枪上装的是 PUBG 自动配的，没人指定过，只能靠被测检测器认——拿它标模板是循环论证 |
-| `docs/attachments/runs/<stamp>/` | 配件采集：槽位配对图（空/满同角度）、库存行图（同一行 10 个背景）、枪名板 | 配件模板的真值集，`pixi run attachments` 吃它。**两半都可信了**（2026-08-05 重采）；坏掉的旧行图还在盘上，但 `labelled()` 不发它们 |
-| `docs/lobby/*.png` | 5 张：大厅 / 训练场 / 训练场+Tab / 正式局结算 / ESC 菜单 | 在不在局内的回归，`tools/verify_lobby_detector.py` 五条全过。每张的 `bar_max`/`ping_frac` 实测值见 `docs/lobby/README.md` |
-| `docs/ads/runs/**/*.jpg` | 610 张全屏帧（本为 ADS 采集） | 顺带是弹药数字的离线回归集：`tools/probe_ammo_ocr.py` 在 921 张里读出 869，其余 52 张确实没数字 |
-| `docs/ads/runs/*/index.jsonl` | 每帧标了 scope / state / t_ms / 槽位实读 asset | 开镜检测评测集，492 帧。**别照 `state` 当真值**：`20260801_222936` 的 `state=ads` 其实是按住右键的肩瞄、从未开镜；`20260802_015545` 整轮在错的槽位上。两个 run 的 `meta.json` 里都写了原因，`calibration/fit_ads_detector.py` 顶部的 `NOT_SCOPED` / `SCOPED` 是修正后的真值。**用 `CaptureRun.load_dir()` 读就不会踩**：旧 run 的标签一律降级为 `LABEL_DETECTED`，`labelled()` 对它们返回空，`state` 只作为「采集过程干了什么」的事实存在，不冒充「屏幕上是什么」 |
+| `calibration/artifacts/tab_inventory.png` | G36C + SKS，库存 12 行满 | Tab 检测回归，12 行真值原来钉在一个已经不在盘上的标定脚本里 |
+| `calibration/artifacts/tab_inventory_2.png` | Micro UZI + Mk12，「附近」栏有物品 | 地面栏 + 槽位渲染规则 |
+| `calibration/artifacts/training_epuipment.png` | spawner 面板 | `SpawnerDetector` 正例 |
+| `data/templates/highlight_eval/` | 260 高亮 + 439 非高亮，带标签 | 配对评测（脚本已不在盘上）。`errors_v4/` 是空的——**这个集里没有难例** |
+| `calibration/artifacts/spawner/runs/` | spawner 全部分类的菜单截图 | 游戏当前物品清单的事实来源 |
+| `calibration/artifacts/compat/runs/<stamp>/` | 30 把枪各一张全屏 + `summary.json` | 槽位几何回归（`scan_compat.py --report <stamp>`）。**不是模板真值集**：枪上装的是 PUBG 自动配的，没人指定过，只能靠被测检测器认——拿它标模板是循环论证 |
+| `calibration/artifacts/attachments/runs/<stamp>/` | 配件采集：槽位配对图（空/满同角度）、库存行图（同一行 10 个背景）、枪名板 | 配件模板的真值集，`pixi run attachments` 吃它。**两半都可信了**（2026-08-05 重采）；坏掉的旧行图还在盘上，但 `labelled()` 不发它们 |
+| `calibration/artifacts/lobby/*.png` | 5 张：大厅 / 训练场 / 训练场+Tab / 正式局结算 / ESC 菜单 | 在不在局内的回归，`tools/verify_lobby_detector.py` 五条全过。每张的 `bar_max`/`ping_frac` 实测值见 `calibration/artifacts/lobby/README.md` |
+| `calibration/artifacts/ads/runs/**/*.jpg` | 610 张全屏帧（本为 ADS 采集） | 顺带是弹药数字的离线回归集：`tools/probe_ammo_ocr.py` 在 921 张里读出 869，其余 52 张确实没数字 |
+| `calibration/artifacts/ads/runs/*/index.jsonl` | 每帧标了 scope / state / t_ms / 槽位实读 asset | 开镜检测评测集，492 帧。**别照 `state` 当真值**：`20260801_222936` 的 `state=ads` 其实是按住右键的肩瞄、从未开镜；`20260802_015545` 整轮在错的槽位上。两个 run 的 `meta.json` 里都写了原因，`calibration/fit_ads_detector.py` 顶部的 `NOT_SCOPED` / `SCOPED` 是修正后的真值。**用 `CaptureRun.load_dir()` 读就不会踩**：旧 run 的标签一律降级为 `LABEL_DETECTED`，`labelled()` 对它们返回空，`state` 只作为「采集过程干了什么」的事实存在，不冒充「屏幕上是什么」 |
 
 槽位坐标固定：枪没有的槽只是**不画**，不会挪位（UZI 无 grip / Mk12 无 stock 实拍确认）。所以拖拽目标坐标是安全的。
 
@@ -543,7 +543,7 @@ det.scores(crop)    # {枪: 余弦}，问「是不是某把枪」时用这个
 
 ## 当前已知缺陷
 
-- ⚠ **~~`posture_detector` 在浅色木质背景上读不出来~~ —— 这段诊断是假的，2026-08-05 逐像素复核后推翻。** 原文写着「46% 像素过闸、最大连通域 1403 px 是木头、三个模板 IoU 全低于阈值、判为读不出」。拿现行代码跑那张裁图（`docs/posture/fail_0804/`）：
+- ⚠ **~~`posture_detector` 在浅色木质背景上读不出来~~ —— 这段诊断是假的，2026-08-05 逐像素复核后推翻。** 原文写着「46% 像素过闸、最大连通域 1403 px 是木头、三个模板 IoU 全低于阈值、判为读不出」。拿现行代码跑那张裁图（`calibration/artifacts/posture/fail_0804/`）：
 
   | | 原文说 | 实测 |
   |---|---|---|
@@ -557,7 +557,7 @@ det.scores(crop)    # {枪: 余弦}，问「是不是某把枪」时用这个
 
   ✅ **~~真正的缺陷在触发时机~~ —— 已测已修（2026-08-05）。缺陷是「读不到就丢弃」，不是延迟太短。**
 
-  `tools/probe_posture_trace.py`，一把 m416 在手，**六个随机视角**各测一轮（`docs/posture/traces/20260805_094215`，4834 样本）：
+  `tools/probe_posture_trace.py`，一把 m416 在手，**六个随机视角**各测一轮（`calibration/artifacts/posture/traces/20260805_094215`，4834 样本）：
 
   | | 实测 |
   |---|---|
@@ -571,7 +571,7 @@ det.scores(crop)    # {枪: 余弦}，问「是不是某把枪」时用这个
 
   ⚠ **这个 probe 自己踩了两个坑，都值得记**：① `ensure_ready()` 之后角色是**空手**，而空手时既没有姿势图标、也没有准星——于是 `AdsDetector` 对着「没开镜」返回 `True`（它答的是「准星缺席」），十个窗口全报 `ADS up: True` 而实际一次都没开过镜。现在开跑前先 `control.stock.ensure_weapon_in_hand()`，判据是**弹药数读得出**（在场证据），不是任何一个「缺席」判据。② 右键是**切换不是按住**，`click(0x02, 1200)` 不等于按住 1.2 秒，它只是切了一下——加上图标 ~0.85 s 才出现，ADS 整整晚了一个窗口，读出来的 `ads` 列刚好错位。
 
-  标注集仍然薄且不可尽信：`docs/training_data/Manual/posture/` 1714 张里 **prone 只有 10 张**，而上面那张唯一的"失败样本"标签是错的。`GunDriver.dump()` 已改成编号不覆盖（原来每次写同一个文件名，六次失败只剩最后一张）。
+  标注集仍然薄且不可尽信：`data/templates/pubg_assets/posture/` 1714 张里 **prone 只有 10 张**，而上面那张唯一的"失败样本"标签是错的。`GunDriver.dump()` 已改成编号不覆盖（原来每次写同一个文件名，六次失败只剩最后一张）。
 
 - `ammo_detector` 的十个字模全部采自**三位数**（150..121）。两位、一位实测逐个读对，但它们从没被单独重采过；哪天游戏改成按位数用不同字号，会先在这里翻车，重跑一次 `--verify` 就能看出来。
 - ❗ **`ads_detector` 在开火时会翻车——2026-08-06 实测确认，不再是「没验过」。** 同一把 vss、同一次开镜、连着读两段：
@@ -592,7 +592,7 @@ det.scores(crop)    # {枪: 余弦}，问「是不是某把枪」时用这个
   ✅ 也排除了它污染残差：那 20% 只影响 `ads_frac` 这个统计量，分析对整梭仍用同一个 K。**vss 的 +16~22% 欠补是真的**，不是这个造成的。
 
 - `ads_detector` 其余没验过的：其他枪的腰射准星是否同形、载具/趴姿等会改准星的状态、以及 4 倍以下的其他红点变体
-- `lobby_detector` 的状态里，**加载页一张样本都没有**（大厅 ESC 菜单 2026-08-07 补上了，`docs/lobby/system_menu_lobby.png`）——`FULLBLEED` 现在被结算页和退出确认框覆盖，它对加载页的判定仍是照定义推的（活体转移里观测到了，没存图）。另外 **正式局的 ESC 菜单**没采过，`leave_entry_confirmed()` 届时会失配、拒绝点击，所以**正式局现在退不出来**（训练场可以）。补齐跑 `pixi run python tools/probe_lobby_transition.py`，全程截图落 `docs/lobby/runs/<n>/`。`control/lobby.py` 顶部的 `OBSERVED DURATIONS` 三项也还是空的
+- `lobby_detector` 的状态里，**加载页一张样本都没有**（大厅 ESC 菜单 2026-08-07 补上了，`calibration/artifacts/lobby/system_menu_lobby.png`）——`FULLBLEED` 现在被结算页和退出确认框覆盖，它对加载页的判定仍是照定义推的（活体转移里观测到了，没存图）。另外 **正式局的 ESC 菜单**没采过，`leave_entry_confirmed()` 届时会失配、拒绝点击，所以**正式局现在退不出来**（训练场可以）。补齐跑 `pixi run python tools/probe_lobby_transition.py`，全程截图落 `calibration/artifacts/lobby/runs/<n>/`。`control/lobby.py` 顶部的 `OBSERVED DURATIONS` 三项也还是空的
 - ~~`Lower_ThumbGrip_C`、`Stock_UZI_C` 已漂移~~ 两个都有 solved 变体，槽位上 45/45 和 40/40。**行里仍然差**：`thumb_grip` 9/20（有 row 模板还是欠），`uzi_stock` 0/40（行解是云，要重采）。
 - ~~枪口制退器、重型枪托、多倍率混合瞄具没有模板~~ 三个都有了，槽位上 18/18、10/10、10/10。
 - ✅ **~~刷新器在连续多轮里会点错类别行~~ —— 那条诊断是假的，真因是读回在亮背景上说谎。已修（2026-08-04）。**
@@ -616,7 +616,7 @@ det.scores(crop)    # {枪: 余弦}，问「是不是某把枪」时用这个
   | 展开验证 | `_click_await` 轮询 `read()` 直到列出条目 | **帧差**：点击前后数列内改变的像素（原本只用在装备那一支，注释写着「the scene behind a translucent panel does not do on its own」） |
   | `expect` 计数 | 拿识别出的条目数当闸 | 不再当闸——能查它的只有会说谎的那个读回。目录过期是慢事实，归 `tools/scrape_spawner.py` 显式核对 |
 
-  常量不是新猜的：`SUBMENU_ENTRY_DY/PITCH/CLICK_DX` 从一开始就在 `spawner_layout` 里，注释甚至写着「that is why the spawner does not need a screenshot per click」。2026-08-04 拿 `docs/spawner/runs/` 里**全部 42 张类别展开图**重新验过：三列、每个类别、每一条目都吻合 `cat_y + 44 + k*50.72`，**最大误差 3.1 px**，条目中心 x = 列左 +252.7（三列一致）。
+  常量不是新猜的：`SUBMENU_ENTRY_DY/PITCH/CLICK_DX` 从一开始就在 `spawner_layout` 里，注释甚至写着「that is why the spawner does not need a screenshot per click」。2026-08-04 拿 `calibration/artifacts/spawner/runs/` 里**全部 42 张类别展开图**重新验过：三列、每个类别、每一条目都吻合 `cat_y + 44 + k*50.72`，**最大误差 3.1 px**，条目中心 x = 列左 +252.7（三列一致）。
 
   **验收是对着天空刷东西**：`give_many(['m416','red_dot','comp_ar'])` 8 次点击 3/3 落地，枪架从空变 m416。这正是原来必死的姿势。
 
@@ -627,7 +627,7 @@ det.scores(crop)    # {枪: 余弦}，问「是不是某把枪」时用这个
   **行采集现在不需要枪也不需要模板**：`collect_templates.py --targets rows` 走 `rows_only`——清空架子和库存 → 刷**一个**件 → `inv_rows`（纯 Laplacian）确认库存正好一行 → 那一行就是它。身份来自「只刷了一样东西」。
   ⚠ 这条路以前是**寄生在装配流程里**的（装上→拆下→拍行），所以要过 `SlotDetector`，而缺模板的件正好卡死在那里——**要采模板的件恰好是采不了的件**。`--targets rows` 单独跑因此永远返回 0 crops（`rows` 列表是空的，喂给 `sweep` 什么都拍不到）。
   还缺 `uzi_stock` / `variable` / `scope_8x`，命令见上面「两种渲染」那一节。
-- `attachment_catalog.SLOTS` 的 **`scope` 那一项仍是推断**。2026-08-02 全量扫过 30 把枪（`calibration/scan_compat.py`，run 在 `docs/compat/runs/20260802_155222/`），另外四个槽全部实测，`unverified()` 已清空；但 scope 槽**不画 tile**，存在性读不出来，`SlotDetector` 在那里返回 `unknown`。要确认得靠装一个瞄具。
+- `attachment_catalog.SLOTS` 的 **`scope` 那一项仍是推断**。2026-08-02 全量扫过 30 把枪（`calibration/scan_compat.py`，run 在 `calibration/artifacts/compat/runs/20260802_155222/`），另外四个槽全部实测，`unverified()` 已清空；但 scope 槽**不画 tile**，存在性读不出来，`SlotDetector` 在那里返回 `unknown`。要确认得靠装一个瞄具。
 - `EXCLUDE` / `ONLY` / `GRIP_ONLY` **一条都没实测**。「某个槽只收部分配件」（汤姆逊枪口只收消音）读不出来——收与不收留下的是同一个空 tile，只能逐个拖。
 
 后两类都能自动闭环解决：`control/spawner.py` 的 `give_*` 能刷出任意物品，`control/inventory.py` 能装，`tab_items.detect` 能读回——**给什么就该读出什么，ground truth 是自己指定的**。

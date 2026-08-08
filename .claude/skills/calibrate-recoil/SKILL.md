@@ -34,7 +34,7 @@ because the questions are.
 | `pixi run impulse-ab` | checked two grids shared an origin | there is one origin: the click, which we send |
 
 **Samples are never deleted and never re-collected.** Every magazine ever fired
-is in `docs/recoil/samples/<weapon>__<config>.jsonl` with the curve that was
+is in `calibration/artifacts/recoil/samples/<weapon>__<config>.jsonl` with the curve that was
 playing stored BY VALUE. That is what makes a magazine fired last week
 comparable with one fired tonight, and it is why fitting is one full refit
 rather than an iteration on top of the last one.
@@ -278,9 +278,17 @@ capture comes back identical.
 | `calibration/sweep.py` | `Rig` — the assembly shell, and nothing else now |
 | `press/pico_mouse.py` | `upload_pattern` uploads the curve AS GIVEN, one knot in, one knot out |
 
-⚠ **`docs/recoil/curves/` is gone.** 1184 curves fitted in the retired
-coordinate were deleted on 2026-08-08 rather than kept: a curve fitted on bins
-anchored to the ammo counter, played back on a grid anchored to the click, is
-not a starting point. `detector/weapon.py` reads `docs/recoil/curves_time/`
-now, and a weapon with no curve there simply gets no compensation — which is
-the honest state, not a regression.
+⚠ **The 1184 old curves are gone.** Fitted in the retired coordinate and
+deleted on 2026-08-08 rather than kept: a curve fitted on bins anchored to the
+ammo counter, played back on a grid anchored to the click, is not a starting
+point. `detector/weapon.py` reads `config.CURVES_DIR` (**`data/curves/`**,
+and it is IN git — the previous home was under the wholesale-ignored `docs/`,
+which is how a cleanup took 40 weapons' curves with nothing to restore from).
+A weapon with no curve there simply gets no compensation — the honest state,
+not a regression.
+
+⚠ **Ask `config`/`samples` for a path, do not spell one.** Every artifact
+path in this skill was `calibration/artifacts/...` until the 2026-08-08 move to
+`calibration/artifacts/`, and three of them were still wrong after the commit
+that claimed to have repointed the skills — a step written in Markdown is
+invisible to every import graph and to `pixi run layering`.

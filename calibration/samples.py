@@ -30,7 +30,7 @@ magazines. But
 and if each magazine records THE CURVE THAT WAS PLAYING, every magazine's
 y_true is an estimate of the same function, whatever curve it was fired under.
 
-⚠ SO THE CURVE IS STORED BY VALUE, NOT BY NAME. `calibration/artifacts/recoil/curves/m416_att.json`
+⚠ SO THE CURVE IS STORED BY VALUE, NOT BY NAME. `data/curves/m416_att.json`
 is overwritten every time the fit runs; a magazine that recorded the name would,
 a week later, be reconstructed against a curve that did not exist when it was
 fired. Every sample in this store would then be quietly wrong, and the store's

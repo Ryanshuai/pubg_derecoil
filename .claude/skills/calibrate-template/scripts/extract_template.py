@@ -11,14 +11,14 @@ Usage:
     python extract_template.py --mode alpha \
         --with-ui img_with_ui.png --no-ui img_no_ui.png \
         --region 1626,1325,1682,1368 \
-        --output template.png --save-dir docs/debug
+        --output template.png --save-dir calibration/artifacts/debug
 
     # Status bar blend (fire mode, with blur+darken)
     python extract_template.py --mode status_bar \
         --with-ui img_with_ui.png --no-ui img_no_ui.png \
         --region 1626,1325,1682,1368 \
         --blur-k 17 --gradient 0.65 \
-        --output template.png --save-dir docs/debug
+        --output template.png --save-dir calibration/artifacts/debug
 
     # Batch: multiple with_ui files, same no_ui prefix pattern
     python extract_template.py --mode status_bar \
@@ -26,7 +26,7 @@ Usage:
         --no-ui a_no_ui.png b_no_ui.png c_no_ui.png \
         --region 1626,1325,1682,1368 \
         --blur-k 17 --gradient 0.65 \
-        --output-dir templates/ --save-dir docs/debug
+        --output-dir templates/ --save-dir calibration/artifacts/debug
 """
 import argparse
 import cv2

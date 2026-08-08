@@ -28,7 +28,7 @@ The chain, in order, because each link fails differently:
   close     Press again, verify it closed. A panel left open breaks whatever
             runs next.
 
-Shots land in docs/<screen>/. Keep them: the calibrate-screen and
+Shots land in calibration/artifacts/<screen>/. Keep them: the calibrate-screen and
 calibrate-template skills both work off saved captures, and a screen that has
 to be re-opened to be re-measured cannot be measured offline at all.
 """
@@ -163,7 +163,7 @@ def drive(screen, shoot_as=None, keep_open=False, verbose=True):
 
     path = None
     if shoot_as:
-        out_dir = os.path.join(ROOT, 'docs', screen.name)
+        out_dir = os.path.join(ROOT, 'calibration', 'artifacts', screen.name)
         os.makedirs(out_dir, exist_ok=True)
         path = os.path.join(out_dir, f'{shoot_as}.png')
         cv2.imwrite(path, frame)
@@ -190,7 +190,7 @@ def main():
     ap.add_argument('screen', choices=tuple(SCREENS) + ('list',))
     ap.add_argument('--shoot', nargs='?', const='__stamp__', default=None,
                     metavar='NAME',
-                    help='save the verified frame to docs/<screen>/<NAME>.png')
+                    help='save the verified frame to calibration/artifacts/<screen>/<NAME>.png')
     ap.add_argument('--keep-open', action='store_true')
     ap.add_argument('--no-ensure', action='store_true',
                     help='skip the readiness gate; assumes a live match with '

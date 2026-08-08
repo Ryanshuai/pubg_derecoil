@@ -196,7 +196,17 @@ pixi run protocol-check  # PC/固件两端的生成物跟 protocol.toml 漂了�
 
 **离线回归**（改完代码就跑）
 
-`analysis` · `abs-offset` · `attachments` · `drag-log` · `fire` · `frames` · `gestures` · `harness` · `highlight` · `kit` · `locations` · `lobby-detector` · `panel-state` · `placement` · `recenter` · `runs` · `snaps` · `spawner-plan` · `stocktake-test` · `tab-open` · `tab-watch`
+`analysis` · `abs-offset` · `attachments` · `drag-log` · `fire` · `frames` · `gestures` · `harness` · `highlight` · `kit` · `locations` · `lobby-detector` · `panel-state` · `placement` · `pointers` · `recenter` · `runs` · `snaps` · `spawner-plan` · `stocktake-test` · `tab-open` · `tab-watch`
+
+`pointers` 是 2026-08-08 补的,判据一句话:**散文里写的每一条路径,必须指进一个存在的目录。**
+
+那天一次重构把测量产物从 `docs/` 挪进 `calibration/artifacts/`、把签入的资产挪进 `data/`,commit message 写着已经把 skill 重新指过去了,而**四十一条引用还在旧布局上**——其中三条是承重的:`calibrate-recoil` 指着样本库的旧地址;`timing-analyst` 管那个旧地址叫「现在唯一的逐帧原始数据」,而那个 agent 的整套纪律就是读它;还有一条说 `detector/weapon.py` 读一个旧的曲线目录,而它读的是 `config.CURVES_DIR`——**错两遍**。三条的原文在 `tools/check_pointers.py` 的文件头里。
+
+⚠ **那几条死路径故意不在这里写全**,因为这道闸会咬——它第一次跑就咬了本段的初稿。verbatim 的记录归被测者自己(`tools/*.py` 不在扫描范围内),散文只指过去。**一个能咬自己文档的闸,比一个需要人记得绕开它的闸更可信。**
+
+**`layering` / `surface --check` / `params` 全程绿,而且永远会绿:一个写在 Markdown 里的步骤,对每一张 import 图都是隐形的。** 这跟本文件「删探针之前先查有没有代码在引用它」是同一条——`probe_icon_threshold` 的唯一引用方是一个 skill 的步骤。
+
+判据是**父目录**不是文件,因为一半的路径是某一步即将创建的产物(`--shoot baseline`)、另一半带占位符或通配。但**父目录不存在的路径不可能是产物**——没有东西会往一棵没了的树里写。这恰好、且仅仅是那个失效模式,而且可判定。⚠ 它**看不见**的两样写在文件头:指进一个存在但错误的目录,以及移动了的函数/参数/task 名。
 
 `placement` 是 2026-08-08 补的，钉的是「进局要不要传送」那张四分支的表（`ensure_in_match` 的 `range_name`）。**九例里三例是「不该传送」的**，因为一个只验「该传的时候传了」的闸门，在「永远传」下面也全绿——而永远传就是那个操作员点名要停掉的开销（每把枪一次开图/读/关图）。两个注入的 bug 各自被咬：把跳过分支拿掉 → 第 2 例红；把 `entered` 换成 `actions > 0`（代码注释里点名的那个弱写法）→ 第 3、5、5b 三例红。
 
@@ -208,7 +218,7 @@ pixi run protocol-check  # PC/固件两端的生成物跟 protocol.toml 漂了�
 
 `highlight` 是 2026-08-06 补的，理由跟 `lobby-detector` / `stocktake-test` 那次一模一样，只是这次是**量出来的**：全目录查了一遍「除了自己还有谁写过这个名字」，92 个脚本里引用为零的就它一个。它绿着（254/254，26 把枪），而且在每次按键的路径上——**一个没有 task 的离线闸门，跟没有这个闸门的区别只是你以为它在**。
 
-`drag-log` 读的是 `control/inventory.py` 每次**手势**都追加的 `docs/drag/journal.jsonl`（**常开**，几百字节一次）。它把三类候选原因写在同一行里——手势（定位重放次数、抓/放点偏差）、状态（两栏行数 + 轮询序列 / 槽位读回 / 枪名板墨迹）、时序（距上次手势多久）——因为「有时候扔不到地上」是关于**差异**的问题，布尔量答不了。
+`drag-log` 读的是 `control/inventory.py` 每次**手势**都追加的 `calibration/artifacts/drag/journal.jsonl`（**常开**，几百字节一次）。它把三类候选原因写在同一行里——手势（定位重放次数、抓/放点偏差）、状态（两栏行数 + 轮询序列 / 槽位读回 / 枪名板墨迹）、时序（距上次手势多久）——因为「有时候扔不到地上」是关于**差异**的问题，布尔量答不了。
 
 **2026-08-05 之前只记拖拽，而那是错的一半。** 会赔掉一把枪的是**右键**：打在空槽（或光标漂走了的槽）上会穿到下面的武器行，整枪掉地上——11 轮采集赔了 74 件，一行日志都没留，因为 `right_click_equip` / `right_click_unequip` / `auto_equip` / `drop_weapon` 全都直接调 Pointer。现在六种都写，靠 `kind` 分：
 
@@ -243,8 +253,8 @@ pixi run protocol-check  # PC/固件两端的生成物跟 protocol.toml 漂了�
 | 姿势 | `probe_posture_trace`（449 行） | 姿势图标什么时候可读，六个视角 4834 样本。`config.py` 三条 `retry_ms` 的出处 |
 | Tab / 面板时序 | `probe_toggle_latency`（456 行） | 每块屏开/关到底多久，`control/inventory.py` 和 `detector/spawner_detector.py` 的等待常量都来自它 |
 | 背包 | `probe_backpack_depth` | 背包比读得到的 12 行深不深；`control/stock.py` 引两次 |
-| 刷新器 | `scrape_spawner`（346 行） | 展开全部 21 个类别拍图 → `docs/spawner/layout.json`。**游戏更新后重量坐标唯一的路** |
-| 大厅 | `probe_lobby_transition` | 大厅→局内端到端，全程截图落 `docs/lobby/runs/`；加载页和正式局菜单的语料缺口靠它补 |
+| 刷新器 | `scrape_spawner`（346 行） | 展开全部 21 个类别拍图 → `calibration/artifacts/spawner/layout.json`。**游戏更新后重量坐标唯一的路** |
+| 大厅 | `probe_lobby_transition` | 大厅→局内端到端，全程截图落 `calibration/artifacts/lobby/runs/`；加载页和正式局菜单的语料缺口靠它补 |
 | 采集 / 验收 | `collect_ammo_digits`（637 行）· `verify_kit` | 前者是无人值守采 0–9 模板的整套机器（起始值推断 + 交叉验证 + 错位整轮作废），不是一个循环 |
 
 **离线分析**（吃已存图，📄）
@@ -255,7 +265,7 @@ pixi run protocol-check  # PC/固件两端的生成物跟 protocol.toml 漂了�
 
 **这一节 2026-08-06 换掉了一张叫「一次性调查」的表**，那张表点名六个脚本「结论已进代码/文档，跑它只是复现历史」，读起来像一张删除清单。当时的反驳是「有两个还在承重」：`probe_icon_threshold` 是 calibrate-template 的一步，`probe_mask_diff` 被 `detector/spawner_layout.py` 指着，**「删掉探针，那个常量就只剩一个数字，没有出处」**。
 
-**2026-08-08 这两个都删了，因为那句话检查一下就是假的。** 出处不在探针里，在 `docs/spawner/README.md`：§3 有整张表（真实展开 513–21180 px、噪声 0–4 px、下限是 `col1_row10` 以及为什么），§4 有三条灰度测量和 0.989–1.000 / 0.000 的分离度。**探针能打印的每一个数都已经在那份 README 里，连它排除了什么都写了。**
+**2026-08-08 这两个都删了，因为那句话检查一下就是假的。** 出处不在探针里，在 `calibration/artifacts/spawner/README.md`：§3 有整张表（真实展开 513–21180 px、噪声 0–4 px、下限是 `col1_row10` 以及为什么），§4 有三条灰度测量和 0.989–1.000 / 0.000 的分离度。**探针能打印的每一个数都已经在那份 README 里，连它排除了什么都写了。**
 
 > **一个测量的出处是那份记下了它的文档，不是那份能把它重跑一遍的脚本。** 脚本只有在**记录不完整**、或者**要拿新语料重跑**的时候才是出处。两条都不成立，它就只是一份用四十行代码写的重复。
 
@@ -265,8 +275,8 @@ pixi run protocol-check  # PC/固件两端的生成物跟 protocol.toml 漂了�
 
 | 删掉的 | 类 |
 |---|---|
-| `probe_icon_threshold`（57 行） `probe_button_icons`（99） | 结论全在 `docs/spawner/README.md` §4，**而且 fixture 随 `temp_debug/` 没了** |
-| `probe_mask_diff`（60） | 结论全在 `docs/spawner/README.md` §3 |
+| `probe_icon_threshold`（57 行） `probe_button_icons`（99） | 结论全在 `calibration/artifacts/spawner/README.md` §4，**而且 fixture 随 `temp_debug/` 没了** |
+| `probe_mask_diff`（60） | 结论全在 `calibration/artifacts/spawner/README.md` §3 |
 | `probe_backpack_slot`（47） | 结论是 `control/stock.py` 的 `BACKPACK_DETAIL_MIN`，输出目录也在 `temp_debug/` |
 | `probe_lobby_nav`（72） | **它自己的 docstring 就列着替代品**：live 是 `control/lobby.py state\|mode`，离线闸门是 `pixi run lobby-detector` |
 | `shoot_lobby`（78） | 唯一的消费者是 `probe_lobby_nav` |
@@ -410,12 +420,12 @@ control/match.py（还原后）                   11:16:41.613     ← 晚 171 m
 | 某把枪的槽位跟 catalogue 对不上 | `calibration/scan_compat.py`（30 把枪 268 秒）。⚠ **刷出来的枪不是裸枪**——PUBG 会把背包里能装的自动装上，要先 strip |
 | 拖拽 / 右键落不下去 | **`pixi run drag-log`**，然后看 `control/CLAUDE.md` 里那张 2×2 （右键 10/10、库存→枪拖拽 0/10）。要重测就**读回验证，不看鼠标**——手势报成功和东西落地是两回事 |
 | 右键完枪没了 / 一轮采集颗粒无收 | **`pixi run drag-log --guns`**。右键卸配件之后槽位是空的、记录报成功，枪掉了长得一模一样——日志里 `plate` 从 679–901 掉到 0 就是枪走了，汇总会标 ⚠GUN LOST。同时看 `refused` 那几行：哪道闸拦下了同一个手势 |
-| 别的 agent 的运行挂了要查 | 同一个 `docs/drag/journal.jsonl`，**常开且带 pid**。`pixi run drag-log --pid <他的pid> --all`。别先去问他打了什么日志——静默失败的运行不会打日志 |
+| 别的 agent 的运行挂了要查 | 同一个 `calibration/artifacts/drag/journal.jsonl`，**常开且带 pid**。`pixi run drag-log --pid <他的pid> --all`。别先去问他打了什么日志——静默失败的运行不会打日志 |
 | 扔东西扔不掉 / 库存清不空 | **先 `pixi run drag-log`**——每次手势都记了几何、行数、距上次多久，它会告诉你是「光标没到位」「松手落在原栏」还是「手势干净但游戏没接」，三类要三种修法。悬崖值和那条固件线索都在 `control/CLAUDE.md`。要重扫手势时长：**扫描循环里绝不能有 `look()`**，那个间隔会掩盖被测变量 |
 | 光标 SetCursorPos 之后跑掉了 | **已经答了**，在 `press/pointer.py` 的 `move_cursor` 注释里：Tab 开着时转视角的 raw counts 打在光标上，而且是**陆续到达**的（`move(900,0)` Tab 开着漂 450，Tab 关着漂 0）。那次是三段分别排除「固件在注入」「click 报告带位移」「游戏在松手时归位」测出来的 |
 | 「category colN_rowM does not exist」/「would not expand」 | **先看视角朝哪。** 面板半透明，对着天空时读回会在全折叠的面板上报假状态——2026-08-04 修掉了驱动路径上的识别，但 `read()` / `find_menu` 本身仍然如此，诊断用它们时要记得。然后 `pixi run panel-state`。⚠ **光标停在类别行会吃掉那个子菜单的第一项**，所以读回之前先把光标 park 到面板外 |
 | 面板坐标要重新量 | `tools/scrape_spawner.py`。**条目几何也是常量**（`SUBMENU_ENTRY_DY/PITCH/CLICK_DX`），2026-08-04 拿 42 张展开图验到 3.1 px 以内；游戏更新后连它一起重量 |
-| 游戏更新后面板坐标全错 | `tools/scrape_spawner.py` 重采 → `docs/spawner/layout.json` → `pixi run spawner-plan` 会红出差在哪 |
+| 游戏更新后面板坐标全错 | `tools/scrape_spawner.py` 重采 → `calibration/artifacts/spawner/layout.json` → `pixi run spawner-plan` 会红出差在哪 |
 | 检测器整体还活着吗 | `pixi run smoke`；改完检测器 `python tools/regression_check.py --compare` |
 | DXGI 抓帧突然全黑 / 尺寸不对 | `tools/probe_capture_recovery.py`（不需要游戏） |
 | Tab 状态跟屏幕不一致 | `pixi run tab-open` / `tab-watch`（都是离线；实机对照那个探针 2026-08-08 删了，它是十几行「开关 Tab、每次读屏对一次」） |

@@ -51,7 +51,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # control/evidence.py photographs BEFORE it presses anything, precisely so a
 # screen that would not open is still on disk. `pixi run tab-open` went red
 # with seven false-shut failures the first time a night left evidence behind.
-RUNS = os.path.join(ROOT, 'docs', 'nights')
+RUNS = os.path.join(ROOT, 'calibration', 'artifacts', 'nights')
 
 # Failures in a row before giving up. Two is impatient -- a single bad spawn
 # happens -- and ten is a night spent on a broken detector. Four is one full

@@ -10,7 +10,7 @@ here too; the last one went on 2026-08-08, see detector/fire_mode_detector.)
     pixi run python tools/regression_check.py --save      # before upgrading
     pixi run python tools/regression_check.py --compare   # after
 
-Needs no game and no hardware; reads only files under docs/.
+Needs no game and no hardware; reads only files under calibration/artifacts/.
 """
 import argparse
 import glob
@@ -44,9 +44,9 @@ ATOL = 2e-3
 
 
 def _frames():
-    """Full-screen shots under docs/, sorted so the report is stable."""
+    """Full-screen shots under calibration/artifacts/, sorted so the report is stable."""
     out = []
-    for f in sorted(glob.glob(os.path.join(ROOT, 'docs', '**', '*.png'), recursive=True)):
+    for f in sorted(glob.glob(os.path.join(ROOT, 'calibration', 'artifacts', '**', '*.png'), recursive=True)):
         img = cv2.imread(f)
         if img is not None and img.shape[:2] == (SCREEN_H, SCREEN_W):
             out.append((os.path.relpath(f, ROOT).replace('\\', '/'), img))
@@ -54,7 +54,7 @@ def _frames():
 
 
 def _labelled_crops():
-    """Crops under docs/ whose sidecar carries GROUND TRUTH.
+    """Crops under calibration/artifacts/ whose sidecar carries GROUND TRUTH.
 
     -> [(relpath, img, [label, ...])]
 
@@ -73,7 +73,7 @@ def _labelled_crops():
     """
     from detector.snapshot import KIND_CROP, read_sidecar, truth
     out = []
-    for f in sorted(glob.glob(os.path.join(ROOT, 'docs', '**', '*.png'),
+    for f in sorted(glob.glob(os.path.join(ROOT, 'calibration', 'artifacts', '**', '*.png'),
                               recursive=True)):
         meta = read_sidecar(f)
         if not meta or meta.get('kind') != KIND_CROP:
@@ -200,7 +200,7 @@ def collect():
 
     frames = _frames()
     if not frames:
-        raise SystemExit(f"no {SCREEN_W}x{SCREEN_H} screenshots under docs/")
+        raise SystemExit(f"no {SCREEN_W}x{SCREEN_H} screenshots under calibration/artifacts/")
 
     for name, img in frames:
         row = {}

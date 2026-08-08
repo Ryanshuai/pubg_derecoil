@@ -35,9 +35,9 @@ run.add_observed(frame, name, weapon, read)     # a detector read it -> context
 run.labelled()                                  # ONLY the first kind
 ```
 
-Runs live in `docs/runs/<kind>/<stamp>/`, except the two whose directory is
-itself ground truth for another regression (`docs/ads/runs/`,
-`docs/attachments/runs/` — see `capture_run.py`). List every one of them with
+Runs live in `calibration/artifacts/runs/<kind>/<stamp>/`, except the two whose directory is
+itself ground truth for another regression (`calibration/artifacts/ads/runs/`,
+`calibration/artifacts/attachments/runs/` — see `capture_run.py`). List every one of them with
 `pixi run python calibration/capture_run.py`, and open any of them, in any of
 the three on-disk shapes, with `CaptureRun.load_dir(<directory>)`.
 
@@ -109,8 +109,8 @@ Collect `.row` for them (see `calibration/score_attachments.py: BASELINE`).
 `dl_models/icon_merging.py` for blend formulas — each function there carries
 its verified parameters in its docstring. `config.ASSET_DIR` maps icon type →
 directory, but not every directory is listed (`posture/`, `ammo/`, `lobby/`
-are not), so also `ls docs/training_data/pubg_assets/`. Existing captures:
-`docs/attachments/runs/*/`, `docs/spawner/runs/*/`, `docs/tab_inventory*.png`.
+are not), so also `ls data/templates/pubg_assets/`. Existing captures:
+`calibration/artifacts/attachments/runs/*/`, `calibration/artifacts/spawner/runs/*/`, `calibration/artifacts/tab_inventory*.png`.
 
 ## Step 1 — get the pictures
 
@@ -152,7 +152,7 @@ pixi run python tools/collect_ammo_digits.py --write               # the ten amm
 ```
 
 Targets: `slots` (icons fitted to the gun), `rows` (库存 list), `plate`,
-`type`. A run lands in `docs/attachments/runs/<stamp>/manifest.json` — **start
+`type`. A run lands in `calibration/artifacts/attachments/runs/<stamp>/manifest.json` — **start
 from `facts.bad`**, one entry per target with no template, never matched, or
 matched on some backgrounds only, each carrying the region and the crops. Runs
 written before 2026-08-03 carry an `index.json` instead; `CaptureRun.load_dir`
@@ -187,7 +187,7 @@ formula is the game's, not the icon's:
 ```bash
 pixi run python "${CLAUDE_SKILL_DIR}/scripts/extract_template.py" --mode alpha \
     --with-ui <a.png> --no-ui <b.png> --region <x1>,<y1>,<x2>,<y2> \
-    --output <t.png> --save-dir docs/<icon_type>/
+    --output <t.png> --save-dir calibration/artifacts/<icon_type>/
 # fire mode: --mode status_bar --blur-k 21 --gradient 0.67
 ```
 
@@ -211,7 +211,7 @@ what `blend_attachment` was verified against.
 ### Path C — where it is drawn and how it is composited
 
 ```bash
-S="${CLAUDE_SKILL_DIR}/scripts"; D=docs/<icon_type>/
+S="${CLAUDE_SKILL_DIR}/scripts"; D=calibration/artifacts/<icon_type>/
 pixi run python "$S/diff_overview.py" <with_ui> <no_ui> --save-dir $D
 # crop the region and LOOK at it (Read tool) before matching
 pixi run python "$S/search_icon.py" <icon> <shot> <x1> <y1> <x2> <y2> --save-dir $D
@@ -231,7 +231,7 @@ is usually a C that was never done.
 ## Step 2 — cut it
 
 **icon.** First find which pixels are stable, across those different-scene
-captures (docs/spawner/README.md §4 is a worked example):
+captures (calibration/artifacts/spawner/README.md §4 is a worked example):
 
 - *achromatic?* `|max-min|` over BGR ≤2 → a grey or binary template is safe.
 - *opaque?* spread across scenes. The spawner buttons' bright pixels moved ≤6 grey levels; their dark parts moved up to **86** — those are alpha-blended and carry the scene through, so a template including them tracks the background and matches nowhere else.
@@ -260,13 +260,13 @@ frame and the best wins, so a mid-run language switch still reads with no flag
 anywhere:
 
 ```
-docs/training_data/ocr_white/slr.png      sole or default
-docs/training_data/ocr_white/slr.cn.png   自动装填步枪
-docs/training_data/ocr_white/slr.en.png   SLR
+data/templates/ocr_white/slr.png      sole or default
+data/templates/ocr_white/slr.cn.png   自动装填步枪
+data/templates/ocr_white/slr.en.png   SLR
 ```
 
 ~1 ms per extra template over a 250x45 plate, on Tab frames only. Templates
-live in `docs/training_data/ocr_white/` (plates) and `docs/training_data/pubg_assets/`
+live in `data/templates/ocr_white/` (plates) and `data/templates/pubg_assets/`
 (icons and digits, by subdirectory).
 
 ## Step 4 — score against everything, not just itself
@@ -276,7 +276,7 @@ Run the whole set against the whole set and read the **margin**, not the top
 score — a thin margin is a future misread.
 
 - text: correct match ≥0.85 (`TMPL_THRESHOLD`)
-- icon: report separation the way docs/spawner/README.md §4 does — the spawner anchors score 0.989–1.000 on 24 positives and 0.000 on negatives, hence 0.55 with room both sides
+- icon: report separation the way calibration/artifacts/spawner/README.md §4 does — the spawner anchors score 0.989–1.000 on 24 positives and 0.000 on negatives, hence 0.55 with room both sides
 - digit: `probe_ammo_ocr.py --confusion`, then the offline sweep with no flags, then `--selftest`
 
 **A missing template does not read as nothing — it reads as the nearest
@@ -311,5 +311,5 @@ language switch is a checklist and not a debugging session.
 - The posture icon renders **only in ADS**, so its with_ui/no_ui pair must be captured while aiming.
 - `IMREAD_GRAYSCALE` does not guarantee one channel — anything importing ultralytics replaces `cv2.imread`. Guard loads with `if img.ndim == 3: img = img[:, :, 0]`.
 - All coordinates are **3440x1440**.
-- Visualisations go under `docs/<icon_type>/`; scratch output goes to `docs/debug/`. There is no `temp_debug/` any more — it was a never-delete scratch dir that grew for eight months until a third of it asked questions about a coordinate system that had been removed.
+- Visualisations go under `calibration/artifacts/<icon_type>/`; scratch output goes to `calibration/artifacts/debug/`. There is no `temp_debug/` any more — it was a never-delete scratch dir that grew for eight months until a third of it asked questions about a coordinate system that had been removed.
 - PowerShell's `Get-Content`/`Set-Content` mojibake UTF-8; use the Edit tool or Python for files with Chinese.

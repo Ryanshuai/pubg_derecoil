@@ -133,7 +133,7 @@ with LobbyControl() as lc:
         return                # 大厅/加载/结算/菜单，任意态都会自己走到局内
 ```
 
-测量值和状态机全在 `docs/lobby/README.md`。两个坑：
+测量值和状态机全在 `calibration/artifacts/lobby/README.md`。两个坑：
 
 - **ESC 菜单的像素探针全都说「在局内」**。不查 `SYSTEM MENU` 标题就会返回 `playable=True`，而按键全被菜单吃掉。
 - **别用固定 `sleep` 等游戏。** 结算页 ~18 秒、匹配+加载不是常数。`EXIT_TIMEOUT`/`ENTER_TIMEOUT` 是放弃阈值，不是预期耗时。
@@ -252,7 +252,7 @@ sc.click_entry(rec['entries'][4])  # 直接点第 5 项
 sc.collapse_all()                  # 回根（现在是可选的，不是每次必须）
 ```
 
-`read()` 是**绝对**的：一次截图读出「面板开着吗 / 哪个类别展开着 / 有哪些子项」，不跟任何基线比，所以序列中间读和开头读一样可信。原理和 42 帧真值验证见 `docs/spawner/README.md` 第 3b 节，回归测试是 `pixi run panel-state`（离线）。
+`read()` 是**绝对**的：一次截图读出「面板开着吗 / 哪个类别展开着 / 有哪些子项」，不跟任何基线比，所以序列中间读和开头读一样可信。原理和 42 帧真值验证见 `calibration/artifacts/spawner/README.md` 第 3b 节，回归测试是 `pixi run panel-state`（离线）。
 
 **要手动救场，用 L0**：`click_category(col, row)` / `click_entry(entry)` 只发点击，不读不验。
 
@@ -262,7 +262,7 @@ sc.collapse_all()                  # 回根（现在是可选的，不是每次�
 
   **为什么必须这样**：面板 = `blur(bg)*0.49`，对着天空时 `read()` 会在全折叠的面板上报 `col1_row02 expanded, 2 entries`——不是报错，是格式完全正确的假答案。一整轮采集（12 轮死 8 轮）就这么没的。细节和 A/B 数字在 `detector/CLAUDE.md`。
 
-  常量在 `spawner_layout`，拿 `docs/spawner/runs/` 全部 42 张展开图验过：三列每个类别每条目吻合到 **3.1 px** 以内。**验收是对着天空刷东西**，`give_many` 3/3。
+  常量在 `spawner_layout`，拿 `calibration/artifacts/spawner/runs/` 全部 42 张展开图验过：三列每个类别每条目吻合到 **3.1 px** 以内。**验收是对着天空刷东西**，`give_many` 3/3。
 - `sync()` 只回答「面板在不在屏幕上」，坐标一个都不读（它自己的注释里写着）。要重新量坐标是 `sync(recalibrate=True)`，那是 `tools/scrape_spawner.py` 的事。
 - **类别行的 y 不随展开变化**（实测 42/42 帧）——展开只把**下面**的行推下去。所以同一个点既能开也能关它，`_spawn` 因此总是关掉自己开的那个，`plan()` 也把同列的类别按**自底向上**排序。这条不变量成立，常量表就永远有效。
 - ⚠ **展开态下 `find_menu` 会在 3~14 行之间乱跳**（子菜单的居中行混进行检测）。它现在是兜底，不是主路。
@@ -426,7 +426,7 @@ for attempt in range(retries + 1):
 
 ### 每个手势都写一行 —— 而且要给别人看
 
-`docs/drag/journal.jsonl`，**常开**，几百字节一次，读它是 `pixi run drag-log`。这里只记两件本层特有的，其余用法在 `tools/CLAUDE.md`：
+`calibration/artifacts/drag/journal.jsonl`，**常开**，几百字节一次，读它是 `pixi run drag-log`。这里只记两件本层特有的，其余用法在 `tools/CLAUDE.md`：
 
 **一、写日志的是驱动方，不是被驱动方。** 这个文件多个 agent 共写，所以每行带 `pid` / `proc` / 墙钟 `t`。别人那轮采集回来是空的，去看他这几行——**静默失败的运行不会自己打日志**，而这一层替他打了。
 
@@ -543,7 +543,7 @@ rig.view.set_reference()                      # 4
 
 **为什么定俯仰要回腰射。** 俯仰是**角色**的属性，两个限位在任何镜子下都是同两个；跟着镜子变的只有「一个 count 转多少度」，而那个换算（`pitch_scale`）是没验过的模型，8-05 每一次倍率镜尝试都栽在它上面。**在固定的一档里做这个动作，换算就整个不进来**——腰射行程量一次，所有镜子共用，而不是每个镜子量一次。
 
-**实测（2026-08-06，m416 站立，`docs/pitch/pitch_travel.json`）：**
+**实测（2026-08-06，m416 站立，`calibration/artifacts/pitch/pitch_travel.json`）：**
 
 ```
 腰射   行程 8034 counts   区间 (7725, 8034]   中线 4017    上/下行差 309 = 一个步长

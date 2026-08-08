@@ -102,11 +102,11 @@ self.ac.pointer.drag(src, dst)       # ✗ 绕过了 _reject()
 
 **`docs/` 整个不进 git**（`.gitignore` 第 19 行就一个 `docs`），2.7 GB，0 个文件被跟踪。
 
-⚠ 这里原来写着一张「结论进 git、原始数据不进」的分界表，点名 `docs/recoil/weapon_rpm.json` 等三个文件在 git 里。**那从来没成立过**——查一次 `git ls-files docs/` 就知道是 0。2026-08-05 改成实际情况。
+⚠ 这里原来写着一张「结论进 git、原始数据不进」的分界表，点名 `calibration/artifacts/recoil/weapon_rpm.json` 等三个文件在 git 里。**那从来没成立过**——查一次 `git ls-files docs/` 就知道是 0。2026-08-05 改成实际情况。
 
 代价是清醒的：**`weapon_rpm.json`、`pitch_range.json`、`kit_facts.json` 这些几百字节的实测结论没有版本历史，删了就没了**，而它们正是别处当事实读取的东西。哪天要给它们上版本，得单独开一条 `!docs/**/xxx.json` 的例外，而不是把 `docs` 整个放进来。
 
-采集类产物用 `CaptureRun`（默认 `docs/runs/<kind>/<stamp>/`；`capture_ads` 和 `collect_templates` 用 `create(path=...)` 留在各自的老根目录，理由见下面 5h）。它的 `labelled()` 只返回 `LABEL_REQUESTED`，**永不返回检测器读出来的标签**——理由在 `capture_run.py` 顶部：拿被测检测器的读数当它自己的真值是循环论证，而漂移的检测器不会报错，它会给一个看起来完全合理的错答案。
+采集类产物用 `CaptureRun`（默认 `calibration/artifacts/runs/<kind>/<stamp>/`；`capture_ads` 和 `collect_templates` 用 `create(path=...)` 留在各自的老根目录，理由见下面 5h）。它的 `labelled()` 只返回 `LABEL_REQUESTED`，**永不返回检测器读出来的标签**——理由在 `capture_run.py` 顶部：拿被测检测器的读数当它自己的真值是循环论证，而漂移的检测器不会报错，它会给一个看起来完全合理的错答案。
 
 `CaptureRun.load_dir(<目录>)` 读得了三种形状：现行 `manifest.json`、旧 ADS run 的 `index.jsonl`+`meta.json`、旧模板 run 的 `index.json`。旧 run 是**只读**的，`save()` 直接抛——在 867 帧不可再生的数据旁边再写一份索引就是第二个真值来源。
 
@@ -196,7 +196,7 @@ quick_smg  hit='Magazine_QuickDraw_Medium_C'  mse=192  gate=150  state='empty'
 
 - **旧 run 的标签一律读成 `LABEL_DETECTED`。** 旧目录里没有 `source` 字段，文件本身分不出「要求并确认过」和「检测器读的」，从外面替它补上更强的那个，正是当初制造出那两个坏 run 的动作。副作用正好是想要的：两个坏 run 一经这套 API 读取，`labelled()` 就是空的，**没人需要记得是哪两个 stamp**。
 - **`state=ads` 不是标签，是事实。** 它描述的是采集过程（「点了右键，这帧在 700 ms 后」），不是屏幕。`20260801_222936` 就是过程完全按写的跑、却一帧都没开镜。屏幕上到底开没开镜的真值只有人判过一次，那就是 `fit_ads_detector.py` 的 `NOT_SCOPED`/`SCOPED`——**任何采集程序都产不出它**，所以它留在消费者里是对的，不是历史包袱。
-- **run 的路径本身是别的回归的真值，所以不搬家。** `tools/test_tab_open.py` 拿 `docs/ads/runs/**` 当「Tab 关着」、`docs/runs/**` 当「拍的就是 Tab 界面」。把 ADS run 挪进 `docs/runs/` 会静默地把 400 帧贴错标签。统一的是 manifest，不是路径。
+- **run 的路径本身是别的回归的真值，所以不搬家。** `tools/test_tab_open.py` 拿 `calibration/artifacts/ads/runs/**` 当「Tab 关着」、`calibration/artifacts/runs/**` 当「拍的就是 Tab 界面」。把 ADS run 挪进 `calibration/artifacts/runs/` 会静默地把 400 帧贴错标签。统一的是 manifest，不是路径。
 
 第三态是这次补上的：**只有有人看过才有标签，`source` 说是谁看的。** 没人确认的意图不给标签——`capture_ads` 的镜子在装上并读回槽位时才是 `REQUESTED`，读回来跟要求不一致就是 `DETECTED`（记读到的那个），谁都没看就没有标签。`collect_templates` 的 `slots`/`rows` 是全仓最硬的真值（刷新器坐标 → 库存行 → 槽位，每一跳都用无模板的手段确认），而 `plate` / `type` **一个标签都不给**，理由在 `label_for()`。
 

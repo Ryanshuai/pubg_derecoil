@@ -175,7 +175,7 @@ def main():
         return 0
 
     shots = [a for a in argv if not a.startswith('-')] or [
-        os.path.join(ROOT, 'docs', n) for n in TRUTH]
+        os.path.join(ROOT, 'calibration', 'artifacts', n) for n in TRUTH]
     det = TabWeaponDetector()
     crops = []
     for path in shots:

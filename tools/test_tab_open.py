@@ -121,7 +121,7 @@ def corpus():
     mistakes — those runs are somebody's ground truth elsewhere too.
     """
     rows, blank = [], []
-    pats = ['docs/**/*.jpg', 'docs/**/*.png']
+    pats = ['calibration/artifacts/**/*.jpg', 'calibration/artifacts/**/*.png']
     for path in sorted(sum((glob.glob(os.path.join(ROOT, p), recursive=True)
                             for p in pats), [])):
         want = truth(path)
@@ -145,7 +145,7 @@ def corpus():
 def main():
     rows, blank = corpus()
     if not rows:
-        raise SystemExit('no stored 3440x1440 shots under docs/')
+        raise SystemExit('no stored 3440x1440 shots under calibration/artifacts/')
 
     det = TabTypeDetector()
     n_up = sum(r[0] for r in rows)

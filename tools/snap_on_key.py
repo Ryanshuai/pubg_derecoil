@@ -13,7 +13,7 @@ released" is answered by putting the mouse there and pressing the key, and
 guessing the coordinate off a picture afterwards is how the current release
 point came to be wrong in the first place.
 
-Shots land in docs/, so tools/regression_check.py picks them up on its own.
+Shots land in calibration/artifacts/, so tools/regression_check.py picks them up on its own.
 """
 import argparse
 import ctypes
@@ -52,13 +52,13 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--key', default='C', choices=sorted(VK))
     ap.add_argument('--out', default=None,
-                    help='directory (default docs/shots/<stamp>/)')
+                    help='directory (default calibration/artifacts/shots/<stamp>/)')
     ap.add_argument('--note', default='',
                     help='goes into every sidecar — say what you are capturing')
     args = ap.parse_args()
 
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    out = args.out or os.path.join(ROOT, 'docs', 'shots', stamp)
+    out = args.out or os.path.join(ROOT, 'calibration', 'artifacts', 'shots', stamp)
     os.makedirs(out, exist_ok=True)
 
     vk = VK[args.key]

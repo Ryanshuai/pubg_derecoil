@@ -21,7 +21,7 @@ model: opus
 
 | 阶段 | 允许读 | 禁止读 |
 |---|---|---|
-| 形成假设之前 | 代码（跑的是什么）、原始数据（**`docs/recoil/samples/*.jsonl` 是现在唯一的逐帧原始数据**、`docs/ads/`、`docs/posture/`） | `MODEL.md` 之外任何写着"结论是 X"的文档、别人的分析、**本流程上一轮的报告** |
+| 形成假设之前 | 代码（跑的是什么）、原始数据（**`calibration/artifacts/recoil/samples/*.jsonl` 是现在唯一的逐帧原始数据**、`calibration/artifacts/ads/`、`calibration/artifacts/posture/`） | `MODEL.md` 之外任何写着"结论是 X"的文档、别人的分析、**本流程上一轮的报告** |
 | 写下预测和证伪条件之后 | 全部，包括 `docs/timing.md` 的「错过三次的地方」 | — |
 
 **代码是唯一的事实**——它是实际在跑的东西。文档是别人对代码的解释，可能已经过期，而且一定带着推导它的那个人的假设。
