@@ -196,7 +196,21 @@ pixi run protocol-check  # PC/固件两端的生成物跟 protocol.toml 漂了�
 
 **离线回归**（改完代码就跑）
 
-`analysis` · `abs-offset` · `attachments` · `drag-log` · `fire` · `frames` · `gestures` · `harness` · `highlight` · `kit` · `locations` · `lobby-detector` · `panel-state` · `placement` · `pointers` · `recenter` · `runs` · `snaps` · `spawner-plan` · `stocktake-test` · `tab-open` · `tab-watch`
+`analysis` · `abs-offset` · `attachments` · `drag-log` · `fire` · `frames` · `gestures` · `harness` · `highlight` · `kit` · `locations` · `lobby-detector` · `one-gun` · `panel-state` · `placement` · `pointers` · `recenter` · `runs` · `snaps` · `spawner-plan` · `stocktake-test` · `tab-open` · `tab-watch`
+
+⚠ **`pixi run one-gun` 是 2026-08-08 加的,因为「架子上冒出第二把枪」在两天里咬了两次,而第一次只修了代码没配闸。** 它锁两条独立的路:`ensure_weapon_in_hand` 在枪**已经在架上但拿不到手**时必须拒绝(以前落进刷新分支,还把矛盾打印在同一行——`no mp5k in the rack (holds {1: 'mp5k'})`);`collect_timed.read_config` 在架上**有第二把枪**时必须拒绝(它读 1 号槽,扳机打手里那把,两把枪时屏幕上没有东西能证明是同一把)。
+
+16 条用例,其中「空架子必须还能刷」那两条是防「无条件返回 None 也能通过」的。**把修复注掉重跑会红 2 条,验过。**
+
+---
+
+**读数据的探针**（不占游戏窗口,不改任何东西）
+
+| 脚本 | 干什么 |
+|---|---|
+| `probe_mp5k_cube.py` (`pixi run cube`) | mp5k 2×2×2 八格,**在同一个 t 上**读,并逐格对 `data/kit_factors.json` 那套已退场的弹桶坐标。正交性带 bootstrap CI。隔离掉的样本单列 |
+
+⚠ **`cube` 里那一列 08-05 的旧值不是装饰。** 它是**另一套代码、另一天、另一个坐标系**测的同样八格,所以是这个仓库拿得到的最强的第二独立来源——而它已经赚回本钱了:`grip-vert_grip` 读出 0.482 而旧表说 0.747,差 55%,查下去是**五梭打的是另一把枪**。八格里七格两条线差 ≤3.7%,那种一致性要两边同时朝一个方向错才伪造得出来。
 
 `pointers` 是 2026-08-08 补的,判据一句话:**散文里写的每一条路径,必须指进一个存在的目录。**
 

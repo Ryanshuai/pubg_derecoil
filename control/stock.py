@@ -759,13 +759,35 @@ def ensure_weapon_in_hand(ac, sc, weapon='m416', slots=(1, 2), verbose=True):
                   f'can tell. Drop one.')
         return None
 
-    for slot in slots:
-        if racked.get(slot) != weapon:
-            continue
+    # ⚠ A GUN THAT IS RACKED AND WILL NOT COME TO HAND IS NOT AN ABSENT GUN,
+    # and this loop used to fall straight through to the spawner when the hold
+    # failed. Measured 2026-08-08, and it printed its own contradiction:
+    #
+    #     [stock] no mp5k in the rack (holds {1: 'mp5k'}) — spawning mp5k
+    #     [stock] holding mp5k in slot 2, 40 rounds
+    #
+    # Two mp5ks on the shelf. The run then kitted and READ gun 1 while gun 2
+    # was the one in hand, and fired five magazines out of a gun wearing a
+    # compensator and a stock into a cell labelled `grip-vert_grip`. The
+    # numbers looked perfect: 432.5 / 438.1 / 427.3 / 424.9 / 439.4, cv 1.4%.
+    #
+    # It is the same rounding the block above refuses to make for the rack
+    # read — "I could not confirm it" collapsed into "it is not there" — and
+    # the dupes check cannot save it, because at the moment of the check there
+    # genuinely was only one.
+    present = [s for s in slots if racked.get(s) == weapon]
+    for slot in present:
         if ac.hold(slot) and weapon_in_hand() is not None:
             if verbose:
                 print(f'      [stock] {weapon} already in slot {slot}')
             return slot
+    if present:
+        if verbose:
+            print(f'      [stock] {weapon} is in slot(s) {present} and would '
+                  f'not come to hand — refusing. Spawning here puts a SECOND '
+                  f'{weapon} on the shelf, and then which one fires and which '
+                  f'one gets read are two different guns.')
+        return None
 
     if verbose:
         others = {s: g for s, g in racked.items() if g}

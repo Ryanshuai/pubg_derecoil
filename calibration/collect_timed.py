@@ -181,6 +181,30 @@ def read_config(weapon=None):
         print(f'  [!] rack slot 1 holds {held!r}, not {weapon!r} — refusing '
               f'rather than filing this magazine under the wrong weapon.')
         return None
+    # ⚠ EXACTLY ONE GUN, AND THIS FILE READS SLOT 1 WHILE THE TRIGGER FIRES
+    # WHATEVER IS IN HAND. Nothing in the HUD distinguishes them: the name
+    # plate says `mp5k` for both, the ammo counter says 40 for both, and the
+    # burst looks identical. So a second gun is not a mess to tidy, it is an
+    # unanswerable question, and the answer this function would give is a
+    # confident description of the wrong object.
+    #
+    # Measured 2026-08-08. ensure_weapon_in_hand spawned a second mp5k (its own
+    # bug, fixed in control/stock.py), put THAT one in hand, and ensure_kit
+    # stripped and read the other -- it skips hold() when its only step is an
+    # unequip. Five magazines out of a gun wearing comp_smg + vert_grip +
+    # tactical_stock landed in the cell named `grip-vert_grip`:
+    #
+    #     gun1  red dot, no muzzle, vert_grip, no stock     <- read and filed
+    #     gun2  red dot, comp_smg,  vert_grip, tactical     <- fired
+    #
+    # cv was 1.4% across the five. Nothing about the run looked wrong, and the
+    # only tell was that the cell reproduced a DIFFERENT cell's number to 1%.
+    others = {s: g for s, g in (lo.get('guns') or {}).items() if g and s != 1}
+    if others:
+        print(f'  [!] the rack also holds {others} — refusing. This reads slot '
+              f'1 and the trigger fires whatever is in hand, and with two guns '
+              f'out nothing on screen can say those are the same gun. Drop one.')
+        return None
     slots = lo['slots'].get(1) or {}
     out = {}
     for slot in RECOIL_SLOTS:
@@ -192,7 +216,7 @@ def read_config(weapon=None):
 
 
 def read_sight():
-    """Which RECOIL_SIGHT_PROFILES entry the gun's optic is. -> name | None.
+    """The gun's optic, twice: -> (profile_name, asset). (None, None) if unread.
 
     ⚠ THIS WAS READ AND THEN THROWN AWAY, and it is the one quantity in this
     file that nothing could check after the fact. `scope` is deliberately not
@@ -211,6 +235,11 @@ def read_sight():
 
     A program can only check a thing that exists in two places. This one
     existed in zero.
+
+    Returns the ASSET alongside the profile because two different consumers
+    need two different spellings of one reading, and taking it twice would be
+    two readings: `Weapon.set('scope', ...)` keys `_SCOPE_TO_MAG` on the raw
+    asset, while everything downstream of K wants the profile name.
     """
     from control.inventory import InventoryControl
     from detector.weapon import _sight_of
@@ -218,8 +247,9 @@ def read_sight():
         with ac.tab_up():
             lo = ac.loadout()
     if not lo or not lo.get('slots'):
-        return None
-    return _sight_of((lo['slots'].get(1) or {}).get('scope') or '')
+        return None, None
+    asset = (lo['slots'].get(1) or {}).get('scope') or ''
+    return _sight_of(asset), asset
 
 
 # The key `travel()` and calibration/artifacts/pitch/pitch_travel.json use for "not looking
@@ -479,76 +509,24 @@ def main():
     # a NameError three screens away from its cause.
     config, written = None, 0
     try:
-        w = build_weapon(a.weapon, a.posture, {})
-        interval_s = w.bullet_interval_s
-        # The curve is reported by its TIME SPAN, not by a round count:
-        # curve_bullets() went with the bullet-bucket coordinate, and the span
-        # is what the firmware actually plays.
-        span_ms = w.t_s[-1] * 1000.0 if len(w.t_s) else 0.0
-        print(f'  {a.weapon}: interval {interval_s*1000:.2f} ms, '
-              f'curve spans {span_ms:.0f} ms over {len(w.t_s)} knots')
-
-        if a.from_fit:
-            # Fit from what is already stored and fire THAT, rather than the
-            # curve on disk. This is the iteration MODEL.md calls for: each
-            # round the compensation lands closer, |y_obs| shrinks, and the
-            # curve-dependence measured on 2026-08-08 shrinks with it.
-            from calibration.fit_time_curve import fit
-            # ⚠ NO `or {}` HERE. None means the slots could not be read, and
-            # falling back to {} turns a refusal into the claim "the gun is
-            # bare" -- which then loads the wrong file, or none at all, and
-            # reports it as "nothing stored". That is the third time in one
-            # night that an unreadable state was quietly rounded to an empty
-            # one; the first two were read_config's own `{}` and the missing
-            # gun check inside it.
-            cfg_now = read_config(a.weapon)
-            if cfg_now is None:
-                print('  [!] --from-fit needs to know which config to fit '
-                      'from, and the slots did not read.')
-                return 5
-            prev = [m for m in S.load(a.weapon, cfg_now)
-                    if a.fit_all or m.comp_enabled]
-            if not prev:
-                print('  [!] --from-fit with nothing stored for this config')
-                return 5
-            r = fit(prev)
-            if not r['ok']:
-                print(f'  [!] {r["why"]}')
-                return 5
-            ks = r['knots']
-            w.t_s = [k['t_ms'] / 1000.0 for k in ks]
-            w.dy_s = [k['dy'] for k in ks]
-            w.dx_s = [k['dx'] for k in ks]
-            # ⚠ `w.bullet_interval_s = grid_ms/1000` STOOD HERE, to stop
-            # upload_pattern re-binning a 225-knot curve back to 41. That
-            # merge is gone and so is the parameter, so this assignment now
-            # defends against nothing -- and it was the more dangerous half of
-            # a pair: the local `interval_s` read at the top of main() is what
-            # reaches fire_magazine_timed, and IT must stay the gun's real
-            # rate or the trigger is released a fifth of the way through.
-            print(f'  --from-fit: {r["n_kept"]}/{r["n_total"]} stored magazines '
-                  f'-> {len(ks)} knots @ {r["grid_ms"]:.1f} ms, '
-                  f'{r["total_counts"]:.1f} counts')
-
-        if a.scale != 1.0:
-            # Scale the curve, not the analysis. What gets stored is read back
-            # from the firmware afterwards, so the record describes the curve
-            # that actually played whatever is done here.
-            w.dy_s = [v * a.scale for v in w.dy_s]
-            w.dx_s = [v * a.scale for v in w.dx_s]
-            print(f'  curve scaled x{a.scale}')
-        rig.arm(w)
-        if a.no_comp:
-            rig.fire.disarm()
-        curve = rig.mouse.read_pattern() or []
-        if not curve and not a.no_comp:
-            print('  [!] the firmware reports no pattern — refusing. A '
-                  'magazine whose curve is unknown cannot be added back, '
-                  'and MODEL.md needs y_comp to pool it with the others.')
-            return 2
-        print(f'  firmware holds {len(curve)} knots'
-              f'{" (compensation OFF)" if a.no_comp else ""}')
-
+        # ⚠ THE GUN IS ESTABLISHED BEFORE THE CURVE IS BUILT, AND IT USED TO BE
+        # THE OTHER WAY ROUND. `build_weapon(weapon, posture, {})` stood at the
+        # top of this block and armed the firmware from an EMPTY config, then
+        # the kit went on and the readback happened underneath it. So every
+        # compensating run on a kitted gun played the curve stored for a bare
+        # one through iron sights — `[curves] no fitted curve for mp5k bare
+        # standing iron` printed on a gun that was about to wear a compensator,
+        # a foregrip and a red dot (2026-08-08).
+        #
+        # `--no-comp` hid it completely: the curve is never played, so the only
+        # symptom was one log line that read like a missing measurement rather
+        # than like a wrong lookup.
+        #
+        # It cannot be fixed by passing `--kit` into build_weapon either. The
+        # config that decides the curve has to be the READBACK — what the gun
+        # turned out to be wearing — and that does not exist until the kitting
+        # is done. So the kitting comes first, and everything downstream reads
+        # ONE established configuration instead of a request and a hope.
         if a.kit:
             # Declarative: say what the gun should WEAR, not which drags to
             # make. ensure_kit reads back and retries on its own.
@@ -557,9 +535,38 @@ def main():
                 k, _, v = part.partition('=')
                 want[k.strip()] = (v.strip() or None)
             from control.inventory import InventoryControl
-            with InventoryControl() as ac:
+            from control.spawner import SpawnerControl
+            from control.stock import restock as _restock
+            keep = {v for v in want.values() if v}
+            with InventoryControl() as ac, SpawnerControl(verbose=False) as sc:
+                # ⚠ THE HOOK IGNORES ITS ARGUMENT, ON PURPOSE. ensure_kit hands
+                # it only the keys that are MISSING, and `restock`'s first
+                # argument doubles as the KEEP-LIST -- everything nameable in
+                # 库存 and not in it goes on the floor. Handing it the missing
+                # subset would therefore drop the parts already on hand, which
+                # is the same shape as the bug control/stock.py records under
+                # "want DOUBLES AS THE KEEP-LIST": a {slot: key} table once
+                # emptied the whole backpack for exactly this reason.
+                #
+                # So the keep-list is the WHOLE kit, every time.
+                # `_missing` underscored so tools/check_params.py reads the
+                # signature the way the paragraph above does: the argument is
+                # ensure_kit's to pass, not this body's to use.
+                def _fill(_missing):
+                    return _restock(ac, sc, keep, leave='shut', verbose=True)
+
+                # ⚠ WITHOUT A HOOK, AN EMPTY BACKPACK IS AN UNCONDITIONAL
+                # REFUSAL. Measured 2026-08-08: the game had restarted, 库存
+                # held nothing, and `--kit` could not fit a single part -- so
+                # read_config saw a bare gun, the disagreement check fired, and
+                # the run ended before a shot. Nothing was wrong except that
+                # this layer knew how to ask for parts and not how to get them.
+                #
+                # `weapon` is the catalogue gate and was missing too: without
+                # it a fit can be planned onto a slot the gun does not have,
+                # and that part lands on the floor.
                 with ac.tab_up():
-                    r = ac.ensure_kit(1, want)
+                    r = ac.ensure_kit(1, want, weapon=a.weapon, restock=_fill)
             print(f'  kit {want} -> ok={r.get("ok") if isinstance(r, dict) else r}')
             # ⚠ NOT checked here on purpose. ensure_kit's ok=False can mean
             # UNREADABLE rather than unfitted, and eleven cells of the
@@ -584,37 +591,91 @@ def main():
         # `read_config` returning {} means "no attachments", and that is
         # exactly what an unreadable-but-fitted part looks like.
         #
-        # Measured 2026-08-08 on the mp5k: `--kit stock=heavy_stock` fitted,
-        # the gun fired 435 counts against bare's 901 — so the stock was ON —
-        # and the readback said nothing at all, so five magazines landed in the
-        # BARE cell. Not a missing template either: Stock_Heavy_C carries two
-        # variants and scores 10/10 elsewhere. It simply does not read on this
-        # gun, and reads as `empty` rather than as a failure (see
-        # detector/CLAUDE.md on that deliberate trade).
+        # ⚠⚠ THIS PARAGRAPH USED TO NAME A CASE THAT NEVER HAPPENED, and the
+        # way it was wrong is worth more than the example was. It said:
+        # `--kit stock=heavy_stock` fitted on the mp5k, the gun fired 435
+        # against bare's 901, "so the stock was ON", and the readback saw
+        # nothing — therefore heavy_stock does not read on this gun.
         #
-        # The clustering caught it that time (cut 5/10, separation 16.3x
-        # against a gate of 8.0) and that is luck, not a guard: it only worked
-        # because the stock is worth 2x. A part worth 5% would have merged into
-        # the bare cell and moved its mean.
+        # Every step of that is an inference except the 435, and the inference
+        # is arithmetic that was never done. heavy_stock on this gun is 0.817
+        # (data/kit_factors.json, 2026-08-05), so a stocked mp5k fires ~740.
+        # 435/903 = 0.48, which is not the stock — it is comp_smg+vert_grip,
+        # 0.479 in the same table. The batch was a KITTED GUN read as bare, the
+        # same two-guns-on-the-rack failure as the two batches either side of
+        # it, and "the template cannot read this part" was a story invented to
+        # explain a number that already had an explanation.
+        #
+        # Measured properly 2026-08-08 16:24, one gun on the rack: the readback
+        # says `{'stock': 'heavy_stock'}` first try, and the gun fires 751.2
+        # against a predicted 738. IT READS FINE. IT ALWAYS DID.
+        #
+        # What survives is the reason for the check, which the fake example was
+        # only illustrating: `read_config` returning {} means "no attachments",
+        # and an unreadable-but-fitted part looks exactly like that. That much
+        # is a property of slot_detector's deliberate trade and needs no
+        # example. What does NOT survive is trusting a diagnosis built from one
+        # cell's total — see MODEL.md §5之二, and note that this is that law
+        # biting through a number that was measured correctly.
         #
         # So: what you ASKED for is the one thing this layer knows that the
         # readback does not. A disagreement is not a mislabel to file, it is a
         # measurement whose subject is unknown.
+        # ⚠ ONLY AGAINST SLOTS `config` CAN CONTAIN, and getting that wrong made
+        # the check UNPASSABLE. read_config returns RECOIL_SLOTS and nothing
+        # else — `scope` is excluded from the key on purpose, three screens up —
+        # so `--kit scope=red_dot` compared a request against a dict that
+        # structurally could not hold the answer, and refused a gun that was
+        # wearing the right optic all along (2026-08-08, mp5k, ensure_kit's own
+        # plan said "3 slots already right" in the line above the refusal).
+        #
+        # A checker that cannot pass is not a strict checker, it is a broken
+        # one: it stops the good runs and says nothing about the bad ones. The
+        # scope is checked ten lines down by read_sight(), and MORE strictly —
+        # that one also compares against --sight, which decides K.
         if a.kit:
+            unverifiable = sorted(k for k in want
+                                  if k not in RECOIL_SLOTS and k != 'scope')
+            if unverifiable:
+                print(f'  [!] REFUSING: --kit names {unverifiable}, and nothing '
+                      f'in this run can read those slots back. read_config '
+                      f'reports {list(RECOIL_SLOTS)} and read_sight reports the '
+                      f'optic; a request nobody checks is a request that can '
+                      f'silently not happen.')
+                return 5
+            # Both directions. A part that was asked for and is not there is
+            # the obvious half; a STRIP that did not happen is the other, and
+            # it is the one that kept coming back — PUBG bolts whatever the
+            # backpack holds onto a gun the moment it arrives, so `stock=`
+            # failing quietly hands back the previous cell's stock.
+            #
+            # ⚠ THE STRIP HALF CANNOT BE FULLY VERIFIED and must not be read as
+            # if it could: an unreadable part reads `empty` (slot_detector's
+            # deliberate trade), so this catches a strip that left something
+            # RECOGNISABLE and misses one that left something the templates do
+            # not know. Partial, and better than nothing, and that is all.
             missing = {k: v for k, v in want.items()
-                       if v and config.get(k) != v}
-            if missing:
-                print(f'  [!] REFUSING: asked for {missing} and the readback '
-                      f'does not show it (reads {config or "nothing"}). Either '
-                      f'the part did not go on — in which case this is the '
-                      f'wrong gun to measure — or it went on and cannot be '
-                      f'read, in which case every magazine would be filed '
-                      f'under a config that is not what fired. Both end the '
-                      f'same way, so neither is worth a run.\n'
-                      f'      To measure it anyway, fit it by hand and drop '
-                      f'--kit: the readback is only consulted for slots it can '
-                      f'see, and without a request there is nothing to '
-                      f'contradict.')
+                       if k in RECOIL_SLOTS and v and config.get(k) != v}
+            stuck = {k: config[k] for k, v in want.items()
+                     if k in RECOIL_SLOTS and not v and config.get(k)}
+            if missing or stuck:
+                if missing:
+                    print(f'  [!] REFUSING: asked for {missing} and the readback '
+                          f'does not show it (reads {config or "nothing"}). '
+                          f'Either the part did not go on — in which case this '
+                          f'is the wrong gun to measure — or it went on and '
+                          f'cannot be read, in which case every magazine would '
+                          f'be filed under a config that is not what fired. '
+                          f'Both end the same way, so neither is worth a run.\n'
+                          f'      To measure it anyway, fit it by hand and drop '
+                          f'--kit: the readback is only consulted for slots it '
+                          f'can see, and without a request there is nothing to '
+                          f'contradict.')
+                if stuck:
+                    print(f'  [!] REFUSING: asked to STRIP {sorted(stuck)} and '
+                          f'the gun still wears {stuck}. This run would measure '
+                          f'a config it was not asked for — five magazines '
+                          f'filed under the wrong cell, all of them plausible.')
                 return 5
 
         # ⚠ THE OPTIC DECIDES K, AND NOTHING WAS CHECKING IT. `--sight` picks
@@ -628,7 +689,7 @@ def main():
         # magazines under a sight the caller did not ask for, and a cell that
         # silently changes its own measurement conditions is the thing this
         # whole file exists to stop.
-        worn = read_sight()
+        worn, scope_asset = read_sight()
         if worn is None:
             print('  [!] REFUSING: could not read the scope slot. K comes from '
                   'the optic, so an unread one is an unknown scale on every '
@@ -643,6 +704,103 @@ def main():
                   f'      Either fit a {rig.sight} or pass --sight {worn}.')
             return 7
         print(f'  sight : {worn} (K={rig.K}, read back off the gun)')
+
+        # ---------------------------------------------------------------
+        # The gun is now established. Build the curve FOR IT.
+        # ---------------------------------------------------------------
+        # `config` is the readback, `scope_asset` is the optic as the raw asset
+        # string Weapon.set('scope', ...) keys _SCOPE_TO_MAG on. Together they
+        # are the same four things set_seq looks the curve up by, so what the
+        # firmware plays is what was fitted for this exact configuration —
+        # under plan A there is no interpolation, so a wrong key is not a
+        # slightly-wrong curve, it is another gun's.
+        w = build_weapon(a.weapon, a.posture, dict(config, scope=scope_asset))
+        interval_s = w.bullet_interval_s
+        # The curve is reported by its TIME SPAN, not by a round count:
+        # curve_bullets() went with the bullet-bucket coordinate, and the span
+        # is what the firmware actually plays.
+        span_ms = w.t_s[-1] * 1000.0 if len(w.t_s) else 0.0
+        print(f'  {a.weapon}: interval {interval_s*1000:.2f} ms, '
+              f'curve spans {span_ms:.0f} ms over {len(w.t_s)} knots')
+
+        if a.from_fit:
+            # Fit from what is already stored and fire THAT, rather than the
+            # curve on disk. This is the iteration MODEL.md calls for: each
+            # round the compensation lands closer, |y_obs| shrinks, and the
+            # curve-dependence measured on 2026-08-08 shrinks with it.
+            from calibration.fit_time_curve import fit
+            # ⚠ THIS USED TO TAKE ITS OWN read_config(), and that read happened
+            # BEFORE the kitting — so --from-fit fitted from the configuration
+            # the gun had on ARRIVAL and then fired it at the one it was kitted
+            # into. One established readback now serves both, which is also the
+            # only way the two can be guaranteed to agree.
+            #
+            # The old comment here is still the reason `config` may not be
+            # rounded to {}: None means the slots could not be read, and
+            # falling back to {} turns a refusal into the claim "the gun is
+            # bare" -- which then loads the wrong file, or none at all, and
+            # reports it as "nothing stored". The refusal now lives at the
+            # readback itself (return 4), which is strictly earlier.
+            prev = [m for m in S.load(a.weapon, config)
+                    if a.fit_all or m.comp_enabled]
+            if not prev:
+                print('  [!] --from-fit with nothing stored for this config')
+                return 5
+            r = fit(prev)
+            if not r['ok']:
+                print(f'  [!] {r["why"]}')
+                return 5
+            ks = r['knots']
+            w.t_s = [k['t_ms'] / 1000.0 for k in ks]
+            w.dy_s = [k['dy'] for k in ks]
+            w.dx_s = [k['dx'] for k in ks]
+            # ⚠ `w.bullet_interval_s = grid_ms/1000` STOOD HERE, to stop
+            # upload_pattern re-binning a 225-knot curve back to 41. That
+            # merge is gone and so is the parameter, so this assignment now
+            # defends against nothing -- and it was the more dangerous half of
+            # a pair: the local `interval_s` read just above is what reaches
+            # fire_magazine_timed, and IT must stay the gun's real rate or the
+            # trigger is released a fifth of the way through.
+            print(f'  --from-fit: {r["n_kept"]}/{r["n_total"]} stored magazines '
+                  f'-> {len(ks)} knots @ {r["grid_ms"]:.1f} ms, '
+                  f'{r["total_counts"]:.1f} counts')
+
+        if a.scale != 1.0:
+            # Scale the curve, not the analysis. What gets stored is read back
+            # from the firmware afterwards, so the record describes the curve
+            # that actually played whatever is done here.
+            w.dy_s = [v * a.scale for v in w.dy_s]
+            w.dx_s = [v * a.scale for v in w.dx_s]
+            print(f'  curve scaled x{a.scale}')
+        rig.arm(w)
+        if a.no_comp:
+            rig.fire.disarm()
+        curve = rig.mouse.read_pattern() or []
+        if not curve and not a.no_comp:
+            print('  [!] the firmware reports no pattern — refusing. A '
+                  'magazine whose curve is unknown cannot be added back, '
+                  'and MODEL.md needs y_comp to pool it with the others.')
+            return 2
+        print(f'  firmware holds {len(curve)} knots'
+              f'{" (compensation OFF)" if a.no_comp else ""}')
+
+        # ⚠ SAY WHICH GUN FIRES. Everything above reads RACK SLOT 1; the
+        # trigger fires whatever is in hand, and until this line nothing joined
+        # the two. ensure_kit does not close the gap either -- it takes the gun
+        # in hand only when one of its steps is an EQUIP, so a cell whose only
+        # step is a strip leaves in hand whatever was there before.
+        #
+        # With read_config now refusing a second gun this is no longer load
+        # bearing for correctness, and it stays anyway: a precondition that
+        # holds by luck reads exactly like one that is enforced, and this one
+        # cost five magazines on 2026-08-08 the last time it held by luck.
+        from control.inventory import InventoryControl as _IC
+        with _IC() as _ac:
+            if not _ac.hold(1):
+                print('  [!] REFUSING: rack slot 1 would not come to hand. It '
+                      'is the slot every readback above describes, so firing '
+                      'now would measure a gun nothing in this run has read.')
+                return 8
 
         rig.ensure_posture(a.posture)
 
