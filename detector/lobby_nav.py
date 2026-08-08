@@ -59,7 +59,7 @@ SUB_TABS = ('NORMAL', 'RANKED', 'ARCADE', 'TRAINING', 'CUSTOM')
 # The only sub tab anything here is allowed to start. See the module docstring.
 SAFE_MODE = 'TRAINING'
 
-TAB_TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data',
+TAB_TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'training_data',
                             'pubg_assets', 'lobby', 'tabs')
 TAB_TMPL_MIN = LOBBY_TAB_TMPL_MIN
 

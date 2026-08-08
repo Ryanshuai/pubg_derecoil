@@ -38,11 +38,12 @@ from config import (LOBBY_BAR_MAX, LOBBY_BAR_ROI, LOBBY_ERROR_MIN_SCORE,
                     LOBBY_LEAVE_MIN_SCORE, LOBBY_LEAVE_TEXT_ROI,
                     LOBBY_MENU_MIN_SCORE, LOBBY_MENU_SEARCH,
                     LOBBY_MENU_THRESH, LOBBY_MENU_TITLE_ROI,
+                    LOBBY_MENU_TITLE_ROI_IN_LOBBY,
                     LOBBY_PING_MIN_FRAC, LOBBY_PING_ROI, LOBBY_PING_THRESH)
-from detector.cropper import RegionGrabber, win32_cap
+from capture.cropper import RegionGrabber, win32_cap
 from detector.geometry import cut
 
-_TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data',
+_TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'training_data',
                          'pubg_assets', 'lobby')
 EXIT_TMPL_PATH = os.path.join(_TMPL_DIR, 'exit_to_lobby_mask.png')
 MENU_TMPL_PATH = os.path.join(_TMPL_DIR, 'system_menu_mask.png')
@@ -60,9 +61,31 @@ class LobbyState(enum.Enum):
     LOBBY = 'lobby'          # menus: letterboxed
     IN_GAME = 'in_game'      # full-bleed, net overlay drawing, no pause menu
     MENU = 'menu'            # in a round but the ESC menu is up
+    LOBBY_MENU = 'lobby_menu'       # the ESC menu, over the lobby
     FULLBLEED = 'fullbleed'  # full-bleed, no overlay — loading, or ping is off
     DISCONNECTED = 'disconnected'   # dropped by the server; RECONNECT is up
     ERROR = 'error'          # a modal ERROR dialog is up; OK must be clicked
+    # ── Decided by the process table, never by pixels ──
+    # These two are the only members THIS MODULE CANNOT PRODUCE. They live in
+    # the same enum anyway because callers switch on one vocabulary, and
+    # `control/lobby.py` is where they are answered — asking psutil from a
+    # detector would invert the package dependency (see control/CLAUDE.md).
+    #
+    # ⚠ THEY EXIST BECAUSE THE PIXEL ANSWER IS WRONG, not merely missing. With
+    # the game closed the desktop is bright, so the letterbox probe reads
+    # bar_max=251 and the ping probe 0.000 — measured 2026-08-07 — and
+    # classify() calls that FULLBLEED, which every policy in control/lobby.py
+    # treats as a loading screen: click nothing, wait it out. A dead game
+    # therefore cost the FULL 300 s ENTER_TIMEOUT and then blamed the game for
+    # being slow.
+    NOT_RUNNING = 'not_running'     # no game process at all
+    NO_WINDOW = 'no_window'         # process alive, no drivable window yet
+    # ...and a third, which is a WINDOW fact rather than a process one, but
+    # belongs with these because it breaks the screen the same way: the game
+    # is up, healthy and iconified, so every grab returns the DESKTOP. Its own
+    # member rather than NO_WINDOW because the recoveries are opposite — this
+    # one is fixed by raise_game() in a second, that one by waiting.
+    MINIMIZED = 'minimized'         # window exists, iconified, screen is not it
 
     @property
     def playable(self):
@@ -78,8 +101,23 @@ class LobbyState(enum.Enum):
         DISCONNECTED is a black screen with a RECONNECT button, which the
         letterbox probe cannot tell from the lobby.
         ERROR is a modal dialog over whatever was there.
+        LOBBY_MENU is the lobby with the ESC menu over it, which the letterbox
+        probe also cannot tell from the lobby.
         """
         return self is LobbyState.IN_GAME
+
+    @property
+    def running(self):
+        """Is there a game process to drive at all?
+
+        The question every caller of this enum used to assume the answer to.
+        False means no amount of clicking, focusing or waiting will help —
+        the game has to be launched.
+
+        ⚠ MINIMIZED IS RUNNING. It is one raise_game() from drivable, and the
+        thing that must not happen to it is a relaunch.
+        """
+        return self not in (LobbyState.NOT_RUNNING, LobbyState.NO_WINDOW)
 
     @property
     def needs_dismissing(self):
@@ -102,12 +140,17 @@ def ping_fraction(crop):
     return float((g > LOBBY_PING_THRESH).sum()) / g.size
 
 
-def classify(bar_crop, ping_crop, menu_open=False, disconnected=False):
+def classify(bar_crop, ping_crop, menu_open=False, disconnected=False,
+             lobby_menu=False):
     """State from the two probes. Pure function — takes crops, no capture.
 
-    `menu_open` and `disconnected` are passed in rather than measured here:
-    both probes live in different parts of the screen and are only worth
-    grabbing once the cheap probes have narrowed things down.
+    `menu_open`, `disconnected` and `lobby_menu` are passed in rather than
+    measured here: all three probes live in different parts of the screen and
+    are only worth grabbing once the cheap probes have narrowed things down.
+
+    Note the two menu flags are read on OPPOSITE sides of the letterbox test
+    and cannot substitute for each other — same title, two positions, and
+    which one is on screen is exactly what tells the two menus apart.
     """
     # Checked first because it is invisible to everything below: the drop
     # screen is almost entirely black, so the letterbox probe reads 0 and
@@ -115,7 +158,7 @@ def classify(bar_crop, ping_crop, menu_open=False, disconnected=False):
     if disconnected:
         return LobbyState.DISCONNECTED
     if bar_max(bar_crop) <= LOBBY_BAR_MAX:
-        return LobbyState.LOBBY
+        return LobbyState.LOBBY_MENU if lobby_menu else LobbyState.LOBBY
     if ping_fraction(ping_crop) >= LOBBY_PING_MIN_FRAC:
         return LobbyState.MENU if menu_open else LobbyState.IN_GAME
     return LobbyState.FULLBLEED
@@ -125,7 +168,8 @@ def classify_frame(frame):
     """Same verdict from a full-screen BGR frame, for offline use on saved
     screenshots. The live path uses the grabber instead."""
     return classify(cut(frame, LOBBY_BAR_ROI), cut(frame, LOBBY_PING_ROI),
-                    is_system_menu(frame), reconnect_visible(frame))
+                    is_system_menu(frame), reconnect_visible(frame),
+                    is_lobby_system_menu(frame))
 
 
 # ── Results screen ───────────────────────────────────────────────────────
@@ -247,6 +291,24 @@ def is_system_menu(frame=None):
     return menu_title_score(_grab(roi, frame)) >= LOBBY_MENU_MIN_SCORE
 
 
+def is_lobby_system_menu(frame=None):
+    """True when the ESC menu is up OVER THE LOBBY — 315 px below where
+    is_system_menu() looks.
+
+    Two windows rather than one tall one, and two functions rather than a
+    `where=` argument, because the ANSWERS differ: an ESC menu in a match is
+    closed to keep playing, one in the lobby is closed to press PLAY, and the
+    caller has to know which it got. Measured 2026-08-07 on the two captures:
+    each window scores 0.999 at its own menu and 0.000 at the other's.
+
+    ⚠ The template is 66x402 and matchTemplate needs room to slide, so the
+    window must stay padded by LOBBY_MENU_SEARCH. At pad 0 this scores 0.000
+    on a menu that is plainly there.
+    """
+    roi = _search_roi(LOBBY_MENU_TITLE_ROI_IN_LOBBY, LOBBY_MENU_SEARCH)
+    return menu_title_score(_grab(roi, frame)) >= LOBBY_MENU_MIN_SCORE
+
+
 def leave_entry_score(crop):
     """Match the LEAVE TRAINING glyphs in a crop of the search window."""
     return _score(crop, _LEAVE_TMPL, LOBBY_MENU_THRESH)
@@ -347,9 +409,17 @@ class LobbyDetector:
             return LobbyState.MENU
         # A dropped session is a black screen, so it arrives here disguised as
         # the lobby — and only here, since nothing else makes the letterbox
-        # read zero. Paid for only in that branch.
-        if base is LobbyState.LOBBY and reconnect_visible():
-            return LobbyState.DISCONNECTED
+        # read zero. Paid for only in that branch. The ESC menu over the lobby
+        # arrives disguised the same way and for the same reason (the lobby is
+        # letterboxed whether or not a menu is over it), so both are asked in
+        # this one branch. RECONNECT first: it is the one that means the
+        # session is gone, and a menu over a dead session is still a dead
+        # session.
+        if base is LobbyState.LOBBY:
+            if reconnect_visible():
+                return LobbyState.DISCONNECTED
+            if is_lobby_system_menu():
+                return LobbyState.LOBBY_MENU
         # The inactivity logout dialog spans the full 21:9, covering the
         # letterbox bars and the ping overlay, so it lands in FULLBLEED —
         # alongside the loading screen, which wants the opposite treatment.
@@ -397,5 +467,12 @@ class LobbyDetector:
 
 
 def snapshot():
-    """One-shot state without holding a grabber open. For scripts."""
+    """One-shot state without holding a grabber open. For scripts.
+
+    ⚠ THE TWO CHEAP PROBES ONLY. It cannot return MENU, LOBBY_MENU,
+    DISCONNECTED or ERROR — each of those needs a further grab — so a screen
+    that is one of them comes back as the state it is disguised as. Anything
+    that acts on the answer wants LobbyControl.state(); this is for scripts
+    that print it.
+    """
     return classify(win32_cap(LOBBY_BAR_ROI), win32_cap(LOBBY_PING_ROI))

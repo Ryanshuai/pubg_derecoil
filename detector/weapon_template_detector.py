@@ -32,7 +32,7 @@ TMPL_THRESHOLD = 0.85
 # the nearest wrong answer is either a rounding error or a fifth of the scale.
 TIE_MARGIN = 0.05
 
-TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data', 'ocr_white')
+TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'training_data', 'ocr_white')
 _OPEN_KERNEL = np.ones((3, 3), np.uint8)
 
 

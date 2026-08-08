@@ -384,7 +384,7 @@ class TabGrabber:
         wearing" pays for one block instead of two. The other block is the
         库存/附近 lists, needed only when reading loose items.
         """
-        from detector.cropper import RegionGrabber
+        from capture.cropper import RegionGrabber
         self._blocks = tab_blocks()
         if only is not None:
             missing = set(only) - set(self._blocks)

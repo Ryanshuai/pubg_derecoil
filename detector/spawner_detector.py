@@ -17,9 +17,9 @@ import numpy as np
 from config import (SPAWNER_ICON_ANCHORS, SPAWNER_ICON_W, SPAWNER_ICON_H,
                     SPAWNER_ICON_THRESH, SPAWNER_ICON_SEARCH,
                     SPAWNER_MIN_SCORE)
-from detector.cropper import anchor_box
+from capture.cropper import anchor_box
 
-ASSET_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data',
+ASSET_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'training_data',
                          'pubg_assets')
 TMPL_NAME = 'spawner_icon_{}_mask.png'
 N_ICONS = len(SPAWNER_ICON_ANCHORS)

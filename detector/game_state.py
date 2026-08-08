@@ -175,14 +175,23 @@ class GameState:
         'Muzzle_FlashHider_Large_C': '消焰', 'Muzzle_FlashHider_Medium_C': '消焰',
         'Muzzle_FlashHider_SniperRifle_C': '消焰',
         # Both names: 41.1 replaced the Angled Foregrip with the Tilted Grip,
-        # and the old asset still appears in older captures and in
-        # dl_models/icon_layout.py, whose class ORDER cannot be edited.
+        # and the old asset still appears in older captures. (It was also
+        # pinned by a class list whose ORDER could not be edited; that list
+        # died with the fire-mode CNN on 2026-08-08, so only the captures
+        # keep the old name alive now.)
         'Lower_Foregrip_C': '垂直', 'Lower_TiltedGrip_C': '斜向',
         'Lower_AngledForeGrip_C': '三角(已移除)',
         'Lower_HalfGrip_C': '半截', 'Lower_ThumbGrip_C': '拇指',
         'Lower_LightweightForeGrip_C': '轻型', 'Lower_LaserPointer_C': '激光',
         'Lower_Foregrip_Crossbow': '弩垂', 'Lower_QuickDraw_Large_Crossbow_C': '弩快',
-        'Lower_Sniper_CheekPad_Vss_setting': '腮托', 'Vector_VerGrip': '垂直',
+        'Vector_VerGrip': '垂直',
+        # 枪托。名字取自 attachment_catalog 的 `asset` 字段, 那是检测器实际
+        # 读回来的东西 —— 这五条以前一条都没有, 而 'Lower_Sniper_CheekPad_
+        # Vss_setting': '腮托' 曾经挂在这里, 是个 Lower_(握把槽) 名字, 对不
+        # 上任何一个真实读数。它看起来像覆盖了腮托, 于是没人去补剩下四个。
+        'Stock_SniperRifle_CheekPad_C': '腮托',
+        'Stock_Heavy_C': '加重', 'Stock_AR_Composite_C': '战术',
+        'Stock_SniperRifle_BulletLoops_C': '弹袋', 'Stock_UZI_C': 'UZI托',
     }
 
     def _short(self, name):
@@ -202,5 +211,10 @@ class GameState:
         scope = self._short(w.scope)
         muzzle = self._short(w.muzzle)
         grip = self._short(w.grip)
-        right = f'{scope:>4s} | {muzzle:>5s} | {grip:>5s}'
+        # ⚠ 枪托这一列 2026-08-07 才有, 而 set_seq() 一直在按它算压枪。VSS 装
+        # 上腮托 sum|dy| 从 1696.4 掉到 1292.7 (实测因子 0.762, kit 档), 而状态
+        # 行只有 scope|muzzle|grip 三列, 打出来是一排 `-`。三个槽全空的枪看着
+        # 像裸枪, 补偿却已经按装配后的曲线在发 —— 差 24% 而屏幕上没有出处。
+        butt = self._short(w.butt)
+        right = f'{scope:>4s} | {muzzle:>5s} | {grip:>5s} | {butt:>5s}'
         return f'  {mark} {left:<16s}  {right} | {self.posture}'

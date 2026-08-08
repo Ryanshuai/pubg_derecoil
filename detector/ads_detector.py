@@ -6,12 +6,36 @@ and draws nothing there once they are — no reticle a scope paints is in the
 same place with the same shape. So this asks "is the crosshair still there?"
 and answers the ADS question by negation.
 
-Two crosshairs, not one. Holding the right button is shoulder aim, which is
-still hip fire, and the crosshair tightens when it happens: the four ticks sit
-at ±56 px standing still and pull in while aiming. Matching only the wide one
-reads shoulder aim as scoped, which is exactly the distinction that matters —
-run 20260801_222936 is 64 frames of shoulder aim that a wide-only match called
-ADS. Both templates are tried and the better score wins.
+THE THREE STATES, and this file is the repo's definition of them. PUBG has
+three, not two, and every place in this tree that treated it as two has cost a
+run:
+
+    hip fire      腰射 / 不开镜.  Right button NOT touched. Gun at the hip,
+                  the small centre-dot crosshair is drawn.
+    shoulder aim  肩射 / tactical aim.  Right button HELD. Third person, the
+                  camera pulls in over the shoulder; no first-person sight
+                  picture ever appears. A THIRD STATE — not a kind of hip fire
+                  and not a kind of ADS.
+    ADS           开镜 / Aim Down Sights.  Right button TAPPED (it is a
+                  TOGGLE). Looking through the optic.
+
+Two crosshairs, not one. The crosshair TIGHTENS in shoulder aim: the four
+ticks sit at ±56 px in hip fire and pull in while the button is held. Matching
+only the wide one reads shoulder aim as scoped, which is exactly the
+distinction that matters — run 20260801_222936 is 64 frames of shoulder aim
+that a wide-only match called ADS. Both templates are tried and the better
+score wins.
+
+⚠ THIS ANSWERS "SCOPED OR NOT", NOT "WHICH OF THE THREE". Both crosshair
+templates return the same verdict (not scoped), and score_crop() reports only
+the better of the two, so hip fire and shoulder aim are indistinguishable
+through this API even though the pixels differ. A caller that needs true hip
+fire — control.gun.ensure_hip does, because the pitch is positioned there —
+gets it by RELEASING the button, which is an action, not by reading. Exposing
+the per-template scores would make it readable, but "the tight one won" has
+never been measured AS a discrimination (only as "both are un-scoped"), and a
+gate whose error rate nobody has measured is how three of this project's gates
+came to reject nothing.
 
 Scoring is relative, never absolute. Each template is five blobs (four ticks
 and a centre dot); a frame scores each blob's mean dewhite minus the mean of a
@@ -52,7 +76,7 @@ import numpy as np
 from dl_models.icon_merging import dewhite
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TEMPLATE_PATH = os.path.join(HERE, '..', 'training_data', 'pubg_assets',
+TEMPLATE_PATH = os.path.join(HERE, '..', 'docs', 'training_data', 'pubg_assets',
                              'ads_crosshair.npz')
 
 # The crop is centred on the screen centre and has to hold the outermost tick

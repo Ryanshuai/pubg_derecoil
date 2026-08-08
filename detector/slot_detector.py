@@ -49,7 +49,7 @@ carries scenery too, and the only thing that separates "a part is fitted"
 from everything else is RECOGNISING THE PART.
 
 So occupancy is now a template match, and the numbers say it separates
-cleanly. Re-measured 2026-08-06 (`tools/scan_slot_bleed.py --mse`,
+cleanly. Re-measured 2026-08-06 (`calibration/scan_slot_bleed.py --mse`,
 calibration/scan_bare_tiles.py):
 
     fitted  n=1725   p50 15.4   p90 48.2   p99 535.7   max 14823.8

@@ -1,8 +1,9 @@
 """Tab-screen geometry — where to grab an attachment and where to drop it.
 
 Reference capture: docs/tab_inventory.png (3440x1440, 2026-08-01).
-Measured by temp_debug/probe_tab_layout.py (inventory rows, from the text
-bands) and temp_debug/probe_tab_slots.py (slot boxes, from their borders).
+Measured by two scratch probes (inventory rows from the text bands; slot
+boxes from their borders). Neither is on disk any more, so the constants
+below are the whole record of what they found.
 
 The attachment slots themselves are NOT redefined here — they already exist as
 config.HUD_REGIONS['att_*'] for the detector, and a second copy would be one
@@ -38,7 +39,7 @@ ROW_PITCH = 81.55
 ROW_H = 82
 
 # Icon box, calibrated against AttachmentDetector's own metric rather than
-# eyeballed: temp_debug/calib_inv_icon.py sweeps centre and size over the 12
+# eyeballed: a scratch calibrator (gone) swept centre and size over the 12
 # known rows of docs/tab_inventory.png and keeps what classifies most of them.
 # 80 px is the box that puts the artwork at the same relative size the weapon
 # slots present it at, so the same 63x63 templates apply after a resize.
@@ -223,7 +224,7 @@ def _masks():
         import cv2
         from config import TAB_ANCHOR_LANGS
         d = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..',
-                         'training_data', 'pubg_assets', 'tab')
+                         'docs', 'training_data', 'pubg_assets', 'tab')
         _MASKS = {}
         for lang in TAB_ANCHOR_LANGS:
             m = cv2.imread(os.path.join(d, f'type_header_{lang}.png'),

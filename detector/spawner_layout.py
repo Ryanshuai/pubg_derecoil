@@ -156,7 +156,9 @@ SUBMENU_CENTRE_TOL = 45  # entries are centred; categories are left-aligned
 # clicked column's box. Measured over a full 21-category run: a real expansion
 # moves 489..21096 px (the floor is the last row of a column, whose submenu has
 # two entries and nothing below it to push down), while an untouched column
-# drifts by at most ~75. See tools/probe_mask_diff.py.
+# drifts by at most ~75. The run and both bounds are in docs/spawner/README.md
+# §3 — the 60-line probe that produced them was deleted 2026-08-08, because
+# re-running it can only reprint that table.
 CHANGE_MIN = 200
 
 # How far below its category row the submenu's first entry starts. Measured
@@ -174,7 +176,7 @@ SUBMENU_OFFSET_TOL = 12
 
 # Where a submenu's entries are DRAWN, so they can be clicked without looking
 # for them first. Calibrated over the same 40 ground-truthed frames
-# (tools/probe_panel_state.py), and the panel turns out to be rigid:
+# and the panel turns out to be rigid:
 #
 #   category centre -> first entry centre   44.25 px   sd 0.43
 #   entry pitch                             50.70 px   sd 0.17

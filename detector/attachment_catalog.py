@@ -8,7 +8,7 @@ Two independent things live here, kept apart on purpose because they have very
 different confidence:
 
   ROSTER / ATTACHMENTS  — measured. Read straight off the training-range item
-      spawner on 2026-08-01 (temp_debug/spawner_scrape/20260801_210656), which
+      spawner on 2026-08-01 (a scrape run on 2026-08-01, no longer on disk), which
       is by definition the live build's item list.
 
   SLOTS                 — measured, all 40. calibration/scan_compat.py:
@@ -163,7 +163,7 @@ ROSTER = {
 # A FEW STEMS ARE OURS, NOT THE GAME'S, and they are marked `# recovered`. The
 # game added these attachments after the art dump this repo unpacked, so there
 # is no shipped file to name them after — the only picture of them is the one
-# tools/solve_template.py recovers off the screen. The stem still has to start
+# calibration/solve_template.py recovers off the screen. The stem still has to start
 # with the slot's prefix, because AttachmentDetector.SLOT_PREFIXES routes on it.
 #
 # THE ALTERNATIVE WAS LEAVING THEM None, AND None IS NOT NEUTRAL. A key with no
@@ -469,16 +469,43 @@ EXCLUDE = {
     'groza': {'comp_ar', 'flash_ar', 'brake_ar'},   # suppressor is its only muzzle
     'tommy': {'comp_smg', 'flash_smg'},             # suppressor only
     # CONFIRMED BY HAND 2026-08-04. Two harvest cells failed to fit it and both
-    # recorded `reads ''` -- the part never landed at all, which is a different
-    # signature from the mp5k/scope_4x strikes recorded the same evening, where
-    # the slot read a red dot because the run had bolted one on and mislabelled
-    # it. That pair was this project's bug and was cleared; this one was tried
-    # in the game and the grip will not go on.
+    # recorded `reads ''` -- the part never landed at all. It was then tried in
+    # the game by hand and the grip will not go on.
     #
-    # Cost to the recoil work: tilted_grip is measured on the mp5k alone
-    # (0.809), with no second weapon to repeat it on. vert_grip and half_grip
-    # both have an mp5k/vector pair.
+    # ⚠ The cost recorded here used to be "tilted_grip is measured on the mp5k
+    # alone (0.809), with no second weapon to repeat it on". THAT COST IS PAID:
+    # the m762 measures 0.8169 ± 0.0210 (2026-08-05), 0.4σ from the mp5k. The
+    # vector is still excluded; the cross-weapon repeat just came from a third
+    # gun instead. It is the only grip in the set with one.
     'vector': {'tilted_grip'},
+    # MEASURED 2026-08-05, and it RETRACTS what this table claimed the day
+    # before. The retracted sentence, which sat right here: "the mp5k/scope_4x
+    # strikes ... the slot read a red dot because the run had bolted one on and
+    # mislabelled it. That pair was this project's bug and was cleared."
+    #
+    # It was not cleared. The strikes were real and the red dot was PUBG's
+    # autofit, not a mislabelled run. What settles it is a POSITIVE CONTROL in
+    # the same session 3.5 minutes apart -- same code path, same slot, same
+    # starting condition (a red dot the spawner had autofitted):
+    #
+    #   aug  + scope_4x   red_dot -> Upper_ACOG_01_C   ok    (drag journal 489)
+    #   mp5k + scope_4x   red_dot -> red_dot           MISS  (journal 490, 491)
+    #
+    # and the journal says the gesture was clean on both misses: cursor placed
+    # on the first try, `grab±0` (zero offset from the intended point), plate
+    # 889 -> 898 (the gun never left the rack). A clean gesture the game does
+    # not accept is a refusal -- which is exactly why the journal records the
+    # geometry next to the outcome instead of just the outcome.
+    #
+    # ⚠ SO "the slot reads the OLD part" IS A THIRD FAILURE SIGNATURE, next to
+    # `reads ''` (never landed) and `reads '?'` (landed but unnameable). It is
+    # the one that looks most like a bug in this project, and telling it apart
+    # takes a same-session control -- not a re-reading of the logs, which is
+    # what produced the retracted sentence.
+    #
+    # This is measurement-only; no wiki claim was consulted either way. One
+    # hand-drag of a 4x onto an mp5k refutes it if it is wrong.
+    'mp5k':  {'scope_4x'},
 }
 
 # The other direction: an attachment whose class list is wider than the set of

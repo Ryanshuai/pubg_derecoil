@@ -48,7 +48,7 @@ from detector.geometry import detail
 
 SLOT_NAMES = ['scope', 'muzzle', 'grip', 'magazine', 'stock']
 
-TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'training_data',
+TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'training_data',
                         'pubg_assets', 'Item', 'Attachment')
 
 TMPL_SIZE = 48

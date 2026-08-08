@@ -13,9 +13,8 @@ the 254 labelled pairs in training_data/highlight_eval and contributed
 NOTHING: 254/254 with it, 254/254 without, and 6x faster without (0.60 ms per
 pair against 3.6). The ALIGN_JITTER knob it was wired through went with it —
 that knob's own comment already recorded three jitter settings scoring
-identically. Regression: temp_debug/eval_highlight_jitter.py.
+identically. Regression: `pixi run highlight` (254/254, 26 weapons). The paired-jitter evaluation that first established this lived in a scratch dir and is gone.
 """
-import cv2
 import numpy as np
 
 # 同一个算子在这里曾经有第二份逐字相同的实现（`_dewhite`）：高斯背景估计、减、

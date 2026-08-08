@@ -2,7 +2,27 @@ import os
 import numpy as np
 import json
 
-CURVE_DIR = os.path.join(os.path.dirname(__file__), '..', 'docs', 'recoil', 'curves')
+import config
+
+# ⚠ UNDER calibration/, NOT under docs/, AND THAT IS THE POINT.
+#
+# calibration/CLAUDE.md says every product goes to docs/ and never next to the
+# source. That rule is right for MEASUREMENTS -- 2.7 GB of frames and runs that
+# nothing should version. Curves are not measurements. They are the ARTIFACT
+# the runtime loads: control/match.py calls upload_pattern() on every weapon,
+# attachment and posture change, and with no curve the tool simply does not
+# compensate.
+#
+# docs/ is line 19 of .gitignore in its entirety, so the old docs/recoil/curves/
+# had no history at all. On 2026-08-08 it was deleted during a cleanup and every
+# weapon's curve went with it -- 40 guns, unrecoverable, while `git status`
+# stayed clean because git had never heard of the directory. There was nothing
+# to revert to.
+#
+# So: measurements -> docs/ (gitignored, regenerable by re-measuring).
+#     artifacts the runtime loads -> calibration/artifact/ (versioned).
+CURVE_DIR = os.path.join(os.path.dirname(__file__), '..',
+                         'calibration', 'artifact', 'curves')
 
 
 # Weapon RPM (rounds per minute) from PUBG Wiki -- a STARTING GUESS, not a
@@ -101,14 +121,138 @@ def load_curves():
     places to forget when the format moves.
     """
     out = {}
+    # ⚠ A MISSING CURVE_DIR USED TO TAKE THE WHOLE PROCESS DOWN, from inside
+    # Weapon.__init__ -- so nothing that builds a Weapon could even start, and
+    # the traceback pointed at os.listdir rather than at the fact that
+    # docs/recoil/curves/ is gitignored and therefore one `rm` from gone.
+    # Happened 2026-08-08. Returning {} is not a silent fallback: every caller
+    # then gets an empty pattern, and arm() has always refused that.
+    if not os.path.isdir(CURVE_DIR):
+        print(f'[curves] {CURVE_DIR} does not exist — no compensation curve '
+              f'for any weapon. docs/ is gitignored, so this directory has no '
+              f'history to restore from; the imported curves come from the '
+              f'upstream pattern repo named in each file\'s `source` field, '
+              f'and anything fitted here is gone.', flush=True)
+        return out
     for fname in os.listdir(CURVE_DIR):
         if not fname.endswith('.json'):
+            continue
+        # ⚠ BACKUPS ARE NOT CURVES, AND THEY CLAIM THE SAME NAME. write_curve
+        # keeps a timestamped copy per EMA step -- `m416_att.0807_030635.bak
+        # .json` -- and the copy's own `weapon` field still says `m416_att`.
+        # This function keys on that field, not on the filename, so every
+        # backup overwrites the live entry and the winner is whichever one
+        # os.listdir happens to yield last.
+        #
+        # Measured 2026-08-07: 1080 files in the directory, 991 of them
+        # backups, and `m416_att.json` came out at position 253 of the 255
+        # that claim `m416_att`. It wins only because '0' sorts before 'j' --
+        # a naming coincidence, not a design. One backup named differently, or
+        # one filesystem that enumerates in another order, and the live
+        # compensation fires a curve from hours ago while every log looks
+        # normal and the only symptom is "it does not hold the gun down".
+        #
+        # It is also 92% of the read: skipping them takes load_curves from
+        # 163 ms to ~13 ms, which is what makes reloading per burst affordable
+        # at all (see Weapon._hot_reload).
+        if fname.endswith('.bak.json'):
             continue
         with open(os.path.join(CURVE_DIR, fname), 'r') as f:
             data = json.load(f)
         weapon = data['weapon']          # e.g. 'akm' or 'akm_att'
         out.setdefault(weapon, {})[data.get('stance', 'standing')] = \
             data['shots']
+    return out
+
+
+def config_key(config):
+    """The filename fragment a (weapon, attachments) pair is stored under.
+
+    Deliberately the SAME function as calibration.samples.config_key, expressed
+    here so detector/ does not import calibration/. If the two ever disagree,
+    the curve a magazine was fitted from stops being findable by the runtime
+    that has to fire it -- which is silent, because the lookup just misses.
+    """
+    if not config:
+        return 'bare'
+    items = sorted((str(k), str(v)) for k, v in config.items() if v)
+    return '_'.join(f'{k}-{v}' for k, v in items) or 'bare'
+
+
+# One line per unmeasured configuration, not one per keypress: set_seq runs
+# on every weapon, attachment and posture change.
+def _sight_of(scope_asset):
+    """Which RECOIL_SIGHT_PROFILES entry an equipped optic corresponds to.
+
+    The curve store keys on the profile name because that is what carries K,
+    and K is what a count is worth. `''` is not "no sight, so red dot" -- an
+    empty scope slot means the player is looking down iron sights or hip
+    firing, where a count rotates the view about a third as far.
+    """
+    if not scope_asset:
+        # ⚠ AN EMPTY SCOPE SLOT IS NOT A RED DOT. _SCOPE_TO_MAG maps '' to
+        # magnification 1, which is true and misleading: iron sights are 1x
+        # but they are not the red dot's sensitivity, and this function keys
+        # the CURVE, not the zoom. Returning 'red_dot' here handed the red
+        # dot's 895-count curve to a gun with no optic at all.
+        return 'iron'
+    mag = _SCOPE_TO_MAG.get(scope_asset, 1)
+    return {1: 'red_dot', 2: '2x', 3: '3x', 4: '4x',
+            6: '6x', 8: '8x', 15: '15x'}.get(mag, 'red_dot')
+
+
+_MISSING_SAID = {}
+
+
+def load_final_curves():
+    """{(weapon, config_key, posture): shots} for MODEL.md's fitted curves.
+
+    A "final" curve is one whose dy values are the mouse counts to send, full
+    stop. It carries no scale, no attachment factor and no posture factor,
+    because it was fitted from magazines fired on exactly that gun in exactly
+    that configuration -- those factors are already IN it.
+
+    ⚠ THAT IS WHY THEY CANNOT SHARE A LOOKUP WITH THE OLD CURVES. The old ones
+    are raw patterns that set_seq multiplies by scope x naked_scale x
+    attachment x posture on the way out. Running a fitted curve through the
+    same path multiplies the answer by the factors a second time; on the m416
+    measured 2026-08-08 that is 895 counts of truth turned into 1521 of
+    compensation, which is the 71% over-compensation the fit was measured
+    against in the first place.
+
+    ⚠ AND A MISS RETURNS NOTHING RATHER THAN A NEIGHBOUR. Under plan A there is
+    one curve per attachment combination and no interpolation between them, so
+    an m416 with a compensator has nothing to say about an m416 without one.
+    Falling back to "some other m416 curve" is exactly the error that made the
+    shipped curve fire a bare-gun pattern at an attachment-laden gun.
+    """
+    out = {}
+    if not os.path.isdir(CURVE_DIR):
+        return out
+    for fname in os.listdir(CURVE_DIR):
+        if not fname.endswith('.json') or fname.endswith('.bak.json'):
+            continue
+        with open(os.path.join(CURVE_DIR, fname), encoding='utf-8') as f:
+            data = json.load(f)
+        if not data.get('shots'):
+            continue
+        # ⚠ THE SIGHT IS PART OF THE KEY, and leaving it out is a bug this
+        # repository has already paid for once. PUBG scales ADS sensitivity
+        # with magnification, so the counts needed to cancel the same angular
+        # recoil scale with it too: K is 0.5 hip-firing, 1.5474 on a red dot,
+        # 1.885 on a 4x. A curve fitted at the red dot, played while hip
+        # firing, is out by a factor of three.
+        #
+        # `build_weapon` never setting `scope` cost every magnification above
+        # 1x its compensation until 2026-08-05 (aug at 4x: +265% residual,
+        # presenting as "the correlator lost the view"). The first version of
+        # THIS lookup, written 2026-08-08, keyed on (weapon, config, posture)
+        # and reintroduced exactly that -- with the sight sitting right there
+        # in the file it was reading.
+        key = (data['weapon'], config_key(data.get('config')),
+               data.get('posture', data.get('stance', 'standing')),
+               data.get('sight', 'red_dot'))
+        out[key] = data['shots']
     return out
 
 
@@ -127,6 +271,7 @@ class BulletCalculator:
         # stance: 'standing', 'crouching'
         # gun_name may end with '_att' for attachment variant
         self.recoil_data = load_curves()
+        self._final = load_final_curves()
 
     def reload(self):
         """Re-read the curve files.
@@ -137,6 +282,7 @@ class BulletCalculator:
         never close.
         """
         self.recoil_data = load_curves()
+        self._final = load_final_curves()
 
     def calculate_press_seq(self, gun_name, factor, stance='standing', has_att=False):
         """Return (dx_s, dy_s, t_s) arrays for press.py.
@@ -173,7 +319,9 @@ class BulletCalculator:
         t_s = np.array(t_s)
         return dx_s, dy_s, t_s
 
-SCALES_PATH = os.path.join(os.path.dirname(__file__), '..', 'press', 'weapon_scales.json')
+# config, not a '..' into press/ -- see config.WEAPON_SCALES_PATH for what
+# that path was claiming and why it was wrong.
+SCALES_PATH = config.WEAPON_SCALES_PATH
 
 def _load_scales():
     if os.path.exists(SCALES_PATH):
@@ -193,7 +341,7 @@ _weapon_scales = _load_scales()
 # ── Per-weapon posture factors ───────────────────────────
 # Structure: {"akm": {"crouching": 0.8, "prone": 0.5}, ...}
 # standing is always 1.0 (not stored).
-POSTURE_SCALES_PATH = os.path.join(os.path.dirname(__file__), '..', 'press', 'posture_scales.json')
+POSTURE_SCALES_PATH = config.POSTURE_SCALES_PATH
 
 # Default posture factors by weapon type
 _POSTURE_DEFAULTS = {
@@ -247,6 +395,10 @@ class Weapon():
         self.dy_s = []
         self.bullet_interval_s = 0.1  # default 600 RPM
         self.bullet_calculator = BulletCalculator()
+        # Plan A's lookup: one fitted curve per exact attachment
+        # combination. Read once per Weapon; _hot_reload refreshes it
+        # alongside the raw curves so a refit lands without a restart.
+        self._final = load_final_curves()
 
     def set(self, pos, state):
         if pos == 'name':
@@ -325,9 +477,38 @@ class Weapon():
         _save_scales(_weapon_scales)
         _save_posture_scales(_posture_scales)
 
+    _curves_stamp = None
+
     def _hot_reload(self):
-        """Reload curves from disk so edits take effect immediately."""
+        """Re-read the curves IF any of them changed. Cheap when they did not.
+
+        ⚠ THE POINT IS THAT A MEASURED CURVE REACHES THE GAME WITHOUT A
+        RESTART. A night of --apply passes writes better curves every
+        magazine, and a live process that loaded them at startup keeps firing
+        the ones it read hours ago -- which is indistinguishable, from the
+        player's side, from the calibration not having worked. Asked for on
+        2026-08-07: "每次开枪都是最新的曲线".
+        A DIRECTORY STAT, NOT A RE-READ. set_seq() runs on every weapon,
+        attachment and posture change, so an unconditional reload put 163 ms
+        of file I/O on that path and is why this sat behind a debug flag.
+        The newest mtime in the directory answers "did anything change" in one
+        syscall; only when it moves is anything parsed.
+        """
+        try:
+            stamp = max(os.path.getmtime(os.path.join(CURVE_DIR, f))
+                        for f in os.listdir(CURVE_DIR)
+                        if f.endswith('.json') and not f.endswith('.bak.json'))
+        except (OSError, ValueError):
+            stamp = None
+        if stamp is not None and stamp == Weapon._curves_stamp:
+            return
+        Weapon._curves_stamp = stamp
         self.bullet_calculator.reload()
+        # The fitted curves live in the same directory and are
+        # the ones a refit actually rewrites, so reloading only
+        # the raw ones would hot-reload everything except the
+        # thing that changes.
+        self._final = load_final_curves()
 
     def set_seq(self):
         import config as _cfg
@@ -337,10 +518,47 @@ class Weapon():
         posture_f = _get_posture_factor(self.name, self.type, self.posture)
 
         if self.type in ['ar', 'smg', 'mg', 'dmr', 'shotgun']:
+            # PLAN A: one fitted curve per exact attachment combination, no
+            # interpolation between them. When this gun's combination has been
+            # measured, that curve IS the answer -- emitted with NO factors,
+            # because scope, scale, attachments and posture are all already
+            # baked into the counts it was fitted from.
+            cfg = {'muzzle': self.muzzle, 'grip': self.grip,
+                   'stock': self.butt}
+            sight = _sight_of(self.scope)
+            shots = self._final.get((self.name, config_key(cfg),
+                                     self.posture, sight))
+            if shots:
+                t = 0.0
+                self.t_s, self.dx_s, self.dy_s = [], [], []
+                for i, s in enumerate(shots):
+                    if i:
+                        t += s['delay_ms'] / 1000.0
+                    self.t_s.append(t)
+                    self.dx_s.append(float(s['dx']))
+                    self.dy_s.append(float(s['dy']))
+                return
+            # ⚠ NO FALLBACK TO ANOTHER COMBINATION. Under plan A a miss means
+            # this configuration has not been measured, and the honest output
+            # is no compensation rather than another gun's answer. The old
+            # path's fallback is what fired a bare-gun curve at a gun wearing a
+            # compensator, a foregrip and a stock -- 1521 counts against 895 of
+            # real recoil, and nothing anywhere said so.
+            said = (self.name, config_key(cfg), self.posture, sight)
+            if not _MISSING_SAID.get(said):
+                _MISSING_SAID[said] = True
+                print(f'[curves] no fitted curve for {self.name} '
+                      f'{config_key(cfg)} {self.posture} {sight} — NOT '
+                      f'compensating. Measure it with `pixi run collect-timed '
+                      f'--weapon {self.name} --sight {sight}`.', flush=True)
+            self.dx_s, self.dy_s, self.t_s = [], [], []
+            return
+
             from detector.weapon_attachments import calibration_factor, attachment_factor
             # Reverse calibration to get naked scale, then apply current attachments
             cal_f = calibration_factor(self.name)
-            att_f = attachment_factor(self.name, self.muzzle, self.grip)
+            att_f = attachment_factor(self.name, self.muzzle, self.grip,
+                                      self.butt, self.posture)
             naked_scale = self.scale / cal_f
             factor = self.scope_factor * naked_scale * att_f * posture_f
 

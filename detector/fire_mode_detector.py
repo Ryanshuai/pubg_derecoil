@@ -1,21 +1,54 @@
-"""Fire mode detector — DL model + RF structural verification.
+"""Fire mode detector — a RandomForest over eight structural features.
 
-RF is more reliable; used as output when both have a result.
+⚠ THERE WAS A 4 MB MobileNet HERE UNTIL 2026-08-08, and it went because it was
+measured, not because it felt old. It sat behind the forest as a fallback ("RF
+first, and only fall through to the net when it abstains"), and on the whole
+docs/mismatch/fire_mode corpus — 859 crops, every one of them a case somebody
+collected BECAUSE something disagreed — this is what the fallback did:
+
+    RF abstained (said 'bg')                    3 / 859   0.35%
+    of those, the net gave a real answer        2 / 859   0.23%
+                                                (the third agreed: also 'bg')
+
+Two answers out of 859, on a corpus deliberately stocked with hard cases. For
+that it cost a torch forward pass on the frame path, a 4 MB checkpoint, 376 MB
+of background plates and 12 MB of labelled crops to train on, and it kept torch
+in the detector import graph — robot.py's device line existed for this class
+alone.
+
+⚠ THE HONEST LIMIT ON THAT NUMBER: docs/mismatch/fire_mode is a mismatch and
+hard-case sink, not a representative frame sample (87.8% of it reads
+single_bot_sniper). The abstention rate on ordinary frames is probably lower
+still, but nobody has an unbiased sample, so 0.35% is a ceiling measured on the
+hard cases rather than an average over play.
+
+WHAT THIS COSTS. Those two frames now return None instead of a mode. None is
+already the "not readable" answer every caller handles — the HUD does not draw
+this icon at all in plenty of states — so the failure is the one the interface
+was built for, not a new one.
+
+THE FEATURES, and why they are not a bag of whatever was handy: the icon is
+either a STACK OF BARS (full auto, burst) or a BULLET SILHOUETTE (single,
+sniper, shotgun). `big_comp` counts components over 20 px — bars give >= 6,
+a bullet <= 5 — and `bright_bars` measures the same thing radiometrically by
+splitting the crop into five horizontal strips. The rest (contour area, extent,
+aspect, mean/std, bar_range) separate within those two families.
 """
 import os
 import pickle
 
 import cv2
-import torch
-import torch.nn.functional as F
 
-from detector.utils import load_model as _load, crop_to_tensor_4ch
-from dl_models.icon_layout import FIRE_MODE_CLASSES
+# The vocabulary. It lived in dl_models/icon_layout.py until 2026-08-08, where
+# a comment warned its ORDER could not be edited — that was true while a
+# softmax head's indices were derived from it. The forest predicts these as
+# STRINGS, so the order is now just presentation, and the list lives with its
+# only consumer.
+FIRE_MODE_CLASSES = ['single', 'burst2', 'burst3', 'full', 'single_sniper',
+                     'single_shotgun', 'high', 'single_smoke']
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'dl_models', 'fire_mode.pth.tar')
-HEAD_SIZES = {'fire_mode': len(FIRE_MODE_CLASSES) + 1}
-
-_RF_PATH = os.path.join(os.path.dirname(__file__), '..', 'dl_models', 'fire_mode_structural_rf.pkl')
+_RF_PATH = os.path.join(os.path.dirname(__file__), '..', 'dl_models',
+                        'fire_mode_structural_rf.pkl')
 _rf_model = None
 
 
@@ -66,27 +99,23 @@ def _structural_classify(crop):
 
 class FireModeDetector:
 
-    def __init__(self, device):
+    def __init__(self, device=None):
+        """`device` is accepted and ignored.
+
+        It was a torch device until 2026-08-08. Kept in the signature because
+        robot.py and regression_check pass it positionally, and removing the
+        parameter is a separate edit from removing the model — doing both at
+        once is how a caller ends up passing a crop as a device.
+        """
         self.device = device
-        self.model = _load(MODEL_PATH, HEAD_SIZES, device, in_channels=4)
 
     def classify(self, crops):
         """Classify fire mode from crop dict. Returns mode string or None."""
         crop = crops.get('fire_mode') if isinstance(crops, dict) else crops
         if crop is None:
             return None
-
-        # RF first, and only fall through to the net when it abstains. The
-        # result was already "RF unless it says bg", so running the forward
-        # pass up front just paid for a tensor upload and a GPU sync whose
-        # answer was then thrown away on most frames.
-        rf_name = _structural_classify(crop)
-        if rf_name and rf_name != 'bg':
-            return rf_name
-
-        t = crop_to_tensor_4ch(crop, self.device)
-        with torch.no_grad():
-            out = self.model(t)
-        idx = F.softmax(out['fire_mode'][0], dim=0).argmax().item()
-        model_name = FIRE_MODE_CLASSES[idx - 1] if idx > 0 else 'bg'
-        return model_name if model_name != 'bg' else None
+        name = _structural_classify(crop)
+        # 'bg' is the forest saying the icon is not there (or not readable).
+        # That IS None to every caller — see the module docstring for what used
+        # to happen next and what it was worth.
+        return str(name) if name and name != 'bg' else None

@@ -1,9 +1,16 @@
-"""Shared utilities for all detectors."""
+"""Shared utilities for all detectors.
+
+⚠ THIS FILE USED TO PULL IN torch. `load_model` built the MultiHeadMobileNet
+that FireModeDetector loaded, and `crop_to_tensor_4ch` fed it; both went on
+2026-08-08 with the model itself (the numbers are in
+detector/fire_mode_detector.py's docstring — the net answered 2 frames in 859).
+
+That is why one shared helper module importing torch mattered: EVERY detector
+imports this file, so a torch import here put torch on the import path of the
+offline regression suite, of tools/ scripts that only wanted img_hash, and of
+anything that touched a detector at all. One line, whole-graph reach.
+"""
 import cv2
-import numpy as np
-import torch
-from dl_models.train import MultiHeadMobileNet
-from dl_models.icon_merging import dewhite
 
 
 def img_hash(img, length=6):
@@ -12,21 +19,3 @@ def img_hash(img, length=6):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
     resized = cv2.resize(gray, (16, 16), interpolation=cv2.INTER_AREA)
     return hashlib.md5(resized.tobytes()).hexdigest()[:length]
-
-
-def load_model(path, head_sizes, device, in_channels=3, hidden_dim=128):
-    """Load a MultiHeadMobileNet model from checkpoint."""
-    model = MultiHeadMobileNet(head_sizes, in_channels=in_channels, hidden_dim=hidden_dim).to(device)
-    model.load_state_dict(torch.load(path, map_location=device, weights_only=True))
-    model.eval()
-    return model
-
-
-def crop_to_tensor_4ch(crop, device):
-    """BGR uint8 (H,W,3) -> (1,4,H,W) float32 tensor (BGR + dewhite)."""
-    dw = dewhite(crop)
-    bgrd = np.dstack([crop, dw])
-    t = torch.from_numpy(
-        bgrd.transpose(2, 0, 1).astype(np.float32) / 255.0
-    )
-    return t.unsqueeze(0).to(device)
