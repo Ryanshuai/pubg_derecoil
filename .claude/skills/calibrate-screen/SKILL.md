@@ -85,7 +85,7 @@ Pick UI furniture that exists on **no other screen** (buttons, a header). Then c
 - **Opaque?** Same pixels across ≥3 screenshots with *different scenes behind them*. Bright parts of the spawner buttons moved ≤6 grey levels; their dark parts moved up to 86 — those are alpha-blended and must stay out of the template.
 - Threshold at whatever separates the opaque part, mask it, `matchTemplate` in a small window around a fixed anchor.
 
-`tools/probe_button_icons.py` does exactly these measurements; copy it.
+docs/spawner/README.md §4 is a worked example of exactly these measurements — three captures, three numbers, and what each one rules out.
 
 Report the separation, not just "it works": the spawner anchor scores 0.989–1.000 on 24 positives and 0.000 on gameplay negatives, hence a 0.55 threshold.
 
@@ -112,7 +112,7 @@ the strokes are there.
 `类型` in the old captures and `Type` in the current client. Each scores the
 other at 0.27 — below the brightest negative — so a single-language anchor
 reads "closed" forever after a language switch, silently. Score the best of
-several masks: `training_data/pubg_assets/tab/type_header_{zh,en}.png`,
+several masks: `docs/training_data/pubg_assets/tab/type_header_{zh,en}.png`,
 rebuilt by `tools/probe_tab_anchor.py --write`.
 
 ## Step 2.5 — one element usually needs two windows
@@ -238,7 +238,7 @@ When a screen's list and a code table disagree, **fix the mapping in the driver,
 
 ## Step 7 — write it down
 
-`docs/<screen>/README.md`: every threshold with the measurement that justifies it, the traps hit, and the commands to re-run offline. Keep the captures under `docs/`, not `temp_debug/` — later work builds on them.
+`docs/<screen>/README.md`: every threshold with the measurement that justifies it, the traps hit, and the commands to re-run offline. Keep the captures under `docs/` — later work builds on them.
 
 Any game behaviour discovered along the way (a click having a side effect, a key being swallowed by the UI) goes in `docs/game_quirks.md`, not here.
 
@@ -253,4 +253,4 @@ Any game behaviour discovered along the way (a click having a side effect, a key
 - The game truncates its own long labels (`后坐补偿器 (突击步枪、精确射手...`). That is not a detection bug.
 - PowerShell's `Get-Content`/`Set-Content` read UTF-8 source as system ANSI and will mojibake every Chinese comment in the file. Use the Edit tool or Python for any file with non-ASCII.
 - All coordinates are **3440x1440**. Never 3840x2160.
-- Do NOT delete anything in `temp_debug/`.
+- Scratch output goes to `docs/debug/`. `temp_debug/` no longer exists.

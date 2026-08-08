@@ -78,7 +78,7 @@ were another part's.
 **The check: spawn one of every entry in the category into a level-3 backpack,
 Tab, capture the FULL screen, and read the names.** The 库存 list prints the
 item name beside each row, so one screenshot names the whole category in order.
-Use `detector.cropper.capture_screen()` — `InventoryControl.frame()` is a
+Use `capture.cropper.capture_screen()` — `InventoryControl.frame()` is a
 banded grab that cuts the labels off, and a wrong crop invents things.
 
 A part scoring `<nothing>` on *every* sample in `pixi run attachments` is the
@@ -101,7 +101,7 @@ screen or it does not exist yet.
 
 The cost is real and was accepted: an asset holding only `.solved` has no
 row-scale picture, so `scope_6x` and `uzi_stock` lost their 库存 rows outright.
-Collect `.row` for them (see `tools/score_attachments.py: BASELINE`).
+Collect `.row` for them (see `calibration/score_attachments.py: BASELINE`).
 
 ## Step 0 — check what is known
 
@@ -109,7 +109,7 @@ Collect `.row` for them (see `tools/score_attachments.py: BASELINE`).
 `dl_models/icon_merging.py` for blend formulas — each function there carries
 its verified parameters in its docstring. `config.ASSET_DIR` maps icon type →
 directory, but not every directory is listed (`posture/`, `ammo/`, `lobby/`
-are not), so also `ls training_data/pubg_assets/`. Existing captures:
+are not), so also `ls docs/training_data/pubg_assets/`. Existing captures:
 `docs/attachments/runs/*/`, `docs/spawner/runs/*/`, `docs/tab_inventory*.png`.
 
 ## Step 1 — get the pictures
@@ -231,7 +231,7 @@ is usually a C that was never done.
 ## Step 2 — cut it
 
 **icon.** First find which pixels are stable, across those different-scene
-captures (`tools/probe_button_icons.py` does this):
+captures (docs/spawner/README.md §4 is a worked example):
 
 - *achromatic?* `|max-min|` over BGR ≤2 → a grey or binary template is safe.
 - *opaque?* spread across scenes. The spawner buttons' bright pixels moved ≤6 grey levels; their dark parts moved up to **86** — those are alpha-blended and carry the scene through, so a template including them tracks the background and matches nowhere else.
@@ -260,13 +260,13 @@ frame and the best wins, so a mid-run language switch still reads with no flag
 anywhere:
 
 ```
-training_data/ocr_white/slr.png      sole or default
-training_data/ocr_white/slr.cn.png   自动装填步枪
-training_data/ocr_white/slr.en.png   SLR
+docs/training_data/ocr_white/slr.png      sole or default
+docs/training_data/ocr_white/slr.cn.png   自动装填步枪
+docs/training_data/ocr_white/slr.en.png   SLR
 ```
 
 ~1 ms per extra template over a 250x45 plate, on Tab frames only. Templates
-live in `training_data/ocr_white/` (plates) and `training_data/pubg_assets/`
+live in `docs/training_data/ocr_white/` (plates) and `docs/training_data/pubg_assets/`
 (icons and digits, by subdirectory).
 
 ## Step 4 — score against everything, not just itself
@@ -276,7 +276,7 @@ Run the whole set against the whole set and read the **margin**, not the top
 score — a thin margin is a future misread.
 
 - text: correct match ≥0.85 (`TMPL_THRESHOLD`)
-- icon: report separation the way `tools/probe_icon_threshold.py` does — the spawner anchors score 0.989–1.000 on 24 positives and 0.000 on negatives, hence 0.55 with room both sides
+- icon: report separation the way docs/spawner/README.md §4 does — the spawner anchors score 0.989–1.000 on 24 positives and 0.000 on negatives, hence 0.55 with room both sides
 - digit: `probe_ammo_ocr.py --confusion`, then the offline sweep with no flags, then `--selftest`
 
 **A missing template does not read as nothing — it reads as the nearest
@@ -311,5 +311,5 @@ language switch is a checklist and not a debugging session.
 - The posture icon renders **only in ADS**, so its with_ui/no_ui pair must be captured while aiming.
 - `IMREAD_GRAYSCALE` does not guarantee one channel — anything importing ultralytics replaces `cv2.imread`. Guard loads with `if img.ndim == 3: img = img[:, :, 0]`.
 - All coordinates are **3440x1440**.
-- Visualisations go under `docs/<icon_type>/`. Do NOT delete anything in `temp_debug/` — it is training data.
+- Visualisations go under `docs/<icon_type>/`; scratch output goes to `docs/debug/`. There is no `temp_debug/` any more — it was a never-delete scratch dir that grew for eight months until a third of it asked questions about a coordinate system that had been removed.
 - PowerShell's `Get-Content`/`Set-Content` mojibake UTF-8; use the Edit tool or Python for files with Chinese.

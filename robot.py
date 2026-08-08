@@ -14,8 +14,6 @@ try:
 except (AttributeError, OSError):
     pass
 
-import torch
-
 from detector.game_state import GameState
 from detector.weapon_hud_detector import WeaponHudDetector
 from detector.fire_mode_detector import FireModeDetector
@@ -24,17 +22,17 @@ from detector.highlight_detector import HighlightDetector
 from detector.tab_detector import TabTypeDetector
 from detector.weapon_template_detector import TabWeaponDetector
 from detector.attachment_detector import AttachmentDetector
-from screen_capture import ScreenCapture
-from key_poller import KeyPoller
+from capture.screen_capture import ScreenCapture
+from capture.key_poller import KeyPoller
 from control.match import Dispatcher
 
 
 class Robot:
     def __init__(self):
         self.state = GameState()
-        # Only FireModeDetector still wants torch; every other detector here
-        # is template matching or plain pixels.
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        # ⚠ There was a `device = torch.device(...)` here until 2026-08-08.
+        # FireModeDetector was the last torch user in the whole detector graph,
+        # and it is a RandomForest now. Nothing on the frame path imports torch.
 
         # Components
         self.capture = ScreenCapture()
@@ -43,7 +41,7 @@ class Robot:
 
         # Register detectors
         self.dispatcher.register('weapon_hud', WeaponHudDetector())
-        self.dispatcher.register('fire_mode', FireModeDetector(device))
+        self.dispatcher.register('fire_mode', FireModeDetector())
         self.dispatcher.register('posture', PostureDetector())
         self.dispatcher.register('highlight', HighlightDetector())
         self.dispatcher.register('tab_type', TabTypeDetector())

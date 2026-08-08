@@ -10,9 +10,15 @@
 剩下两件，而且它们不是同一类东西：
 
     dewhite            **不是 blend**，是一个检测通道：减去估计背景、提取白色信号。
-                       十处 import 它（detector ×3、calibration ×3、dl_models ×1、
-                       temp_debug ×3），是这个文件唯一还被广泛用到的东西。
-    blend_status_bar   真正的合成，唯一调用方是 icon_layout（火力模式条的训练数据）。
+                       六处 import 它（detector ×3、calibration ×3），是这个文件
+                       现在**唯一**的内容。
+
+⚠ **2026-08-08，`blend_status_bar` 也删了**：它唯一的调用方 `icon_layout.py` 是
+火力模式 CNN 的训练数据合成，而那个 CNN 在 859 张语料上只裁决了 2 张，跟它的
+4 MB checkpoint、391 MB 背景板和整条 torch 依赖一起退场了（数字在
+`detector/fire_mode_detector.py` 顶部）。**同一个形状第三次**：美术图删了 →
+`blend_attachment` 那 120 行死了；模型删了 → `blend_status_bar` 死了。
+**合成代码的寿命等于它那类输入的寿命。**
 
 ⚠ **十个消费者里六个在推理侧**（detector / calibration），而这个文件在训练侧。
 `dewhite` 的家其实应该在 `detector/`，搬它要动十个文件，还没做。
@@ -31,21 +37,3 @@ def dewhite(img_bgr):
     bg_est = cv2.GaussianBlur(img_bgr.astype(np.float32), (31, 31), 10)
     signal = np.clip((img_bgr.astype(np.float32) - bg_est) * 2, 0, 255)
     return cv2.cvtColor(signal.astype(np.uint8), cv2.COLOR_BGR2GRAY)
-
-
-def blend_status_bar(canvas, icon_alpha_mask, x, y, blur_k=21, gradient=0.67):
-    """
-    底部状态栏 (开火模式): 模糊 + 暗化 + 白色图标叠加
-
-    Verified on 0020/0023: gradient=0.67 (range 0.65~0.69), blur_k=21
-    Bar region: y=1312~1370
-    Formula: output = icon_alpha * 255 + (1 - icon_alpha) * 0.67 * blur(bg, k=21)
-    """
-    ih, iw = icon_alpha_mask.shape[:2]
-    region = canvas[y:y + ih, x:x + iw].astype(np.float32)
-    blurred = cv2.GaussianBlur(region, (blur_k, blur_k), 0)
-    darkened = gradient * blurred
-    alpha = icon_alpha_mask[:, :, np.newaxis]
-    canvas[y:y + ih, x:x + iw] = np.clip(
-        alpha * 255 + (1 - alpha) * darkened, 0, 255
-    ).astype(np.uint8)

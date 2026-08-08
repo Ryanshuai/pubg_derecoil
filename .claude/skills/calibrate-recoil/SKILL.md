@@ -1,19 +1,43 @@
 ---
 name: calibrate-recoil
 description: Measure a weapon's real recoil off the screen and rebuild its compensation curve from it, in the training range. Use when a gun sprays despite compensation, after a game patch changes recoil, to extend coverage to a weapon that has no measured curve, or to test what an attachment actually does. Also the entry point for diagnosing a calibration run that failed — most failures are state, not measurement. Not for mouse-to-view scale (K), which is calibrate_k.py.
-argument-hint: "<weapon or question> - e.g. 'aug', 'do compensators really do 0.85', 'harvest failed at the grip config'"
+argument-hint: "<weapon or question> - e.g. 'aug', 'do compensators really do 0.85', 'the night failed on the grip config'"
 ---
 
 # Recoil Calibration
 
-The screen is the sensor. Fire a magazine with compensation ON, measure how far
-the view still moved, and the leftover **is** the correction — per bullet, no
-model in between.
+**`MODEL.md` is the law. Anything here that contradicts it is wrong and this
+file is what gets corrected.** It says what is being fitted; this says how to
+run it and what the failures look like from the chair.
 
-    true_recoil[b] = compensation_applied[b] + residual_measured[b]
+The screen is the sensor. Fire, measure how far the view moved, add back the
+compensation that was playing, and what is left is the weapon's own recoil:
 
-Everything below exists because some part of that sentence turned out to be
-harder than it reads.
+    y_true(t) = y_obs(t) + y_comp(t)
+
+⚠ **`y_true` IS A FUNCTION OF TIME SINCE THE CLICK, NOT OF BULLET NUMBER.**
+The per-round kicks are the SHAPE of that curve, not its coordinate. Everything
+downstream follows from that one sentence, and this file was rewritten on
+2026-08-08 because it used to assume the other thing.
+
+## What changed, in one table
+
+Read this if you have used this skill before. The commands are different
+because the questions are.
+
+| gone | why | now |
+|---|---|---|
+| `harvest.py --weapons aug` | binned view motion into 42 bullet buckets | `pixi run collect-timed --weapon aug` |
+| `fit_curve.py --apply` (EMA) | blended each round into the last curve | `fit_time_curve.py --weapon aug`, a full refit |
+| "has this cell converged" | there are no rounds to converge over | "are there enough samples", which is a count |
+| residual / wander per bullet | both are bucket quantities | cluster spread in counts, and the arms agreeing |
+| `pixi run impulse-ab` | checked two grids shared an origin | there is one origin: the click, which we send |
+
+**Samples are never deleted and never re-collected.** Every magazine ever fired
+is in `docs/recoil/samples/<weapon>__<config>.jsonl` with the curve that was
+playing stored BY VALUE. That is what makes a magazine fired last week
+comparable with one fired tonight, and it is why fitting is one full refit
+rather than an iteration on top of the last one.
 
 ## Rule 0: ask the game where it is, before running anything
 
@@ -33,51 +57,126 @@ posture, ammo, and the per-patch texture gate.
 One device, several tools, no lock: if another agent is mid-run the port is
 taken. `state.py` without `--pico` does not touch it.
 
+### If the HUD is unreadable, LOOK AT THE SCREEN before believing any message
+
+`posture ?? unreadable` + `ammo ?? None` + an empty rack is not four faults, it
+is one: **there is no HUD, because we are not in the game.** Every downstream
+message is then a true sentence about the wrong subject. 2026-08-06, verbatim:
+
+```
+[stock] spawned 1 in 2 clicks: vss
+[!] vss is not in the rack, and both slots are empty — the spawn did not land.
+[!] posture unreadable (want standing)
+```
+
+The screen at that moment said 「因长时间没有动作, 您已被踢出游戏」 — the AFK
+kick. **The dialog names its own cause and nothing was reading it.** One
+capture answers it, and costs nothing:
+
+```
+pixi run python control/lobby.py state       # error / disconnected / lobby / in_game
+```
+
+⚠ **The idle clock that gets you kicked is the AGENT'S thinking time, not the
+game's.** Four kicks in one night, and before each one the gap was me writing
+analysis instead of driving: 14:33:36 a run ended, 14:49 the next began,
+**fifteen minutes of nothing**. The firing itself never triggered it. So:
+**launch the next run first, analyse while it fires.** Standing in the range
+idle is the one thing a human player never does.
+
 ## The loop
 
 | step | command | what it answers |
 |---|---|---|
-| 1. measure | `calibration/harvest.py --weapons aug --configs both --mags 3` | how far off is the curve now |
-| 2. fit | `calibration/fit_curve.py --jsonl <out> --weapon aug` | dry run: what would change |
-| 3. apply | same, `--apply` | writes the curve, backs up the old one |
-| 4. verify | step 1 again | residual should fall to ~0 **and wander should shrink** |
+| 1. collect | `pixi run collect-timed --weapon aug --mags 6` | adds magazines to the store |
+| 2. second arm | same, `--no-comp` (or `--scale 0.5`) | **makes the cell checkable at all** |
+| 3. fit | `pixi run python calibration/fit_time_curve.py --weapon aug` | one refit over everything ever stored |
+| 4. upload + verify | fit again after firing more | the spread should tighten and the arms should still agree |
 
-Step 4 is not optional. Step 3 can improve the residual while making the gun
-spray worse — that has happened, see *the wrong objective* below.
+⚠ **STEP 2 IS NOT OPTIONAL AND IT IS NOT A LUXURY.** The model's licence to
+pool magazines is that magazines fired under DIFFERENT curves, each with its
+own `y_comp` added back, estimate the SAME `y_true`. A pool with one arm has
+never been checked, and `harness/verdict.py` fails such a cell closed on
+`agree` — deliberately, because "not checked" and "fine" are the two things
+that layer exists to keep apart. A fitter cannot fake it: it never sees which
+arm a magazine came from.
 
-`docs/recoil/curves/` is **not in git**. The backup fit_curve writes is the
-only way back.
+`collect-timed` takes the gun **already in hand**. No spawning, no kitting —
+that machinery is the single largest source of wasted runs and has nothing to
+do with whether the model works. `--weapon` names what is held and the HUD
+detector is asked to agree; a disagreement stops the run rather than labelling
+the samples with the name that was typed.
 
-Runs land in `docs/recoil/runs/`, not next to the script. Everything this repo
-has measured lives under `docs/`; `calibration/` is source only.
+For a whole roster unattended, that is the night loop instead:
+
+    pixi run night --weapons ar --configs bare,grip --mags 6
+
+It kits, fires both arms per cell, fits the pool and judges each cell against
+`harness/verdict.py`. `--rejudge <run>` re-runs the verdict over a finished
+run's records offline, which is how a wrong threshold gets corrected without
+re-firing anything.
 
 ## Read the numbers in this order
 
-**Wander first, residual second.** `residual` is the cumulative view offset at
-the end of a magazine — one number, easy to zero, and it says nothing about
-where the bullets went. Two curves with identical residual can group very
-differently. The quantity that matters is how far the impact point wanders
-*during* the magazine, `max|cum|` over the per-bullet residuals.
+**The arms first, the spread second, the total last.**
 
-Measured on the AUG when a scalar was tuned to fix the total: endpoint improved
-from +43.7 to −22.1 counts while wander got **worse**, 44 → 76. Rebuilding per
-bullet instead took wander 76 → 16.
+| number | where | what it means |
+|---|---|---|
+| `agree_arms` / `agree_spread` | the cell record | did the model's own assumption hold here |
+| `n_kept` / `n_total` | `fit()` | how many magazines the clustering kept |
+| `spread_counts` | `fit()` | median disagreement between the kept magazines |
+| `dropped[]` | `fit()` | what was pushed out, and how far it sat |
+| `total_counts` | `fit()` | y_true at the end of the span |
 
-Then check, in this order:
+⚠ **A small `spread_counts` proves nothing on its own.** Nine magazines fired
+under one curve will agree with each other beautifully and still be nine
+estimates of the same wrong thing. That is what `agree_arms` is for, and it is
+why it is read first.
 
-- `oor` — frames past the correlator's range. Non-zero means readings wrapped
-  and the magazine is suspect. Should be 0.
-- `hand=net/abs` — how much the human moved the mouse. Net is subtracted out;
-  a large `abs` with a small net still means a noisier run.
-- `mad` — cross-patch agreement, sub-pixel when healthy (0.4–0.8 px). This is
-  the evidence the matching is not inventing motion.
-- spread across magazines — the game's own per-shot randomness is ±5% of a
-  magazine, so ~3 magazines resolve a posture factor and ~7 are needed to tune
-  a scale to 2%.
+### The clustering is per MAGAZINE, not per point
+
+**There are always outliers and they are almost never scattered.** What ruins a
+magazine — a hand on the mouse, the wrong posture, an attachment that did not
+go on, dropping out of ADS mid-burst, the correlator losing the view —
+**contaminates the whole trajectory**, not a few points on it. And the
+contaminated trajectory looks completely reasonable: smooth, monotone, the
+right order of magnitude. Point-wise outlier rejection cannot see it. Only
+comparing whole magazines against each other can.
+
+So `fit()` resamples each magazine onto a common grid, clusters the resulting
+vectors, and fits the largest cluster. `dropped[]` says what fell out and how
+far it sat from the centre, because **a gate that cannot say what it refused
+cannot be retuned** — and this repo has a rule about gates auditing away the
+data you would need to retune them.
+
+## The one place the model is known to be wrong
+
+MODEL.md §5之二, and it is worth reading before trusting a number from the ends
+of a burst. 28 magazines of m416 bare, four curve strengths spanning 3x:
+
+```
+    t         spread across the four arms
+   1.5 s      0.9%        ← the assumption is excellent here
+   ≤ 2.4 s    3.7–5.6%
+   ≥ 2.7 s    up to 15%   ← and ONLY the strongest arm falls away
+```
+
+So: **the mid-band is verified, the two ends are not.** The judge's agreement
+gate is set on 0.5–2.4 s for exactly that reason — judging the model on the one
+region MODEL.md says is unexplained would be judging it where nobody knows the
+answer.
+
+⚠ Two claims about this were made and withdrawn the same day, and they are kept
+in MODEL.md as samples rather than deleted: "the game has a 0.92 gain" (it is
+0.98 mid-band; 0.92 was an endpoint ratio) and "y_true is an inverted U" (it is
+monotone to 2.4 s; the U was an artefact of reading only the last point).
+**Both numbers were computed correctly.** The error was reading an aggregate
+that could not see the dimension it was being asked about.
 
 ## Traps
 
-Every one of these produced plausible wrong numbers rather than an error.
+Every one of these produced plausible wrong numbers rather than an error, and
+none of them was fixed by the model change.
 
 **Every state change in this game is a toggle.** Comma opens *and* closes the
 spawner, Tab the inventory, right-click ADS. Pressing one blind lands in the
@@ -96,87 +195,31 @@ always: read attachments (Tab) → ADS → verify posture → fire. `ads_detecto
 reads the crosshair instead and is faster; the two disagreeing means
 mid-transition.
 
-**Recentre between magazines.** The view never ends where it started — it is
-off by exactly the residual — and it accumulates. PUBG clamps pitch, and at the
-limit the view stops moving: a magazine fired there measures near-zero recoil
-and reports nothing wrong. Must be done in ADS, since a mouse count buys a
-third as much rotation from the hip.
+**Home to the midline between magazines.** The view never ends where it
+started, and it accumulates. PUBG clamps pitch, and at the limit the view stops
+moving: a magazine fired there measures near-zero recoil and reports nothing
+wrong. `goto_midline` shoves past the bottom clamp by a known multiple of the
+travel and comes back up half — the travel is a stored per-(sight, posture)
+constant, so the dip is two mouse moves and **not** a measurement.
+
+⚠ **One homing per magazine, not two.** `collect_timed` used to home once in
+setup and again in the loop, so the first magazine dipped the view twice.
+Reported from the chair on 2026-08-08: 「压枪的时候会低两次头」. The loop's is
+the one that must stay — every magazine has to start at the midline because the
+burst walks the view up from wherever it begins.
 
 **The patch height is the measurable range.** One shot's recoil lands in a
 single frame, so the peak frame carries the whole per-bullet kick. Wrap limit
 is height/2 = 128 px. A bare m762 peaks at 80 px, a kitted AUG at 49. Past the
 limit the correlation peak *wraps* rather than failing — off by a whole patch,
-83 counts.
+83 counts. `oor` records the pairs where that happened; they are stored, not
+dropped, because dropping is a fit-time decision.
 
 **Template drift is silent.** An attachment whose template no longer matches
 becomes `<occupied, no template>`: it has no key, `find()` cannot see it, and
-the symptom is "not on screen" for something plainly on screen. `half_grip` and
-`thumb_grip` are both drifted today. See *when a thing cannot be seen* below.
-
-**The game dresses guns by itself.** PUBG auto-fits whatever the backpack holds
-onto a weapon the moment it arrives, so any slot a config does not name is not
-empty — it is whatever the last strip left lying around. A "bare" run came back
-wearing a cheek pad, which reduces recoil.
-
-**Strip before spawning the next weapon.** A full rack means the incoming gun
-evicts the old one onto the floor, wearing everything it had on.
-
-**Look in the backpack before spawning anything.** The spawner has no idea what
-you already own — clicking 垂直握把 always produces another one. Spawning the
-parts list unconditionally (once at the start, once per eviction) stacks
-duplicates until the pack is full and the next part has nowhere to land, and
-every spare is one more thing `find()` can pick instead of the one meant.
-`control/stock.py` does the whole read-tidy-top-up: it drops the
-surplus on the floor and spawns only the shortfall. A part already fitted to a
-gun counts as owned; a row with no template (ammo, meds) is never touched.
-
-**The range evicts after 20 minutes** and re-entry empties the backpack and the
-rack — it is a restart, not a pause. `RangeSession` re-enters on a 17-minute
-budget so it happens between weapons rather than mid-magazine, and re-stocks
-afterwards; `--resume` picks up completed cells from the JSONL.
-
-Re-entry is automated (`--session auto`, the default): `control/lobby.py` drives
-the results screen, the lobby, an open ESC menu or a loading screen back to a
-running round, polling state rather than sleeping. Measured round trip: in
-11.5 s, out 7.4 s.
-
-**The lobby only takes clicks.** The PLAY button draws an "F" hint and the code
-took it at face value — three F presses, game verified frontmost, lobby
-unmoved. The lobby has a real cursor sitting wherever it was left, so the
-cursor has to be driven to the button rather than avoided.
-
-**Leaving the range needs two clicks.** `LEAVE TRAINING` raises a CONFIRM /
-CANCEL dialog, and that dialog reads as `FULLBLEED` — identical to a loading
-screen, which wants the opposite treatment. `exit_to_lobby` asks
-`leave_confirm_visible()` before it looks at the state. Symptom when this was
-missing: "the exit worked, then we lost focus one step short of the lobby". Two things it cannot know,
-both caught immediately afterwards by trying to open the spawner — **which**
-mode it entered (F starts whatever the lobby had selected, so leave the lobby
-on the training range) and **where** in the range it landed (walking to a
-spawner is not automated).
-
-**Focus is taken, not waited for.** Every tool here launches from a terminal,
-so at t=0 the terminal is frontmost and the game is not — the guard fires and
-the run aborts having done nothing. Do not ask a human to alt-tab; that human
-is exactly what an unattended harvest exists to remove. `ensure_focus()` raises
-the game window, verifies, retries, and only then falls back to the countdown.
-
-    from control.focus import ensure_focus, focus_keeper
-    if not ensure_focus(countdown_s=args.countdown, label='...'): return 1
-    time.sleep(0.6)          # the game eats input for a few frames after this
-
-Mid-run, `focus_keeper().ok(where)` takes the foreground back — bounded at 5
-regains per process, because a run that keeps losing focus has something
-contending with it and every keypress in between went elsewhere. **To stop a
-run by hand, Ctrl-C the terminal**: it will fight you for focus up to 5 times
-before giving up.
-
-**Focus is checked by executable, and so is the window search.** This
-repository's own name contains "pubg", so a title match calls an editor window
-the game — both for "am I focused" (the guard passes while the game sits in the
-background) and for "which window do I raise" (it raises the editor). Matched
-on `TslGame.exe` at both ends; `game_hwnd()` takes the largest visible window
-of that process, since PUBG owns several and only one takes input.
+the config the samples are pooled under is then a guess. `collect_timed`
+refuses rather than guessing — **the config is the key every magazine gets
+pooled under, and a wrong one merges two different guns.**
 
 ## When a thing cannot be seen
 
@@ -200,10 +243,8 @@ against several backgrounds, turning the view between captures. Two outputs:
 The labels are trustworthy because the ground truth is self-specified: the
 spawner is told what to produce and in what order, and 库存 fills from the top
 with no gaps, so row N holds a known item **even when nothing on screen can
-name it**. That is the one situation where a broken template cannot hide, and
-it is why this is a collector and a self-check in the same pass. If the row
-count does not grow by exactly what was ordered, it stops rather than
-mislabelling every crop.
+name it**. If the row count does not grow by exactly what was ordered, it stops
+rather than mislabelling every crop.
 
 `--check-only` skips spawning and grades whatever is already in the backpack.
 
@@ -211,62 +252,35 @@ Turning is done with Tab shut. With the inventory open the mouse drives a
 cursor rather than the view, so a turn issued there moves nothing and every
 capture comes back identical.
 
-Then hand the crops to `calibrate-template`, and re-run with `--check-only` to
-confirm the coverage table went clean.
-
-## What is measured, and what is still assumed
-
-Measured on the AUG, red dot, standing, 3 magazines per cell:
-
-| | measured | model |
-|---|---|---|
-| compensator | 0.787 ± 0.009 | 0.850 |
-| vertical grip | 0.786 ± 0.008 | 0.850 |
-| both | 0.598 ± 0.007 | 0.7225 |
-| interaction | −3.4% (1.8σ) | none |
-
-The two attachments are equally effective to within 0.03%, and they compose
-multiplicatively — so attachments can be measured **one at a time** against
-bare rather than as a grid, 13 cells instead of 54. The individual values are
-what the model has wrong, not the structure.
-
-Still assumed, still untested: that those numbers are the same on every weapon.
-One weapon cannot answer it. That is what a full `--weapons ar` run is for.
-
-Posture factors, by contrast, came out right: 0.805 and 0.564 measured against
-presets of 0.800 and 0.550.
-
 ## When it breaks
 
-| symptom | first command |
+| symptom | first move |
 |---|---|
-| anything at all | `calibration/state.py` |
-| `ABORT: game not focused` | the game is not running, or `game_hwnd()` returns None — check with `pixi run python -c "from control.focus import game_hwnd; print(game_hwnd())"`. Windows can also refuse the handover; run it again |
-| "not on screen" for a part that is | `state.py --tab` → `UNRECOGNISED`? then `collect_templates.py --slot <slot> --targets rows` |
-| "could not reach posture" | `state.py` — in ADS? inventory closed? |
-| "inventory would not open/close" | `state.py`, check the `type` pixel count against its window |
-| could not open the port | another tool has it; the error names the process. Wait, do not kill it |
-| residual fine, gun still sprays | you optimised the endpoint — look at wander |
-| a weapon measures implausibly mild | check `oor`, and whether the view hit the pitch limit |
-| spawner would not sync | `state.py` — is the panel actually up? are we still in the range? |
-| "in a match, but the item spawner will not open" | lobby was on the wrong mode, or the spawn point is not next to a spawner — walk there and re-run |
-| re-entry never completes | `detector/lobby_detector.py` `selftest()` — the ping overlay is a user setting, and without it the detector degrades to lobby/not-lobby |
+| every message is nonsense at once | not in the game. `python control/lobby.py state` |
+| `REFUSING: could not read the attachment slots` | the config key would be a guess. Fix the template, not the run — `pixi run attachments` |
+| the cell fails on `agree` | one arm only. Fire `--no-comp` into the same config |
+| the cell fails on `samples` | the main cluster is thin. Read `dropped[]` before firing more — it may be that most magazines are the outliers |
+| the cell fails on `tracking` | the correlator is not placing pairs. `detector/view_tracker.py`; the anchor should hold until the displacement approaches half a patch |
+| the fit's total moves a lot between runs | expected early. Every fit is a full refit, so a thin pool moves; it stops moving as the pool grows |
+| `pixi run night` cannot start | it opens with the five-leg gate. The message names which leg |
 
 ## Files
 
 | | |
 |---|---|
-| `calibration/state.py` | read-only state probe — start here |
-| `calibration/collect_templates.py` | spawn parts, photograph them, grade the templates |
-| `calibration/harvest.py` | spawn, dress, fire, measure; the unattended loop |
-| `calibration/sweep.py` | same measurement without the spawner, for a gun already in hand |
-| `calibration/fit_curve.py` | residual → new curve |
-| `calibration/range_session.py` | 20-minute eviction, budget and re-stock |
-| `control/stock.py` | what is in the backpack; drop the surplus, spawn the shortfall |
-| `detector/lobby_detector.py` | lobby vs match, by letterbox bars and the ping overlay |
-| `control/lobby.py` | drives the lobby back into a match |
-| `calibration/weapon_switcher.py` | weapon supply interface |
-| `detector/view_tracker.py` | the measurement itself |
-| `control/focus.py` | focus: `ensure_focus`, `focus_keeper`, `game_hwnd` |
-| `docs/game_quirks.md` | mechanics found by hitting them |
-| `docs/recoil_observer_design.md` | why the ROI is where it is |
+| `MODEL.md` | **the law.** What is fitted, in what coordinate, and what that deleted |
+| `calibration/samples.py` | the store. Never deleted, never re-collected |
+| `calibration/collect_timed.py` | fire into the store. One magazine at a time |
+| `calibration/fit_time_curve.py` | cluster and fit. `--selftest` is offline |
+| `harness/night.py` | the unattended loop |
+| `harness/verdict.py` | whether a cell is usable. Numbers against thresholds |
+| `control/kitting.py` | put a config on a gun and prove it. Moved out of calibration/ on 2026-08-08 |
+| `calibration/sweep.py` | `Rig` — the assembly shell, and nothing else now |
+| `press/pico_mouse.py` | `upload_pattern` uploads the curve AS GIVEN, one knot in, one knot out |
+
+⚠ **`docs/recoil/curves/` is gone.** 1184 curves fitted in the retired
+coordinate were deleted on 2026-08-08 rather than kept: a curve fitted on bins
+anchored to the ammo counter, played back on a grid anchored to the click, is
+not a starting point. `detector/weapon.py` reads `docs/recoil/curves_time/`
+now, and a weapon with no curve there simply gets no compensation — which is
+the honest state, not a regression.
