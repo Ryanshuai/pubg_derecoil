@@ -94,5 +94,7 @@ map-detect = "python detector/map_detector.py --selftest"
 # every import. Had no task until 2026-08-08 — the file that could have caught
 # its own builder breaking was the one nobody could run.
 kit-factors = "python calibration/build_kit_factors.py --selftest"
+kit-grid = "python calibration/build_kit_grid.py"
+kit-grid-check = "python calibration/build_kit_grid.py --selftest"
 placement = "python tools/test_range_placement.py"
 fit-time = "python calibration/fit_time_curve.py --selftest"
