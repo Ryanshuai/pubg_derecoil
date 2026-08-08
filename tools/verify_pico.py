@@ -23,8 +23,11 @@ number against a threshold that was written down before the check ran; none of
 them asks anyone to look at a trace and judge.
 
 What this does NOT cover: whether the compensation lands on the right ROUND.
-That is not observable from the wire -- it needs the game and the screen, and
-it is tools/probe_impulse_align.py.
+That is not observable from the wire -- it needs the game and the screen.
+An alignment probe used to answer it; MODEL.md §4 carries what it found,
+and the probe itself went on 2026-08-08 with the coordinate it measured
+in (both grids are anchored to the click now, so there is nothing to
+align).
 """
 import os
 import sys
@@ -96,10 +99,17 @@ def main():
     # samples into bullets and applies RECOIL_FIRE_DELAY_MS, and this is a
     # test of the firmware, not of the host's merge. The merge has its own
     # bugs and they belong to a different test.
+    # ⚠ THE FORMAT STRINGS COME FROM press/protocol/, NOT FROM HERE. They were
+    # '<hhH' and '<BH' spelled out, which is the exact duplication protocol.toml
+    # exists to end -- and this file is the FIRMWARE ACCEPTANCE test, so a
+    # hand-written format here would agree with a wrong firmware and pass.
     import struct
-    from press.pico_mouse import CMD_PATTERN_UPLOAD
-    body = b''.join(struct.pack('<hhH', dx, dy, t) for dx, dy, t in pts)
-    m._write(struct.pack('<BH', CMD_PATTERN_UPLOAD, len(pts)) + body)
+    from press.protocol import (CMD_PATTERN_UPLOAD, CMD_PATTERN_UPLOAD_FMT,
+                                PATTERN_POINT_FMT)
+    body = b''.join(struct.pack(PATTERN_POINT_FMT, dx, dy, t)
+                    for dx, dy, t in pts)
+    m._write(struct.pack(CMD_PATTERN_UPLOAD_FMT, CMD_PATTERN_UPLOAD,
+                         len(pts)) + body)
 
     print(f'\nfirmware acceptance — {len(pts)} bullets at {INTERVAL_MS} ms\n')
 
@@ -160,6 +170,38 @@ def main():
             rep.check('jitter mean, dx', abs(bias_x) <= JITTER_MEAN_MAX,
                       f'{bias_x:+.4f} counts/bullet (limit {JITTER_MEAN_MAX})')
 
+    # ── 5. the enable flag, BOTH WAYS ──
+    #
+    # Added 2026-08-07 with the firmware field it tests. CMD_RECOIL_ENABLE is
+    # a one-way write, so control/fire.py's disarm() had nothing to check and
+    # returned True whether or not the byte arrived — while press/pico_mouse
+    # ._write swallowed the CDC timeout it documents as normal. A dropped
+    # disarm therefore left the pattern running silently, and sweep.Rig.arm's
+    # `--no-comp` guard (`if not disarm(): raise`) could never fire: the run
+    # whose entire purpose is measuring UNCOMPENSATED recoil had a safety net
+    # that was not connected to anything.
+    #
+    # ⚠ BOTH DIRECTIONS, and that is not symmetry for its own sake. A
+    # readback stuck at False passes a disarm test every time — it is the
+    # answer disarm() wants — so only the True leg can tell a working flag
+    # from a wire that always says "off". Same reason `pixi run tab-open`
+    # scores the frames that must NOT read as inventory.
+    before = m.recoil_enabled()
+    if before is None:
+        rep.check('enable readback', False,
+                  'firmware has no [pat] end flag — reflash before trusting '
+                  'disarm(), which now refuses rather than guessing')
+    else:
+        m.set_recoil_enabled(True)
+        on = m.recoil_enabled()
+        m.set_recoil_enabled(False)
+        off = m.recoil_enabled()
+        rep.check('enable readback, on', on is True, f'set True -> {on}')
+        rep.check('enable readback, off', off is False, f'set False -> {off}')
+        # Leave it as found. A verification that disarms the firmware would be
+        # indistinguishable from the bug it is checking for, one run later.
+        m.set_recoil_enabled(bool(before))
+
     m.clear_pattern()
 
     bad = rep.failed()
@@ -175,7 +217,7 @@ def main():
     print(f'all {len(rep.rows)} checks pass.\n\n'
           'Not covered here: whether the compensation lands on the right '
           'ROUND. That is\nnot observable from the wire — '
-          'tools/probe_impulse_align.py, and it needs the game.')
+          'a deleted alignment probe; MODEL.md §4 carries the conclusion, and it needs the game.')
     return 0
 
 

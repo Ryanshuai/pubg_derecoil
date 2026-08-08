@@ -33,7 +33,7 @@ from config import HUD_REGIONS, TAB_COUNT_MAX, TAB_COUNT_MIN, TAB_PIXEL_THRESH
 from detector.tab_layout import type_ink
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TMPL_DIR = os.path.join(ROOT, 'training_data', 'pubg_assets', 'tab')
+TMPL_DIR = os.path.join(ROOT, 'docs', 'training_data', 'pubg_assets', 'tab')
 
 # The glyph is drawn well above the threshold; the point of masking is to
 # score only the strokes, so a uniformly bright crop cannot match.

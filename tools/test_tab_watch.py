@@ -160,7 +160,7 @@ check('the weapon names reach the attachment read',
 print('\n=== a SWALLOWED keypress must not move the flag ===')
 w2, state2, screen2 = build()
 screen2.open = True
-w2._set_open(True, time.perf_counter())
+w2._set_open(True)
 t = time.perf_counter()
 w2.on_key(t)                     # key sent... but the game ignores it
 t = run(w2, TAB_SETTLE_S + 0.05, t0=t)
@@ -180,7 +180,7 @@ check('drift check noticed it closed', w3.open, False)
 print('\n=== closing keeps the last reading taken while it was up ===')
 w4, state4, screen4 = build()
 screen4.open = True
-w4._set_open(True, time.perf_counter())
+w4._set_open(True)
 t = run(w4, TAB_REFRESH_S * 2, t0=time.perf_counter())
 screen4.guns = ('kar98k', 'ump45')      # user swapped a gun
 t = run(w4, TAB_REFRESH_S * 2, t0=t)

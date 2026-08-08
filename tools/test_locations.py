@@ -172,7 +172,10 @@ print('\n=== _await returns the record shape its three callers publish ===')
 # is read by callers, by _checks_str, and by the journal, and a key renamed on
 # one side is three silent breakages.
 _await_probe = InventoryControl.__new__(InventoryControl)
-_await_probe._frame = lambda: None
+# Matches the real signature, including `park`. It caught the day _frame_for
+# started passing that keyword (2026-08-07) -- a stub narrower than the thing
+# it stands in for reports a design change as a bug in the design.
+_await_probe._frame = lambda park=True: None
 _await_probe._slot_states = lambda f: {1: {'muzzle': 'comp_ar', 'grip': ''}, 2: {}}
 _before = {1: {'muzzle': '', 'grip': ''}, 2: {}}
 _rows = _await_probe._await([(1, 'muzzle', ANY_ITEM), (1, 'grip', 'vert_grip')],

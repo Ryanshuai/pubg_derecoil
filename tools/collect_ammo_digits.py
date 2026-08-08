@@ -57,7 +57,7 @@ import numpy as np
 from config import HUD_REGIONS
 from detector.ammo_detector import (ASSETS_DIR, AmmoDetector, _iou, _place,
                                     segment)
-from detector.cropper import make_grabber
+from capture.cropper import make_grabber
 from detector.lobby_detector import LobbyState, snapshot as lobby_state
 from press.pico_mouse import get_mouse, other_agents
 from control.focus import game_focused, raise_game
@@ -125,7 +125,7 @@ def same_state(a_slots, b_slots):
 def _frozen(gap_s=0.4):
     """Two frames a moment apart, identical to the bit — the game is not
     rendering, so it is not really in front however the title bar reads."""
-    from detector.cropper import capture_screen
+    from capture.cropper import capture_screen
     a = capture_screen()
     time.sleep(gap_s)
     return bool(np.array_equal(a, capture_screen()))

@@ -238,6 +238,16 @@ def selftest():
 
     def state(rel):
         frame = cv2.imread(os.path.join(ROOT, rel))
+        if frame is None:
+            # Say which frame and why, rather than dying on None[y:y+h]. The
+            # 40-round fixture lived in temp_debug/, which was archived to
+            # docs/attic/ on 2026-08-08 WITHOUT its screenshots — so this
+            # refuses until someone re-grabs a frame reading 40.
+            raise SystemExit(
+                f'[!] selftest fixture missing: {rel}\n'
+                f'    Re-grab a full-screen shot whose ammo counter reads 40 '
+                f'(pixi run python tools/snap_on_key.py), drop it under '
+                f'docs/, and point this line at it.')
         glyphs = segment(ammo_crop(frame))
         return [None, [[_place(g)] for _, g in glyphs]]
 

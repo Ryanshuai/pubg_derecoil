@@ -87,191 +87,53 @@ import cv2
 import numpy as np
 
 from control.session import ensure_ready
+from control.aim import ViewDriver
+# THE WALK ITSELF NOW LIVES ON ViewDriver, and these are aliases so the prose
+# above and below still names the same things. It moved on 2026-08-06 because
+# control/aim.py's goto_midline() has to put the view at the midpoint before
+# EVERY magazine, and a second copy of "walk into the stop, decide moved vs
+# still" is how the numbers in two files quietly stop being the same number --
+# tools/CLAUDE.md's rule is that the thing to add is a control/ method, not a
+# fifth loop here. What stayed is what this file is for: several bearings,
+# several postures, the screenshots, and the predictions checked out loud.
+from control.aim import (TRAVEL_MAX as MAX_COUNTS, TRAVEL_STEP as STEP,
+                         MIDLINE_FRAC)
 from config import SCREEN_W, SCREEN_H
-from detector.cropper import win32_cap
-from sweep import Rig, POSTURES
+from capture.cropper import win32_cap
+from calibration.sweep import Rig, POSTURES
 
 OUT = os.path.join(ROOT, 'docs', 'pitch')
 STORE = os.path.join(OUT, 'pitch_range.json')
 
-STEP = 100          # counts per step; the bracket on each stop is this wide
-MAX_COUNTS = 9000   # give up. The travel is ~5000 COMMANDED counts, not ~3000
-                    # — see MOVED_FRAC on where the other 40% goes.
-CONFIRM = 2         # consecutive still steps before believing a stop
-SETTLE = 0.20       # after the tracker says the view stopped, before the shot
-MIN_TRAVEL = 500    # below this, nothing was taking input — refuse to write
-
-# ── deciding "did it move", and the run that set these numbers ──
+# --sight names a MEASUREMENT PROFILE; this names the part that gets fitted.
+# They are not the same string and conflating them crashes: spawn_gun used
+# --sight directly as an attachment key, so `--sight hipfire` asked the
+# spawner for a part called 'hipfire'. The recoil sweep had made this exact
+# split already (SIGHT_SCOPE) for the same reason, and made it again after
+# forgetting -- which is why it is written down here rather than there.
 #
-# The first live run (2026-08-04, m416 + red dot, training range) decided it by
-# change/control and got it wrong in both directions, because CONTROL IS THE
-# NOISY ONE. Over a single ~0.6 s step the idle sway of an ADS'd rifle put it
-# anywhere from 0.42 to 3.79 grey levels, while `change` on a genuinely moving
-# step sat at a steady ~9. So the ratio flickered between 3.0 and 21 on
-# identical steps, and with a threshold at 4.0:
-#
-#   * the UP pass returned a stop at 400 counts. Its last two steps read
-#     change 8.60 and 9.37 — the same as every moving step before them — and
-#     were called still only because control happened to spike to 2.86 and
-#     2.77. Standing came out with a travel of 550.
-#   * crouching refused outright as "blind" on predict 15.04 vs control 3.79,
-#     a ratio of 3.97 against the same 4.0. Nothing was wrong with that view.
-#
-# `predict` is the stable comparison and it is what a step SHOULD produce, so
-# the primary test is now change/predict. Measured over that whole run:
-#
-#     moving steps    change/predict  0.57 .. 1.00
-#     at a stop       change/predict  0.03, 0.06, 0.16, 0.18
-#
-# The floor at 0.30 sits in a 3x gap. Control survives only as a secondary
-# floor (a stop still shows the sway, so change lands near control there) and
-# in the blind test, where the question is whether a full step could out-signal
-# the noise AT ALL rather than whether this one did.
-#
-# THE 0.57-1.00 IS NOT SLOP, IT IS THE COUNT EFFICIENCY. The view rotates
-# ~60% of what is commanded: the tracker read +60 counts per 100 commanded on
-# every early step, and prone's tracked/commanded came back 0.603 ± 0.014. A
-# CONSTANT factor, which is why the midpoint survives it untouched — half of a
-# travel measured in commanded counts is still half of the travel. It is also
-# why MAX_COUNTS had to grow: the real travel costs ~1/0.6 as many commands.
-MOVED_FRAC = 0.30   # change must be this much of what a full step would give
-CTRL_MULT = 1.5     # ...and this much above the idle change at the same pitch
-BLIND_MULT = 2.0    # predict below this x control: nothing here can answer
+# `hipfire` still wears a red dot. The measurement never looks through it --
+# the walk happens with the button untouched -- but the gun has to be ARMED
+# and in hand, which is precisely what config.py flags as missing from the old
+# hipfire K ("TPP, no weapon"). ensure_posture needs one optic or another to
+# read the posture icon through, and the red dot is what the range fits by
+# default anyway.
+SCOPE_FOR = {'hipfire': 'red_dot', 'red_dot': 'red_dot', '2x': 'scope_2x',
+             '3x': 'scope_3x', '4x': 'scope_4x', 'vss_pso1': None}
 
-# The crop the frame difference is taken over: the middle of the screen, which
-# is all game world. Everything outside it is HUD — the compass strip across
-# the top, the ammo counter and minimap along the bottom — and HUD does not
-# move with pitch, so including it only dilutes the signal. The weapon model
-# sits bottom-centre and is camera-attached, so it does not move with pitch
-# either; it sways, and that sway lands in the control measurement too.
-WORLD = (int(SCREEN_H * 0.15), int(SCREEN_W * 0.25),
-         int(SCREEN_H * 0.65), int(SCREEN_W * 0.50))
-
-
-def world():
-    """The central crop as grayscale. One GDI grab, ~4 ms."""
-    return cv2.cvtColor(win32_cap(WORLD), cv2.COLOR_BGR2GRAY)
-
-
-def change(a, b):
-    """Mean absolute difference in grey levels. Deliberately the dumbest
-    possible measure of "is this a different picture": it needs no texture, no
-    features and no threshold of its own, which is the entire reason it works
-    where the correlator does not."""
-    return float(np.abs(a.astype(np.float32) - b.astype(np.float32)).mean())
-
-
-def shift_change(img, px):
-    """What this picture would look like if it slid `px` rows.
-
-    Overlapping slices rather than np.roll: rolling wraps the bottom of the
-    frame onto the top and the seam contributes a difference that no real
-    motion would produce.
-    """
-    px = max(1, min(abs(int(px)), img.shape[0] - 1))
-    return change(img[:-px], img[px:])
+# The per-step decision, the stop walk and the three-pass bracket all live on
+# ViewDriver now -- see the TRAVEL block in control/aim.py, which carries the
+# measured provenance of MOVED_FRAC / CTRL_MULT / BLIND_MULT with it. These
+# two wrappers keep the names this file's docstring and --selftest talk about.
 
 
 def step_once(rig, counts):
-    """Command `counts` of pitch (positive = down) and report what happened.
-
-    Returns a dict. Three numbers decide, and each answers a different
-    question:
-
-      change   did the picture change over this step
-      control  how much it changes on its own over the same time, at this same
-               pitch, with nothing commanded. Idle sway is not a constant —
-               close ground at the bottom stop swings far more pixels per
-               degree of breathing than sky at the top does — so this is what
-               makes MOVE_RATIO a ratio instead of a literal.
-      predict  how much it WOULD have changed had it moved, taken by sliding
-               the frame itself by the pixels this many counts buys.
-
-    `predict` is the guard against the failure this whole file exists because
-    of. "The picture did not change" has two causes: the view is against a
-    stop, or there is nothing in the picture for a change to show up in. On a
-    featureless sky those are indistinguishable from `change` alone, and the
-    one that gets reported is a travel that stops short — a confident wrong
-    number, which is exactly what the horizon detector produced. When predict
-    is itself down at the control, this position cannot answer the question,
-    and the probe says so rather than guessing.
-
-    `got` is the view tracker's opinion in counts, and it decides nothing:
-    near the stops it is blind and blind reads as zero (see the module
-    docstring). It is recorded because where it does work it says whether the
-    count ruler is linear — got/counts constant across the travel means no
-    counts are being dropped, so the midpoint in counts is the midpoint in
-    angle.
-    """
-    t0 = time.perf_counter()
-    before = world()
-    prev = rig.tracker.slice_frame(rig.grab())
-    # turn() is the named open-loop entry point and the honest one here: this
-    # probe does not want a closed loop, it wants to find out what the game
-    # does with counts it was told to consume.
-    rig.view.turn(0, int(counts))
-    got = rig.track_still(timeout_s=0.7, still_s=0.10, prev=prev)
-    time.sleep(SETTLE)
-    after = world()
-    dt = time.perf_counter() - t0
-
-    c0 = world()
-    time.sleep(dt)
-    c1 = world()
-
-    d_still = max(change(c0, c1), 0.05)
-    d_move = change(before, after)
-    d_pred = shift_change(after, abs(counts) * rig.K)
-    return {'change': d_move, 'control': d_still, 'predict': d_pred,
-            'tracked': got,
-            'moved': (d_move > MOVED_FRAC * d_pred
-                      and d_move > CTRL_MULT * d_still),
-            'blind': d_pred < BLIND_MULT * d_still}
+    return rig.view.step_once(counts)
 
 
 def to_stop(rig, direction, step, label, max_counts=MAX_COUNTS):
-    """Walk into a pitch stop. Returns (last_moving_total, rows).
+    return rig.view.to_stop(direction, step, label, max_counts)
 
-    `direction` is +1 down, -1 up. On return the view is AGAINST the stop —
-    the confirming steps were absorbed by it — so the caller can treat this
-    position as absolute without knowing how much was swallowed.
-
-    last_moving_total is the cumulative commanded counts of the last step that
-    actually moved, so the stop lies in (last_moving_total, +step]. None means
-    no stop was established, and the caller must not turn that into a number.
-    """
-    total, last_moving, still_run, rows = 0, 0, 0, []
-    while total < max_counts:
-        r = step_once(rig, direction * step)
-        total += step
-        rows.append(dict(r, at=total, change=round(r['change'], 2),
-                         control=round(r['control'], 2),
-                         predict=round(r['predict'], 2),
-                         tracked=round(r['tracked'], 1)))
-        print(f"    {label} {total:5d}  change {r['change']:6.2f}  predict "
-              f"{r['predict']:6.2f}  = {r['change'] / max(r['predict'], .01):4.2f}"
-              f"  control {r['control']:5.2f}  "
-              f"{'moved' if r['moved'] else 'STILL'}"
-              f"{' BLIND' if r['blind'] else '     '}"
-              f"   tracked {r['tracked']:+7.1f}")
-        if r['moved']:
-            last_moving, still_run = total, 0
-            continue
-        if r['blind']:
-            # Nothing here could have shown motion whether or not there was
-            # any. Declaring the stop would be the horizon bug again in a new
-            # costume: a number that looks like a measurement and is not one.
-            print(f"    [!] {label}: the view is somewhere with nothing in it "
-                  f"— a {step}-count step would only change this picture by "
-                  f"{r['predict']:.2f} against a control of {r['control']:.2f}, "
-                  f"so 'it did not move' means nothing here. Turn to face "
-                  f"something and run it again.")
-            return None, rows
-        still_run += 1
-        if still_run >= CONFIRM:
-            return last_moving, rows
-    print(f"    [!] {label}: no stop within {max_counts} counts")
-    return None, rows
 
 
 def band_from(rows, step):
@@ -337,8 +199,8 @@ def draw_weapon(rig, slots=(1, 2), timeout_s=3.0):
                 continue
             t0 = time.perf_counter()
             while time.perf_counter() - t0 < timeout_s:
-                if rig.read_ammo() is not None:
-                    return slot if rig.ensure_ads() else None
+                if rig.fire.read_ammo() is not None:
+                    return slot if rig.gun.ensure_ads() else None
                 time.sleep(0.15)
     finally:
         ac.close()
@@ -347,7 +209,7 @@ def draw_weapon(rig, slots=(1, 2), timeout_s=3.0):
     return None
 
 
-def spawn_gun(weapon, sight):
+def spawn_gun(weapon, sight_profile):
     """Put a gun with a sight on it in the rack. -> True if the rack has one.
 
     Needed because re-entering the training range EMPTIES THE RACK, and
@@ -359,11 +221,14 @@ def spawn_gun(weapon, sight):
     optional: `sc.collapse_all()` called on a CLOSED panel collapses nothing
     and reports nothing, so give_many then clicks from a stale layout. That is
     what `ensure_panel(True)` ... `finally ensure_panel(False)` is for, and it
-    is the shape calibration/posture_axis.py's spawn_pair() already uses.
+    is the shape control/stock.py's ensure_weapon_in_hand() uses, and it is
+    the one to copy — the spawn_pair() this line used to name went with the
+    recoil sweep on 2026-08-08.
     """
     from control.spawner import SpawnerControl
     from control.inventory import InventoryControl
     from control.stock import restock
+    sight = SCOPE_FOR.get(sight_profile, sight_profile)
     ac = InventoryControl(verbose=False)
     try:
         with SpawnerControl() as sc:
@@ -380,24 +245,30 @@ def spawn_gun(weapon, sight):
             finally:
                 sc.ensure_panel(False)
             # loose_only: the sight ends up ON the gun, so what the pack is
-            # short of is what is not already fitted.
-            restock(ac, sc, {sight}, loose_only=True, per=1,
-                    drop_unwanted=False, verbose=False)
+            # short of is what is not already fitted. `sight` is None for a
+            # weapon that carries its own optic (the VSS), and asking the
+            # spawner for None is how a set of parts once got a None in it.
+            if sight:
+                restock(ac, sc, {sight}, loose_only=True, per=1,
+                        drop_unwanted=False, verbose=False)
         with ac.tab_up():
             guns = ac.loadout()['guns']
             slot = next((n for n, w in guns.items() if w), None)
             if slot is None:
                 print('  [!] spawned but the rack still reads empty')
                 return False
+            if not sight:
+                print(f"  spawned {guns[slot]} in slot {slot}, no sight to fit")
+                return True
             k = ac.ensure_kit(slot, {'scope': sight}, weapon=guns[slot])
-            print(f"  spawned {guns[slot]} in slot {slot}, sight "
+            print(f"  spawned {guns[slot]} in slot {slot}, sight {sight} "
                   f"{'fitted' if k['ok'] else 'NOT fitted — ' + str(k['bad'])}")
             return True
     finally:
         ac.close()
 
 
-def probe(rig, posture, step=STEP, yaw=0, base='standing'):
+def probe(rig, posture, step=None, yaw=0, base='standing', store=True):
     """Bottom stop, top stop, and back down. Returns a result dict or None.
 
     Three passes rather than two, and the third is nearly free because the view
@@ -410,43 +281,43 @@ def probe(rig, posture, step=STEP, yaw=0, base='standing'):
         print(f"  [!] could not reach {posture}")
         return None
 
-    print(f"  down to the bottom stop (from wherever the view is):")
-    first, down0 = to_stop(rig, +1, step, 'down')
-    bottom_shot = shoot(posture, 'bottom', yaw)
-    if first is None:
-        # Everything after this counts FROM the bottom stop. Without one, the
-        # up pass measures from an arbitrary place and still produces a
-        # confident number.
-        print("  [!] never reached the bottom stop — the rest would be "
-              "measured from nowhere")
-        return None
+    # ⚠ MEASURE IN THE STATE THE FILE WILL BE LABELLED WITH. ensure_posture
+    # needs ADS -- the posture icon does not render from the hip -- so a
+    # `--sight hipfire` run that just returned from it would walk both stops
+    # SCOPED and store the result under 'hipfire'. That is the same shape as
+    # the bug that had every run measuring a 4x through the red dot's K: the
+    # label and the state came apart and nothing said so.
+    want_hip = getattr(rig, 'sight', None) == 'hipfire'
+    if hasattr(rig, 'ensure_hip'):
+        ok = rig.gun.ensure_hip() if want_hip else rig.gun.ensure_ads()
+        if not ok:
+            print(f"  [!] could not put the character "
+                  f"{'out of' if want_hip else 'into'} ADS — refusing rather "
+                  f"than measuring one state and storing it as another")
+            return None
 
-    print(f"  up, counting from the bottom stop:")
-    up_ok, up_rows = to_stop(rig, -1, step, 'up  ')
-    top_shot = shoot(posture, 'top', yaw)
-    if up_ok is None:
-        return None
-
-    print(f"  down again, counting from the top stop:")
-    down_ok, down_rows = to_stop(rig, +1, step, 'down')
-    if down_ok is None:
-        return None
-
-    lo = max(up_ok, down_ok)
-    hi = min(up_ok, down_ok) + step
-    agreed = hi >= lo
-    if not agreed:
-        # The two passes do not overlap: one of them lost a step somewhere.
-        # Say so rather than averaging two brackets that disagree.
-        print(f"  [!] the two passes disagree: up says the travel is in "
-              f"({up_ok}, {up_ok + step}], down says ({down_ok}, "
-              f"{down_ok + step}] — no overlap")
-        lo, hi = min(up_ok, down_ok), max(up_ok, down_ok) + step
-    travel = (lo + hi) / 2.0
-    if travel < MIN_TRAVEL:
-        print(f"  [!] travel came out {travel:.0f} counts — the game was not "
-              f"taking input, or the screen was frozen")
-        return None
+    shots = {}
+    # store: THIS is the separate measurement run, and its whole purpose is
+    # that no calibration run ever has to do it. ViewDriver.goto_midline reads
+    # docs/pitch/pitch_travel.json and does not measure.
+    #
+    # ⚠ AND --selftest MUST PASS store=False. It drives this same function
+    # against a SYNTHETIC scene, and on 2026-08-06 the first version of this
+    # line wrote the fake rig's travel (3700 counts at K=1.55, off a generated
+    # gradient) straight into the real file, over a number that came from the
+    # game. An offline test that can overwrite a measured fact is worse than no
+    # test: it corrupts exactly the file nobody re-derives.
+    travel = rig.view.measure_travel(
+        posture, step=step, store=store,
+        on_stop=lambda where: shots.setdefault(where, shoot(posture, where, yaw)))
+    d = rig.view.travel_detail
+    up_rows, down_rows, down0 = d.get('up', []), d.get('down_out', []), \
+        d.get('down_in', [])
+    if not travel:
+        return None         # measure_travel has already said which pass failed
+    lo, hi = d['bracket']
+    agreed, up_ok, down_ok = d['agreed'], d['up_last_moving'], d['down_last_moving']
+    bottom_shot, top_shot = shots.get('bottom'), shots.get('top')
 
     # WHERE THIS POSTURE'S BOTTOM STOP SITS RELATIVE TO STANDING'S, and it is
     # not bookkeeping — without it prone's midpoint is a guess.
@@ -477,16 +348,21 @@ def probe(rig, posture, step=STEP, yaw=0, base='standing'):
             print(f'  [!] could not stand up to measure the offset')
         rig.ensure_posture(posture)     # the view snaps back to this stop
 
-    level = int(round(travel / 2))
+    # MIDLINE_FRAC, not half. The screenshot below is the ONLY check on
+    # where the aim really lands, so it has to be taken at the pitch
+    # goto_midline will actually use -- a shot at travel/2 would verify a
+    # position nothing fires from.
+    level = int(round(travel * MIDLINE_FRAC))
     # The view is at the bottom stop, which is exactly where goto_level()
     # starts from. Rise by the same amount it will and photograph the result —
     # that picture is the only check on whether the midpoint really is level.
     rig.view.turn(0, -level, settle_s=0.4)
     level_shot = shoot(posture, 'level', yaw)
 
+    step = d.get('step', step or STEP)     # what measure_travel really used
     lin = linearity(up_rows, step)
     tf, tt = band_from(up_rows, step)
-    print(f"  -> travel {travel:.0f} counts (bracket {lo}..{hi}), "
+    print(f"  -> travel {travel} counts (bracket {lo}..{hi}), "
           f"level at +{level}")
     if lin:
         print(f"     count ruler: tracked/commanded {lin[0]:.3f} ± {lin[1]:.3f} "
@@ -608,8 +484,15 @@ class _FakeRig:
     which is the whole failure mode this probe was built to survive.
     """
 
-    def __init__(self, travel, start, K=1.55, noise=0.4, flat_rows=0):
+    def __init__(self, travel, start, K=1.55, noise=0.4, flat_rows=0,
+                 up_gain=1.0):
         self.travel, self.pos, self.K, self.noise = travel, start, K, noise
+        # How much of a commanded count the view actually consumes going UP.
+        # 1.0 is a perfectly symmetric ruler, which is what the fake was until
+        # 2026-08-06 -- and a symmetric fake cannot tell "aim on the up pass"
+        # apart from "average the two passes", so it silently passed both.
+        # calibrate_k re-measured the real up/down asymmetry at 5.37%.
+        self.up_gain = up_gain
         rng = np.random.default_rng(7)
         h = int(936 + travel * K) + 16
         # bottom (high row index) = close ground, fine detail; top = sky, a
@@ -625,32 +508,45 @@ class _FakeRig:
         if flat_rows:
             self.scene[:flat_rows] = 200
         self.rng = rng
-        self.view = self
         self.tracker = self
         self.moves = 0
+        self.last = 0
+        # A REAL ViewDriver over a fake world. The point of the selftest is to
+        # exercise the code harvest actually runs, and since 2026-08-06 that is
+        # ViewDriver.measure_travel -- a fake that reimplemented the walk would
+        # only be testing itself. `world_fn` is the seam; everything else the
+        # driver touches (mouse, tracker, frames) is this object.
+        self.view = ViewDriver(self, self, self, K=K)
+        self.view.world_fn = self.frame
 
-    # -- the surface probe() and to_stop() actually touch --
+    # -- the surface ViewDriver actually touches --
     def frame(self):
         top = int(round((self.travel - self.pos) * self.K))
         out = self.scene[top:top + 936].astype(np.float32)
         return np.clip(out + self.rng.normal(0, self.noise, out.shape),
                        0, 255).astype(np.uint8)
 
-    def turn(self, yaw, pitch=0, settle_s=0.0):
+    def move(self, dx, dy):
+        """ViewDriver.turn() goes out through the mouse, and this is it. The
+        clamping IS the thing under test: counts past a stop are swallowed."""
         self.moves += 1
-        self.last = max(0, min(self.travel, self.pos - pitch)) - self.pos
+        want = -dy * (self.up_gain if dy < 0 else 1.0)
+        self.last = max(0, min(self.travel, self.pos + want)) - self.pos
         self.pos += self.last
 
     def grab(self):
         return None
 
     def slice_frame(self, _):
+        # None all the way through, so step_once takes its `tracked` shortcut
+        # and never enters the correlator. That is honest rather than lazy: the
+        # tracker DECIDES NOTHING here, and a fake reading fed into the
+        # `linearity` line would be this file reporting its own arithmetic as
+        # evidence about whether PUBG consumes every count it is sent.
         return None
 
-    def track_still(self, **kw):
-        # Same sign convention as the real one: a positive mouse dy pulls the
-        # view down, which slides content up the screen and reads negative.
-        return float(self.last)
+    def flush(self, n=8):
+        pass
 
     def ensure_posture(self, p, tries=4):
         return True
@@ -665,7 +561,7 @@ def _selftest():
     sent, which is what the `linearity` line in a live run is for.
     """
     g = globals()
-    real_sleep, real_world, real_shoot = time.sleep, g['world'], g['shoot']
+    real_sleep, real_shoot = time.sleep, g['shoot']
     fails = []
     cases = [               # travel, start, flat sky rows, expected level
         (3000, 1500, 0, 1500),
@@ -678,10 +574,13 @@ def _selftest():
     try:
         time.sleep = lambda *_a, **_k: None
         for travel, start, flat, want in cases:
+            # `want` in the table is just 'is there an answer'; the value
+            # follows MIDLINE_FRAC so this table does not have to be
+            # re-typed every time the aim fraction is re-checked by eye.
+            want = None if want is None else round(travel * MIDLINE_FRAC)
             rig = _FakeRig(travel, start, flat_rows=flat)
-            g['world'] = rig.frame
             g['shoot'] = lambda *a, **k: 'x.png'
-            r = probe(rig, 'standing', step=STEP)
+            r = probe(rig, 'standing', step=STEP, store=False)
             got = None if r is None else r['level_up']
             ok = (got is None and want is None) or \
                  (got is not None and want is not None and
@@ -690,8 +589,55 @@ def _selftest():
                   f"level {got}  (want {want})  {'ok' if ok else 'FAIL'}")
             if not ok:
                 fails.append((travel, start, got, want))
+
+        # AN ASYMMETRIC COUNT RULER. Going up costs more commands than coming
+        # down, which is what a 5.37% up/down gap in K means in practice. The
+        # aim has to come out of the UP pass, because up is the only direction
+        # goto_midline ever travels; averaging the two passes lands the midline
+        # short by a quarter of the gap, and nothing downstream would say so.
+        # The check is on where the view ACTUALLY ends up, not on the counts.
+        print('\n  an asymmetric ruler still lands level:')
+        for travel, gain in ((3000, 0.95), (3000, 1.05), (3450, 0.947)):
+            rig = _FakeRig(travel, travel // 3, up_gain=gain)
+            r = probe(rig, 'standing', step=STEP, store=False)
+            level = None if r is None else r['level_up']
+            # Command the midline the way harvest does, then ask the fake where
+            # the view is. Half the travel in ANGLE is what has to be hit.
+            rig.pos = 0
+            if level:
+                rig.move(0, -level)
+            off = None if level is None else rig.pos - travel * MIDLINE_FRAC
+            ok = off is not None and abs(off) <= STEP // 2
+            print(f"    travel {travel} up_gain {gain}  -> rose {level} "
+                  f"commanded, view {off:+.0f} off level"
+                  if off is not None else
+                  f"    travel {travel} up_gain {gain}  -> no answer")
+            print(f"      {'ok' if ok else 'FAIL'}")
+            if not ok:
+                fails.append(('asym', travel, gain, level, off))
+
+        # goto_midline() is what harvest calls before EVERY magazine, and its
+        # failure is the silent kind: the view ends up somewhere either way,
+        # and a magazine fired 700 counts low reads as a mild gun rather than
+        # as a broken aim. So drive it against a known travel from three very
+        # different starting pitches -- including jammed against the top stop,
+        # which is where a burst leaves the view -- and check where it stopped.
+        print('\n  goto_midline lands at half the travel:')
+        for travel, start in ((3000, 0), (3000, 2999), (1450, 700)):
+            rig = _FakeRig(travel, start)
+            # Keyed (sight, posture) since 2026-08-06: goto_midline positions
+            # from the hip whatever optic is up, so the sight it looks the
+            # travel up under is an argument, not self.sight.
+            rig.view._travel = {('red_dot', 'standing'): travel}
+            half = rig.view.goto_midline()
+            want = round(travel * MIDLINE_FRAC)
+            ok = half == want and abs(rig.pos - want) <= 1
+            print(f"    travel {travel:5d} from {start:5d} -> rose {half}, "
+                  f"view at {rig.pos}  {'ok' if ok else 'FAIL'}")
+            if not ok:
+                fails.append(('midline', travel, start, half, rig.pos))
     finally:
-        time.sleep, g['world'], g['shoot'] = real_sleep, real_world, real_shoot
+        time.sleep, g['shoot'] = real_sleep, real_shoot
         g['time'] = sys.modules['time']
     print('selftest:', 'all ok' if not fails else f'{len(fails)} FAILED')
     return 0 if not fails else 1
@@ -712,7 +658,17 @@ def main():
                          'be the same at every bearing, and the old band was '
                          'not. More than one bearing writes the scan file '
                          'instead of pitch_range.json.')
-    ap.add_argument('--step', type=int, default=STEP)
+    # DEFAULT None, NOT STEP. measure_travel scales the step by the sight's
+    # pitch_scale so every profile takes about the same number of steps; passing
+    # STEP unconditionally overrode that, and on 2026-08-06 that is exactly how
+    # the hip-fire run died. `predict` -- what a step WOULD change the picture
+    # by -- is proportional to the step, so a step 3x too small makes predict 3x
+    # too small, and up near the sky where the weapon model's idle sway pushes
+    # `control` to 11.5 the ratio fell to 1.79 against the 2.0 blind floor. The
+    # probe refused, correctly, at 7000 counts with the view still moving.
+    ap.add_argument('--step', type=int, default=None,
+                    help='counts per probe. Default: scaled per sight, which '
+                         'is what keeps `predict` above the idle sway.')
     ap.add_argument('--sight', default='red_dot')
     ap.add_argument('--slot', type=int, default=0,
                     help='weapon slot to hold; 0 tries 1 then 2')
@@ -759,7 +715,7 @@ def main():
     # (it fails on pale wood — see detector/CLAUDE.md). Safe here in a way it
     # is not during a cell: the nudge destroys the view driver's running total,
     # and this probe keeps no running total to destroy.
-    rig.use_homing = True
+    rig.view.use_homing = True
     result = {}
     # Counts are not comparable between optics: a 4x buys 3.3x the rotation per
     # count, so the travel measured through one is 3.3x the travel measured

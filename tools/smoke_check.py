@@ -46,10 +46,18 @@ print(f"  python   {sys.version.split()[0]}  {sys.executable}")
 
 import importlib.metadata as md
 
-for dist, mod in [('numpy', 'numpy'), ('opencv-python', 'cv2'), ('torch', 'torch'),
-                  ('torchvision', 'torchvision'), ('scikit-learn', 'sklearn'),
+# ⚠ torch, torchvision and ultralytics are NOT in this list any more, and
+# their absence is the point. Nothing in this repo imports them as of
+# 2026-08-08: the fire-mode CNN went (2 answers in 859 crops) and the aim-assist
+# trees went with the operator's call. They are still installed, because pulling
+# a multi-GB CUDA wheel out of the environment is its own change and other
+# agents run out of this same env. Listing them here would make a smoke check
+# FAIL on a package the repo has no opinion about — a gate that guards an
+# unused dependency teaches people to ignore gate output.
+for dist, mod in [('numpy', 'numpy'), ('opencv-python', 'cv2'),
+                  ('scikit-learn', 'sklearn'),
                   ('scipy', 'scipy'), ('pyserial', 'serial'), ('pywin32', 'win32gui'),
-                  ('bettercam', 'bettercam'), ('hidapi', 'hid'), ('ultralytics', 'ultralytics')]:
+                  ('bettercam', 'bettercam'), ('hidapi', 'hid')]:
     try:
         __import__(mod)
         # The runtime version is what matters — a dist can be shadowed by another
@@ -60,14 +68,13 @@ for dist, mod in [('numpy', 'numpy'), ('opencv-python', 'cv2'), ('torch', 'torch
         print(f"  {dist:<15} MISSING  {type(e).__name__}: {e}")
         _failures.append(dist)
 
-import torch
-
-print(f"  cuda     {torch.cuda.is_available()}"
-      + (f"  {torch.cuda.get_device_name(0)}" if torch.cuda.is_available() else ""))
+# ⚠ A `cuda available?` line stood here. It is gone because the answer stopped
+# mattering: no detector, no calibration path and no control loop imports torch
+# any more. Verified rather than assumed — `import robot; 'torch' in sys.modules`
+# is False.
 
 # ── 2. detectors + model weights ────────────────────────────
 _section("detectors")
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 from detector.ammo_detector import AmmoDetector
 from detector.game_state import GameState
@@ -89,8 +96,8 @@ _check('GameState', lambda: None)
 # runtime behaviour and exactly the failure a smoke check has to catch.
 _check('WeaponHudDetector', lambda: None if WeaponHudDetector().ready
        else (_ for _ in ()).throw(RuntimeError('bank missing: '
-             'pixi run python tools/build_weapon_hud_bank.py')))
-_check('FireModeDetector', lambda: FireModeDetector(device) and None)
+             'pixi run python calibration/build_weapon_hud_bank.py')))
+_check('FireModeDetector', lambda: FireModeDetector() and None)
 _check('PostureDetector', lambda: PostureDetector() and None)
 _check('HighlightDetector', lambda: HighlightDetector() and None)
 _check('TabTypeDetector', lambda: TabTypeDetector() and None)
@@ -133,7 +140,7 @@ _section("capture")
 
 
 def _capture():
-    from screen_capture import ScreenCapture
+    from capture.screen_capture import ScreenCapture
     cap = ScreenCapture()
     cap.start()
     try:

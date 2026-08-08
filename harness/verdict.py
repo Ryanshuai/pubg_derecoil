@@ -59,7 +59,20 @@ IMPULSE_OFF_MAX = 0.5           # rounds
 # bypassed, or the record came from somewhere else. Defence in depth with the
 # same derived number is honest; a stricter arbitrary one is a second opinion
 # nobody derived. tools/test_harness.py asserts the two stay equal.
-ADS_FRAC_MIN = 0.80
+#
+# 2026-08-06: 0.80 -> 0.30, following calibration/analysis, and the reason is
+# not a loosening of standards -- it is that the quantity turned out not to
+# measure what the floor assumed. FIRING CANNOT CHANGE ADS (right click is a
+# toggle, nothing touches it during a burst, the reload is after), so
+# GunDriver.ensure_ads settles the question before the trigger and this reading
+# adds nothing about whether the magazine was aimed. What it DOES do is read
+# low under recoil shake: measured 387/387 scoped while still and 0.79 while
+# firing on the same VSS in the same ADS, scaling with recoil across the
+# roster. The old floor refused 55 of 1044 magazines, every one of them at
+# 61-80% and none near the ~0 of a real hip-fired burst, 46 of them the vector.
+# What survives at 0.30 is the contradiction check: ensure_ads said up, this
+# says never up, and one of them is lying.
+ADS_FRAC_MIN = 0.30
 
 # NOT a target -- a floor under a known defect. Phase-correlation tracking is
 # lost after 3-4 magazines of 5 ("the reference match has wrapped"), so half of

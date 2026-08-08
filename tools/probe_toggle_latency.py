@@ -50,7 +50,7 @@ from config import SCREEN_H, SCREEN_W
 from control.focus import focus_keeper
 from control.session import ensure_ready
 from control.lobby import LobbyControl
-from detector.cropper import capture_screen, win32_cap
+from capture.cropper import capture_screen, win32_cap
 from detector.spawner_detector import ICON_BOX, SpawnerDetector
 from detector.spawner_layout import find_menu
 from detector.tab_items import TabGrabber

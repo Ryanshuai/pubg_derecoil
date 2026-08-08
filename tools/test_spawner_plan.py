@@ -346,7 +346,50 @@ print('\n=== goto()\'s path log: the split, not the count ===')
 # whether the menu is an accordion. If the classifier is wrong then, the data
 # is already spent -- every transition it mislabels was a real click nobody is
 # going to make again. So the buckets are pinned here, offline, now.
-from tools.report_goto_paths import classify
+
+def classify(r):
+    """-> the bucket this transition belongs in.
+
+    THE BUCKETS DESCRIBE WHAT WAS OBSERVED, NOT WHY. They used to be named
+    'ACCORDION' and 'MULTI-OPEN', on the assumption that the menu had to be
+    one or the other. It is neither, and the first real sample said so: the
+    panel keeps BOTH columns open at once, and what a transition costs
+    depends on DIRECTION, not on any accordion discipline. A bucket named
+    after a mechanism would have gone on asserting the wrong one while the
+    counts underneath it were perfectly good.
+
+    So: same-column-up, same-column-down and cross-column are separated,
+    because that is the split the measurements actually landed on.
+
+    ⚠ THIS LIVED IN A REPORTING SCRIPT UNTIL 2026-08-08, and that script was
+    the one thing in tools/ another script imported. The report around it
+    was deleted because its `main()` returned 0 unconditionally: it
+    had a pixi task, it ran, and it could not fail. Mutation-testing every
+    gate that day turned up exactly one that was green by construction, and
+    it was that one. The classifier is real, so it moved to its only caller
+    — the thing that pins it.
+    """
+    if not r.get('ok'):
+        return 'failed'
+    src, dst = r.get('from'), r.get('to')
+    if r.get('path') == 'already':
+        return 'already open — 0 clicks'
+    if src is None:
+        return 'from a collapsed panel'          # uninformative by construction
+    if list(src) == list(dst or []):
+        return 'already open — 0 clicks'
+    same_col = dst and src[0] == dst[0]
+    if not same_col:
+        where = 'cross-column'
+    elif src[1] < dst[1]:
+        # The open one is ABOVE the target, so its submenu pushes the target's
+        # row ~360 px down out from under the measured coordinate. Geometry.
+        where = 'same column, DOWN (open one is above)'
+    else:
+        where = 'same column, UP'
+    return f'{where}: {r.get("path")} ({r.get("clicks")} clicks)'
+
+
 
 CASES = [
     # A one-click transition from a COLLAPSED panel is not evidence. There was

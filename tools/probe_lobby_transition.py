@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import cv2
 
 from config import LOBBY_BAR_ROI, LOBBY_PING_ROI, LOBBY_PLAY_XY
-from detector.cropper import capture_screen
+from capture.cropper import capture_screen
 from detector.geometry import cut
 from detector.lobby_detector import LobbyState, bar_max, classify, ping_fraction
 from control.focus import game_focused
@@ -117,20 +117,23 @@ class Recorder:
 
 
 def press_f():
-    """Press F through the Pico. Returns False if there is no Pico.
+    """Press F through the Pico.
+
+    ⚠ IT USED TO RETURN False WHEN THERE WAS NO PICO, and phase 2 branched on
+    that. Nothing can return False any more -- get_mouse() raises instead --
+    so the caller's `if not press_f()` was unreachable and this line said
+    otherwise.
 
     Deliberately no SendInput fallback: the game reads keys through raw input,
     and a silent no-op would look identical to "F does not start a match",
     which is the question this script exists to answer.
     """
-    from press.pico_mouse import HID_KEY_F, PicoMouse, get_mouse
+    # get_mouse() only ever returns a PicoMouse now, so the isinstance guard
+    # that stood here (and told the reader to set config.MOUSE_BACKEND) is
+    # gone with the backend it discriminated against.
+    from press.pico_mouse import HID_KEY_F, get_mouse
     mouse = get_mouse()
-    if not isinstance(mouse, PicoMouse):
-        print(f'[probe] {type(mouse).__name__} cannot send keys; '
-              f'set config.MOUSE_BACKEND = "pico"')
-        return False
     mouse.key(HID_KEY_F, 60)
-    return True
 
 
 def main():
@@ -201,8 +204,7 @@ def main():
     # ── phase 2: press F ─────────────────────────────────────────────────
     print('\n[probe] phase 2: pressing F')
     rec.mark('press F')
-    if not press_f():
-        return report(rec, run, entered=False)
+    press_f()
     f_at = rec.t
     clicked = False
 
@@ -228,7 +230,7 @@ def main():
                   f'{args.f_timeout:.0f}s; trying the PLAY button')
             rec.mark(f'click PLAY {LOBBY_PLAY_XY}')
             from press.pointer import Pointer
-            Pointer('auto').click_at(*LOBBY_PLAY_XY)
+            Pointer().click_at(*LOBBY_PLAY_XY)
             clicked = True
         if not game_focused():
             print(f'  {rec.t:6.2f}s  game lost focus — stopping; this run is '

@@ -41,7 +41,7 @@ import numpy as np
 
 from control.session import ensure_ready
 
-from sweep import Rig
+from calibration.sweep import Rig
 
 TAP_MS = 30           # trigger hold; long enough for one round, short of two
 WATCH_S = 0.45        # how long to look after the click
@@ -66,7 +66,7 @@ def one_tap(rig):
     rig.flush(4)
     base = rig.grab()
     prev_patch = rig.tracker.slice_frame(base)
-    prev_sig = rig.ammo_sig(base)
+    prev_sig = rig.fire.ammo_sig(base)
     t_click = time.perf_counter()
     rig.mouse.click(buttons=0x01, duration_ms=TAP_MS)
     t_recoil = t_ammo = None
@@ -81,7 +81,7 @@ def one_tap(rig):
             cum += m.dy / rig.K
             if abs(cum) >= ONSET_COUNTS:
                 t_recoil = now
-        sig = rig.ammo_sig(frame)
+        sig = rig.fire.ammo_sig(frame)
         if t_ammo is None and float(np.mean(sig != prev_sig)) > 0.02:
             t_ammo = now
         prev_sig = sig
@@ -127,13 +127,49 @@ def main():
     rig = Rig(args.sight)
     rec, ammo, both = [], [], []
     try:
+        # ⚠ A GUN AND ROUNDS IN IT, verified -- because the failure without
+        # them is a lie that reads as a result. 2026-08-07: this ran straight
+        # after an impulse probe had emptied the magazine, tapped 20 times into
+        # a gun with nothing in it, and reported
+        #
+        #     S_recoil  view starts moving : never seen
+        #     S_ammo    counter changes    : never seen
+        #
+        # Every word of which is TRUE. The view really did not move and the
+        # counter really did not change -- because no round was fired, which is
+        # not what the probe set out to measure and not what "never seen"
+        # sounds like.
+        #
+        # Same shape as probe_pitch_range's "posture unreadable" against the
+        # lobby (tools/CLAUDE.md): a real reading of the wrong situation.
+        # ensure_ready covers "can the game be driven"; it says nothing about
+        # what is in the character's hands, which is the experiment's business.
+        #
+        # This REFUSES rather than spawning: a probe that quietly fixes its own
+        # preconditions hides the one fact its caller most needs -- that the
+        # gun it thinks it measured is not the gun that was there.
+        rounds = rig.fire.read_ammo(rig.grab())
+        if not rounds:
+            rounds, _ = rig.fire.top_up()
+        if not rounds:
+            print('[!] REFUSING: no ammo counter, so either nothing is held or '
+                  'the magazine is empty.\n'
+                  '    Tapping now would report "never seen" for both signals, '
+                  'which is true and\n'
+                  '    means nothing. Rack a loaded gun (harvest or '
+                  'control/stock.py) and re-run.')
+            return 2
+        print(f'    {rounds} rounds in the magazine — enough for '
+              f'{args.taps} taps' if rounds >= args.taps else
+              f'    [!] only {rounds} rounds for {args.taps} taps; the tail '
+              f'will read "never seen" once it runs dry')
         if not args.keep_comp:
-            rig.disarm()
-        if not rig.ensure_ads():
+            rig.fire.disarm()
+        if not rig.gun.ensure_ads():
             print('[!] could not enter ADS')
             return 1
         for i in range(args.taps):
-            if not rig.ensure_ads():
+            if not rig.gun.ensure_ads():
                 print(f'  tap {i}: lost ADS')
                 continue
             r, a = one_tap(rig)
@@ -171,9 +207,76 @@ def main():
                   f'off. The residual\n  cannot see it — the fit converges to '
                   f'whatever nulls its own grid.')
     if s_rec is not None:
-        print(f'\n  Pattern start offset should be S_recoil - L = '
-              f'{s_rec:.0f} - 36 = {s_rec - 36:.0f} ms')
-        print(f'  press/pico_mouse.RECOIL_FIRE_DELAY_MS is currently 36')
+        # ⚠ BOTH NUMBERS HERE WERE ONCE HARDCODED AS 36, AND BOTH WERE STALE.
+        # L is 38 ms (tools/probe_input_latency.py, n=44, sd 4.8) and the
+        # constant is 13, not 36 -- 36 was an earlier value of the constant
+        # itself, retired because it came from S = 72 measured with a coarse
+        # motion threshold on the RAMPING recoil rather than off the counter.
+        # press/pico_mouse.py says so directly above the constant.
+        #
+        # So on 2026-08-07 this probe measured S_recoil = 51.3 (the docs say
+        # 51: a clean independent confirmation, and the first on a weapon other
+        # than the AUG) and then advised changing 13 to 15 while reporting the
+        # value as 36. A probe that reads its own subject from a literal will
+        # eventually argue against a correct calibration, confidently.
+        #
+        # Read the constant. Do not restate it.
+        # A CLASS attribute of PicoMouse, not a module global -- importing it
+        # by name raises, which is its own small reminder that reading the
+        # subject beats restating it.
+        # ⚠ THE OFFSET COMES OFF THE COUNTER, NOT OFF S_recoil, and this probe
+        # used to do the opposite -- which made it argue for exactly the value
+        # press/pico_mouse.py records as retired. Its comment there:
+        #
+        #     36 ms came from S = 72, measured with a coarse motion threshold
+        #     on the ramping recoil. Re-measured off the counter it is 51,
+        #     and W is 13.
+        #
+        # S_recoil is that same coarse threshold, and it is biased LATE by
+        # construction: the detector needs displacement to accumulate before
+        # it will call the view moved, so it can only ever fire at or after
+        # the true instant. Measured 2026-08-07, m416, 40 taps -- the paired
+        # gap median is 0.0 ms (the two ARE the same event), yet 5 of 40 taps
+        # read recoil 12-17 ms LATE and NOT ONE read it early. That one-sided
+        # tail is what pushed S_recoil's median 5 ms above S_ammo's and made
+        # this probe recommend 21 against a stored 13.
+        #
+        # The counter has no such tail: it is a discrete glyph change, present
+        # or not. Both are rendered through the same chain, so L cancels the
+        # same way for either -- the counter is simply the cleaner clock.
+        from press.pico_mouse import PicoMouse
+        CUR = PicoMouse.RECOIL_FIRE_DELAY_MS
+        # Also measured, also drifts: tools/probe_input_latency.py, 35.8 +-5.1
+        # over n=44. Its SPREAD is the reason for the tolerance below -- an
+        # offset quoted without it looks far more decided than it is.
+        L_MS, L_SD = 38.0, 5.1
+        s_amm = float(np.median(ammo)) if len(ammo) else None
+        if s_amm is None:
+            print('\n  No counter readings — cannot site the offset. '
+                  'S_recoil alone will not do it; see the comment here.')
+            return 0
+        want = s_amm - L_MS
+        sem = float(np.std(ammo, ddof=1)) / max(len(ammo), 1) ** 0.5
+        tol = (sem ** 2 + L_SD ** 2) ** 0.5
+        print(f'\n  Pattern start offset = S_ammo - L = {s_amm:.0f} - '
+              f'{L_MS:.0f} = {want:.0f} ms  (+-{tol:.0f}, and L carries '
+              f'{L_SD:.0f} of that)')
+        print(f'  S_recoil would say {s_rec - L_MS:.0f} — NOT the number to '
+              f'use, see the comment in this file')
+        # ⚠ NAMES config.py, NOT press/pico_mouse.py. PicoMouse still
+        # carries a RECOIL_FIRE_DELAY_MS class attribute, but it merely
+        # reads config's -- and this line used to send the operator to edit
+        # the attribute, where a new value would silently shadow the ~70
+        # lines of measurement that justify the one in config.py.
+        print(f'  config.RECOIL_FIRE_DELAY_MS is {CUR}')
+        if abs(want - CUR) <= tol:
+            print(f'  Inside {tol:.0f} ms — this run CONFIRMS the stored '
+                  f'value, it does not move it.')
+        else:
+            print(f'  [!] {want - CUR:+.0f} ms apart, against a tolerance of '
+                  f'{tol:.0f}. Re-measure L before touching the constant:\n'
+                  f'      it is the bigger term here, and it is a literal in '
+                  f'this file rather than a reading.')
     return 0
 
 

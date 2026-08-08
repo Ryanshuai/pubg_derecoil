@@ -59,7 +59,7 @@ except (AttributeError, OSError):
 
 import numpy as np
 
-from capture_run import (CaptureRun, LABEL_DETECTED, LABEL_REQUESTED,
+from calibration.capture_run import (CaptureRun, LABEL_DETECTED, LABEL_REQUESTED,
                          MANIFEST, VERSION)
 
 FAILS = []
@@ -265,7 +265,7 @@ def t_capture_ads_roundtrip(tmp):
     stubbed; everything between them is the real code path.
     """
     print('\ncapture_ads writes a run its own --report can read')
-    import capture_ads as ca
+    from calibration import capture_ads as ca
 
     shot = np.zeros((240, 320, 3), np.uint8)
     shot[60:180, 80:240] = 40                      # something for the median
@@ -337,7 +337,7 @@ def t_v1_manifest(tmp):
 def t_scope_label():
     """capture_ads: what is known about the scope on the gun."""
     print('\ncapture_ads.scope_label()')
-    from capture_ads import scope_info, scope_label
+    from calibration.capture_ads import scope_info, scope_label
     # The catalogue's own asset names, not made-up ones: half of what this
     # function decides is whether the readback matches what --scopes asked for,
     # and a literal here would let scope_info() drift out from under it.
@@ -370,7 +370,7 @@ def t_scope_label():
 def t_label_for():
     """collect_templates: which targets can claim ground truth."""
     print('\ncollect_templates.label_for()')
-    from collect_templates import label_for
+    from calibration.collect_templates import label_for
     cases = [
         ('slots', 'vert_grip', 'grip', LABEL_REQUESTED, 'grip'),
         ('rows', 'comp_ar', None, LABEL_REQUESTED, 'inventory'),
@@ -402,7 +402,7 @@ def t_label_for():
     # a floor alone would believe scenery, and no floor at all would believe a
     # gun that was already sitting there.
     print('\ncollect_templates.plate_arrived()')
-    from collect_templates import plate_arrived, PLATE_INK_MIN, PLATE_INK_MAX
+    from calibration.collect_templates import plate_arrived, PLATE_INK_MIN, PLATE_INK_MAX
     check('cleared rack -> a real plate (0 -> 682, measured)',
           plate_arrived(0, 682) is True)
     check('the two extremes of the occupied samples',

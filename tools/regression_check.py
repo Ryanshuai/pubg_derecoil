@@ -4,7 +4,8 @@ Every detector is deterministic given a frame, so a dependency bump can be
 checked numerically instead of trusted: dump the results before the upgrade,
 dump them after, diff. Covers the cv2 call sites that `smoke` does not reach —
 matchTemplate, phaseCorrelate, connectedComponents, findContours, adaptive
-threshold, Sobel/Canny — plus the sklearn RF and the four torch heads.
+threshold, Sobel/Canny — plus the sklearn RF. (There were four torch heads
+here too; the last one went on 2026-08-08, see detector/fire_mode_detector.)
 
     pixi run python tools/regression_check.py --save      # before upgrading
     pixi run python tools/regression_check.py --compare   # after
@@ -28,7 +29,6 @@ try:
 except (AttributeError, OSError):
     pass
 
-import torch
 
 from config import HUD_REGIONS, SCREEN_H, SCREEN_W
 
@@ -155,7 +155,7 @@ def _crops(img, names):
 
 
 def _jsonable(v):
-    """numpy / torch scalars and containers -> plain JSON, floats rounded."""
+    """numpy scalars and containers -> plain JSON, floats rounded."""
     if isinstance(v, (np.floating, float)):
         f = float(v)
         return None if math.isnan(f) else round(f, 6)
@@ -171,7 +171,6 @@ def _jsonable(v):
 
 
 def collect():
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     from detector.game_state import GameState
     from detector.weapon_hud_detector import WeaponHudDetector
@@ -186,7 +185,7 @@ def collect():
 
     state = GameState()
     weapon_hud = WeaponHudDetector()          # exemplar bank + PCA, no torch
-    fire_mode = FireModeDetector(device)      # torch head + sklearn RF
+    fire_mode = FireModeDetector()            # sklearn RF, 8 structural features
     posture = PostureDetector()               # Canny / Sobel / connectedComponents
     highlight = HighlightDetector()           # dewhite + red-channel, no templates
     tab_type = TabTypeDetector()
@@ -243,7 +242,6 @@ def collect():
             'python': sys.version.split()[0],
             'numpy': np.__version__,
             'cv2': cv2.__version__,
-            'torch': torch.__version__,
         },
         'n_frames': len(frames),
         'results': results,
@@ -278,7 +276,7 @@ def _report_labels():
     """The ground-truth pass on its own. -> exit code.
 
     Separate from --compare on purpose. --compare answers "did anything move
-    since the baseline", needs torch and takes a while; this answers "is any
+    since the baseline", and takes a while; this answers "is any
     detector wrong", needs no baseline at all, and is the one worth running in
     the gate set after touching a detector or a template.
     """
@@ -304,7 +302,7 @@ def main():
     ap.add_argument('--baseline', default=DEFAULT_BASELINE)
     ap.add_argument('--labels', action='store_true',
                     help='only run the ground-truth crop assertions (fast, '
-                         'no torch heads, no baseline)')
+                         'no baseline)')
     args = ap.parse_args()
     if not (args.save or args.compare or args.labels):
         ap.error('pass --save, --compare or --labels')

@@ -4,7 +4,7 @@
 
 fire_magazine() holds the fire button down for up to MAX_FIRE_S and grabs
 frames the whole time. Since the frame source started raising FocusLost when
-the game leaves the foreground (detector/cropper.ScreenBuffer), that loop has
+the game leaves the foreground (capture/cropper.ScreenBuffer), that loop has
 an exception path through the middle of it — and the thing on the other side
 of that path is a mouse button that is still held.
 
@@ -28,10 +28,13 @@ try:
 except (AttributeError, OSError):
     pass
 
+import time
+
 import numpy as np
 
+import control.fire as fire_mod
 from control.fire import FireDriver, PREFIRE_FRAMES
-from detector.cropper import FocusLost
+from capture.cropper import FocusLost
 
 FAILS = []
 
@@ -151,6 +154,80 @@ except FocusLost:
 # It presses nothing, so there is nothing to leak; what matters is that it
 # does not swallow the exception and report a finished reload.
 check('a lost foreground during the reload propagates', raised, True)
+
+
+print('\n=== wait_reload reads the NUMBER, and does not wait when it can ===')
+# The reload used to end on "the ammo pixels stopped moving" plus a flat 1.8 s,
+# because the counter refills partway through the animation and pixels cannot
+# say how far in they are. Digits can. These check both halves of that: the
+# digit path returns on the reading and sleeps nothing, and the pixel path is
+# still there for a weapon whose counter does not read -- and SAYS SO.
+
+
+class Ammo:
+    """Hands back a scripted sequence of counter readings. None is not zero."""
+
+    def __init__(self, seq):
+        self.seq, self.i = list(seq), 0
+
+    def classify(self, _crops):
+        v = self.seq[min(self.i, len(self.seq) - 1)]
+        self.i += 1
+        return v
+
+
+def reload_run(seq, expect, **patch):
+    """-> (returned value, total seconds slept). The sleep total is the test:
+    a digit-driven reload must not be paying a fixed settle on top."""
+    fd, frames, mouse = driver()
+    fd.ammo_det = None if seq is None else Ammo(seq)
+    slept, real_sleep = [], time.sleep
+    old = {k: getattr(fire_mod, k) for k in patch}
+    try:
+        time.sleep = lambda s=0, *a, **k: slept.append(s)
+        for k, v in patch.items():
+            setattr(fire_mod, k, v)
+        return fd.wait_reload(expect), sum(slept)
+    finally:
+        time.sleep = real_sleep
+        for k, v in old.items():
+            setattr(fire_mod, k, v)
+
+
+# Mid-animation the counter is unreadable, then it climbs, then it is full.
+# RELOAD_CONFIRM = 2 means one lone parse is not a reading.
+got, slept = reload_run([None, None, 0, 0, 12, 30, 30, 30], expect=30)
+check('a counter that reaches the magazine size ends the reload',
+      got is not None, True)
+# Not zero any more: the counter comes back PARTWAY through the animation,
+# so the digit path pays RELOAD_READY_SETTLE_S and nothing else. The point
+# of the check is that it is not paying SETTLE_AFTER_RELOAD_S's 1.8 s
+# guess on top -- that one is anchored to the end of FIRING, this one to a
+# read number.
+check('...and it pays only the ready settle', slept,
+      fire_mod.RELOAD_READY_SETTLE_S)
+check("...which is well under the pixel path's blind wait",
+      slept < fire_mod.SETTLE_AFTER_RELOAD_S, True)
+
+# top_up() does not know the size yet -- it is the thing that measures it -- so
+# the rule relaxes to "above zero and no longer changing".
+got, slept = reload_run([None, 30, 30, 30, 30, 30], expect=None,
+                        RELOAD_HOLD_S=0.0)
+check('with no expected size, a settled non-zero reading ends it',
+      got is not None, True)
+
+# Digits that read and never reach the size: a reload that did not happen. It
+# must NOT fall through to the pixel path and call the frozen counter settled.
+got, _ = reload_run([0] * 40, expect=30, RELOAD_TIMEOUT_S=0.25)
+check('a counter stuck at 0 times out rather than settling', got, None)
+
+# No counter at all: the pixel fallback, which still needs its settle because
+# "the pixels stopped" says nothing about how far into the animation this is.
+got, slept = reload_run(None, expect=30, RELOAD_MIN_S=0.05,
+                        RELOAD_STATIC_S=0.01, RELOAD_TIMEOUT_S=2.0)
+check('an unreadable counter still finishes on pixels', got is not None, True)
+check('...and that path DOES pay the settle',
+      slept >= fire_mod.SETTLE_AFTER_RELOAD_S, True)
 
 print()
 if FAILS:

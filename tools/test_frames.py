@@ -2,7 +2,7 @@
 
     pixi run frames
 
-detector/cropper.ScreenBuffer collects three things that were written out by
+capture/cropper.ScreenBuffer collects three things that were written out by
 hand in four places: the crop-to-screen-coordinate blit (calibration/sweep.py's
 Rig and calibration/state.py's Probe; harvest.py's Panel was the third
 until it was deleted), the
@@ -33,7 +33,7 @@ except (AttributeError, OSError):
 
 from config import (HUD_REGIONS, SCREEN_H, SCREEN_W, SPAWNER_ICON_ANCHORS,
                     SPAWNER_ICON_H, SPAWNER_ICON_SEARCH, SPAWNER_ICON_W)
-from detector.cropper import (FLUSH_FRAMES, FocusLost, ScreenBuffer,
+from capture.cropper import (FLUSH_FRAMES, FocusLost, ScreenBuffer,
                               StillGrabber, anchor_box)
 
 FAILS = []
@@ -126,10 +126,10 @@ print('     a migration that moves a box by a pixel has to fail here)')
 
 # THE CROSS-CHECK IS RETIRED, on purpose. It lifted the box arithmetic out of
 # each hand-rolled copy with ast and re-ran it, so that a migration moving a
-# box by one pixel had to fail here. Both copies are now gone —
-# calibration/harvest.py's Panel was deleted with the class, and
-# calibration/state.py's Probe calls anchor_box() itself — so there is nothing
-# left to extract and the comparison has no second opinion to offer.
+# box by one pixel had to fail here. Both copies are now gone — one went
+# with the recoil sweep, and calibration/state.py's Probe calls anchor_box()
+# itself — so there is nothing left to extract and the comparison has no
+# second opinion to offer.
 #
 # It caught both deletions on the way past, which is what it was for. Removed
 # deliberately rather than made tolerant of a missing name: a lookup that

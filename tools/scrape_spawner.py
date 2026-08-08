@@ -46,7 +46,7 @@ import cv2
 
 from config import SCREEN_H, SPAWNER_MIN_SCORE
 from detector.spawner_detector import SpawnerDetector, build_templates
-from detector.cropper import capture_screen
+from capture.cropper import capture_screen
 from detector.spawner_layout import (CHANGE_MIN, PARK_XY, annotate,
                                      bright_mask, changed_rows, column_boxes,
                                      column_diff, find_menu)
@@ -136,7 +136,7 @@ def expand_capture_collapse(item, pointer, base_mask, boxes, out_dir,
     return rec
 
 
-def scrape(columns=None, limit=None, backend='auto', layout_only=False,
+def scrape(columns=None, limit=None, layout_only=False,
            countdown=5, start_from=None):
     os.makedirs(OUT_ROOT, exist_ok=True)
     out_dir = os.path.join(OUT_ROOT, time.strftime('%Y%m%d_%H%M%S'))
@@ -204,7 +204,7 @@ def scrape(columns=None, limit=None, backend='auto', layout_only=False,
     print(f'\nscraping {len(targets)} categories '
           f'({targets[0].key}..{targets[-1].key})\n')
 
-    pointer = Pointer(backend)
+    pointer = Pointer()
     records, done, failed = [], 0, []
     t0 = time.perf_counter()
     for it in targets:
@@ -291,8 +291,6 @@ def main():
                     help='grab the panel and dump coordinates, never click')
     ap.add_argument('--columns', help='comma-separated column indices, e.g. 1,2')
     ap.add_argument('--limit', type=int, help='rows per column')
-    ap.add_argument('--backend', default='auto',
-                    choices=('auto', 'pico', 'sendinput'))
     ap.add_argument('--countdown', type=int, default=5)
     ap.add_argument('--start-from', help='resume at this row key, e.g. col2_row03')
     ap.add_argument('--recrop', metavar='DIR',
@@ -337,7 +335,7 @@ def main():
     cols = None
     if args.columns:
         cols = {int(c) for c in args.columns.split(',') if c.strip()}
-    return 0 if scrape(cols, args.limit, args.backend, args.layout_only,
+    return 0 if scrape(cols, args.limit, args.layout_only,
                        args.countdown, args.start_from) else 1
 
 

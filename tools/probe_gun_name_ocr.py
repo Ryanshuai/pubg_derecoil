@@ -128,7 +128,7 @@ def extract(spec, write=False, force=False):
     tight = mask[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
 
     fname = f'{code}.{tag}.png' if tag else f'{code}.png'
-    out = os.path.join(ROOT, 'training_data', 'ocr_white', fname)
+    out = os.path.join(ROOT, 'docs', 'training_data', 'ocr_white', fname)
     det = TabWeaponDetector()
     have = len(det._templates.get(code, []))
     print(f'{code}: {tight.shape[1]}x{tight.shape[0]}, '

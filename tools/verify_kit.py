@@ -35,8 +35,8 @@ from control.session import ensure_ready
 from control import spawner as spawner_mod
 from control.spawner import SpawnerControl
 from control.stock import restock
-from sweep import Rig
-from harvest import Kitter, BACKPACK, SCOPE_PART
+from calibration.sweep import Rig
+from control.kitting import Kitter, BACKPACK, SCOPE_PART
 
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                    'docs', 'kit_checks')
@@ -104,12 +104,12 @@ def main():
 
         # Open the inventory again and photograph it: the slot row is where a
         # human can see what is actually bolted on.
-        rig.ensure_inventory_open()
+        rig.gun.ensure_inventory_open()
         time.sleep(0.5)
         p = os.path.join(OUT, f'{args.weapon}_{stamp}.png')
         shot(p)
         slots = kit.ac.read_slots(args.slot) if kit.ac.sync() else {}
-        rig.ensure_inventory_closed()
+        rig.gun.ensure_inventory_closed()
 
         print(f'\nslots read from the Tab screen: {slots}')
         print(f'screenshot -> {p}')

@@ -19,7 +19,6 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import win32gui
-import win32process
 
 from control.focus import (GAME_EXES, game_focused, game_hwnd,
                            raise_game, window_info)

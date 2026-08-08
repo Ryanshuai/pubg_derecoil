@@ -16,14 +16,17 @@ import cv2
 from detector.geometry import cut
 
 from config import (LOBBY_BAR_ROI, LOBBY_ERROR_TEXT_ROI,
+                    LOBBY_MENU_TITLE_ROI, LOBBY_MENU_TITLE_ROI_IN_LOBBY,
                     LOBBY_RECONNECT_TEXT_ROI,
                     LOBBY_LEAVE_CONFIRM_TEXT_ROI,
                     LOBBY_LEAVE_TEXT_ROI, LOBBY_MENU_SEARCH, LOBBY_PING_ROI)
 from detector.lobby_detector import (LobbyState, _search_roi, bar_max,
                                      classify_frame, error_dialog_score,
-                                     error_dialog_visible, is_results_screen,
+                                     error_dialog_visible, is_lobby_system_menu,
+                                     is_results_screen, is_system_menu,
                                      leave_confirm_score, leave_confirm_visible,
                                      leave_entry_confirmed, leave_entry_score,
+                                     menu_title_score,
                                      ping_fraction, reconnect_score,
                                      reconnect_visible)
 
@@ -70,6 +73,14 @@ CASES = [
     # playable=True while every key goes to the menu.
     ('system_menu.png', LobbyState.MENU,      False,
      'SYSTEM MENU over the training range'),
+    # The SAME menu raised from the LOBBY, 315 px lower. Until 2026-08-07
+    # nothing could see it: the lobby is letterboxed with or without a menu
+    # over it, so bar_max reads 0 and this classified as plain LOBBY --
+    # whereupon press_play() fired PLAY into a modal that swallowed it, every
+    # 15 s to the 300 s ceiling. Same shape as the ERROR and RECONNECT
+    # dialogs, which is why it is a state and not a gate.
+    ('system_menu_lobby.png', LobbyState.LOBBY_MENU, False,
+     'SYSTEM MENU over the lobby (4th entry RESTART LOBBY)'),
 ]
 
 UNCOVERED = ['loading screen (LOBBY -> IN_GAME transition)',
@@ -94,7 +105,16 @@ def confusion():
              ('error_dialog', error_dialog_visible, error_dialog_score,
               LOBBY_ERROR_TEXT_ROI, 'error_inactivity.png'),
              ('reconnect', reconnect_visible, reconnect_score,
-              LOBBY_RECONNECT_TEXT_ROI, 'error_disconnected.png')]
+              LOBBY_RECONNECT_TEXT_ROI, 'error_disconnected.png'),
+             # ⚠ ONE TEMPLATE, TWO WINDOWS, so these two can only be told
+             # apart by WHERE they fire — and they decide opposite actions
+             # (ESC to keep playing vs. ESC to reach PLAY). Nothing else in
+             # this table shares a template with another row, which is why
+             # these are the two that had to be added to it.
+             ('menu_title', is_system_menu, menu_title_score,
+              LOBBY_MENU_TITLE_ROI, 'system_menu.png'),
+             ('menu_title_lobby', is_lobby_system_menu, menu_title_score,
+              LOBBY_MENU_TITLE_ROI_IN_LOBBY, 'system_menu_lobby.png')]
     bad = 0
     print(f'\n{"gate":<16}{"screen":<22}{"score":>7}  fires')
     for gate, visible, score, roi, expect_on in gates:
@@ -108,7 +128,7 @@ def confusion():
             want = (name == expect_on)
             ok = fires == want
             bad += not ok
-            print(f'{gate:<16}{name:<22}{s:>7.3f}  '
+            print(f'{gate:<18}{name:<22}{s:>7.3f}  '
                   f'{str(fires):<6}{"" if ok else "  <-- WRONG"}')
     return bad
 

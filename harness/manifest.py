@@ -43,10 +43,18 @@ SKIPPED = 'skipped'
 VERSION = 1
 
 
-def cell_id(weapon, posture, sight):
+def cell_id(weapon, posture, sight, config='bare'):
     """The key a cell is addressed by. Stable across runs, so two nights of
-    the same plan can be diffed."""
-    return f'{weapon}|{posture}|{sight}'
+    the same plan can be diffed.
+
+    ⚠ CONFIG IS PART OF THE KEY, and it has to be: a night that measures
+    m416 in all eight slot combinations would otherwise write eight cells
+    that all address as `m416|standing|red_dot`, so mark() would move the
+    same row eight times and seven of the results would be invisible.
+    'bare' is folded away so ids written before configs existed still match.
+    """
+    tail = '' if config in (None, '', 'bare') else f'|{config}'
+    return f'{weapon}|{posture}|{sight}{tail}'
 
 
 class Manifest:
@@ -62,12 +70,16 @@ class Manifest:
     def build(cls, path, cells, axis='weapon', params=None):
         """A fresh manifest with every cell UNMEASURED.
 
-        `cells` is an iterable of (weapon, posture, sight).
+        `cells` is an iterable of (weapon, posture, sight) or
+        (weapon, posture, sight, config).
         """
         rows = []
-        for weapon, posture, sight in cells:
-            rows.append({'id': cell_id(weapon, posture, sight),
+        for cell in cells:
+            weapon, posture, sight = cell[:3]
+            config = cell[3] if len(cell) > 3 else 'bare'
+            rows.append({'id': cell_id(weapon, posture, sight, config),
                          'weapon': weapon, 'posture': posture, 'sight': sight,
+                         'config': config,
                          'state': UNMEASURED, 'attempts': 0,
                          'verdict': None, 'evidence': None, 'updated': None})
         data = {'version': VERSION, 'axis': axis,

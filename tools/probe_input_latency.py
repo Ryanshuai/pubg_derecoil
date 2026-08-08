@@ -36,7 +36,7 @@ sys.path.insert(0, os.path.join(ROOT, 'calibration'))
 import numpy as np
 
 from control.session import ensure_ready
-from sweep import Rig
+from calibration.sweep import Rig
 
 MOVE = 250          # counts per probe; big enough to clear the noise floor
 WATCH_S = 0.40      # how long to keep looking after the command

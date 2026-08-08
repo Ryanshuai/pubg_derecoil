@@ -317,6 +317,86 @@ def summarise(rows):
         for k, n in sorted(by_stage.items(), key=lambda kv: -kv[1]):
             print(f'  {n:>4}  {k}')
 
+    # WAS THERE ANYTHING TO GRAB? The geometry fields were byte-for-byte
+    # identical between landed and missed (place tries 1.00 both, dy 0.00
+    # both), which rules out the gesture and leaves the TARGET. src_key is
+    # read from the source row at grab time, so it separates three failures
+    # that look the same from the caller:
+    #   None                -> that row was empty. The plan was computed
+    #                          against a stale read; rows below a removed one
+    #                          scroll up, so the gesture aimed at a row that
+    #                          had already moved. This is the row-shift bug.
+    #   '(read failed: ..)' -> the detector could not name it (park/tooltip).
+    #   an actual key       -> the item WAS there and the game refused. Only
+    #                          this third bucket is a timing or firmware
+    #                          question; the other two are our own bookkeeping.
+    def _bucket(r):
+        k = r.get('src_key')
+        if k is None:
+            return 'source row was EMPTY (stale plan / row shift)'
+        if isinstance(k, str) and k.startswith('('):
+            return k
+        return 'item was there, the game refused'
+
+    have = [r for r in drags if 'src_key' in r]
+    if have:
+        print('\nwhat sat on the grab point (only rows logged since src_key '
+              'was added):')
+        for name, rs in (('landed', [r for r in have if landed(r) is True]),
+                         ('missed', [r for r in have if landed(r) is False])):
+            if not rs:
+                continue
+            by = {}
+            for r in rs:
+                b = _bucket(r)
+                by[b] = by.get(b, 0) + 1
+            print(f'  {name} ({len(rs)}):')
+            for k, n in sorted(by.items(), key=lambda kv: -kv[1]):
+                print(f'    {n:>4}  ({100 * n / len(rs):>4.0f}%)  {k}')
+        stale = sum(1 for r in have
+                    if landed(r) is False and r.get('src_key') is None)
+        bad = sum(1 for r in have if landed(r) is False)
+        if bad:
+            print(f'  -> {stale}/{bad} of the misses were aimed at an empty '
+                  f'row. Anything near 100% means\n     the fix is to re-read '
+                  f'before each gesture, not to slow the gesture down.')
+
+        # THE RETRY IS THE CONTROL, and it costs no new instrumentation. A
+        # miss followed by attempt 2 on the SAME address re-reads the row, so
+        # the two records answer the question the bucket above cannot: a row
+        # holding SOMETHING is not a row holding the RIGHT something, and a
+        # shifted row still reads as a key. Comparing the pair splits them.
+        #
+        #   src_key CHANGED between the attempts -> the row moved under us.
+        #     The first gesture grabbed whatever had scrolled into that slot,
+        #     which is a bookkeeping bug on our side (re-read before each
+        #     gesture) and NOT a timing one.
+        #   src_key IDENTICAL and the retry landed -> same item, same point,
+        #     one refusal then one acceptance. That is the game, or something
+        #     between the gestures. This is the bucket that stays open.
+        pairs = []
+        for i, r in enumerate(have):
+            if landed(r) is not False or 'src_key' not in r:
+                continue
+            for nxt in have[i + 1:i + 3]:
+                if (nxt.get('src') == r.get('src')
+                        and nxt.get('dst') == r.get('dst')
+                        and (nxt.get('attempt') or 0) > (r.get('attempt') or 0)):
+                    pairs.append((r, nxt))
+                    break
+        if pairs:
+            same = sum(1 for a, b in pairs
+                       if a.get('src_key') == b.get('src_key'))
+            won = sum(1 for a, b in pairs
+                      if a.get('src_key') == b.get('src_key')
+                      and landed(b) is True)
+            print(f'\n  the retry as a control ({len(pairs)} miss->retry '
+                  f'pairs on the same address):')
+            print(f'    {same:>4}  the re-read found the SAME item  '
+                  f'({won} of those then landed)')
+            print(f'    {len(pairs) - same:>4}  the re-read found a DIFFERENT '
+                  f'item -> the row had moved')
+
     if ok or miss:
         print('\nlanded vs missed, on the three candidate causes:')
         for name, rs in (('landed', ok), ('missed', miss)):
@@ -370,6 +450,40 @@ def summarise(rows):
             print(f'  {n:>4}  {k}')
 
 
+
+def churn_report(rows):
+    """Tab screens left and re-entered with nothing done in between.
+
+    The pattern was measurable from this file already -- a close row followed
+    by an open row -- but not ATTRIBUTABLE, because a Tab row records the press
+    and not the code that asked for it. control.inventory._churn stamps the
+    caller onto the offending open row; this is the half that reads it.
+
+    Printed even when the count is zero. A gate whose output nobody sees is a
+    gate nobody knows is armed -- which is how the drag verdict stayed wrong.
+    """
+    hits = [r for r in rows if isinstance(r.get('churn'), dict)]
+    print()
+    print('=== Tab churn: left the inventory and came straight back ===')
+    if not hits:
+        print('  none in this slice, or the run predates the churn stamp')
+        return
+    by = {}
+    for r in hits:
+        c = r['churn']
+        pair = (f"{c.get('closed_by') or '?'}  ->  "
+                f"{c.get('by') or '?'}")
+        e = by.setdefault(pair, [0, 0.0])
+        e[0] += 1
+        e[1] += c.get('gap_s') or 0.0
+    print(f'  {len(hits)} occurrence(s), {len(hits) * 2} Tab presses, '
+          f'{sum(v[1] for v in by.values()):.0f}s of wall clock')
+    print()
+    print('  count   secs   closed by  ->  reopened by')
+    for who, (n, secs) in sorted(by.items(), key=lambda kv: -kv[1][0]):
+        print(f'  {n:4d}  {secs:6.1f}s   {who}')
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--log', default=LOG)
@@ -420,6 +534,7 @@ def main():
             detail(i, r)
         if len(bad) > 12:
             print(f'\n({len(bad) - 12} earlier failure(s) not shown)')
+    churn_report(rows)
     return 0
 
 

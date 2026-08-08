@@ -32,7 +32,7 @@ except (AttributeError, OSError):
 
 import cv2
 
-from detector.cropper import capture_screen
+from capture.cropper import capture_screen
 from press.pointer import cursor_pos
 
 VK = {'C': 0x43, 'V': 0x56, 'X': 0x58, 'B': 0x42, 'F8': 0x77, 'F9': 0x78}

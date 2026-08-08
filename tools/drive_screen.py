@@ -14,11 +14,12 @@ that step, once, with the verification the copies skip.
 
 The chain, in order, because each link fails differently:
 
-  focus     ensure_focus() — a keypress sent to the terminal is simply lost,
-            and the symptom is "the panel did not open" with no error.
-  in match  LobbyControl.ensure_in_match() — TAB in the lobby does nothing,
-            and the ESC menu eats every key while looking exactly like a
-            live round to the pixel probes.
+  ready     control.session.ensure_ready() in main(), NOT in drive() — a
+            keypress sent to the terminal is simply lost, TAB in the lobby
+            does nothing, and the ESC menu eats every key while looking
+            exactly like a live round to the pixel probes. The leg for the
+            screen being opened is switched off, since shutting it is the one
+            thing that would defeat the shot.
   known     If the screen is already up, close it first. A toggle key applied
             to an unknown state lands on the opposite of what was wanted.
   open      Press, wait, verify. Not "press and assume".
@@ -50,12 +51,10 @@ for _s in (sys.stdout, sys.stderr):
 import cv2
 
 from detector import spawner_layout, tab_layout
-from control.lobby import LobbyControl
 from detector.spawner_detector import SpawnerDetector
-from detector.cropper import capture_screen
+from capture.cropper import capture_screen
 from press.pico_mouse import HID_KEY_COMMA, HID_KEY_TAB
 from press.pointer import Pointer, move_cursor
-from control.focus import ensure_focus
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -112,30 +111,33 @@ SCREENS = {
 }
 
 
-def drive(screen, shoot_as=None, keep_open=False, ensure_match=True,
-          backend='auto', countdown=6, verbose=True):
-    """-> {'ok', 'path', 'error'}"""
+def drive(screen, shoot_as=None, keep_open=False, verbose=True):
+    """-> {'ok', 'path', 'error'}
+
+    ⚠ THIS DOES NOT GATE THE GAME, and it used to. It opened with
+    ensure_focus() plus an open-coded ensure_in_match(), which put it on rule
+    9's debt list with the note "its ensure_focus is inside drive(), a LIBRARY
+    function that calibration/scan_compat.py calls once per weapon -- 30 times
+    a run. ensure_ready there would teleport 30 times."
+
+    Every clause of that was false, and it is worth writing down because the
+    exemption survived a year on it. scan_compat imports SCREENS, not drive();
+    `grep 'drive('` finds exactly ONE caller, main() below. And scan_compat
+    has opened with ensure_ready since 2026-08-06 anyway, so the teleport the
+    note was protecting against could not have happened. AN EXEMPTION IS A
+    CLAIM ABOUT THE CODE, and this one was never checked against it.
+
+    The gate belongs to whoever is starting a run — main() takes it now, and a
+    caller that imports this drives through their own ensure_ready.
+    """
     def log(m):
         if verbose:
             print(f'[drive] {m}', flush=True)
 
-    if not ensure_focus(countdown_s=countdown, label=f'drive {screen.name}'):
-        return {'ok': False, 'path': None,
-                'error': 'could not bring the game to the foreground'}
-
-    if ensure_match:
-        with LobbyControl(backend, verbose=verbose) as lc:
-            rec = lc.ensure_in_match()
-        if not rec['ok']:
-            return {'ok': False, 'path': None,
-                    'error': f'not in a match: {rec["error"]}'}
-        log(f'in a match after {rec["elapsed"]:.1f}s')
-
-    ptr = Pointer(backend)
-    if ptr.pico is None:
-        return {'ok': False, 'path': None,
-                'error': 'no Pico — these screens are opened by keypress and '
-                         'only the Pico can send keys'}
+    # No `pico is None` branch: Pointer() raises when there is no device, and
+    # the raise carries who is holding it. The dict this used to return said
+    # only "no Pico".
+    ptr = Pointer()
 
     if screen.is_up():
         log(f'{screen.name} is already up — closing first for a known state')
@@ -191,9 +193,8 @@ def main():
                     help='save the verified frame to docs/<screen>/<NAME>.png')
     ap.add_argument('--keep-open', action='store_true')
     ap.add_argument('--no-ensure', action='store_true',
-                    help='skip the lobby check; assumes a live match')
-    ap.add_argument('--backend', default='auto',
-                    choices=('auto', 'pico', 'sendinput'))
+                    help='skip the readiness gate; assumes a live match with '
+                         'nothing else on screen')
     ap.add_argument('--countdown', type=int, default=6)
     args = ap.parse_args()
 
@@ -208,9 +209,29 @@ def main():
     if shoot_as == '__stamp__':
         shoot_as = time.strftime('%Y%m%d_%H%M%S')
 
+    # ⚠ THE GATE IS HERE, NOT IN drive(). And it is the whole five-leg gate,
+    # not the focus + match that used to live one level down: this script's
+    # entire job is to open ONE screen and photograph it, so the other three
+    # legs are precisely the ones that ruin it. A Tab already up means the
+    # toggle closes it; a spawner panel already up means the shot is of the
+    # panel; and the shot is a CALIBRATION REFERENCE that later runs match
+    # against, so a wrong one is not a failed run, it is a wrong constant.
+    #
+    # `panel=False` for the spawner screen, because that leg would shut the
+    # very thing being photographed. Same reasoning as tab=False below it: a
+    # gate that closes the subject is not a gate.
+    if not args.no_ensure:
+        from control.session import ensure_ready
+        rec = ensure_ready(label=f'drive {args.screen}',
+                           countdown_s=args.countdown,
+                           tab=args.screen != 'tab',
+                           panel=args.screen != 'spawner')
+        if not rec['ok']:
+            print(f"not ready: failed at {rec.get('failed')!r}")
+            return 1
+
     rec = drive(SCREENS[args.screen], shoot_as=shoot_as,
-                keep_open=args.keep_open, ensure_match=not args.no_ensure,
-                backend=args.backend, countdown=args.countdown)
+                keep_open=args.keep_open)
     print(f'\n{rec}')
     return 0 if rec['ok'] else 1
 

@@ -22,18 +22,21 @@ A measure() that returned ok=True would be grading its own homework — the
 failure mode Anthropic's harness work names explicitly, and the same shape as
 this project's closed-loop blindness. So measure() reports, verdict judges.
 
-WHAT IS DELIBERATELY NOT MEASURED HERE: `impulse_off_rounds`. The impulse
-check fires a curve that is zero except one spiked bullet, which is not a
-recoil measurement and cannot be taken during one. It is a per-SESSION gate,
-not a per-cell one — run tools/probe_impulse_ab.py, and pass the result in
-via open_rig(impulse_off=...). Left None it fails every cell closed, which is
-the right default: an unverified timing chain makes every curve in the night
-worthless, and finding that out in the morning is the whole point.
+WHAT REPLACED THE IMPULSE CHECK (2026-08-08). This file used to carry an
+`impulse_off_rounds` from a per-session probe: fire a curve spiked on one
+bullet, watch which round moves, and refuse the night if the measurement grid
+and the firmware's playback grid disagreed about their origin. Under MODEL.md
+they cannot — both are anchored to the click, which this repo sends itself.
+
+The NEED for a check the fit could not arrange did not go away, and `measure()`
+now produces one per cell: it fires the magazines under MORE THAN ONE
+compensation curve, and `_agreement()` asks whether adding each one's own
+y_comp back makes them the same measurement. That is the assumption pooling
+rests on, the fitter never sees which arm a magazine came from, and MODEL.md
+§5之二 is a record of it failing at one end.
 """
 import os
-import statistics
 import sys
-import time
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -46,16 +49,24 @@ RECORD_FIELDS = {
                           'it is labelled with? Everything else is a lie if '
                           'this is False.',
     'reached_why':        'str   — why not, when reached is False',
-    'mags_kept':          'int   — magazines that survived to the fit',
-    'rate_resid_ms':      'float — how far the per-magazine fire rates '
-                          'disagree, in ms of bullet interval',
-    'rounds':             'int   — rounds the rate was fitted over',
-    'impulse_off_rounds': 'float — out-of-loop timing check: how far the '
-                          'commanded spike landed from where it was asked '
-                          'for. None if no check was run.',
+    'n_kept':             'int   — magazines in the fitter\'s main cluster, '
+                          'over the WHOLE accumulated pool, not tonight\'s',
+    'n_total':            'int   — magazines in the pool',
+    'fired':              'int   — magazines this cell actually fired',
     'ads_frac':           'float — fraction of polls the crosshair said aiming',
-    'track_alive_frac':   'float — fraction of fired rounds the tracker held',
-    'curve':              'list  — the measured per-bullet dy, for the log',
+    'track_alive_frac':   'float — frame pairs the correlator could place',
+    'agree_arms':         'int   — how many DIFFERENT compensation curves the '
+                          'pool contains. Under 2 the pooling assumption is '
+                          'untested and judge() fails the cell closed.',
+    'agree_spread':       'float — how far those arms disagree about y_true in '
+                          'the mid-band, as a fraction. THE out-of-loop check.',
+    'span_s':             'float — how long the fitted curve runs',
+    'total_counts':       'float — y_true at the end of the span',
+    'spread_counts':      'float — median disagreement between kept magazines',
+    'curve':              'list  — the fitted knots, for the log',
+    'dropped':            'list  — what the clustering pushed out, and how far '
+                          'each sat from the kept cluster. A gate that cannot '
+                          'say what it refused cannot be retuned.',
 }
 
 # reset() levels, cheapest first. The loop escalates: a first failure gets
@@ -74,7 +85,7 @@ class Rigging:
     measurement lives.
     """
 
-    def __init__(self, rig, kit, sc, session, log, facts, parts, impulse_off):
+    def __init__(self, rig, kit, sc, session, log, facts, parts):
         self.rig = rig
         self.kit = kit
         self.sc = sc
@@ -82,8 +93,6 @@ class Rigging:
         self.log = log
         self.facts = facts
         self.parts = parts
-        self.impulse_off = impulse_off
-        self.apply_ema = True
 
     def close(self):
         for name in ('rig', 'kit', 'session'):
@@ -101,20 +110,20 @@ class Rigging:
             pass
 
 
-def open_rig(sight, out_dir, home=True, apply_ema=True, countdown=6,
-             impulse_off=None, weapons=(), configs=('bare',)):
+def open_rig(sight, out_dir, home=True, countdown=6,
+             weapons=(), configs=('bare',)):
     """Build the rig, take the foreground, prove we are in the range.
 
     -> (Rigging, None) or (None, why). Never raises for a game-state problem:
     "PUBG is not running" is an answer the morning can read, and a traceback
     out of a 4 a.m. process is not.
     """
-    from calibration.harvest import (Kitter, MAG_FOR_CLASS, PART_FOR_CLASS,
+    from control.kitting import (Kitter, MAG_FOR_CLASS, PART_FOR_CLASS,
                                      SCOPE_PART, parse_config, stock_parts)
     from calibration.kit_facts import KitFacts
     from calibration.range_session import get_session
     from calibration.sweep import Rig
-    from control.focus import ensure_focus
+    from control.session import ensure_ready
     from control.spawner import ROSTER, SpawnerControl
 
     # What the run needs on hand. Same derivation as harvest's, because it is
@@ -130,18 +139,50 @@ def open_rig(sight, out_dir, home=True, apply_ema=True, countdown=6,
                      [table.get(s) for s in wanted_slots] +
                      [MAG_FOR_CLASS.get(cls)] if x)
 
+    # ⚠ THE FIVE LEGS BEFORE ANYTHING IS BUILT, and this door of all doors.
+    # It used to open with a bare ensure_focus + sleep(0.6) and then lean on
+    # session.ensure(), which on the happy path — already in a match, budget
+    # not spent — RETURNS WITHOUT CALLING enter() AT ALL. So on a normal night
+    # start, AutoSession.enter's careful ensure_ready() never ran: Tab was
+    # never checked and the character was never walked to the 200m lane. The
+    # re-entry path had been fixed; the START path had not, and the start path
+    # is the one every unattended night takes.
+    #
+    # Two of them are not decoration here. Tab swallows the 1/2 weapon keys,
+    # so a night that starts with the inventory up spawns a gun it never
+    # holds. And the teleport — which rides along with the MATCH leg since
+    # 2026-08-08, rather than being a leg of its own — is the difference
+    # between measuring recoil and measuring recoil plus whoever drove through
+    # the spawn compound. A 45-minute run at the compound is exactly what this
+    # harness is for.
+    #
+    # BEFORE the Rig, so a refusal has nothing to close, and so the Pointer
+    # ensure_ready opens is shut before Rig takes the port (its docstring says
+    # so, and fit_pitch_level.py takes the same order).
+    rec = ensure_ready(label='the night', countdown_s=countdown, verbose=True)
+    if not rec['ok']:
+        where = rec.get('failed')
+        if where == 'range':
+            return None, ('in a match, but could not reach the 200m lane — '
+                          'the lobby may have been left on a mode other than '
+                          'the training range')
+        return None, {
+            'focus': 'PUBG is not in the foreground and would not take it',
+            'match': 'could not get into a match',
+            'tab': 'the inventory screen would not close',
+            'panel': 'the item spawner panel would not close',
+        }.get(where, f'not ready: failed at {where!r}')
+
     rig = Rig(sight)
-    rig.use_homing = home
+    rig.view.use_homing = home
     sc = SpawnerControl()
     kit = Kitter(rig)
     kit.restock_fn = lambda need: stock_parts(sc, kit, set(need) | parts)
 
-    if not ensure_focus(countdown_s=countdown, label='the night'):
-        rig.close()
-        kit.close()
-        return None, 'PUBG is not in the foreground and would not take it'
-    time.sleep(0.6)
-
+    # Constructed AFTER the gate rather than driving it: its job is the
+    # 17-minute recycle during the night, and ensure() is a cheap no-op here
+    # (in_range() is true, the budget is fresh) — kept so `_entered` is stamped
+    # from a session that has actually been verified.
     session = get_session('auto')
     ok, _ = session.ensure()
     if not ok:
@@ -166,8 +207,7 @@ def open_rig(sight, out_dir, home=True, apply_ema=True, countdown=6,
               % (sight, datetime.now().isoformat(timespec='seconds')))
     log.flush()
 
-    r = Rigging(rig, kit, sc, session, log, KitFacts(), parts, impulse_off)
-    r.apply_ema = apply_ema
+    r = Rigging(rig, kit, sc, session, log, KitFacts(), parts)
     return r, None
 
 
@@ -179,27 +219,47 @@ def measure(rigging, cell, mags):
     harness being wrong (bad arguments, missing hardware), and the loop lets
     those out.
     """
-    from calibration.harvest import (SIGHT_FOR, measure_cell, note_fits,
+    from control.kitting import (SIGHT_FOR, note_fits, parse_config,
                                      stock_parts, want_for)
     from control.spawner import ROSTER
 
     weapon, posture = cell['weapon'], cell['posture']
+    # WHICH SLOTS THIS CELL FILLS. Defaulted to 'bare' so a manifest written
+    # before configs existed still resumes, and so a caller that does not care
+    # gets what this always did.
+    cfg = cell.get('config') or 'bare'
     rig, kit, sc = rigging.rig, rigging.kit, rigging.sc
     rec = _blank(cell)
 
     rig.set_sight(SIGHT_FOR.get(weapon, cell.get('sight', 'red_dot')))
 
-    # Clear the rack before spawning, do not merely strip one slot of it.
-    # Relying on the incoming gun to evict the old one is what leaked a
-    # magazine per cell: eviction only happens once the rack is FULL, and an
-    # evicted gun leaves wearing everything it had on. See Kitter.clear_rack.
-    kit.clear_rack()
-    if not stock_parts(sc, kit, rigging.parts, also=(weapon,),
+    # ⚠ KEEP THE GUN IF IT IS ALREADY THERE. The plan runs every config of one
+    # weapon before moving to the next, so consecutive cells almost always
+    # want the SAME gun with different attachments -- and throwing it away to
+    # spawn an identical one costs a drop, a spawner visit and a restock, per
+    # cell. 37 cells over 8 weapons needs 8 spawns, not 37. calibration's own
+    # harvest_weapon has always worked this way; only this adapter did not,
+    # because it was written when a cell meant a weapon.
+    #
+    # The clear is still right when the gun DOES change, and the reason it was
+    # written is unchanged: relying on the incoming gun to evict the old one
+    # leaks a magazine per cell, because eviction only happens once the rack is
+    # FULL and an evicted gun leaves wearing everything it had on. See
+    # Kitter.clear_rack.
+    #
+    # Nothing is inherited by keeping it: want_for pins every controlled slot,
+    # filled or empty, so kit.apply below strips whatever the previous config
+    # left on. That is the same guarantee the spawn-fresh path relied on.
+    already = kit.find_gun(weapon) is not None
+    if not already:
+        kit.clear_rack()
+    if not stock_parts(sc, kit, rigging.parts, also=() if already else (weapon,),
                        loose_only=True):
         rec['reached_why'] = f'could not stock the parts or produce {weapon}'
         return rec
     # Where the gun actually landed, read rather than assumed. An empty rack
-    # takes the first gun into slot 1, and range re-entry empties the rack.
+    # takes the first gun into slot 1, and range re-entry empties the rack --
+    # which is why this is re-read even on the `already` path.
     if kit.find_gun(weapon) is None:
         rec['reached_why'] = f'{weapon} is not in the rack after the spawn'
         return rec
@@ -207,29 +267,69 @@ def measure(rigging, cell, mags):
     # Bare: pinned sight and magazine, every other controlled slot forced
     # EMPTY rather than left alone. The rule and the reason live in
     # harvest.want_for, in one copy, on purpose.
-    want = want_for(weapon, ROSTER.get(weapon, (None,))[0])
+    # ⚠ EVERY SLOT THIS CELL DOES NOT FILL IS FORCED EMPTY, not left alone.
+    # PUBG auto-fits whatever the backpack holds onto a gun the moment it
+    # arrives, so an unmentioned slot is not empty -- it is whatever the last
+    # teardown left lying around, and a cell labelled `bare` then quietly ran
+    # wearing a grip. want_for is the one copy of that rule.
+    fill = parse_config(cfg)
+    if fill is None:
+        rec['reached_why'] = f'unknown config {cfg!r}'
+        return rec
+    want = want_for(weapon, ROSTER.get(weapon, (None,))[0], fill)
     if kit.apply(want, weapon=weapon) is None:
-        for slot_name, key, why in kit.last_bad:
-            if key:
+        # ⚠ FOUR FIELDS, AND THE FOURTH DECIDES WHETHER THIS IS EVIDENCE.
+        # `verifiable` is False when the readback could not JUDGE the slot --
+        # an AMBIGUOUS icon over a dark backdrop, or a part with no template --
+        # as opposed to reading a different part, which is the game refusing.
+        # Recording the first kind as a compatibility failure is how "the
+        # templates cannot separate these two magazines" became "this weapon
+        # will not take ext_smg" in kit_facts.json, and kit_facts is read by
+        # humans deciding whether to edit the catalogue.
+        #
+        # It became a 4-tuple on 2026-08-07 and this unpack was still on three,
+        # so the harness would have raised ValueError on the first cell that
+        # failed to kit -- at 4 a.m., unattended, with the loop's own comment
+        # about a KeyError costing a whole night one screen away.
+        for slot_name, key, why, verifiable in kit.last_bad:
+            if key and verifiable:
                 rigging.facts.note_failure(weapon, slot_name, key, note=why)
         rec['reached_why'] = ('kit: ' + '; '.join(
-            f'{s} {w}' for s, _, w in kit.last_bad)) if kit.last_bad \
+            f'{s} {w}' for s, _, w, _ in kit.last_bad)) if kit.last_bad \
             else 'the kit would not go on'
         return rec
     note_fits(rigging.facts, weapon, want)
 
-    cellrec = measure_cell(rig, weapon, posture, mags, kit.slot, rigging.log,
-                           'bare', want, apply_ema=rigging.apply_ema)
-    if cellrec is None:
-        # measure_cell prints its own reason and returns None for all of them:
-        # no curve, wrong fire mode, posture refused, every magazine dropped.
-        # Naming the stage is honest; naming a cause would be a guess, and the
-        # evidence dump is what settles it.
-        rec['reached_why'] = ('fired nothing usable — see cells.jsonl and the '
-                              'run log for which stage refused')
-        return rec
+    # ── the measurement, MODEL.md's way ──────────────────────────────────
+    #
+    # ⚠ WHAT CHANGED IS NOT THE ARITHMETIC, IT IS WHAT COMES BACK. measure_cell
+    # returned a JUDGED cell: magazines already dropped by collection-time
+    # gates, per-bullet counts already binned, and an EMA already applied to
+    # the curve on disk. Three decisions taken before anything else was
+    # visible. Now the run APPENDS RAW SAMPLES and decides nothing: the
+    # clustering picks the main cluster at fit time with every magazine in
+    # view, and the fit is a full refit over the accumulated pool.
+    #
+    # ⚠ TWO ARMS, DELIBERATELY. verdict.judge's out-of-loop check needs
+    # magazines fired under DIFFERENT curves — that is the only way to test
+    # the assumption pooling rests on, and a fit cannot arrange it. The split
+    # is here rather than in the night loop because it is a property of one
+    # cell's measurement, and a caller that asked for one magazine should not
+    # silently get an unverifiable cell.
+    return _collect(rec, rigging, weapon, posture, mags)
 
-    return _fill(rec, cellrec, rigging.impulse_off)
+
+# How the magazines of one cell are split between compensation arms. The
+# second arm is what makes the cell checkable at all (verdict.judge check 4),
+# and one magazine is enough to compare against — the arms are compared as
+# whole trajectories, not averaged.
+#
+# ⚠ `False` MEANS NO CURVE AT ALL, which measures y_true directly. It is the
+# cheapest second arm and the one MODEL.md §5之二 used. It is NOT a better
+# arm: that section measured its y_true at t=3.8 s as the lowest of four, 13%
+# under the plateau, and named "the no-comp arm is an unbiased anchor" as one
+# of the things it got wrong.
+ARM_PLAN = (True, True, False)
 
 
 def _blank(cell):
@@ -244,80 +344,119 @@ def _blank(cell):
     return rec
 
 
-def _fill(rec, cellrec, impulse_off):
-    """Turn one measure_cell record into the harness's numbers."""
-    rows = cellrec.get('mags') or []
-    kept = len(rows)
-    fired = kept + len(cellrec.get('mags_discarded') or [])
+def _collect(rec, rigging, weapon, posture, mags):
+    """Fire into the sample store, then fit the whole accumulated pool."""
+    from calibration import samples as S
+    from calibration.collect_timed import collect_into_store
+    from calibration.fit_time_curve import fit
 
+    config = rec.get('config_read') or {}
+    fired, err = collect_into_store(
+        rigging.rig, weapon, config, posture, mags, ARM_PLAN,
+        note_prefix=f'night {rec["cell"]} ')
+    if err:
+        rec['reached_why'] = err
+        if not fired:
+            return rec
+
+    # ⚠ THE FIT SEES THE WHOLE POOL, NOT TONIGHT'S MAGAZINES. Samples
+    # accumulate across runs, curves and days (calibration/samples.py), so a
+    # thin night on top of a fat history is a good cell. Fitting only what was
+    # just fired would throw that away and reintroduce the per-round thinking
+    # the store exists to end.
+    pool = S.load(weapon, config)
+    res = fit(pool)
+    if not res.get('ok'):
+        rec['reached_why'] = f'fit refused: {res.get("why")}'
+        return rec
+    return _fill(rec, res, pool, fired)
+
+
+def _fill(rec, res, pool, fired):
+    """Turn one fit over the accumulated pool into the harness's numbers."""
     rec['reached'] = True
-    rec['mags_kept'] = kept
-    rec['rounds'] = int(cellrec.get('bullets_fired') or 0)
-    rec['impulse_off_rounds'] = impulse_off
-    rec['curve'] = _mean_curve(rows)
+    rec['fired'] = fired
+    rec['n_kept'] = res['n_kept']
+    rec['n_total'] = res['n_total']
+    rec['span_s'] = res['span_s']
+    rec['total_counts'] = res['total_counts']
+    rec['spread_counts'] = res['spread_counts']
+    rec['curve'] = res['knots']
+    rec['dropped'] = res['dropped']
 
-    # ADS over the magazines that were KEPT, and the WORST of them rather than
-    # the mean: a cell is only as good as its weakest accepted magazine, and
-    # averaging lets four clean ones carry one fired half from the hip.
-    ads = [r['ads_cross_frac'] for r in rows
-           if r.get('ads_cross_frac') == r.get('ads_cross_frac')]
+    # ADS over the pool, and the WORST magazine rather than the mean: a cell is
+    # only as good as its weakest accepted magazine, and averaging lets four
+    # clean ones carry one fired half from the hip.
+    ads = [m.ads_frac for m in pool if m.ads_frac == m.ads_frac]
     rec['ads_frac'] = float(min(ads)) if ads else None
 
-    # THE RATE CHECK, and it is not the fit residual. interval_from_span uses
-    # two endpoints, so its residual is zero by construction — reporting that
-    # would satisfy verdict's rate gate without measuring anything. What the
-    # function's own docstring asks for instead is agreement BETWEEN
-    # magazines: "a missed LAST change shortens the span and reads as a faster
-    # gun ... it shows up as a rate that disagrees between magazines of the
-    # same cell, so the caller should require agreement before storing one."
-    # No caller did. This one does.
-    ivs = [r['measured_interval_ms'] for r in rows
-           if r.get('measured_interval_ms')]
-    if len(ivs) >= 2:
-        rec['rate_resid_ms'] = float(statistics.pstdev(ivs))
-    elif len(ivs) == 1:
-        # One magazine cannot disagree with itself. Left None rather than 0.0:
-        # zero would claim a check that was never possible, and judge() fails
-        # closed on None, which is the honest outcome.
-        rec['rate_note'] = ('only one magazine produced a rate — nothing to '
-                            'compare it against')
-    else:
-        rec['rate_note'] = 'no magazine produced a fire rate'
+    # Frame pairs the correlator placed, over the pool. `oor` is recorded per
+    # pair and NOT dropped at collection (calibration/samples.py), so this is a
+    # count of a real quantity rather than a rate among survivors — which is
+    # what the old track_alive_frac had to work around.
+    n = sum(len(m.oor) for m in pool)
+    bad = sum(int(sum(bool(x) for x in m.oor)) for m in pool)
+    rec['track_alive_frac'] = float((n - bad) / n) if n else None
 
-    # Tracking, over every magazine FIRED rather than every one kept. A rate
-    # measured over survivors is a rate among survivors: with four of five
-    # magazines thrown away for lost tracking, the fifth still reports ~100%.
-    if fired:
-        oor = sum(r.get('n_out_of_range') or 0 for r in rows)
-        n = sum(len(r.get('per_bullet_counts') or ()) for r in rows)
-        per_mag = (n / kept) if kept else float(cellrec.get('bullets_fired') or 0)
-        # Discarded magazines contribute their rounds to the denominator and
-        # nothing to the numerator. That is the point: they are the rounds the
-        # tracker did not hold.
-        total = n + per_mag * (fired - kept)
-        rec['track_alive_frac'] = float((n - oor) / total) if total else None
-
-    # Carried for the log and the morning, not judged by anything.
-    rec['residual_counts_mean'] = cellrec.get('residual_counts_mean')
-    rec['true_counts'] = cellrec.get('true_counts')
-    rec['mags_discarded'] = cellrec.get('mags_discarded')
+    arms, spread = _agreement(pool)
+    rec['agree_arms'] = arms
+    rec['agree_spread'] = spread
     return rec
 
 
-def _mean_curve(rows):
-    """Per-bullet residual, averaged over the kept magazines.
+def _agreement(pool):
+    """THE OUT-OF-LOOP CHECK. -> (n_arms, spread) or (n_arms, None).
 
-    Ragged rows are truncated to the shortest rather than padded: a bullet
-    only some magazines reached would otherwise be averaged over a changing
-    denominator, which puts a step in the tail of the curve exactly where the
-    compensation is largest.
+    Magazines fired under DIFFERENT curves must, once each one's own y_comp is
+    added back, estimate the SAME y_true. That is the assumption that makes
+    pooling legal (calibration/samples.py), and it is the one thing here a fit
+    cannot arrange: the fitter never sees which arm a magazine came from.
+
+    Arms are keyed by the TOTAL the curve commands, rounded, so `--no-comp`,
+    x0.5, x1 and x1.5 land in four groups without anybody labelling them. A
+    pool with one arm returns (1, None) and judge() refuses the cell — "not
+    checked" is not "passed".
+
+    ⚠ THE MID-BAND, NOT THE ENDPOINT. MODEL.md §5之二 measured the four arms
+    agreeing to 0.9% at t=1.5 s and diverging to 15% by t=3.8 s, with the
+    divergence coming entirely from the strongest arm in the last 1.1 s. That
+    end is a known unexplained region; judging the model there would be judging
+    it on the one part MODEL.md says is not understood. It is also the reason
+    this returns a fraction OF y_true rather than counts: a 30-count
+    disagreement means something different on a Vector than on an MG3.
     """
-    seqs = [r.get('per_bullet_counts') or [] for r in rows]
-    seqs = [s for s in seqs if s]
-    if not seqs:
-        return None
-    n = min(len(s) for s in seqs)
-    return [float(sum(s[i] for s in seqs) / len(seqs)) for i in range(n)]
+    import numpy as np
+    from harness.verdict import AGREE_BAND_S
+
+    lo, hi = AGREE_BAND_S
+    groups = {}
+    for m in pool:
+        key = int(round(sum(float(k.get('dy', 0.0)) for k in (m.curve or []))))
+        groups.setdefault(key, []).append(m)
+    if len(groups) < 2:
+        return len(groups), None
+
+    grid = np.linspace(lo, hi, 25)
+    curves = []
+    for key, mags in sorted(groups.items()):
+        ys = []
+        for m in mags:
+            tt, yy = m.y_true_counts()
+            if len(tt) < 2 or tt[-1] < hi:
+                continue
+            ys.append(np.interp(grid, tt, yy))
+        if ys:
+            curves.append(np.nanmedian(np.vstack(ys), axis=0))
+    if len(curves) < 2:
+        # Arms exist but not enough of them reach the band. Reported as one
+        # arm rather than as agreement: a comparison that could not be made is
+        # not a comparison that passed.
+        return 1, None
+    M = np.vstack(curves)
+    ref = float(np.nanmedian(M[:, -1]))
+    if not ref:
+        return len(curves), None
+    return len(curves), float(np.nanmax(np.nanmax(M, 0) - np.nanmin(M, 0)) / abs(ref))
 
 
 def reset(rigging, level=LIGHT):
@@ -345,7 +484,7 @@ def reset(rigging, level=LIGHT):
         # The measurable band is a property of where the character stands and
         # what they face, and re-entry moves both. Dropped rather than carried
         # over: a stale band puts the aim somewhere the tracker cannot see.
-        rigging.rig.pitch_centre = 0
+        rigging.rig.view.pitch_centre = 0
         # The rack and the backpack came back empty. measure() re-stocks on
         # its way into every cell, so there is nothing else to undo.
         return True
@@ -360,20 +499,25 @@ def reset(rigging, level=LIGHT):
     try:
         # Then Tab, for the same reason one level down: the inventory hides
         # the posture icon and swallows C and Z.
-        rigging.rig.ensure_inventory_closed()
+        rigging.rig.gun.ensure_inventory_closed()
     except Exception:
         ok = False
     try:
         # INTO ADS, not out of it. The contract this replaces said "stand,
-        # hip-fire", which is backwards on both halves: there is no method
-        # that leaves ADS (right click is a toggle and only ensure_ads()
-        # watches it), and ensure_posture REQUIRES ADS because the posture
-        # icon does not render from the hip. Resetting to the hip would make
-        # the posture unreadable and the next cell would toggle blind.
+        # hip-fire", and the reason that is backwards is ensure_posture:
+        # it REQUIRES ADS, because the posture icon does not render from the
+        # hip. Resetting to hip fire would make the posture unreadable and the
+        # next cell would toggle blind.
+        #
+        # ⚠ THE OTHER HALF OF THAT SENTENCE USED TO SAY "there is no method
+        # that leaves ADS". There is one now -- GunDriver.ensure_hip, added
+        # 2026-08-06 so the pitch can be positioned in one fixed aim state --
+        # so if this ever wants hip fire it is available. It still does not
+        # want it, for the posture reason above.
         #
         # Nothing is lost by leaving the sight up: every cell enters ADS on
         # its way in regardless.
-        if rigging.rig.ensure_ads():
+        if rigging.rig.gun.ensure_ads():
             ok &= bool(rigging.rig.ensure_posture('standing'))
         else:
             ok = False
@@ -414,8 +558,8 @@ def contract():
             '', 'dump(where, why, frames=None, state=None) -> path',
             '    the failure frame and the state readout, on disk',
             '',
-            'impulse_off_rounds is a per-SESSION gate, not a per-cell one:',
-            '    pixi run impulse-ab, then night --impulse-off <rounds>.',
-            '    Left unset every cell fails closed on `impulse`, which is',
-            '    correct: an unverified timing chain makes the night worthless.']
+            'the out-of-loop check is PER CELL and measure() arranges it:',
+            '    magazines are fired under more than one compensation curve,',
+            '    and agree_spread asks whether adding each one back makes',
+            '    them the same y_true. One arm = untested = the cell fails.']
     return '\n'.join(out)

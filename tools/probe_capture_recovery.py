@@ -35,7 +35,7 @@ except (AttributeError, OSError):
     pass
 
 from config import HUD_REGIONS
-from detector.cropper import CaptureLost, DXGIGrabber
+from capture.cropper import CaptureLost, DXGIGrabber
 
 GRAB_TIMEOUT = 5.0
 _failures = []
@@ -153,7 +153,7 @@ def case_dead_thread():
 def case_loop_recovers():
     """End to end: ScreenCapture must keep filling its buffer after a kill."""
     print("\n=== 3. ScreenCapture rebuilds after a kill ===")
-    from screen_capture import ScreenCapture
+    from capture.screen_capture import ScreenCapture
 
     cap = ScreenCapture()
     cap.start()

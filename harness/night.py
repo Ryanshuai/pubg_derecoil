@@ -37,8 +37,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from harness import adapter                                    # noqa: E402
-from harness.manifest import (Manifest, USABLE, FAILED,         # noqa: E402
-                              SKIPPED, cell_id)
+from harness.manifest import Manifest, USABLE, FAILED, cell_id  # noqa: E402
 from harness.verdict import judge, PROBE_FOR                    # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -65,8 +64,27 @@ HALT_STREAK = 4
 ATTEMPTS = 2
 
 
-def plan_cells(weapons, postures, sight):
-    return [(w, p, sight) for w in weapons for p in postures]
+def plan_cells(weapons, postures, sight, configs=('bare',)):
+    """Every (weapon, posture, sight, config) the night will attempt.
+
+    ⚠ CONFIGS ARE PER WEAPON, not a global list, because a config naming a
+    slot the weapon does not have is not a cell -- it is a guaranteed failure
+    that costs a spawn, a kit attempt and a place in the halt streak. groza
+    has one muzzle and no lower rail; asking it for `muzzle+grip` would fail
+    four times in a row and stop the night on the strength of a plan error.
+
+    The filtering is calibration.harvest.supported_configs, not a catalogue
+    lookup here: layering rule 5 forbids this package from importing detector,
+    and the reason applies exactly to this -- a planner that decides for itself
+    what a weapon can wear is a second opinion about the game sitting beside
+    the one it is supposed to be judging.
+    """
+    from control.kitting import supported_configs
+
+    return [(w, p, sight, c)
+            for w in weapons
+            for c in supported_configs(w, configs)
+            for p in postures]
 
 
 def run(manifest, rigging, mags, out_dir):
@@ -130,7 +148,7 @@ def run(manifest, rigging, mags, out_dir):
     return 'done'
 
 
-def rejudge(run_dir, write=False, impulse_off=None):
+def rejudge(run_dir, write=False):
     """Re-run judge() over a finished run's records. Offline.
 
     A threshold is a claim about what makes a measurement usable, and claims
@@ -149,25 +167,9 @@ def rejudge(run_dir, write=False, impulse_off=None):
     and stays exactly as it was -- which is the distinction the manifest exists
     to keep, so it is preserved rather than papered over.
     """
-    from harness.adapter import _blank, _fill
-
     path = os.path.join(run_dir, 'manifest.json')
     m = Manifest.load(path)
     params = m.data.get('params') or {}
-    impulse = params.get('impulse_off')
-    if impulse is None and impulse_off is not None:
-        # The manifest did not record it -- runs from before it was a param,
-        # which includes the two nights this was written for. Supplying it by
-        # hand is a claim the caller is making about a measurement they took;
-        # it is printed so the claim is in the output rather than only in
-        # somebody's shell history.
-        impulse = impulse_off
-        print(f'impulse : {impulse:+.2f} rounds, supplied on the command line '
-              f'(the manifest predates the field)')
-    if impulse is None:
-        print('impulse : NOT RECORDED and not supplied — every cell will '
-              'fail closed on `impulse`.\n          Pass --impulse-off with '
-              'the value measured for that run.')
 
     records = {}
     cells_path = os.path.join(run_dir, 'cells.jsonl')
@@ -204,7 +206,13 @@ def rejudge(run_dir, write=False, impulse_off=None):
         rec = records.get(cell['id'])
         if rec is None:
             continue
-        ver = judge(_fill(_blank(cell), rec, impulse))
+        # ⚠ judge() READS THE STORED RECORD DIRECTLY. It used to be handed
+        # through adapter._fill first, which meant a re-judge depended on the
+        # MEASUREMENT layer's shape as well as the record's -- so porting the
+        # measurement would have silently changed what old runs re-judge to.
+        # The record already carries every field judge() reads; that is what
+        # RECORD_FIELDS is for.
+        ver = judge(rec)
         was = cell['state']
         now = USABLE if ver['usable'] else FAILED
         if now != was or (cell.get('verdict') or {}).get('why') != ver['why']:
@@ -249,18 +257,24 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--weapons', default='ar')
     ap.add_argument('--postures', default='standing')
+    # ⚠ DEFAULTS TO BARE, which is what this loop measured before configs
+    # existed. A config naming a slot the weapon does not have is dropped by
+    # plan_cells rather than attempted, so one list can be handed to a mixed
+    # roster: 'bare,muzzle,grip,stock,muzzle+grip,...' gives groza one cell
+    # and m416 eight.
+    ap.add_argument('--configs', default='bare',
+                    help="comma-separated slot combinations to measure, e.g. "
+                         "'bare,muzzle,grip,muzzle+grip'. Slots a weapon does "
+                         "not have are skipped for that weapon.")
     ap.add_argument('--sight', default='red_dot')
     ap.add_argument('--mags', type=int, default=5)
-    ap.add_argument('--impulse-off', type=float, default=None,
-                    help='rounds the commanded spike landed from where it '
-                         'was asked for, from a `pixi run impulse-ab` taken '
-                         'THIS session. Without it every cell fails closed on '
-                         '`impulse` — deliberately: the timing chain is the '
-                         'one thing a clean residual cannot vouch for, so an '
-                         'unverified night is worth nothing and should say so '
-                         'rather than produce curves.')
-    ap.add_argument('--no-ema', action='store_true',
-                    help='measure without writing back to any curve')
+    # ⚠ --impulse-off AND --no-ema WENT ON 2026-08-08 WITH THE MODEL.
+    # The impulse probe checked that the measurement grid and the firmware's
+    # playback grid shared an origin; under MODEL.md they do by construction,
+    # and the out-of-loop check that replaced it is arranged PER CELL by
+    # adapter.measure firing more than one compensation arm. --no-ema had
+    # nothing left to switch off: every fit is a full refit over the stored
+    # samples, so nothing is written back to a curve during a run at all.
     ap.add_argument('--countdown', type=int, default=6)
     ap.add_argument('--run-dir', default='',
                     help='resume this run instead of starting one')
@@ -281,13 +295,13 @@ def main():
     if args.report:
         return report(args.report)
     if args.rejudge:
-        return rejudge(args.rejudge, write=args.write,
-                       impulse_off=args.impulse_off)
+        return rejudge(args.rejudge, write=args.write)
 
-    from calibration.harvest import expand              # noqa: E402
+    from control.kitting import expand              # noqa: E402
     weapons = expand(args.weapons)
     postures = [p for p in args.postures.split(',') if p]
-    cells = plan_cells(weapons, postures, args.sight)
+    configs = [c for c in args.configs.split(',') if c]
+    cells = plan_cells(weapons, postures, args.sight, configs)
 
     out_dir = args.run_dir or os.path.join(
         RUNS, f'night_{datetime.now():%Y%m%d_%H%M}')
@@ -306,13 +320,13 @@ def main():
         return 0
 
     os.makedirs(out_dir, exist_ok=True)
+    # ⚠ NOTHING TAKEN OUTSIDE THE CELL IS RECORDED HERE ANY MORE, and that
+    # is the point of the port: --rejudge used to need `impulse_off` because
+    # the out-of-loop check was a per-session probe no cell record carried.
+    # The replacement lives inside each cell's own numbers (agree_arms /
+    # agree_spread), so a re-judge is a pure function of cells.jsonl.
     params = {'mags': args.mags, 'sight': args.sight,
-              'postures': postures, 'weapons': weapons,
-              # Recorded because --rejudge needs it: it is a measurement taken
-              # OUTSIDE the cell, so no cell record carries it, and re-judging
-              # without it would fail every cell closed on `impulse` and look
-              # like the night had gone wrong.
-              'impulse_off': args.impulse_off}
+              'postures': postures, 'weapons': weapons}
     manifest, resumed = Manifest.open_or_build(
         os.path.join(out_dir, 'manifest.json'), cells, params=params)
 
@@ -320,17 +334,17 @@ def main():
           + ('   (RESUMED)' if resumed else ''))
     print(f'cells   : {len(manifest.cells)}, {len(manifest.pending())} pending')
     print(f'halt    : {HALT_STREAK} failures in a row, {ATTEMPTS} attempts each')
-    if args.impulse_off is None:
-        print('impulse : NOT CHECKED — every cell will fail closed. Run '
-              '`pixi run impulse-ab`\n          and pass --impulse-off.')
-    else:
-        print(f'impulse : {args.impulse_off:+.2f} rounds off, measured this '
-              f'session')
+    # The out-of-loop check is arranged PER CELL now — adapter.ARM_PLAN fires
+    # more than one compensation curve, and a cell whose pool holds only one
+    # arm fails closed on `agree`. There is nothing session-wide to announce
+    # here, which is the improvement: the old line printed a warning about a
+    # probe somebody had to remember to run in another window.
+    print(f'arms    : {adapter.ARM_PLAN} per cell — a cell with one arm fails '
+          f'closed')
 
     rigging, why = adapter.open_rig(
-        args.sight, out_dir, apply_ema=not args.no_ema,
-        countdown=args.countdown, impulse_off=args.impulse_off,
-        weapons=weapons)
+        args.sight, out_dir, countdown=args.countdown,
+        weapons=weapons, configs=configs)
     if rigging is None:
         # Not an exception. A night that cannot start has a reason the morning
         # can read, and the manifest already says every cell is unmeasured --

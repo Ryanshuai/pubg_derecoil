@@ -19,10 +19,12 @@
 |---|---|---|
 | `reached` | bool | 有没有真的到达这个 cell 标的那个枪/镜/姿势 |
 | `reached_why` | str | `reached=False` 时的原因 |
-| `mags_kept` | int | 活到拟合的弹匣数 |
-| `rate_resid_ms` | float | 各弹匣**对射速的分歧**（ms），不是拟合残差——见下 |
+| `n_kept` / `n_total` | int | 拟合器主簇里的弹匣数 / 池子总数。⚠ **数的是**
+**累积的整个池子，不是今晚打的那几梭**——样本跨轮、跨曲线、跨天保留 |
+| `fired` | int | 这一格今晚实际打了几梭 |
 | `rounds` | int | 射速拟合用了多少发 |
-| `impulse_off_rounds` | float | **环外检查**：脉冲落点偏了几发。没跑检查就是 `None` |
+| `agree_arms` | int | 池子里有几条**不同的补偿曲线**。< 2 就是没验过，`judge` fail closed |
+| `agree_spread` | float | 那些臂在中段对 `y_true` 的分歧比例。**这是环外检查** |
 | `ads_frac` | float | 准星判定「在瞄准」的轮询占比 |
 | `track_alive_frac` | float | tracker 撑住的发数占比 |
 | `curve` | list | 逐发 dy，落日志用 |
@@ -33,11 +35,20 @@
 2. **不返回 `ok`/`usable`。** 判决在 `harness/verdict.py`，必须在测量够不着的地方。测量方自己打分就是这个项目的闭环盲区换个形态：残差近零可以是自洽的错曲线。
 3. **游戏状态问题不要抛异常。** 枪没刷出来是 `reached=False` + 原因，不是 exception。异常留给 harness 自己写错了（参数不对、硬件没了），那种要让它冒上来。
 
-`impulse_off_rounds` 是唯一的环外信号，`tools/probe_impulse_align.py` 已经实现了这个测法（放一条除某一发外全零的曲线，看画面在第几发跳）。需要的是**在每个 cell 里插一次**，不是单独跑。
+**环外信号是 `agree_spread`，而且它现在真的是 per-cell 的。**
+
+⚠ 2026-08-08 换了：旧的那个是「放一条除某一发外全零的曲线，看画面在第几发跳」，验的是**测量网格和固件播放网格共不共原点**。`MODEL.md` 之后它们共，而且是构造上共的——两边都锚在点击，而那个点击是本仓库自己发的。那个问题没有指称对象了。
+
+**但需要一个拟合安排不出来的信号这件事没变**，新的那个更强：不同曲线打的梭，各自加回自己的 `y_comp` 之后必须给同一个 `y_true`。那是**整个样本池能合并的前提**（`calibration/samples.py`），而拟合器看不见一条梭来自哪条臂，所以它伪造不了一致。`adapter.ARM_PLAN` 在每个 cell 里安排它，不需要单独跑一个探针。
+
+### ⚠ 下面两条是历史（2026-08-08 随弹桶坐标退场）
+
+两个字段都没有了。留着是因为**第一条的教训跟坐标一点关系都没有**，而它是这一层
+最容易复发的形状：**一个按定义恒等于 0 的量，被当成了一道闸。**
 
 ### 实接时改了什么
 
-**一、`rate_resid_ms` 原来的定义是空的。** 契约写的是"射速拟合残差"，而 `interval_from_span`
+**一、`rate_resid_ms` 原来的定义是空的**（字段已删，教训没删）。 契约写的是"射速拟合残差"，而 `interval_from_span`
 用的是**两个端点**求间隔——两点定一条线，残差按定义恒等于 0。真去实现会写出
 `iv_resid = 0.0` 然后一路 pass，`RATE_RESID_MS_MAX = 12` 拦不住任何东西。事实上代码里
 **就是这么写的**，而且那个 0.0 已经被存进 `weapon_rpm.json` 了。
@@ -50,10 +61,14 @@
 没有调用方做。代价实测到了：AUG 从**单个** 81.32 ms 的弹匣存成 737.9 rpm，
 而前后四个保留弹匣是 82.73–83.39（719.5–725.2）。现在这个字段是**弹匣之间的离散度**。
 
-**二、`impulse_off_rounds` 不该是 per-cell 的。** 契约说"在每个 cell 里插一次"。做不到：
+**二、`impulse_off_rounds` 不该是 per-cell 的**（字段已删）。 契约说"在每个 cell 里插一次"。做不到：
 脉冲测试要放一条除某一发外全零的曲线，那不是后坐力测量，也没法在后坐力测量**期间**做。
-它是 **per-session 闸门**——`pixi run impulse-ab` 跑一次，`night --impulse-off <n>` 传进来。
-不传就每个 cell 都 fail closed，这是对的：时序没验过的话整夜的曲线都不值钱。
+它当时成了 **per-session 闸门**——`pixi run impulse-ab` 跑一次，`night --impulse-off <n>` 传进来。
+
+⚠ **而契约当初是对的，是实现让步了。** 环外检查本来就该 per-cell，做不到只是因为
+「放一条除某一发外全零的曲线」不能在测后坐力的同时做。新的那个（`agree_spread`）没有
+这个矛盾：两条臂都是**真的后坐力测量**，只是补偿强度不同，所以它回到了契约原本要求的
+位置。**一个被实现驳回的契约条款，值得在实现变了之后重新问一次。**
 
 **三、`ads_frac` 取最差的那个弹匣，不取平均。** 四个干净的能把一个腰射的抬过 0.90。
 
@@ -148,10 +163,22 @@ col1_row01 would not expand (<panel open, col1_row02 expanded, 12 entries>)
  "cells": [
    {"id": "aug|standing|red_dot",
     "weapon": "aug", "posture": "standing", "sight": "red_dot",
+    "config": "bare",
+    "state": "unmeasured",
+    "attempts": 0, "verdict": null, "evidence": null, "updated": null},
+   {"id": "aug|standing|red_dot|muzzle+grip",
+    "weapon": "aug", "posture": "standing", "sight": "red_dot",
+    "config": "muzzle+grip",
     "state": "unmeasured",
     "attempts": 0, "verdict": null, "evidence": null, "updated": null}
  ]}
 ```
+
+**`config` 是 2026-08-07 加的，而且它进了 `id`**——这不是装饰。这个循环原来只测 `bare`（`adapter` 早就支持 configs，`night.py` 没把参数暴露出来），而配件槽位**实测是不相乘的**（mp5k 三槽 +17.3%；那份 `docs/recoil/factor_model.md` 2026-08-08 随因子模型一起删了，数留在这里），所以每个要用的配置都得自己收敛，一把枪最多八格。
+
+⚠ **不进 `id` 的话，m416 的八个配置会写成八行同一个 `aug|standing|red_dot`**，`mark()` 把同一行搬八次，**七个结果静默消失**——而 manifest 存在的全部理由就是它不该发生这种事。`bare` 在 id 里折叠掉，所以加 config 之前写的 manifest 照样能 resume。
+
+⚠ **哪些配置对哪把枪成立，问 `control.kitting.supported_configs`，不要在这一层查目录**：分层规则 5 禁止 `harness` import `detector`，理由正好落在这件事上——一个自己判断「这把枪能穿什么」的计划器，就是在被它评判的那份测量旁边又立了一个对游戏的意见。它同时负责**去重**：groza 没有下挂，`grip` / `muzzle+grip` / `grip+stock` 全会降级成同一格，塞进 manifest 就是 id 碰撞，塞进循环就是白烧 halt 额度。
 
 `state` 四种：`unmeasured` / `usable` / `failed` / `skipped`。
 
