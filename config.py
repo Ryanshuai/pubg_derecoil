@@ -1,4 +1,84 @@
 import os
+from typing import NamedTuple
+
+
+# ════════════════════════════════════════════════════════════
+# Rectangles — ONE type, ONE stored order. The corner form is DERIVED.
+# ════════════════════════════════════════════════════════════
+#
+# ⚠ THERE USED TO BE TWO, AND THE SECOND ONE IS WHAT KEPT COSTING. Row-major
+# `(y, x, h, w)` for anything win32_cap or the ring buffer takes, corner
+# `(x0, y0, x1, y1)` for containment tests — each correct on its own, and
+# together a coin-flip at every call site. The only thing saying which a value
+# followed was its VARIABLE NAME: `LOBBY_BAR_ROI` announced it,
+# `HUD_REGIONS['gun_name_1']` announced nothing. Measured 2026-08-08, on that
+# exact key: `x1, y1, x2, y2 = HUD_REGIONS[k]` unpacks, slices, raises
+# nothing, and describes a DIFFERENT rectangle. The crop came back empty and
+# the investigation went looking at the template bank.
+#
+# Naming the two types was not enough, and it was not enough for a reason
+# worth keeping: "which convention is this" is still a question you have to
+# ask, and the answer still has to be remembered. Asked for in those terms:
+# "全局只用一种吧，不然永远会晕."
+#
+# So: ONE class, ONE stored order, and the corner view is a PROPERTY rather
+# than a second storage form. `r.x0` cannot disagree with `r.x` — it is
+# computed from it. There is nothing left to get backwards.
+#
+# Row-major won on arithmetic, not taste: 76 of the 89 slice sites in the
+# repository are `frame[y:y + h, x:x + w]`, and it is the argument order
+# win32_cap already takes. detector/geometry.cut() stays as the one-liner for
+# the simple case; its own docstring explains why it cannot be the whole
+# answer (61 of those 76 need y/x/h/w for something else as well).
+#
+# A NamedTuple, so this costs no call site anything: it IS a tuple, every
+# existing `y, x, h, w = REGION` keeps working verbatim, and `repr` prints the
+# field names.
+class Rect(NamedTuple):
+    """A screen rectangle, stored row-major. Corners are derived.
+
+    The ONLY rectangle type in this repository. `pixi run params` and the
+    import-time check at the bottom of this file both enforce that.
+    """
+    y: int
+    x: int
+    h: int
+    w: int
+
+    # Corner view. Read-only on purpose: a settable corner would be a second
+    # storage form wearing a property's clothes.
+    @property
+    def x0(self):
+        return self.x
+
+    @property
+    def y0(self):
+        return self.y
+
+    @property
+    def x1(self):
+        return self.x + self.w
+
+    @property
+    def y1(self):
+        return self.y + self.h
+
+    @classmethod
+    def corners(cls, x0, y0, x1, y1):
+        """Build from corner points. For a measurement TAKEN that way — the
+        conversion happens once, here, instead of at every reader."""
+        return cls(y0, x0, y1 - y0, x1 - x0)
+
+    def contains(self, xy):
+        """Is this point inside. -> bool. Half-open, like the slice."""
+        return (xy is not None
+                and self.x0 <= xy[0] < self.x1 and self.y0 <= xy[1] < self.y1)
+
+    @property
+    def slice(self):
+        """`frame[r.slice]` — for the sites that only want the sub-image."""
+        return (slice(self.y, self.y + self.h), slice(self.x, self.x + self.w))
+
 
 # ════════════════════════════════════════════════════════════
 # Screen
@@ -40,6 +120,9 @@ HUD_REGIONS = {
     'att_2_magazine': (617, 2502, 63, 63),
     'att_2_stock':    (617, 2785, 63, 63),
 }
+
+# Wrapped AFTER the literal so the table stays readable as a table.
+HUD_REGIONS = {k: Rect(*v) for k, v in HUD_REGIONS.items()}
 
 # Which of the above the capture thread grabs EVERY FRAME. The rest are the
 # Tab screen's, and they are read on demand — see control/tab_watch.py.
@@ -791,14 +874,14 @@ SPAWNER_MIN_SCORE = 0.55       # positives 0.989..1.000, negatives 0.000
 LOBBY_IMAGE_X0, LOBBY_IMAGE_X1 = 440, 2999   # the 16:9 image inside the bars
 
 # (y, x, h, w). Right letterbox bar, clear of the lobby image.
-LOBBY_BAR_ROI = (200, 3060, 1000, 140)
+LOBBY_BAR_ROI = Rect(200, 3060, 1000, 140)
 LOBBY_BAR_MAX = 8              # lobby measures exactly 0; in-game 78..255
 
 # Net-debug overlay ("Ping: 43ms ..."), the one signal independent of the
 # bars. Restricted to x >= LOBBY_IMAGE_X0 so it reads the lobby's own image
 # rather than the black bar, which would make it a second letterbox probe.
 # Bright-pixel fraction: lobby 0.021, in-game 0.099..0.112.
-LOBBY_PING_ROI = (0, 460, 26, 240)
+LOBBY_PING_ROI = Rect(0, 460, 26, 240)
 LOBBY_PING_THRESH = 180        # grey level counted as overlay text
 LOBBY_PING_MIN_FRAC = 0.05
 
@@ -820,7 +903,7 @@ LOBBY_PING_MIN_FRAC = 0.05
 # (y, x, h, w). Starts at y=38, BELOW the yellow "new content" dots that sit
 # at y 26..38 over PASS / CAREER / CUSTOMIZE / WORKSHOP. Including them puts
 # 52 ink into four unselected tabs and five tabs read as selected at once.
-LOBBY_TOP_BAR_ROI = (38, 1050, 30, 1100)
+LOBBY_TOP_BAR_ROI = Rect(38, 1050, 30, 1100)
 
 # (y, x, h, w). Stops at x=2000 deliberately. Run it out to 2150 and a sixth
 # "tab" appears at (2128,146) with more ink than CUSTOM — that is the daily
@@ -832,7 +915,7 @@ LOBBY_TOP_BAR_ROI = (38, 1050, 30, 1100)
 # ROI to exclude it would cut into 商店 in one language or STORE in the other.
 # That is why naming is by template now — an extra run matches nothing and is
 # dropped, instead of shifting every name after it.
-LOBBY_SUB_BAR_ROI = (125, 1300, 40, 700)
+LOBBY_SUB_BAR_ROI = Rect(125, 1300, 40, 700)
 
 # Two working points, and the gap between them IS the selected/unselected
 # signal. Selection is argmax of ink at SEL, not a threshold on it: the top
@@ -893,7 +976,7 @@ LOBBY_PLAY_XY = (749, 1287)
 # 0.000 on all three other captured states.
 #
 # Button box: x 80..347, y 1339..1387. Text band inside it:
-LOBBY_EXIT_TEXT_ROI = (1350, 100, 26, 210)   # (y, x, h, w)
+LOBBY_EXIT_TEXT_ROI = Rect(1350, 100, 26, 210)   # (y, x, h, w)
 LOBBY_EXIT_THRESH = 170
 LOBBY_EXIT_SEARCH = 20
 LOBBY_EXIT_MIN_SCORE = 0.55    # positive 1.000, negatives 0.000
@@ -916,7 +999,7 @@ LOBBY_EXIT_XY = (213, 1363)    # button centre
 #   RESUME 293 / SETTINGS 378 / KEY GUIDE 464 / LEAVE TRAINING 549 /
 #   EXIT TO DESKTOP 634
 # Template scores: system menu 1.000, every other captured state <= 0.111.
-LOBBY_MENU_TITLE_ROI = (150, 571, 66, 402)   # (y, x, h, w)
+LOBBY_MENU_TITLE_ROI = Rect(150, 571, 66, 402)   # (y, x, h, w)
 LOBBY_MENU_THRESH = 190
 LOBBY_MENU_SEARCH = 24
 LOBBY_MENU_MIN_SCORE = 0.55
@@ -936,7 +1019,7 @@ LOBBY_MENU_MIN_SCORE = 0.55
 # 0.000). press_play() then clicks PLAY into a modal that swallows it, which
 # is the same shape as the ERROR and RECONNECT dialogs already handled here —
 # a screen that sits OVER the lobby and eats the one click the pump retries.
-LOBBY_MENU_TITLE_ROI_IN_LOBBY = (465, 570, 66, 402)   # (y, x, h, w)
+LOBBY_MENU_TITLE_ROI_IN_LOBBY = Rect(465, 570, 66, 402)   # (y, x, h, w)
 
 # ⚠ EXIT TO DESKTOP EXISTS ON BOTH MENUS, at two different y, and it is the
 # only entry that does. LEAVE TRAINING / RESTART LOBBY are at least unique to
@@ -956,7 +1039,7 @@ LOBBY_MENU_RESUME_XY = (648, 293)
 # blind click at y=549 would quit the game outright. Confusion measured
 # against every entry in the captured menu: LEAVE TRAINING 1.000, and the
 # worst impostor is EXIT TO DESKTOP at 0.152.
-LOBBY_LEAVE_TEXT_ROI = (527, 570, 46, 316)   # (y, x, h, w)
+LOBBY_LEAVE_TEXT_ROI = Rect(527, 570, 46, 316)   # (y, x, h, w)
 LOBBY_LEAVE_MIN_SCORE = 0.55
 
 # Clicking LEAVE TRAINING does not leave. It raises a centred CONFIRM / CANCEL
@@ -968,7 +1051,7 @@ LOBBY_LEAVE_MIN_SCORE = 0.55
 # confirmation dialog in this game has a CONFIRM button, and only this one says
 # LEAVE TRAINING across the middle of the screen. Distinct from the menu ENTRY
 # of the same name at LOBBY_LEAVE_TEXT_ROI — different position, different size.
-LOBBY_LEAVE_CONFIRM_TEXT_ROI = (558, 1495, 65, 450)   # (y, x, h, w)
+LOBBY_LEAVE_CONFIRM_TEXT_ROI = Rect(558, 1495, 65, 450)   # (y, x, h, w)
 LOBBY_LEAVE_CONFIRM_MIN_SCORE = 0.55
 LOBBY_LEAVE_CONFIRM_XY = (1576, 878)   # CONFIRM; CANCEL is at x=1863
 
@@ -981,7 +1064,7 @@ LOBBY_LEAVE_CONFIRM_XY = (1576, 878)   # CONFIRM; CANCEL is at x=1863
 # dialog. That is deliberate: whatever the message, OK is the only thing to
 # click, and being stuck is worse than dismissing something unexpected. It is
 # logged loudly either way.
-LOBBY_ERROR_TEXT_ROI = (500, 1628, 65, 186)   # (y, x, h, w)
+LOBBY_ERROR_TEXT_ROI = Rect(500, 1628, 65, 186)   # (y, x, h, w)
 LOBBY_ERROR_MIN_SCORE = 0.55
 LOBBY_ERROR_OK_XY = (1709, 904)
 
@@ -994,7 +1077,7 @@ LOBBY_ERROR_OK_XY = (1709, 904)
 # letterbox probe reads 0 and classify() calls it LOBBY. Its ERROR title sits
 # 38 px below the inactivity dialog's, close enough to be a coincidence worth
 # not relying on, so the gate is the RECONNECT glyph, which is unique.
-LOBBY_RECONNECT_TEXT_ROI = (881, 1689, 23, 119)   # (y, x, h, w)
+LOBBY_RECONNECT_TEXT_ROI = Rect(881, 1689, 23, 119)   # (y, x, h, w)
 LOBBY_RECONNECT_MIN_SCORE = 0.55
 LOBBY_RECONNECT_XY = (1730, 906)
 
@@ -1016,6 +1099,9 @@ LOBBY_RECONNECT_XY = (1730, 906)
 MAP_RANGE_BOXES = {
     '200m': (1937, 460, 1999, 622),
 }
+
+# Corner points: these are tested against and sliced, never cut().
+MAP_RANGE_BOXES = {k: Rect.corners(*v) for k, v in MAP_RANGE_BOXES.items()}
 MAP_RANGE_XY = {name: ((b[0] + b[2]) // 2, (b[1] + b[3]) // 2)
                 for name, b in MAP_RANGE_BOXES.items()}
 
@@ -1050,7 +1136,7 @@ MAP_RANGE_SPAWN = {
 # points like MAP_RANGE_BOXES, because it is tested against and sliced with,
 # never cut(). The suffix is the only thing that says which convention a
 # constant follows, so it has to stay honest.
-MINIMAP_BOX = (3030, 1030, SCREEN_W, SCREEN_H)   # (x0, y0, x1, y1)
+MINIMAP_BOX = Rect.corners(3030, 1030, SCREEN_W, SCREEN_H)
 
 # Width of the strip holding the map's left-hand list of training areas. The
 # selected entry is drawn with a yellow border -- two vertical strokes at
@@ -1314,3 +1400,62 @@ FIRE_MODE = {
 POSTURE = {
     'x1': 1373, 'y1': 1301, 'x2': 1439, 'y2': 1367,
 }
+
+
+# ════════════════════════════════════════════════════════════
+# The rectangle-convention ratchet
+# ════════════════════════════════════════════════════════════
+#
+# ⚠ AT IMPORT, AND IT RAISES. Every process in this repository imports config,
+# so there is no "remember to run the gate" step and no file it can stop
+# covering. A rectangle in the wrong convention does not fail loudly on its
+# own -- it returns a DIFFERENT rectangle, and the symptom shows up one layer
+# away as "the detector cannot read this" (2026-08-08, HUD_REGIONS
+# ['gun_name_1'] unpacked as x1/y1/x2/y2: the crop came back empty and the
+# investigation went looking at the template bank).
+#
+# It checks the naming rule and the type together, because each catches what
+# the other misses: a bare tuple named *_ROI passes any type check that only
+# looks at declared Rois, and a Roi named *_BOX passes any name check.
+def _check_rectangles():
+    """Every rectangle in this file is a Rect, and there is no second type.
+
+    ⚠ AT IMPORT, AND IT RAISES. Every process here imports config, so there is
+    no "remember to run the gate" step and no file it can stop covering. A
+    rectangle in the wrong form does not fail loudly on its own -- it returns a
+    DIFFERENT rectangle, and the symptom lands one layer away as "the detector
+    cannot read this" (2026-08-08, HUD_REGIONS['gun_name_1']).
+
+    It checks the NAME as well as the type, because each catches what the other
+    misses: a bare tuple called *_ROI passes any type-only check that iterates
+    declared Rects, and a stray corner tuple called *_BOX passes any name-only
+    check. The suffixes are historical -- both mean Rect now -- and they are
+    kept as the redundant half rather than renamed, because renaming would
+    touch the call sites this change is specifically not touching.
+    """
+    bad = []
+    for _name, _val in list(globals().items()):
+        if _name.startswith('_') or not isinstance(_val, tuple):
+            continue
+        if ('_ROI' in _name or '_BOX' in _name) and not isinstance(_val, Rect):
+            bad.append(f'{_name} is a rectangle constant but a bare '
+                       f'{type(_val).__name__} -- write Rect(y, x, h, w), or '
+                       f'Rect.corners(x0, y0, x1, y1) if that is how it was '
+                       f'measured')
+    for _table in ('HUD_REGIONS', 'MAP_RANGE_BOXES'):
+        for _k, _v in globals().get(_table, {}).items():
+            if not isinstance(_v, Rect):
+                bad.append(f'{_table}[{_k!r}] is a bare {type(_v).__name__} -- '
+                           f'the table is wrapped just below its literal, so a '
+                           f'new ENTRY needs no change; this means the wrapping '
+                           f'line was removed')
+    if bad:
+        raise AssertionError(
+            'config.py rectangles are broken:\n  ' + '\n  '.join(bad)
+            + '\n\nThere is ONE rectangle type and ONE stored order '
+              '(y, x, h, w).\nThe corner view is a PROPERTY '
+              '(r.x0/.x1/.y0/.y1) so it cannot\ndisagree with the storage. '
+              'Do not add a second type back.')
+
+
+_check_rectangles()

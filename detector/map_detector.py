@@ -53,7 +53,7 @@ import cv2
 import numpy as np
 
 from config import (MAP_LEFT_PANEL_W, MAP_RANGE_BOXES, MAP_RANGE_SPAWN,
-                    MINIMAP_BOX)
+                    MINIMAP_BOX, Rect)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
@@ -126,8 +126,7 @@ def _yellow(frame, spec):
     # range highlight is drawn in the bottom-right corner) and would silently
     # truncate one that were -- if a range is ever added down there, measure
     # it with the blanking off.
-    x0, y0, x1, y1 = MINIMAP_BOX
-    mask[y0:y1, x0:x1] = 0
+    mask[MINIMAP_BOX.slice] = 0
     return mask
 
 
@@ -219,8 +218,7 @@ def in_box(xy, name):
     """Is this point inside the range's highlight. -> bool. No padding."""
     if xy is None:
         return False
-    x0, y0, x1, y1 = MAP_RANGE_BOXES[name]
-    return x0 <= xy[0] <= x1 and y0 <= xy[1] <= y1
+    return MAP_RANGE_BOXES[name].contains(xy)
 
 
 def near_spawn(xy, name):
@@ -246,7 +244,7 @@ def at_range(frame, name):
 
 
 def highlight_box(frame):
-    """Measure a range highlight off the frame -> (x0, y0, x1, y1) | None.
+    """Measure a range highlight off the frame -> Rect | None.
 
     NOT used to drive anything -- the click target is a constant, for the same
     reason the spawner's is (detector/CLAUDE.md: no recognition on the driving
@@ -262,7 +260,7 @@ def highlight_box(frame):
     """
     for b in _blobs(_yellow(frame, _LOOSE)):
         if b.area > MARKER_AREA_MAX:
-            return (b.x, b.y, b.x + b.w, b.y + b.h)
+            return Rect(b.y, b.x, b.h, b.w)
     return None
 
 
@@ -310,15 +308,15 @@ def selftest():
 
     # Just inside the NEXT lane -- 15 px right of the box, which the old
     # pad-by-20 predicate accepted as "already at the 200m range".
-    x0, y0, x1, y1 = MAP_RANGE_BOXES['200m']
-    next_lane = (x1 + 15, (y0 + y1) // 2)
+    _r = MAP_RANGE_BOXES['200m']
+    next_lane = (_r.x1 + 15, (_r.y0 + _r.y1) // 2)
 
-    saved, MINIMAP_BOX = MINIMAP_BOX, (0, 0, 0, 0)
+    saved, MINIMAP_BOX = MINIMAP_BOX, Rect(0, 0, 0, 0)
     try:
         unguarded = player_xy(game)
     finally:
         MINIMAP_BOX = saved
-    mx0, my0, mx1, my1 = saved
+    mx0, my0, mx1, my1 = saved.x0, saved.y0, saved.x1, saved.y1
 
     cases = [
         # the reference frame, map open
@@ -354,7 +352,7 @@ def selftest():
         ('a point in the NEXT lane is not at 200m',
          at_range_xy(next_lane, '200m') is False),
         ('...which the old pad-by-20 predicate got wrong',
-         next_lane[0] <= x1 + 20),
+         next_lane[0] <= _r.x1 + 20),
     ]
     lines = [f'  {"ok  " if ok else "FAIL"}  {name}' for name, ok in cases]
     return all(ok for _, ok in cases), lines
