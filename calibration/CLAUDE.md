@@ -61,7 +61,7 @@ self.ac.pointer.drag(src, dst)       # ✗ 绕过了 _reject()
 
 | | 干什么 |
 |---|---|
-| **实验设计** | `collect_timed.py`（打进样本库；拿**已经在手上**的枪，不刷不装）· `sweep.py`（只剩 `Rig` 装配壳）· `scan_compat.py` / `scan_fits.py`（槽位/配件兼容性）· `collect_templates.py` · `capture_ads.py` |
+| **实验设计** | `collect_timed.py`（打进样本库；`--kit` 装配、自己刷枪，**四样东西读不出或对不上就拒绝**，见下）· `sweep.py`（只剩 `Rig` 装配壳）· `scan_compat.py` / `scan_fits.py`（槽位/配件兼容性）· `collect_templates.py` · `capture_ads.py` |
 | **分析** | `samples.py`（样本库，**永不删除**）· `fit_time_curve.py`（聚类 + 一次性全量拟合，`--selftest` 离线）· `bullet_detect.py` |
 | **落盘 / 事实存储** | `capture_run.py`（`CaptureRun` 格式）· `rpm_store.py` · `kit_facts.py` |
 | **模板构建 / 审计** | `solve_template.py` · `score_attachments.py` · `build_name_templates.py` · `build_lobby_tab_templates.py` · `build_weapon_hud_bank.py` · `audit_curves.py` |
@@ -111,6 +111,31 @@ self.ac.pointer.drag(src, dst)       # ✗ 绕过了 _reject()
 `CaptureRun.load_dir(<目录>)` 读得了三种形状：现行 `manifest.json`、旧 ADS run 的 `index.jsonl`+`meta.json`、旧模板 run 的 `index.json`。旧 run 是**只读**的，`save()` 直接抛——在 867 帧不可再生的数据旁边再写一份索引就是第二个真值来源。
 
 `labelled()` 还会挡掉**自相矛盾**的标签（`conflicts()`）：同一个截图文件被两条 entry 说成不同的东西时，至多一条描述的是磁盘上的像素，而文件本身分不出是哪条。这不是假想——`collect_templates` 的库存行图叫 `row00__sks__lbg0.png`，名字里没有轮次，于是多轮 run 的后一轮直接覆盖前一轮的文件，两条 entry 却都留着。7 个 run、130 个文件、**580 条标签**，有一个文件被 12 个配件同时声称。文件名已经加上轮次了；存量的图一张没删，`entries` 照样列出来，只是 `labelled()` 不再把它们当真值发出去。
+
+## 采集要拒绝的四样,以及它们其实是同一样(2026-08-08)
+
+**这一层每一次失败都是同一句话:**
+
+> **记录描述的对象,不是被测量的那个对象。**
+
+一晚上它出现了四次,四次都**不抛异常、印出来的数也全都正常**:
+
+| 读的是什么 | 那天怎么骗过去的 | 代价 |
+|---|---|---|
+| **枪** | 架上两把 mp5k | 读一把的配件,打另一把。一梭装满配件的进了 `bare` |
+| **配件** | `--kit` 要加重枪托,枪上是上一格的握把,读回报 `(nothing)` | 5 梭进错格 |
+| **镜子** | `--sight` 存的是**旗标**不是读回 | K 差 ~3 倍,而下游看不见分歧 |
+| **开镜** | `ads_frac` **全库 167 梭都是 `nan`** | 没有任何东西证明过「这一梭真在镜里」,同样 ~3 倍 |
+
+四条现在都是**拒绝**,不是重试也不是警告。`collect_timed` 的文件头写了每一条的出处。
+
+⚠ **聚类不是防线。** 枪托那次它确实切出来了(`5/10, separation 16.3×` 对闸门 8.0),**但那只因为枪托值两倍**。一个值 5% 的件会直接并进邻居格,把均值挪走而没人看得见。
+
+⚠ **而机器唯一验不了的,是没被记下来的量。** 镜子和 ADS 都是「读对了然后被扔掉」——不在 `RECOIL_SLOTS` 里就没存。**一个程序只能检查存在于两个地方的东西**;只存在于零个地方的,它连比都没得比。所以这两条的修法第一步不是加检测器,是**先把值存下来**(`Magazine.sight` 现在是读回,`Magazine.ads_end` 是新加的)。
+
+⚠ **`ads_end` 是两个端点,不是一个比率。** 时间坐标那条路的 grabber 只抓 tracker 的 patch,而 `AdsDetector` 读的是**屏幕中心**,不在里面——所以拿不到「逐帧比例」。`ads_frac` 继续是 `nan`,**没有被填成 1.0**:填一个没测过的比率,正是这个字段当初变得不可信的原因。它看不见「中途掉出去又回来」,抓得住「掉出去就没回来」。
+
+⚠ **出镜的梭照样入库,只打警告。** MODEL.md 的库永不删除,而一个在采集时被丢掉的梭,拟合永远没机会把它和兄弟并排给你看。
 
 ## 三个反复踩的坑
 

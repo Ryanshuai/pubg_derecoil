@@ -224,6 +224,37 @@ check('a plate that fell to zero is a lost gun',
 check('the same fall on a DROP is the request being granted',
       drag_log.gun_lost({'kind': 'drop', 'plate': [740, 0]}), False)
 
+print('\n=== values DERIVED from a Rect still say what they measured ===')
+# ⚠ THE CLASS THE config RATCHET CANNOT SEE. That check asserts the CONSTANTS
+# are Rects; it cannot assert that arithmetic ON them was updated when the
+# stored order changed. Measured 2026-08-08, within minutes of the change:
+# MAP_RANGE_XY was `((b[0] + b[2]) // 2, (b[1] + b[3]) // 2)` -- correct corner
+# arithmetic on a value that had just stopped being corners. It put the 200m
+# teleport click at (311, 999) instead of (1968, 541), and the run spent eight
+# attempts clicking the far side of the map. It moved the character somewhere
+# real, so it did not even fail cleanly.
+#
+# map_detector's 18-case selftest stayed green throughout: it never reads this
+# dict. THE NUMBERS BELOW ARE MEASUREMENTS, not restatements of the arithmetic
+# -- they come from live runs, which is the only thing that makes this a test
+# rather than a second copy of the formula.
+import config as _C                                              # noqa: E402
+check('MAP_RANGE_XY 200m is the box centre', _C.MAP_RANGE_XY['200m'], (1968, 541))
+check('MAP_RANGE_SPAWN 200m is where a jump lands',
+      _C.MAP_RANGE_SPAWN['200m'], (1977, 450))
+check('MAP_RANGE_BOXES 200m corners',
+      (_C.MAP_RANGE_BOXES['200m'].x0, _C.MAP_RANGE_BOXES['200m'].y0,
+       _C.MAP_RANGE_BOXES['200m'].x1, _C.MAP_RANGE_BOXES['200m'].y1),
+      (1937, 460, 1999, 622))
+check('MINIMAP_BOX corners',
+      (_C.MINIMAP_BOX.x0, _C.MINIMAP_BOX.y0, _C.MINIMAP_BOX.x1, _C.MINIMAP_BOX.y1),
+      (3030, 1030, 3440, 1440))
+check('HUD_REGIONS gun_name_1 is row-major',
+      tuple(_C.HUD_REGIONS['gun_name_1']), (123, 2275, 45, 250))
+check('...and its corner view agrees',
+      (_C.HUD_REGIONS['gun_name_1'].x0, _C.HUD_REGIONS['gun_name_1'].x1),
+      (2275, 2525))
+
 print()
 if FAILS:
     print(f'{len(FAILS)} FAILED: {", ".join(FAILS)}')

@@ -332,6 +332,18 @@ ultralytics 会把 `cv2.imread` 换成自己默认 `IMREAD_COLOR` 的包装，�
 
 ## 开镜检测：用 `ads_detector`，别再自己造
 
+> ### ⚠ 先读这条：本节里所有关于 `ads_frac` 和 `ADS_FRAC_MIN` 的话，描述的是**已退场的旧分析路径**（2026-08-08 更正）
+>
+> 那个闸**现在没有在拦任何东西**。时间坐标那条采集路（`calibration/collect_timed.py` → `fire_magazine_timed`）**从来没接过 `ads_frac`**，样本库里 **167 梭全是 `nan`**（143 梭 m416，含整个 2×2×2 立方体；24 梭 mp5k）。所以「1044 梭里拒了 55 梭」「989 梭的分布最小值 0.80」这些数字仍然是真的历史，**但它们说的是一条不再运行的回路**。
+>
+> 现在活着的是 `Magazine.ads_end`：**两个端点，不是一个比率**——开跑前 `aim_and_scope` 的 `ensure_ads()`，加上扳机松开那一刻的一次 `in_ads()`。时间路的 grabber 只抓 tracker 的 patch，而这个检测器读的是**屏幕中心**，不在里面，所以拿不到逐帧比例。
+>
+> **`ads_frac` 没有被填成 1.0，是故意的**：填一个没测过的比率，正是这个字段当初变得不可信的原因。
+>
+> 它看不见「中途掉出去又回来」；抓得住「掉出去就没回来」——那正是真会发生的那种，而且值 ~3 倍的 K。
+>
+> ⚠ **而 `iron` 根本没有 K。** `config.RECOIL_SIGHT_PROFILES` 只有 `hipfire / red_dot / 2x / 3x / 4x / vss_pso1`，而空镜位经 `_sight_of` 映射成 `'iron'`——一个**表里不存在的键**。以前这种枪会拿红点的 1.5474 硬算；现在 `collect_timed` 直接拒绝。要测铁瞄，得先给它量一个 K。
+
 `detector/ads_detector.py` 回答「现在开镜了没有」，**单帧、0.32 ms、可以每帧跑**：
 
 ```python

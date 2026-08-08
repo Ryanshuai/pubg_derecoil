@@ -63,7 +63,7 @@ pixi run layering      # 只解析 import，不跑任何东西
 | `match.py` | 对局内实时回路（按键→状态→硬件） | `Dispatcher`，由 `robot.py` 装配 |
 | `tab_watch.py` | Tab 界面：开没开、枪上装了什么（**只读**） | `TabWatch`，由 `Dispatcher` 持有 |
 | `inventory.py` | Tab 界面：拖配件、装卸、扔枪（**驱动**） | `InventoryControl` |
-| `stock.py` | 背包盘点：看有什么、多的扔掉、缺的刷出来 | `restock(ac, sc, want)` |
+| `stock.py` | 背包盘点：看有什么、多的扔掉、缺的刷出来；**架子读不出或有两把同名枪就拒绝** | `restock(ac, sc, want)` / `ensure_weapon_in_hand()` |
 | `kitting.py` | 把一整套配件弄到枪上并跨格子维持它 | `Kitter.apply(want)` |
 | `aim.py` | 视角指哪、怎么闭环弄回去 | `ViewDriver` |
 | `gun.py` | 把角色推到测量假设的状态并验证（开镜/姿势/火力模式） | `GunDriver` |
@@ -109,6 +109,21 @@ if not focus_keeper().ok('mag 3'):     # 跑到一半掉了就抢回来，上限
 窗口有焦点 ≠ 游戏在收输入：标题匹配在大厅、加载页、结算页全都成立。焦点之外还要过 `LobbyControl` 那关。
 
 ---
+
+## `ensure_weapon_in_hand` 拒绝的两件事（2026-08-08）
+
+它一直在**读架子**再决定刷不刷（`[stock] m416 already in slot 1` 就是它）。加的是两条**拒绝**：
+
+| 情况 | 以前 | 现在 |
+|---|---|---|
+| `loadout()` 返回 None | `ac.loadout()['guns']` → **TypeError**，四层之下抛「'NoneType' object is not subscriptable」 | 拒绝并说清楚 |
+| 架上**两把同名枪** | 照常 `hold` 第一把 | 拒绝 |
+
+**「架子是空的」和「我看不见架子」从这里看一模一样，而其中一个的结局是货架上多一把枪。**
+
+⚠ **两把同名枪是下游谁都描述不了的状态。** 实测：架上两把 mp5k，标定读了一把的配件、打了另一把，一梭装满配件的枪进了 `bare` 格。**它在每一个印出来的数里都是隐形的**——40 发打满、fps 正常、那一格 5 梭互相一致。唯一的破绽是总量：428 counts 对 905，也就是 0.473，正好是这把枪 comp+vert+heavy 的实测因子。
+
+这是根 `CLAUDE.md` 第二条法则在这一层的实例：**读回描述的对象，不是开火的那个对象。**
 
 ## 状态：两种，别混
 

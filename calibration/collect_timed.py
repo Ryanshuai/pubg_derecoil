@@ -3,12 +3,37 @@
     pixi run collect-timed --weapon m416 --mags 6
     pixi run collect-timed --weapon m416 --mags 6 --no-comp
 
-Takes the gun that is ALREADY IN HAND -- no spawning, no kitting. That is a
-deliberate first cut: the kitting machinery in harvest.py is the single largest
-source of wasted runs in this project, and it has nothing to do with whether
-the model works. `--weapon` names what is held and the HUD detector is asked to
-agree; a disagreement stops the run rather than labelling the samples with the
-name that was typed.
+⚠ THIS PARAGRAPH USED TO SAY "no spawning, no kitting", and by 2026-08-08 it
+was false in both halves: `--kit` fits a config and the run spawns the gun
+through control.stock.ensure_weapon_in_hand. Kept as a correction rather than
+deleted, because the original reason was sound and still constrains the
+design: the kitting machinery was the single largest source of wasted runs in
+this project, so everything it touches here is guarded by a REFUSAL rather
+than by a retry.
+
+FOUR THINGS IT REFUSES TO GUESS, each paid for on the day it was added:
+
+  the weapon    `--weapon` names what should be held; read_config compares it
+                against the rack and stops rather than filing samples under
+                the name that was typed.
+  the config    what `--kit` ASKED for must appear in the readback. A part
+                that went on but reads as empty, and a part that never went
+                on, are the same picture from here — and both end with
+                magazines filed under a config that did not fire them.
+  the optic     `--sight` picks the profile K comes from; the gun wears
+                whatever PUBG auto-fitted. A count is worth ~3x more through
+                a red dot than through iron sights, so a disagreement scales
+                every number in the run.
+  ADS           the burst is bracketed by ensure_ads() before and a read of
+                `in_ads()` after. Same 3x, same silence: `ads_frac` was `nan`
+                on all 167 magazines in the store before this existed.
+
+The shape they share is worth stating once, because every failure this file
+has had is an instance of it: THE RECORD DESCRIBED A DIFFERENT OBJECT THAN THE
+ONE THAT FIRED. Two mp5ks in the rack, a kitted gun filed as bare, a red dot
+analysed as iron. None of them raised, none of them looked wrong in the
+printed numbers, and each was caught only by asking a second, independent
+source about the same object.
 
 WHAT ONE MAGAZINE PRODUCES
 --------------------------
@@ -166,6 +191,37 @@ def read_config(weapon=None):
     return out
 
 
+def read_sight():
+    """Which RECOIL_SIGHT_PROFILES entry the gun's optic is. -> name | None.
+
+    ⚠ THIS WAS READ AND THEN THROWN AWAY, and it is the one quantity in this
+    file that nothing could check after the fact. `scope` is deliberately not
+    in RECOIL_SLOTS -- the config key has to be stable, and the magazine slot
+    already destabilised it once -- but "not in the key" got implemented as
+    "not recorded at all", and those are different decisions.
+
+    What it cost, 2026-08-08: two mp5k cells whose muzzle/grip/stock all read
+    empty came out 901 and 435 counts, a factor of 2.07. The only difference
+    anything could name was the optic, because PUBG auto-fits whatever the
+    backpack holds and --kit has never managed the scope slot. A count is worth
+    a different angle through iron sights than through a red dot -- roughly a
+    third, per detector/weapon._sight_of -- so K is wrong whenever the optic is
+    not the one --sight named. NEITHER CELL RECORDED WHICH IT HAD, so neither
+    can be rescued, only re-fired.
+
+    A program can only check a thing that exists in two places. This one
+    existed in zero.
+    """
+    from control.inventory import InventoryControl
+    from detector.weapon import _sight_of
+    with InventoryControl() as ac:
+        with ac.tab_up():
+            lo = ac.loadout()
+    if not lo or not lo.get('slots'):
+        return None
+    return _sight_of((lo['slots'].get(1) or {}).get('scope') or '')
+
+
 # The key `travel()` and calibration/artifacts/pitch/pitch_travel.json use for "not looking
 # through anything". Spelled once, here, because the one thing that must not
 # happen is this move reading a ruler measured through a sight.
@@ -246,8 +302,39 @@ def aim_and_scope(rig, posture):
 
 def one_magazine(rig, grabber, weapon, mag_size, interval_s, curve,
                  config, posture, note=''):
-    """Fire one, measure it, and return the record. Does not write."""
+    """Fire one, measure it, and return the record. Does not write.
+
+    ⚠ ADS IS BRACKETED, NOT SAMPLED, AND THE DIFFERENCE IS STATED BECAUSE THIS
+    FIELD ALREADY LIED ONCE BY BEING ABSENT. `ads_frac` -- the fraction of
+    polls that read as scoped -- is computed by the OLD fire_magazine(), and
+    this path uses fire_magazine_timed(), which never wired it up. Every one of
+    the 167 magazines in the store carries `nan`: 143 m416 including all eight
+    cells of the 2x2x2, and 24 mp5k.
+
+    That matters because ADS is worth about 3x in K, exactly like the optic --
+    a magazine fired out of ADS is analysed with a constant that is wrong by
+    the same factor, and nothing said so.
+
+    The timed grabber cannot supply the fraction: it captures the tracker's
+    patches, and AdsDetector reads the SCREEN CENTRE, which is not among them.
+    So this reads ADS ONCE, right after the trigger releases, off a GDI frame.
+    Together with aim_and_scope's ensure_ads() before the burst it brackets the
+    magazine: both ends scoped.
+
+    WHAT THAT CANNOT SEE, said plainly: a dropout in the middle that recovers
+    before the end. It catches the failure that actually happens -- dropping
+    out and staying out -- and it is two points, not a rate. `ads_frac` stays
+    nan rather than being filled with 1.0, because writing a rate this did not
+    measure is how the field became untrustworthy in the first place.
+    """
     out = rig.fire.fire_magazine_timed(grabber, mag_size, interval_s)
+    # Before the reload: R drops out of ADS on its own (docs/game_quirks.md),
+    # so a read taken after it would report the reload, not the burst.
+    try:
+        ads_end = bool(rig.gun.in_ads())
+    except Exception as e:                       # noqa: BLE001
+        print(f'      [!] could not read ADS after the burst: {e}')
+        ads_end = None
     t, dy_px, human_dy, oor = measure(rig.tracker, out['t'], out['patches'],
                                       human_fn=getattr(rig.mouse,
                                                        'human_totals', None))
@@ -262,6 +349,7 @@ def one_magazine(rig, grabber, weapon, mag_size, interval_s, curve,
         magazine_size=int(mag_size or 0),
         hold_s=float(out['hold_s']),
         fps=(len(t) - 1) / span if span > 0 else float('nan'),
+        ads_end=ads_end,
         ts=datetime.now().strftime('%m%d_%H%M%S'),
         note=note,
     ), out
@@ -491,6 +579,71 @@ def main():
             return 4
         print(f'  fitted: {config or "(nothing)"}')
 
+        # ⚠ THE READBACK IS AUTHORITATIVE ABOUT WHAT IT SEES, AND SILENT ABOUT
+        # WHAT IT MISSES — which is the hole the refusal above cannot cover.
+        # `read_config` returning {} means "no attachments", and that is
+        # exactly what an unreadable-but-fitted part looks like.
+        #
+        # Measured 2026-08-08 on the mp5k: `--kit stock=heavy_stock` fitted,
+        # the gun fired 435 counts against bare's 901 — so the stock was ON —
+        # and the readback said nothing at all, so five magazines landed in the
+        # BARE cell. Not a missing template either: Stock_Heavy_C carries two
+        # variants and scores 10/10 elsewhere. It simply does not read on this
+        # gun, and reads as `empty` rather than as a failure (see
+        # detector/CLAUDE.md on that deliberate trade).
+        #
+        # The clustering caught it that time (cut 5/10, separation 16.3x
+        # against a gate of 8.0) and that is luck, not a guard: it only worked
+        # because the stock is worth 2x. A part worth 5% would have merged into
+        # the bare cell and moved its mean.
+        #
+        # So: what you ASKED for is the one thing this layer knows that the
+        # readback does not. A disagreement is not a mislabel to file, it is a
+        # measurement whose subject is unknown.
+        if a.kit:
+            missing = {k: v for k, v in want.items()
+                       if v and config.get(k) != v}
+            if missing:
+                print(f'  [!] REFUSING: asked for {missing} and the readback '
+                      f'does not show it (reads {config or "nothing"}). Either '
+                      f'the part did not go on — in which case this is the '
+                      f'wrong gun to measure — or it went on and cannot be '
+                      f'read, in which case every magazine would be filed '
+                      f'under a config that is not what fired. Both end the '
+                      f'same way, so neither is worth a run.\n'
+                      f'      To measure it anyway, fit it by hand and drop '
+                      f'--kit: the readback is only consulted for slots it can '
+                      f'see, and without a request there is nothing to '
+                      f'contradict.')
+                return 5
+
+        # ⚠ THE OPTIC DECIDES K, AND NOTHING WAS CHECKING IT. `--sight` picks
+        # the profile the Rig's K comes from; the gun wears whatever PUBG
+        # auto-fitted out of the backpack. When those disagree every count in
+        # the run is scaled wrong -- by about 3x between iron sights and a red
+        # dot -- and the magazine records the FLAG, so nothing downstream can
+        # even see the disagreement.
+        #
+        # Refused rather than corrected: swapping in the right K would file
+        # magazines under a sight the caller did not ask for, and a cell that
+        # silently changes its own measurement conditions is the thing this
+        # whole file exists to stop.
+        worn = read_sight()
+        if worn is None:
+            print('  [!] REFUSING: could not read the scope slot. K comes from '
+                  'the optic, so an unread one is an unknown scale on every '
+                  'count in this run.')
+            return 6
+        if worn != rig.sight:
+            print(f'  [!] REFUSING: --sight says {rig.sight!r} (K={rig.K}) and '
+                  f'the gun is wearing {worn!r}. A count is worth a different '
+                  f'angle through each, so every number this run produced '
+                  f'would be scaled by the wrong constant — and the magazine '
+                  f'records the FLAG, so nothing downstream could see it.\n'
+                  f'      Either fit a {rig.sight} or pass --sight {worn}.')
+            return 7
+        print(f'  sight : {worn} (K={rig.K}, read back off the gun)')
+
         rig.ensure_posture(a.posture)
 
         grabber = DXGISyncGrabber(rig.tracker.regions())
@@ -524,6 +677,19 @@ def main():
                 rig, grabber, a.weapon, mag_size, interval_s,
                 [] if a.no_comp else curve, config, a.posture,
                 note='no-comp' if a.no_comp else f'scale={a.scale:g}')
+            # ⚠ THE MAGAZINE IS STILL WRITTEN. `ads_end` False means the
+            # burst ended out of the scope, so K is wrong by ~3x -- but
+            # MODEL.md's store never deletes, and a magazine dropped at
+            # collection time is one the fitter's clustering can never show
+            # you next to its siblings. It is RECORDED and SAID OUT LOUD; the
+            # fit is what decides.
+            if mag.ads_end is False:
+                print(f'      [!] mag {i} ENDED OUT OF ADS — K is the scoped '
+                      f'{rig.K}, so this magazine is scaled by the wrong '
+                      f'constant. Stored and flagged, not dropped.')
+            elif mag.ads_end is None:
+                print(f'      [!] mag {i}: ADS could not be read after the '
+                      f'burst — unknown, not assumed good.')
             p = S.append(mag)
             written += 1
             t, y = mag.y_true_counts()

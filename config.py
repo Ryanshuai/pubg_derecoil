@@ -1100,9 +1100,22 @@ MAP_RANGE_BOXES = {
     '200m': (1937, 460, 1999, 622),
 }
 
-# Corner points: these are tested against and sliced, never cut().
+# Measured as corner points, so converted here rather than at every reader.
 MAP_RANGE_BOXES = {k: Rect.corners(*v) for k, v in MAP_RANGE_BOXES.items()}
-MAP_RANGE_XY = {name: ((b[0] + b[2]) // 2, (b[1] + b[3]) // 2)
+
+# ⚠ NAMED FIELDS, NOT INDICES, AND THIS LINE IS WHY. It read
+# `((b.x0 + b.x1) // 2, (b.y0 + b.y1) // 2)` — correct corner arithmetic, on a
+# value that had just stopped being corners. Rect(y=460, x=1937, h=162, w=62)
+# put the 200m click point at (311, 999) instead of (1968, 541), and the
+# teleport spent eight attempts clicking the far side of the map. It moved the
+# character somewhere real, so it did not even fail cleanly.
+#
+# NOTHING CAUGHT IT. config's import-time ratchet checks that the constants are
+# Rects, not that arithmetic ON them was updated; map_detector's 18-case
+# selftest stayed green because it never reads this dict. A type that carries
+# its field names does not help a reader who still writes indices — so do not
+# write indices.
+MAP_RANGE_XY = {name: ((b.x0 + b.x1) // 2, (b.y0 + b.y1) // 2)
                 for name, b in MAP_RANGE_BOXES.items()}
 
 # Where a landed teleport actually puts the marker: the range's spawn point,

@@ -718,7 +718,47 @@ def ensure_weapon_in_hand(ac, sc, weapon='m416', slots=(1, 2), verbose=True):
     # "nothing tracks" because the red dot's patches were sitting on the VSS's
     # integral scope body. An hour of the failure looking like the scene.
     with ac.tab_up():
-        racked = ac.loadout()['guns']
+        read = ac.loadout()
+    # ⚠ REFUSED, NOT CRASHED, AND NOT SPAWNED. loadout() answers None when the
+    # Tab screen never came up, and this line used to be
+    # `ac.loadout()['guns']` -- a TypeError from inside a helper, four frames
+    # below the caller, saying 'NoneType' object is not subscriptable about a
+    # screen that did not open. 2026-08-08: two collection runs died somewhere
+    # in here and produced no magazines at all, and the traceback was the only
+    # thing that could have said where.
+    #
+    # Spawning on an unreadable rack is the worse of the two wrong answers:
+    # "the rack is empty" and "I could not see the rack" look identical from
+    # here, and one of them ends with a second gun on the shelf.
+    if not read or 'guns' not in read:
+        if verbose:
+            print(f'      [stock] could not read the rack — refusing rather '
+                  f'than spawning a {weapon} on top of whatever is there')
+        return None
+    racked = read['guns']
+
+    # ⚠ TWO OF THE SAME GUN IS A STATE NOTHING DOWNSTREAM CAN DESCRIBE, and it
+    # is what this function used to produce. Measured 2026-08-08: the rack held
+    # two mp5ks, calibration read the attachments off one and fired the other,
+    # and a magazine from a fully kitted gun landed in the store labelled BARE.
+    # It is invisible in every number the run prints -- the burst was the full
+    # 40 rounds, the fps was normal, the five magazines of that cell agreed
+    # with each other. The only tell was the total: 428 counts against 905,
+    # i.e. 0.473, which is this gun's measured comp+vert+heavy factor.
+    #
+    # Same shape as the 28 magazines mislabelled `bare` earlier the same day:
+    # THE READBACK DESCRIBES A DIFFERENT OBJECT THAN THE ONE THAT FIRED. The
+    # config readback cannot catch it, because it reads a real gun and gets a
+    # real answer.
+    dupes = [s for s in slots if racked.get(s) == weapon]
+    if len(dupes) > 1:
+        if verbose:
+            print(f'      [stock] {len(dupes)} {weapon}s in the rack (slots '
+                  f'{dupes}) — refusing. Which one fires and which one gets '
+                  f'read are then two different guns, and nothing downstream '
+                  f'can tell. Drop one.')
+        return None
+
     for slot in slots:
         if racked.get(slot) != weapon:
             continue

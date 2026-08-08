@@ -159,6 +159,14 @@ class Magazine:
     # ── context, for clustering and for asking questions later ──
     magazine_size: int = 0
     ads_frac: float = float('nan')
+    # ⚠ TWO POINTS, NOT A RATE, and it exists because ads_frac is nan on
+    # every magazine ever stored -- the timed firing path never wired that
+    # up. True means the trigger released with the gun still scoped;
+    # aim_and_scope's ensure_ads() is the other end of the bracket. None
+    # means the read itself failed. It cannot see a dropout that recovers
+    # mid-burst; it catches dropping out and STAYING out, which is worth
+    # ~3x in K and is what actually happens.
+    ads_end: object = None
     fps: float = float('nan')
     ts: str = ''
     note: str = ''

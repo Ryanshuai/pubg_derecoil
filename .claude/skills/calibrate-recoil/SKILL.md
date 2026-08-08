@@ -101,11 +101,38 @@ never been checked, and `harness/verdict.py` fails such a cell closed on
 that layer exists to keep apart. A fitter cannot fake it: it never sees which
 arm a magazine came from.
 
-`collect-timed` takes the gun **already in hand**. No spawning, no kitting —
-that machinery is the single largest source of wasted runs and has nothing to
-do with whether the model works. `--weapon` names what is held and the HUD
-detector is asked to agree; a disagreement stops the run rather than labelling
-the samples with the name that was typed.
+⚠ **THAT PARAGRAPH SAID "already in hand, no spawning, no kitting" UNTIL
+2026-08-08 AND IT WAS FALSE IN BOTH HALVES.** `collect-timed --kit` fits a
+config, and the run spawns the gun through `control.stock`. The old reason was
+sound and still shapes the design — the kitting machinery is the single
+largest source of wasted runs here — so everything it touches is guarded by a
+REFUSAL rather than a retry.
+
+### It refuses to guess four things, and each was paid for the day it appeared
+
+| it checks | what fooled it | what that cost |
+|---|---|---|
+| the weapon | two mp5ks in the rack | read one gun's attachments, fired the other |
+| the config | `--kit` asked for a stock, the gun wore the previous cell's grip, readback said `(nothing)` | 5 magazines filed under `bare` |
+| the optic | `--sight` recorded the FLAG, not the readback | K wrong by ~3x, invisible downstream |
+| ADS | `ads_frac` was `nan` on all 167 stored magazines | nothing ever verified a burst stayed scoped; same ~3x |
+
+**All four look identical to success in the printed numbers.** None raise, the
+magazine counts are right, the per-cell spread stays tight. Each was caught
+only by asking a SECOND, INDEPENDENT source about the same object.
+
+⚠ **The clustering is not the backstop.** It did cut the mislabelled cell that
+day (`5/10, separation 16.3x` against a gate of 8.0) — but only because a
+stock is worth 2x. A part worth 5% merges into its neighbour and moves the
+mean with nothing to show for it.
+
+⚠ **`iron` HAS NO K.** `config.RECOIL_SIGHT_PROFILES` holds `hipfire /
+red_dot / 2x / 3x / 4x / vss_pso1`, and an empty scope slot maps to `'iron'`,
+which is not in it. A gun with no optic used to be analysed with the red dot's
+1.5474; it is now refused. Measuring iron sights needs a K measured first.
+
+**If a run stops with `[!] REFUSING`, that is the feature.** Read which of the
+four it was — the message names it — and fix the game state, not the check.
 
 For a whole roster unattended, that is the night loop instead:
 
