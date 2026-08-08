@@ -568,45 +568,26 @@ class Weapon():
             # sp (bolt-action snipers) etc. — no recoil control
             self.dx_s, self.dy_s, self.t_s = [], [], []
 
-    # ── the curve, indexed by bullet ──
+    # ⚠ THE CURVE WAS ALSO INDEXABLE BY BULLET, AND IS NOT ANY MORE
+    # (2026-08-08). bullet_of / curve_bullets / comp_bins converted a curve
+    # time into a round number via 60/RPM, and comp_bins -- the only one of
+    # the three that did anything with the answer -- had NO CALLERS. They were
+    # the last of the bullet-bucket coordinate: what is fitted and what the
+    # firmware plays are both functions of TIME, so a round number is not a
+    # position in this model, it is a lossy re-derivation of one.
     #
-    # A curve entry carries a TIME, not a bullet number, and the two use
-    # different units for the same thing. Delays are stored as whole
-    # milliseconds (88 for the AUG) while the firing interval is 60/RPM
-    # (88.235 ms), so entry i sits at i x 88 ms and asking which bullet that
-    # is by flooring i x 88 / 88.235 = 0.9973 i gives i-1 for every i >= 1.
+    # What went with them is worth keeping, because the shape recurs. The
+    # conversion had to ROUND, never floor: delays are whole milliseconds (88
+    # for the AUG) while the interval is 60/RPM (88.235 ms), so entry i sits
+    # at i x 88 ms and flooring i x 88 / 88.235 = 0.9973 i gives i-1 for every
+    # i >= 1. That off-by-one cost a whole calibration round -- comp[] came
+    # out shifted one bullet early with the first two entries merged, the
+    # fitter corrected bullet k against entry k+1's compensation, and the
+    # rebuilt curve slid one bullet earlier on every pass. The AUG's curve
+    # over-compensated by -40 counts a magazine, repeatably.
     #
-    # Flooring cost a whole calibration round. comp[] came out shifted one
-    # bullet early with the first two entries merged, so fit_curve corrected
-    # bullet k using bullet k's residual against entry k+1's compensation, and
-    # the rebuilt curve slid one bullet earlier on every pass. The AUG's
-    # applied curve then over-compensated by -40 counts a magazine, repeatably.
-    #
-    # Rounding is right for any curve whose entries are one per bullet at the
-    # nominal cadence: the error is 0.0027 per bullet, so it would take ~185
-    # rounds to reach half a bin.
+    # `bullet_interval_s` survives, and only for one thing: estimating how
+    # long to hold the trigger (control/fire.fire_magazine_timed). That is
+    # fire control, not compensation, and its own docstring says nothing
+    # downstream depends on the estimate being right.
 
-    def bullet_of(self, t):
-        """Which bullet a curve entry at time `t` belongs to."""
-        return int(round(t / self.bullet_interval_s))
-
-    def curve_bullets(self):
-        """How many bullets the curve covers. 0 when there is no curve."""
-        return self.bullet_of(self.t_s[-1]) + 1 if len(self.t_s) else 0
-
-    def comp_bins(self, nb=None):
-        """Compensation summed per bullet -> (dy, dx), each of length nb.
-
-        nb defaults to the curve's own length. Pass a longer one to line the
-        bins up with a magazine that outlasts the curve; those extra bullets
-        come back zero, which is exactly right — they fire uncompensated.
-        """
-        import numpy as np
-        nb = int(nb or self.curve_bullets())
-        dy, dx = np.zeros(nb), np.zeros(nb)
-        if nb:
-            for a, b, t in zip(self.dy_s, self.dx_s, self.t_s):
-                i = min(nb - 1, self.bullet_of(t))
-                dy[i] += a
-                dx[i] += b
-        return dy, dx

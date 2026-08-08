@@ -393,8 +393,12 @@ def main():
     try:
         w = build_weapon(a.weapon, a.posture, {})
         interval_s = w.bullet_interval_s
+        # The curve is reported by its TIME SPAN, not by a round count:
+        # curve_bullets() went with the bullet-bucket coordinate, and the span
+        # is what the firmware actually plays.
+        span_ms = w.t_s[-1] * 1000.0 if len(w.t_s) else 0.0
         print(f'  {a.weapon}: interval {interval_s*1000:.2f} ms, '
-              f'curve covers {w.curve_bullets()} rounds')
+              f'curve spans {span_ms:.0f} ms over {len(w.t_s)} knots')
 
         if a.from_fit:
             # Fit from what is already stored and fire THAT, rather than the
@@ -427,12 +431,13 @@ def main():
             w.t_s = [k['t_ms'] / 1000.0 for k in ks]
             w.dy_s = [k['dy'] for k in ks]
             w.dx_s = [k['dx'] for k in ks]
-            # ⚠ THE INTERVAL IS THE GRID STEP, NOT THE GUN'S RATE. upload_pattern
-            # merges its input into one point per `bullet_interval_s`, so
-            # passing 85 ms here would squash a 225-knot curve straight back
-            # to 41 and undo the whole point of the time grid. At the grid
-            # step every knot is its own group and nothing is merged.
-            w.bullet_interval_s = r['grid_ms'] / 1000.0
+            # ⚠ `w.bullet_interval_s = grid_ms/1000` STOOD HERE, to stop
+            # upload_pattern re-binning a 225-knot curve back to 41. That
+            # merge is gone and so is the parameter, so this assignment now
+            # defends against nothing -- and it was the more dangerous half of
+            # a pair: the local `interval_s` read at the top of main() is what
+            # reaches fire_magazine_timed, and IT must stay the gun's real
+            # rate or the trigger is released a fifth of the way through.
             print(f'  --from-fit: {r["n_kept"]}/{r["n_total"]} stored magazines '
                   f'-> {len(ks)} knots @ {r["grid_ms"]:.1f} ms, '
                   f'{r["total_counts"]:.1f} counts')

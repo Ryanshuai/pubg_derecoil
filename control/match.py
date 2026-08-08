@@ -206,7 +206,7 @@ class Dispatcher(DaemonLoop):
                     if len(w.dy_s) == 0 or self.state.stop_recoil:
                         m.clear_pattern()
                     else:
-                        m.upload_pattern(w.dx_s, w.dy_s, w.t_s, w.bullet_interval_s)
+                        m.upload_pattern(w.dx_s, w.dy_s, w.t_s)
                 elif action == 'shutdown':
                     self.shutdown()
                     self._running = False

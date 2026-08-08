@@ -259,7 +259,7 @@ class PicoMouse:
     # grid: a curve that is distorted and self-consistent, reporting residuals
     # of a couple of counts while the screen still jumps.
 
-    def upload_pattern(self, dx_s, dy_s, t_s, bullet_interval_s=None):
+    def upload_pattern(self, dx_s, dy_s, t_s):
         """Upload the curve AS GIVEN. One knot in, one knot out.
 
         ⚠ IT USED TO MERGE TO ONE POINT PER BULLET, and MODEL.md §4 named this
@@ -285,10 +285,12 @@ class PicoMouse:
         no freedom to take it out. A 17 ms grid cuts the same profile into 5
         pieces and can.
 
-        `bullet_interval_s` is kept in the signature and IGNORED, deliberately:
-        two callers pass it positionally, and silently dropping the parameter
-        would have moved `t_s` into its place. It is scheduled for removal once
-        both callers stop passing it.
+        The `bullet_interval_s` parameter that drove that merge is GONE
+        (2026-08-08). It outlived the merge by one step on purpose: two
+        callers passed it positionally, so dropping it silently would have
+        slid `t_s` into its place. tools/check_params.py carried the debt with
+        a machine-checkable exit condition -- "nobody passes a fourth
+        positional argument any more" -- and this is that condition being met.
         """
         n = len(dx_s)
         if n == 0:

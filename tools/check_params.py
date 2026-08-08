@@ -103,35 +103,17 @@ EXEMPT = {
     # callback is written that way and is the reason the rule exists.
 }
 
+# ⚠ EMPTY, AND THAT IS THE POINT. The one entry here was
+# press/pico_mouse.py:upload_pattern's `bullet_interval_s` -- a parameter that
+# outlived the merge it drove, because two callers passed it POSITIONALLY and
+# dropping it silently would have slid `t_s` into its place. The debt carried
+# its own exit condition as a predicate ("does anyone still pass a fourth
+# positional argument"), so when the callers were fixed on 2026-08-08 this
+# ledger went RED demanding the line be struck, rather than quietly granting
+# that file a permanent amnesty. A debt whose reason belongs to scheduling
+# must LEAVE this table; only EXEMPT reasons, which belong to the code, stay.
 DEBT = {
-    'press/pico_mouse.py:upload_pattern': Reason(
-        'MODEL.md §4 named this method as the one thing standing between the '
-        'model and the firmware: it re-binned any curve to one point per '
-        'bullet. The merge went on 2026-08-08 and `bullet_interval_s` went '
-        'with it — but TWO CALLERS STILL PASS IT POSITIONALLY '
-        '(control/fire.py, control/match.py), and dropping the parameter '
-        'would slide `t_s` into its place. It leaves this table when both '
-        'call sites stop passing it.',
-        CODE,
-        # The debt's own exit condition, as a predicate: it is paid the moment
-        # nobody passes a fourth positional argument any more, and this goes
-        # red then — which is the ratchet, not a reminder.
-        lambda: _upload_still_has_positional_callers()),
 }
-
-
-def _upload_still_has_positional_callers():
-    """Is anyone still passing upload_pattern a 4th positional argument?"""
-    root = pathlib.Path(__file__).resolve().parent.parent
-    for rel in ('control/fire.py', 'control/match.py'):
-        try:
-            tree = ast.parse((root / rel).read_text(encoding='utf-8'))
-        except (OSError, SyntaxError):
-            continue
-        for n in ast.walk(tree):
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)                     and n.func.attr == 'upload_pattern' and len(n.args) >= 4:
-                return True
-    return False
 
 LEDGER = {**EXEMPT, **DEBT}
 

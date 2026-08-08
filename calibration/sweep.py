@@ -267,9 +267,11 @@ class Rig:
         # has both switched on at once can tell those apart. With this set the
         # residual IS the recoil.
         #
-        # The pattern is still UPLOADED, only not enabled: uploading is what
-        # makes curve_bullets() and the bin edges agree with an armed run, so
-        # the two are comparable bin for bin. arm() then disarm() rather than
+        # The pattern is still UPLOADED, only not enabled: an armed and a
+        # disarmed run then differ in exactly one thing, which is what makes
+        # them comparable. (This used to say "so curve_bullets() and the bin
+        # edges agree" -- there are no bins and no bullet index any more; the
+        # samples sit on a clock.) arm() then disarm() rather than
         # reaching for mouse.upload_pattern here -- Rig owns the Pointer and
         # `pixi run layering` cannot see a HAL member touched through a
         # high-level object, which is how this file would grow the next

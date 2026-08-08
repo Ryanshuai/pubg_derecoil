@@ -188,8 +188,7 @@ class FireDriver:
 
         Pair it with disarm() in a finally, or let Rig.close() do it.
         """
-        self.mouse.upload_pattern(weapon.dx_s, weapon.dy_s, weapon.t_s,
-                                  weapon.bullet_interval_s)
+        self.mouse.upload_pattern(weapon.dx_s, weapon.dy_s, weapon.t_s)
         self.mouse.set_recoil_enabled(True)
         return len(weapon.dy_s)
 
