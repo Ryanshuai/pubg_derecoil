@@ -1,0 +1,200 @@
+# ════════════════════════════════════════════════════════════════════
+# THE PC ↔ PICO WIRE CONTRACT — the single source of truth
+# ════════════════════════════════════════════════════════════════════
+#
+# Two programs have to agree on every number in this file: press/pico_mouse.py
+# running on the PC, and pico_firmware/src/main.c running on the RP2350. Until
+# 2026-08-08 they agreed by BEING TYPED TWICE, and the agreement was held
+# together by comments:
+#
+#     press/pico_mouse.py:203    MAX_POINTS = 300  # must match Pico firmware
+#                                                  # MAX_PATTERN_POINTS
+#
+# That comment is not a mechanism. Nothing reads it, nothing checks it, and the
+# failure it guards against is silent in the worst way: the firmware CLAMPS an
+# over-long pattern (`n > MAX_PATTERN_POINTS ? MAX_PATTERN_POINTS : n`) instead
+# of rejecting it. Raise 300 on the PC side alone and every magazine past the
+# 300th knot is simply dropped, the upload "succeeds", and the residual comes
+# back looking like the gun changed.
+#
+# So: this file is the only place these numbers are written by hand. Both ends
+# are GENERATED from it by tools/gen_protocol.py, and `pixi run protocol-check`
+# (the same script, --check) fails if a generated file has drifted from it.
+#
+# ── WHAT BELONGS IN HERE ────────────────────────────────────────────
+#
+# One test, and it is not "is it about the Pico":
+#
+#     Must the firmware AND the PC agree on this value, or something breaks?
+#
+#   CMD_MOVE = 0x13        both decode it            → in
+#   MAX_PATTERN_POINTS     PC overruns it silently   → in
+#   pattern point layout   both pack/unpack it       → in
+#
+#   RECOIL_FIRE_DELAY_MS   the firmware has never heard of it. It is when the
+#                          PC schedules the curve relative to the click, and
+#                          the Pico just plays what it was handed → NOT here,
+#                          it lives in config.py with the other game constants
+#
+#   HID_KEY_R = 0x15       the firmware forwards the keycode to the HID
+#                          descriptor without interpreting it, so the two ends
+#                          need not agree — only the PC and the GAME do
+#                          → NOT here, it stays in press/pico_mouse.py
+#
+# Anything that fails that test and is put here anyway makes this file a
+# dumping ground for "Pico-ish" constants, and the next person cannot tell
+# which entries are load-bearing.
+
+[meta]
+# Bumped by hand when a change is not backward compatible — a reordered field,
+# a re-used opcode, a changed width. Adding a NEW command does not need a bump;
+# an old PC talking to a new firmware simply never sends it.
+#
+# Nothing enforces this at runtime: the CDC link has no handshake, and adding
+# one would cost a round-trip on every open for a link whose two ends are
+# flashed from the same checkout. It is here so that a mismatch found by hand
+# has a name.
+version = 1
+
+# ── Transport ───────────────────────────────────────────────────────
+# All multi-byte fields are little-endian, which is both ends' native order
+# (RP2350 is LE, x86 is LE) so neither side byte-swaps.
+#
+# The PC writes a command as one contiguous byte string. The firmware reads
+# into a buffer and re-frames, because CDC gives no message boundaries — a
+# 10-byte MOVE_CLICK can arrive as 4 bytes then 6. That is why every generated
+# CMD_*_LEN matters on the C side: process_cdc() breaks out of its loop until
+# the full length is present rather than parsing a partial command.
+endian = "little"
+
+# ── Recoil pattern storage ──────────────────────────────────────────
+[pattern]
+# The firmware's `pattern[]` array size. ⚠ THE FIRMWARE CLAMPS TO THIS
+# SILENTLY — see the header comment. If this ever rises, both ends must be
+# reflashed/restarted together; a PC that thinks it is larger loses knots
+# without an error.
+max_points = 300
+
+# One knot of the curve, as stored and as uploaded: 6 bytes.
+#   dx, dy   counts to emit for this knot
+#   t_ms     when, in ms from the start of the burst
+point_fields = [
+    { name = "dx",   type = "i16" },
+    { name = "dy",   type = "i16" },
+    { name = "t_ms", type = "u16" },
+]
+
+# ════════════════════════════════════════════════════════════════════
+# Commands (PC → Pico over CDC)
+# ════════════════════════════════════════════════════════════════════
+#
+# `fields` is the payload AFTER the opcode byte. The generated *_LEN includes
+# the opcode, so it is directly the number of bytes process_cdc() must have
+# buffered before it may parse.
+
+[[command]]
+name = "PATTERN_UPLOAD"
+opcode = 0x10
+fields = [{ name = "count", type = "u16" }]
+# Then `count` × 6 bytes of pattern points. The only variable-length command,
+# so its generated LEN is a HEADER length and the C side adds count*6 itself.
+variable_payload = "count * PATTERN_POINT_SIZE"
+doc = "Replace the stored recoil curve. Clamped to MAX_PATTERN_POINTS."
+
+[[command]]
+name = "PATTERN_CLEAR"
+opcode = 0x11
+fields = []
+doc = "Drop the stored curve. Recoil compensation emits nothing until re-uploaded."
+
+[[command]]
+name = "RECOIL_ENABLE"
+opcode = 0x12
+fields = [{ name = "enabled", type = "u8" }]
+doc = """Gate compensation without discarding the curve. This is the difference \
+between a run that measures RAW recoil and one that measures the residual."""
+
+[[command]]
+name = "MOVE"
+opcode = 0x13
+fields = [{ name = "dx", type = "i16" }, { name = "dy", type = "i16" }]
+doc = "Add to the mouse accumulator; emitted on the next HID report."
+
+[[command]]
+name = "CLICK"
+opcode = 0x14
+fields = [
+    { name = "buttons",     type = "u8" },
+    { name = "duration_ms", type = "u16" },
+]
+doc = "Hold `buttons` for `duration_ms`, starting now."
+
+[[command]]
+name = "MOVE_CLICK"
+opcode = 0x15
+fields = [
+    { name = "dx",          type = "i16" },
+    { name = "dy",          type = "i16" },
+    { name = "buttons",     type = "u8" },
+    { name = "delay_ms",    type = "u16" },
+    { name = "duration_ms", type = "u16" },
+]
+doc = """Move now, then click after `delay_ms` for `duration_ms`. One command \
+rather than two so the gap is timed on the Pico, not across USB."""
+
+[[command]]
+name = "AIM_MODE"
+opcode = 0x16
+fields = [{ name = "enabled", type = "u8" }]
+doc = "Suppress the human's real left click; only injected clicks fire. Zeroes the aim delta."
+
+[[command]]
+name = "SET_DELTA"
+opcode = 0x17
+fields = [{ name = "dx", type = "i16" }, { name = "dy", type = "i16" }]
+doc = "Latest aim correction, sent by the PC once per frame."
+
+[[command]]
+name = "KEY"
+opcode = 0x18
+fields = [
+    { name = "keycode",     type = "u8" },
+    { name = "duration_ms", type = "u16" },
+]
+doc = """Tap a key on the Pico's second (keyboard) HID interface. `keycode` is \
+a USB HID usage ID, forwarded uninterpreted — see press/pico_mouse.py HID_KEY_*."""
+
+[[command]]
+name = "PATTERN_READ"
+opcode = 0x19
+fields = []
+reply = "[pat] lines"
+doc = """Report the curve as STORED, plus the duration each bullet is spread \
+over. A readback exists because measuring the firmware through the game is a \
+closed loop: a systematic error in here gets absorbed into the fitted curve \
+and the residual comes out clean. Two real bugs lived behind a clean residual."""
+
+[[command]]
+name = "RECOIL_SIM"
+opcode = 0x1A
+fields = [{ name = "iters", type = "u16" }]
+reply = "[sim] line"
+doc = """Run the real per-bullet maths `iters` times over the stored pattern \
+and report commanded-vs-emitted totals. Touches no HID output, so it runs on a \
+bench with no game — which is what makes it cheap enough for every flash."""
+
+[[command]]
+name = "RAZER_READ"
+opcode = 0x1B
+fields = []
+reply = "[razer] line"
+doc = """The mouse's own answer to the polling-rate SET, verbatim and undecoded \
+— the decode is the thing in doubt."""
+
+[[command]]
+name = "REBOOT_BOOTSEL"
+opcode = 0xFF
+fields = []
+doc = """Reboot into the ROM bootloader so flash.py can write a .uf2 without \
+the BOOTSEL button. ⚠ If the running firmware is already broken this will not \
+answer, and the board must be re-plugged with BOOTSEL held."""
