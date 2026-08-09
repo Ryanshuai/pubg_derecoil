@@ -2034,17 +2034,44 @@ COUNTS_PER_PIXEL = 0.5
 # and its size; the cure (interleave, never compare arms across runs) is what
 # was tested, and it works whichever reading is the wrong one.
 #
-RECOIL_FIRE_DELAY_MS = -19
+# ⚠ THE VALUE IS NOT WRITTEN HERE ANY MORE. It is -RECOIL_COMP_LAG_MS, defined
+# below where the lag is, because the paragraphs above END in the conclusion
+# that these are ONE quantity in two roles -- see "the drift-minimising offset
+# and -L COINCIDE". Everything above is why; the assignment is down there.
 
 # How long an EMITTED count takes to become a photon: Pico USB report, the game
 # sampling input, view rotation, render, present. The other half of the pair
-# above, and the two are different numbers doing different jobs:
+# above -- and they are ONE number in two roles, not two numbers:
 #
-#   RECOIL_FIRE_DELAY_MS   shifts WHEN the firmware emits. CHOSEN -- it is the
-#                          offset that minimises measured drift, and with an
-#                          amplitude term in the residual that optimum is not -L.
+#   RECOIL_FIRE_DELAY_MS   shifts WHEN the firmware emits. It must be -L: to
+#                          cancel a displacement that APPEARS at screen-time t,
+#                          the counts have to be EMITTED at t - L.
 #   RECOIL_COMP_LAG_MS     how late the emission APPEARS. MEASURED, and used by
 #                          the ANALYSIS: y_true(t) = y_obs(t) + C(t - L).
+#
+# ⚠ THIS PAIR WAS TWO INDEPENDENT LITERALS, -19 AND 20, UNTIL 2026-08-09, and
+# the sentence that justified the gap had already been refuted 90 lines above
+# it. It read "CHOSEN -- the offset that minimises measured drift, and with an
+# amplitude term in the residual that optimum is not -L". The amplitude term is
+# what was refuted: three offline decompositions said 4.7% / 1.62% / and a
+# bootstrap interval of [+0.60%, +3.01%], and firing a scale sweep put it at
+# -0.38% -- ZERO. With eps = 0 the two coincide, which this file states, and
+# then it kept two literals anyway.
+#
+# WHAT THE SPLIT WOULD HAVE COST is not the 1 ms. `RECOIL_COMP_LAG_MS` is read
+# by the ANALYSIS and stored PER MAGAZINE (samples.Magazine.comp_lag_s, so that
+# a magazine fired last week keeps the display chain it went through);
+# `RECOIL_FIRE_DELAY_MS` is read by press/pico_mouse.py and goes to the
+# FIRMWARE. Re-measure L on a new display chain and the analysis follows it
+# while the firmware keeps leading by the old one -- the two halves of
+# `y_true = y_obs + C(t - L)` drifting apart, silently, with every gate green.
+# That is the root CLAUDE.md's second law with a millisecond in it.
+#
+# ⚠ AND THE VALUE MOVES -19 -> -20, WHICH NOTHING CAN MEASURE. The fired sweep
+# put the parabola minimum at -19.3 and could not separate -19 from -5 at all
+# (P=71%); L's own three readings are 18.3..21.7, 24.3 [18.0, 28.4], and 18.9.
+# A 0.7 ms move inside that is not a change to the tool's behaviour, it is the
+# price of having one author.
 #
 # ⚠ THE ANALYSIS USED C(t) AND THAT IS A DIVERGENT LOOP, not just a bias. The
 # fit consumes its own output, so writing C(t) makes
@@ -2063,6 +2090,13 @@ RECOIL_FIRE_DELAY_MS = -19
 # analysis time. A constant read later describes the machine as it is now, and
 # a magazine fired last week went through a different display chain.
 RECOIL_COMP_LAG_MS = 20
+
+# ⚠ DERIVED, NOT CHOSEN. The derivation is the block above RECOIL_COMP_LAG_MS;
+# the one-line version is that a count emitted at t appears at t + L, so
+# cancelling a displacement SEEN at t means emitting at t - L. Anything that
+# re-measures L now moves the firmware and the analysis together, which is the
+# only property here worth defending.
+RECOIL_FIRE_DELAY_MS = -RECOIL_COMP_LAG_MS
 
 
 # ⚠ 边玩边观测：**默认关，而且不是因为它没写完。**
