@@ -1396,12 +1396,37 @@ COUNTS_PER_PIXEL = 0.5
 # when the -90 end point is dropped. At -30 the residual is 7.0 counts RMS =
 # 11 px of drift over a 40-round burst, against 68-76 px at the old +13.
 #
-# ⚠ WHY -36 AND NOT -21. The residual is not pure timing: a two-arm
-# decomposition puts ~4.7% of it in AMPLITUDE, and with an amplitude term the
-# offset that MINIMISES drift is not -L. What this constant is for is minimum
-# drift, so the fired optimum is the right thing to set and L is the
-# cross-check that it is the right ORDER. They differ by 14 ms, and that gap is
-# the amplitude repair showing through -- not an error in either measurement.
+# ⚠ WHY -36 AND NOT -21, AND THE HONEST ANSWER IS THAT NOBODY KNOWS YET.
+# This comment used to assert the gap "is the amplitude repair showing through",
+# on the strength of a two-arm decomposition that put ~4.7% of the residual in
+# AMPLITUDE -- and with an amplitude term the drift-minimising offset genuinely
+# is not -L, so the story was coherent. It had not been computed.
+#
+# tools/probe_offset_decomposition.py computes it, on these same 25 magazines
+# but using all five arms at once, which is what makes the split well-posed:
+# F and F' are near-collinear within ONE burst shape (the failure that produced
+# "+4.74% gain / +3.2 ms lag", refuted the moment it was fired), while the
+# arm-to-arm difference is pure F' with a coefficient nobody had to fit.
+#
+#     F' coefficient vs commanded offset:  slope +0.92, intercept +22.4 ms
+#     -> M (the true lag) = +24.3 ms, bootstrap 95% [+18.0, +28.4]
+#     -> eps (amplitude)  = +1.62%,   bootstrap 95% [+0.60%, +3.01%]
+#
+# So the "missed lag" reading is REFUTED: M's interval contains the probe's
+# 21.7 and excludes 36 comfortably, and the slope near 1 says the curve moves
+# when it is told to. RECOIL_COMP_LAG_MS = 20 stands.
+#
+# ⚠ AND THE AMPLITUDE READING IS NOT ESTABLISHED EITHER, because the same fit
+# fails to reproduce the sweep that produced it: eps = 1.62% predicts a
+# minimum-RMS offset of -43.3 ms, and this data's own parabola minimum is
+# -29.1. A decomposition that cannot re-derive its own optimum has not
+# explained anything -- eps is the collinear direction and its per-arm
+# estimates swing 0.55%..2.93% with no relation to the arm.
+#
+# THE GAP IS THEREFORE STILL OPEN. What settles it is --scale-sweep: residual
+# is linear in the commanded scale with a zero crossing at 1/(1-eps), a +-10%
+# sweep moves the regressor by six times eps, and under the amplitude reading
+# a 5% scale change must move the optimum by ~59 ms. Nothing subtle to see.
 #
 # ⚠ AND THE INTERLEAVING EARNED ITS KEEP. A -46 arm fired in its own earlier
 # run reads +31.4 counts at t=2.0 s where the interleaved -50 and -30 either

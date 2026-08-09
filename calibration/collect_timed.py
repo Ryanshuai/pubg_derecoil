@@ -497,6 +497,19 @@ def main():
                          'rather than guessed: the curve is held fixed and '
                          'only the offset moves, and the arms interleave in '
                          'time so session drift cannot align with an arm.')
+    ap.add_argument('--scale-sweep', default=None,
+                    help='comma-separated curve multipliers, ROTATED PER '
+                         'MAGAZINE off one fit — the amplitude twin of '
+                         '--fire-delay-sweep, and the only well-posed way to '
+                         'measure how much of the curve actually arrives. '
+                         'residual(s) = y_true - s*(1-eps)*F is LINEAR in s '
+                         'with a zero crossing at s = 1/(1-eps), and a +-10% '
+                         'sweep moves s by six times eps itself, so nothing '
+                         'here is collinear with anything. --scale does the '
+                         'same thing ONE RUN AT A TIME and that is exactly the '
+                         'mistake the offset sweep already paid for: 30 counts '
+                         'of between-session drift on the same gun twenty '
+                         'minutes apart (see config.RECOIL_FIRE_DELAY_MS).')
     ap.add_argument('--countdown', type=int, default=6)
     a = ap.parse_args()
 
@@ -864,6 +877,26 @@ def main():
             print(f'  sweeping the fire delay per magazine over {sweep} ms, '
                   f'off ONE fitted curve')
 
+        scale_sweep = ([float(x) for x in a.scale_sweep.split(',')]
+                       if a.scale_sweep else None)
+        # ⚠ ONE ROTATION AT A TIME. Two arms turning together make every
+        # magazine a different (offset, scale) pair, and with five magazines an
+        # arm neither term is identified -- which is the same ill-conditioning
+        # this sweep exists to escape.
+        if scale_sweep and sweep:
+            print('  [!] REFUSING --scale-sweep with --fire-delay-sweep. Two '
+                  'things rotating per magazine confounds them; run the '
+                  'amplitude sweep at a FIXED offset.')
+            return 10
+        # The base curve, captured BEFORE any magazine scales it, so arm k is
+        # base*s_k and not base*s_0*s_1*...*s_k. Compounding would look exactly
+        # like a very strong amplitude effect and would be monotone in time,
+        # which is the shape everything here is trying not to fake.
+        base_dy, base_dx = list(w.dy_s), list(w.dx_s)
+        if scale_sweep:
+            print(f'  sweeping the curve scale per magazine over {scale_sweep}, '
+                  f'off ONE fitted curve at a fixed {rig.mouse.RECOIL_FIRE_DELAY_MS:+g} ms')
+
         grabber = DXGISyncGrabber(rig.tracker.regions())
         for i in range(a.mags):
             mag_size, _ = rig.fire.top_up()
@@ -924,13 +957,32 @@ def main():
                       f'(curve starts at t={curve[0]["t_ms"]} ms, '
                       f'{len(curve)} knots, {sum(k["dy"] for k in curve):.0f} '
                       f'counts)')
+            mag_scale = a.scale
+            if scale_sweep:
+                mag_scale = scale_sweep[i % len(scale_sweep)]
+                w.dy_s = [v * mag_scale for v in base_dy]
+                w.dx_s = [v * mag_scale for v in base_dx]
+                rig.arm(w)
+                curve = rig.mouse.read_pattern() or []
+                if not curve:
+                    print(f'  mag {i}: the firmware took no pattern — stopping')
+                    break
+                # ⚠ THE TOTAL IS READ BACK, NOT COMPUTED. The scale that
+                # matters is the one the firmware holds, and int16 quantisation
+                # with a carry sits between the multiply and the wire. Printing
+                # the commanded number here would describe the request; this
+                # prints the object that fires.
+                print(f'  mag {i}: scale x{mag_scale:g} '
+                      f'({len(curve)} knots, '
+                      f'{sum(k["dy"] for k in curve):.1f} counts, '
+                      f'starts at t={curve[0]["t_ms"]} ms)')
             if not aim_and_scope(rig, a.posture):
                 print(f'  mag {i}: could not re-aim — stopping')
                 break
             mag, out = one_magazine(
                 rig, grabber, a.weapon, mag_size, interval_s,
                 [] if a.no_comp else curve, config, a.posture,
-                note='no-comp' if a.no_comp else f'scale={a.scale:g}')
+                note='no-comp' if a.no_comp else f'scale={mag_scale:g}')
             # ⚠ THE MAGAZINE IS STILL WRITTEN. `ads_end` False means the
             # burst ended out of the scope, so K is wrong by ~3x -- but
             # MODEL.md's store never deletes, and a magazine dropped at
