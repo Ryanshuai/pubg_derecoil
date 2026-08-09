@@ -256,6 +256,34 @@ class TabWatch:
         computed. Redone interleaved the gap is real, which is luck, not
         method. The separate arm's sd alone is twice the difference it was
         being asked to establish.
+
+        ⚠ THE ANCHOR SHOULD EVENTUALLY MOVE INSIDE THE BLOCK, AND THE REASON IS
+        NOT THE 4.24 ms. tab_layout.gun_tag_point puts the boxed slot numbers
+        「1」「2」 at (2237,145) and (2237,447), both INSIDE the rectangle this
+        already grabs. Reading presence from them would cost no extra grab at
+        all -- and, which matters more, the openness judgement and the loadout
+        would come off THE SAME PIXELS AT THE SAME INSTANT. As it stands the
+        anchor is grabbed 4 ms after the panel, so two rectangles describe two
+        moments, and this file's whole history is that distinction.
+
+        It is also the RIGHT precondition rather than a proxy: those numbers are
+        drawn only when the panel is up AND a gun occupies that slot, and a
+        panel with no gun in it has nothing worth reading.
+
+        ⚠ BUT NOT AS A PIXEL COUNT, AND THAT IS ALREADY SETTLED. The play log of
+        2026-08-09 15:24:10 has `ink 11248 / 6424` on a frame whose saved
+        picture is bare sky and a shed -- no panel anywhere -- while a real
+        plate reads in the hundreds. The false positive is BIGGER than the true
+        one, so no threshold on "how much bright stuff is here" can separate
+        them; overexposed sky is white, and white is what the mask counts. It
+        has to be the GLYPH -- the shape of a boxed digit -- not the amount.
+
+        Which needs one frame of a panel that is actually drawn, and there is
+        not one on disk: the only paired open/shut corpus
+        (calibration/artifacts/tab_type/bg*) was captured with an EMPTY RACK, so
+        its `open` frames show the dimmed blurred world and no weapon panel at
+        all. `snap` now saves both edges of every Tab, which is exactly the
+        corpus that is missing.
         """
         y, x, h, w = _BLOCK()
         block = frame[y:y + h, x:x + w]
