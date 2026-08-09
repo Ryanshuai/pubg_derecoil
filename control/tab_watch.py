@@ -222,31 +222,40 @@ class TabWatch:
         knowing when reading a frame caught mid-transition, and it is the right
         way round: the panel is the thing that has to be caught in time.
 
-        ⚠ TWO GRABS IS THE OPTIMUM AND IT IS NOT MONOTONE IN EITHER DIRECTION.
-        Measured interleaved, n=60 per arm:
+        ⚠ TWO GRABS, AND IT IS NOT MONOTONE IN EITHER DIRECTION. Interleaved,
+        n=200 per arm:
 
-            1 grab, union box          14.81 ms  sd 1.37   1.06 MP
-            2 grabs, block + anchor    13.46 ms  sd 3.92   0.35 MP   <-
-            13 grabs, one per region   78.68 ms  sd 1.01   0.06 MP
+            A  panel only                  8.71 ms  sd 1.86
+            B  panel + type, TWO grabs    12.95 ms  sd 2.58   <- what it does
+            C  panel + type, ONE grab     16.16 ms  sd 1.85
 
-        Fewer pixels is not faster. A GDI grab costs ~6 ms BEFORE it copies
-        anything -- 78.68/13 = 6.05 -- so cutting the panel into the twelve
-        regions actually read costs 6x as long while moving a sixth of the
-        data. And one grab is not faster either: the two rectangles overlap in
-        y (panel 123..680, anchor 129..147) and RegionGrabber bands by y, so
-        asking one grabber for both merges them into a single 1911x557 box,
-        three times the pixels.
+            adding type   B - A = +4.24 ms   18.9 sigma
+            one vs two    C - B = +3.21 ms   14.3 sigma
+
+        ONE grab loses because the rectangles overlap in y (panel 123..680,
+        type 129..147) and RegionGrabber bands by y -- asking one grabber for
+        both merges them into a single 1911x557 box, three times the pixels.
+
+        MANY grabs lose far worse. Cutting the panel into the twelve regions
+        actually read is 78.68 ms (n=60) against 13.46 for the block, while
+        moving a sixth of the data: a GDI grab costs ~6 ms before it copies
+        anything, and 78.68/13 = 6.05 is that constant measured directly.
 
             cost ~= 6 ms x grabs + ~4-8 ms x megapixels
 
         So: as few grabs as possible, but never at the price of a bounding box
         that balloons. Two.
 
-        ⚠ AND THE FIRST VERSION OF THIS COMPARISON WAS NOT A MEASUREMENT. It
-        was 17.47 against 18.60 from a single 40-sample run with no variance
-        reported, and 1.13 ms sat inside a noise band it never computed. The
-        conclusion happened to survive -- interleaved at n=150 the gap is
-        1.59 ms at 5.3 sigma -- which is luck, not method.
+        ⚠ THE 4.24 ms IS AFFORDABLE ONLY BECAUSE IT IS SPENT SECOND. The panel
+        pixels are already captured when this runs, so the anchor comes out of
+        the margin against the fade rather than out of the race for it.
+
+        ⚠ AND THE FIRST VERSION OF THIS COMPARISON WAS NOT A MEASUREMENT: 17.47
+        against 18.60, one 40-sample run each, block after block, no variance
+        reported -- 1.13 ms sitting inside a noise band that was never
+        computed. Redone interleaved the gap is real, which is luck, not
+        method. The separate arm's sd alone is twice the difference it was
+        being asked to establish.
         """
         y, x, h, w = _BLOCK()
         block = frame[y:y + h, x:x + w]
