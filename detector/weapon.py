@@ -758,12 +758,48 @@ class Weapon():
         -> (shots, scale, why) or (None, 1.0, ''). `why` is the whole audit
         trail, meant to be printed: which cell, which factors, what total.
 
-        ⚠ IT SUBSTITUTES ALONG THREE AXES AND REFUSES THE OTHER TWO, and the
-        line is not arbitrary. Posture and optic are believed to scale the
-        WHOLE trajectory by one number; a different gun or a different fire
-        mode changes its SHAPE, and a shape cannot be recovered by multiplying.
-        So `weapon` and `fire_mode` must match exactly, and a miss on those is
-        still no compensation at all.
+        ⚠ IT SUBSTITUTES ALONG THREE AXES AND FALLS BACK ON A FOURTH. Posture
+        and optic are believed to scale the WHOLE trajectory by one number, so
+        those two are multiplied. `weapon` must match exactly and a miss there
+        is no compensation at all. The fire mode is the fourth: it is not
+        scaled -- a mode changes the SHAPE, and no number recovers a shape --
+        but when this mode has no curve the ORDINARY mode's is played as-is.
+
+        ⚠ THE FIRE MODE USED TO BE A HARD GATE AND THAT COST A WHOLE GUN PER
+        READING. `fire_tag` turns a non-ordinary mode into `__fire-single`, and
+        every curve on disk is tagged '', so ONE detector reading filtered out
+        the entire store: play log 0809_163710, a vector armed at 506 counts and
+        was CLEARED 15 ms later with nothing but the fire mode different. There
+        was no way back either -- no optic, posture or kit substitution can
+        cross that axis -- so the gun stayed dead until the mode changed.
+
+        ⚠ AND THE COST OF PLAYING IT IS NEAR ZERO, WHICH IS WHY THIS IS ALLOWED.
+        Read off press/firmware/src/main.c: `firing` is set while the left
+        button is HELD and cleared on release, which also resets `fire_index`.
+        So a single-fire click plays only the first few tens of ms of the curve
+        -- and the first shot's kick is the same kick whether the next one is
+        coming automatically or not. It is not "a 4-second curve fired at one
+        bullet"; it is the head of the curve, which is the part that applies.
+
+        ⚠ THE GUN THIS WOULD HAVE APPROXIMATED IS THE ONE GUN IT NEVER TOUCHES.
+        The mg3 is the only weapon with two AUTOMATIC modes, 1.5x apart in
+        cyclic rate -- and both are measured: `mg3__bare` is `high` (644 counts,
+        10 magazines) and `mg3__bare__fire-full` is the slow one (774 counts, 12
+        magazines). Each hits the exact lookup and never reaches here.
+
+        ⚠ WHICH IS WHY THE AXIS WAS KEPT RATHER THAN DELETED. The obvious
+        reading of "default everything to the ordinary mode" is to drop the tag
+        from the runtime key -- and that would have thrown away one of those two
+        measured mg3 cells, silently, by making both modes look up the same
+        curve and be wrong by 1.5x in one of them. `fire_tag` stays in the key;
+        this is only what happens when the key MISSES.
+
+        So what the fallback actually serves is semi-automatic and single-fire
+        modes, where no gun has a curve and none is going to be fitted -- and
+        there the held-button reasoning above says the ordinary curve's head is
+        the right answer, not an approximation of one. A first version of this
+        note claimed the mg3 would play `high` in its slow mode; that state does
+        not exist, and checking `ls data/curves/mg3*` is what showed it.
 
         ⚠ THE KIT AXIS IS THE THIRD ONE AND IT IS THE WEAKEST (added
         2026-08-09). `_compose` builds the kit out of this gun's bare and
@@ -856,6 +892,21 @@ class Weapon():
             composed = self._compose(ck, fmode)
             notes = {k: v[1] for k, v in composed.items()}
             cands = stretch({k: v[0] for k, v in composed.items()})
+        # ⚠ LAST OF ALL, THE ORDINARY MODE'S CURVE, PLAYED AS-IS. See the fire
+        # mode notes in the docstring: no factor, because a mode changes the
+        # shape; recursion rather than a fourth branch, so this mode gets the
+        # exact-cell, stretch and compose ladder in that same order before it
+        # settles for another mode's curve.
+        if not cands and fmode:
+            shots, scale, why = self._derive(ck, sight, '')
+            if not shots:
+                return None, 1.0, ''
+            return shots, scale, (
+                f'the ORDINARY mode ({fire_mode_for(self.name)}) curve played '
+                f'as-is in {self.fire_mode!r} — a fire mode changes the SHAPE, '
+                f'so this is NOT scaled into it. The firmware plays only while '
+                f'the button is held, so a single-fire click gets the head of '
+                f'the curve, which is the part that applies. ' + why)
         if not cands:
             return None, 1.0, ''
         cands.sort(key=lambda t: (t[0], t[1]))
