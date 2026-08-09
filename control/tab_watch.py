@@ -6,20 +6,44 @@ HUD at the bottom, so having both in one DXGI bounding box cost 5.46 ms of
 every frame — 87% of the capture budget — for a panel that is usually not on
 screen. See config.FRAME_REGIONS.
 
-⚠ THE TAB KEY GRABS AND SAVES, IMMEDIATELY, BEFORE ANYTHING IS DECIDED. Both
-presses. Then, and only if the panel was up, that same frame is classified.
+⚠ THE TAB KEY GRABS AND SAVES, IMMEDIATELY, BEFORE ANYTHING IS DECIDED. Every
+edge. Then, and only if the panel was up, that same frame is classified.
 
-    Tab edge, panel shut   ONE grab, saved `<stamp>_press-shut.png`
+    Tab edge, panel shut   ONE grab, saved `<stamp>_press.png`
     panel is up            nothing
-    Tab edge, panel up     ONE grab, saved `<stamp>_release-open.png`,
+    Tab edge, panel up     ONE grab, saved `<stamp>_release.png`,
                            classify, publish
     anchor reads shut      nothing — the reading was taken ~100 ms ago
 
-BOTH EDGES, press and release, and the filename records which edge saw what.
-Which one closes the panel is the keybind's business: press-only was written
-on the assumption that Tab toggles, and the log refutes it — five sessions
-open-to-closed in 950 / 690 / 960 / 330 / 142 ms. Nobody taps a toggle twice
-in 142 ms. That is Tab being HELD, and the RELEASE is what closes it.
+⚠ TAB IS A TOGGLE, AND THE CLAIM THAT IT IS HELD — WHICH STOOD RIGHT HERE —
+IS WITHDRAWN. It said "five sessions open-to-closed in 950 / 690 / 960 / 330 /
+142 ms, nobody taps a toggle twice in 142 ms". Those were intervals between
+two SEPARATE taps, read off log lines that lag the key; the key itself was
+never measured. It is now, off the saved frames' own stamps (n=66 taps,
+2026-08-09, `_press`/`_release` pairs classified by GunTagDetector):
+
+    KEY DOWN, press -> its own release      43..225 ms   median   97
+    tap -> next tap                        279..954 s    median 2071
+
+97 ms is a tap. The 2 seconds is the panel being looked at. So ONE Tab session
+is TWO taps, and the panel falls on a different edge of each:
+
+     30 / 66   OPENING tap    press = world    release = PANEL
+     28 / 66   CLOSING tap    press = PANEL    release = world
+      7 / 66   nothing at all — the key was swallowed
+      1 / 66   panel across both edges
+
+⚠ SO PRESS-ONLY WAS NOT BROKEN, and the reason for listening to both is not
+the one that was written. Every closing tap's PRESS catches the panel, and
+that is the final state — the thing the loadout has to be. What the RELEASE
+adds is the ENTRY state: a second, independent reading of the same session,
+which earns its ~10 ms because 7 taps in 66 produced no reading at all. Two
+samples of a panel that gets read once per session is not redundancy.
+
+The later reading wins, and it is the closing one, so "the last read is the
+final state" still holds. The opening read lands 60-130 ms after the panel
+appears — before a hand could have changed anything — so it does not violate
+the rule further down about never reading a panel the player is still editing.
 
 Nothing is checked, asked or measured before the grab. Measured, warm, four
 runs:
@@ -571,16 +595,17 @@ class TabWatch:
         the grab lands with 57 ms or more of panel left.
 
         ⚠ BOTH EDGES ARRIVE HERE, AND THIS FILE DOES NOT CARE WHICH ONE CLOSES
-        THE PANEL. `press` only was written on the assumption that Tab toggles.
-        The log says otherwise: five sessions open-to-closed in 950 / 690 / 960
-        / 330 / 142 ms. Nobody taps a toggle twice in 142 ms — that is Tab
-        being HELD, and the RELEASE is what closes it. Under press-only the
-        closing edge was never seen, so the panel was only ever looked at once
-        the screen had already changed, which is a picture of the world.
+        THE PANEL. Tab is a TOGGLE — measured off 66 saved tap pairs, key down
+        43..225 ms, median 97, against 2.1 s between taps — so a session is two
+        taps and the panel falls on the OPENING tap's release and the CLOSING
+        tap's press. The module docstring has the table and the retraction of
+        the "it is held" claim that used to be in this paragraph.
 
         Which edge does what is the keybind's business. What decides here is
         `self.open`, which is the SCREEN's answer: an edge seen while the panel
-        is up reads it, an edge seen while it is down does not.
+        is up reads it, an edge seen while it is down does not. That is why
+        this function needed no correction when the keybind claim turned out to
+        be wrong — it never encoded one.
 
         The edge is a TRIGGER, never an answer: `open` is still whatever the
         screen last said, and if the game eats this key the panel stays up and

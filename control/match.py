@@ -99,17 +99,22 @@ class Dispatcher(DaemonLoop):
         # it is right now.
         #
         # ⚠ BOTH EDGES, BECAUSE WHICH EDGE CLOSES THE PANEL IS THE GAME'S
-        # BINDING TO DECIDE, NOT THIS FILE'S. Press-only was written on the
-        # assumption that Tab toggles, and the log says otherwise: five
-        # sessions open-to-closed in 950 / 690 / 960 / 330 / 142 ms. Nobody
-        # taps a toggle twice in 142 ms -- that is Tab being HELD, and the
-        # RELEASE is what closes it. Under press-only the closing edge was
-        # never seen at all, so the panel was only ever looked at once the
-        # screen had already changed, which is a picture of the world.
+        # BINDING TO DECIDE, NOT THIS FILE'S. This comment used to say Tab was
+        # HELD; it is a TOGGLE, measured off 66 saved tap pairs -- key down
+        # 43..225 ms (median 97) against 2.1 s between taps. So a session is
+        # two taps, and the panel lands on the OPENING tap's release (30/66)
+        # and the CLOSING tap's press (28/66). Retraction and table in
+        # control/tab_watch.py's module docstring.
+        #
+        # Press-only would therefore have caught the final state after all.
+        # Both edges are still right, for the other reason: 7 of those 66 taps
+        # produced NO reading at all (a swallowed key), so the second edge is a
+        # second sample of a panel that is otherwise read once per session.
         #
         # Handling both costs one extra ~10 ms grab per Tab and needs no belief
-        # about the keybind. TabWatch decides what to do with each edge from
-        # what the SCREEN says, which is the only thing here that knows.
+        # about the keybind -- which is what made the wrong belief above cost
+        # nothing. TabWatch decides what to do with each edge from what the
+        # SCREEN says, which is the only thing here that knows.
         if ev.key == 'tab':
             self.tab.on_key(ev.ts, ev.event)
 
