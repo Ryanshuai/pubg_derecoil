@@ -133,6 +133,19 @@ WELL_CONDITIONED = 0.5
 # K and this file can actually vary it. See y_true_at.
 PROBE_SIGHT = '__calibrate_scope_probe__'
 
+# Fractions of the common horizon at which the ratio is re-taken. A scope
+# factor that is a constant is flat across these; one that is not is a
+# different finding, and a single time cannot tell them apart. Starts at 0.4
+# because the first frames are the burst finding its feet and y_true there is
+# small enough that a ratio of two small numbers is mostly noise.
+RATIO_TRAJECTORY = (0.4, 0.6, 0.8, 1.0)
+
+# How much the ratio may move across those times and still be called one
+# number. 5% matches the gate harness/verdict.py holds the arms to; the point
+# is not the exact figure but that SOMETHING checks it, which is what the
+# endpoint-only version had nothing of.
+RATIO_FLAT = 0.05
+
 
 # ════════════════════════════════════════════════════════════════════
 # Pure analysis. No game, no hardware, no store -- everything below takes
@@ -510,6 +523,32 @@ def analyse(weapon, sight, ref, config=None, at=None, verbose=True):
               f'[{s["lo"]:.4f}, {s["hi"]:.4f}]   '
               f'y_true {s["y_ref"]:.0f} -> {s["y_scope"]:.0f} counts')
 
+    # ⚠ AND THE SAME RATIO ACROSS THE BURST, BECAUSE ONE TIME IS AN ENDPOINT
+    # READ. Committed 2026-08-09 with a single t_eval, and the very next commit
+    # in this repository retracted a cell that "agreed to 0.11%" -- 0.11% was
+    # y_true at the LAST sample, while the arms were up to 7% apart mid-burst
+    # and converged to nothing at the end. That was the THIRD instance of the
+    # same error here ("y_true is an inverted U", "the gain is 0.92"), all
+    # arithmetically correct, all blind to the question.
+    #
+    # A scope factor that is a constant is flat in t. One that is not is a
+    # different finding, and a single number cannot tell them apart.
+    traj = rec['trajectory'] = []
+    for frac in RATIO_TRAJECTORY:
+        t = t_eval * frac
+        rr = scope_ratio(ref_pool, sc_pool, t)
+        if rr['ok']:
+            traj.append({'t': t, 'r': rr['r'], 'n': (rr['n_ref'], rr['n_scope'])})
+    if verbose and len(traj) > 1:
+        rs = [p['r'] for p in traj]
+        span = (max(rs) - min(rs)) / abs(rec['stored']['r'] or 1)
+        print('  r across the burst: '
+              + '  '.join(f'{p["t"]:.2f}s {p["r"]:.3f}' for p in traj))
+        print(f'      spans {100 * span:.1f}% of r'
+              + ('   ⚠ NOT a constant -- the endpoint alone cannot see this'
+                 if span > RATIO_FLAT else '   (flat, so one number is honest)'))
+        rec['flat'] = bool(span <= RATIO_FLAT)
+
     if all(ks[n]['ok'] for n in (ref, sight)):
         rec['solved'] = scope_ratio(ref_pool, sc_pool, t_eval,
                                     K_ref=ks[ref]['K'], K_scope=ks[sight]['K'])
@@ -800,6 +839,52 @@ def selftest():
     mean_r = float(np.mean(pool_y_true(dirty, 2.4))
                    / np.mean(pool_y_true(ref, 2.4)))
     _check('...where a mean would have moved a long way', mean_r > 3.5, True)
+
+    print('\n=== a ratio that MOVES is not the same finding as one that does not ===')
+    # ⚠ THE REGRESSION FOR AN ERROR THIS REPOSITORY HAS NOW MADE FOUR TIMES.
+    # The scoped pool below is built so the two sights agree at the END of the
+    # burst and disagree in the middle -- exactly the shape that made a cell
+    # read "0.11%" at the last sample while the arms were 7% apart mid-burst
+    # (commit ca51fb0, the day this file landed). A ratio taken at one time is
+    # the one number in the trajectory that cannot see it.
+    # ⚠ ARMS 0.8 AND 0.6, NOT 1.0: at arm 1.0 `_fake` gives the compensation the
+    # whole of y_true, so dy_px is identically zero and there is no screen
+    # motion to bend. That is a property of the fake, not of the game -- but it
+    # is exactly the sort of thing that makes a test construct silently
+    # degenerate, so it is named rather than worked around.
+    # The same TOTAL screen motion, delivered in the first third of the burst
+    # instead of evenly. y_true therefore lands on the same endpoint by
+    # construction and takes a different path to it -- which is the whole
+    # failure mode in one object.
+    #
+    # ⚠ ARMS 0.4/0.2 AND NOT ARM_PLAN'S: at arm 1.0 `_fake` gives the
+    # compensation the whole of y_true, dy_px is identically zero, and there is
+    # no screen motion left to bend. A weak arm is what puts the answer on the
+    # screen -- which is also why ARM_PLAN does not use one, and why this is a
+    # statement about the test construct rather than about how to fire.
+    bent = []
+    for i in range(6):
+        m = _fake('4x', K_4X, PLANT_Y * PLANT_R, 0.4 if i % 2 else 0.2,
+                  seed=200 + i)
+        d = np.asarray(m.dy_px, dtype=float)
+        w = np.zeros(len(d))
+        w[:max(1, int(len(d) * 0.35))] = 1.0
+        bent.append(replace(m, dy_px=[float(x) for x in
+                                      w * (float(np.sum(d)) / float(np.sum(w)))]))
+    end_r = scope_ratio(ref, bent, 2.4)['r']
+    mid_r = scope_ratio(ref, bent, 2.4 * 0.6)['r']
+    _check('the endpoint says it is the plain ratio', round(end_r, 2), PLANT_R,
+           tol=0.05)
+    _check('...while the middle of the burst does not',
+           abs(mid_r - end_r) > RATIO_FLAT * PLANT_R, True)
+    # ⚠ AND THE CONSTANT ITSELF, because the two checks above call scope_ratio
+    # directly and would stay green with RATIO_TRAJECTORY cut back to (1.0,) --
+    # i.e. with the report returned to exactly the endpoint-only shape this
+    # section exists to prevent. Verified by mutation: without this line that
+    # cut is invisible.
+    _check('the report looks at more than the endpoint',
+           len(RATIO_TRAJECTORY) > 1, True)
+    _check('...including well before it', min(RATIO_TRAJECTORY) <= 0.5, True)
 
     print('\n=== the prediction comes from config, and refuses to guess ===')
     rp, why = predicted_ratio('4x', 'red_dot')
