@@ -509,6 +509,51 @@ def spawn_missing(sc, keys, backpack=None, verbose=True):
     return res['ok']
 
 
+def strip_factory_magazine(ac, sc, verbose=True):
+    """Take off the magazine a freshly spawned gun ARRIVED wearing. -> n taken.
+
+    ⚠ THE POINT IS THAT IT RUNS BEFORE THE REQUESTED MAGAZINE EXISTS. PUBG
+    hands over a factory kit with every spawn ("刷出来的枪不是裸枪"), and the
+    factory quick-draw magazine and the extended one are close enough that the
+    slot templates call both the same name. Every scheme for living with that
+    is a scheme for keeping them apart in TIME; this one takes the factory
+    magazine off while it is the only magazine in play, so afterwards there is
+    exactly one and nothing to confuse.
+
+    It does not drop anything: unequip puts the part in the backpack, and
+    restock's tidy pass throws it because it is not in `want`. Two steps, and
+    the second one already existed.
+
+    ⚠ THE PANEL COMES DOWN FIRST. Tab and the spawner cannot share the screen
+    -- comma does nothing while Tab is up -- and this runs immediately after a
+    spawner visit, which is exactly when the panel is still open.
+    """
+    try:
+        sc.ensure_panel(False)
+    except Exception as e:                          # noqa: BLE001 — reported
+        print(f"      [!] could not close the spawner panel before stripping "
+              f"the factory magazine ({e})")
+        return 0
+    took = 0
+    with ac.tab_up():
+        lo = ac.loadout() or {}
+        for slot, gun in sorted((lo.get('guns') or {}).items()):
+            if not gun:
+                continue
+            worn = ((lo.get('slots') or {}).get(slot) or {}).get('magazine')
+            if not worn:
+                continue
+            rec = ac.unequip(slot, 'magazine')
+            ok = rec.get('ok') if isinstance(rec, dict) else bool(rec)
+            took += bool(ok)
+            if verbose:
+                print(f"      [stock] gun{slot} ({gun}) arrived wearing "
+                      f"{worn} — stripped it BEFORE the requested magazine "
+                      f"exists, so the two are never on screen together "
+                      f"(ok={ok})")
+    return took
+
+
 def restock(ac, sc, want, backpack=BACKPACK, leave='shut',
             drop_unwanted=True, verbose=True, also=(), loose_only=False,
             per=1):
@@ -638,9 +683,41 @@ def restock(ac, sc, want, backpack=BACKPACK, leave='shut',
         # 'as-found' caller still gets the screen back. Nothing here is a
         # close/open pair that the churn pass was right to remove.
         ac.ensure_tab(False)
-        if not spawn_missing(sc, batch,
-                             backpack=None if stock.backpack else backpack,
-                             verbose=verbose):
+        # ⚠ GUN ALONE FIRST, THEN STRIP WHAT IT ARRIVED WEARING, THEN THE
+        # PARTS. Asked for 2026-08-09: 「先拿枪，然后看缺什么配件，然后一起放到
+        # 包里，然后扔掉多余配件 快扩」and 「那就先把快扩，也就是出场带的扔掉，
+        # 在spawn配件，就不会搞混了」.
+        #
+        # What it replaces is PARTS-FIRST-GUN-LAST, and that order was measured
+        # good rather than guessed (see spawn_missing): with the parts already
+        # in the pack the game fits them as the gun arrives, so the requested
+        # magazine wins. The failure it avoided was spawning both in ONE trip,
+        # where the gun keeps its factory magazine while the requested one sits
+        # in the pack and the slot readback cannot tell them apart -- three m416
+        # cells fired 40 rounds reading `ext_ar`, and one such cell drove the
+        # stored curve down 536 counts.
+        #
+        # ⚠ SO GUN-FIRST IS THE MORE DANGEROUS HALF ON ITS OWN, and the strip is
+        # not a tidy-up, it is what makes this order safe: the gun arrives to an
+        # empty pack, so it necessarily keeps its factory magazine. Taking that
+        # magazine OFF before the requested one exists means the two are never
+        # on screen together and there is nothing for the templates to confuse.
+        # The ambiguity is removed rather than avoided.
+        #
+        # Second net, added the same day: collect_timed refuses a magazine whose
+        # CAPACITY disagrees with everything else stored for the weapon, so a
+        # factory magazine that survived this would stop the cell rather than
+        # quietly shorten the burst.
+        bp = None if stock.backpack else backpack
+        guns = [k for k in batch if k in ROSTER]
+        parts = [k for k in batch if k not in ROSTER]
+        if guns and parts:
+            if not spawn_missing(sc, guns, backpack=bp, verbose=verbose):
+                return False
+            strip_factory_magazine(ac, sc, verbose=verbose)
+            if not spawn_missing(sc, parts, backpack=None, verbose=verbose):
+                return False
+        elif not spawn_missing(sc, batch, backpack=bp, verbose=verbose):
             return False
     elif verbose:
         print("      [stock] nothing missing — spawning nothing")

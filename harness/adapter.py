@@ -192,7 +192,16 @@ def open_rig(sight, out_dir, home=True, countdown=6,
     # BEFORE the Rig, so a refusal has nothing to close, and so the Pointer
     # ensure_ready opens is shut before Rig takes the port (its docstring says
     # so, and fit_pitch_level.py takes the same order).
-    rec = ensure_ready(label='the night', countdown_s=countdown, verbose=True)
+    #
+    # ⚠ `panel=False` BECAUSE THE RANGE TEST BELOW IS A STRONGER PANEL LEG, not
+    # because the panel does not matter. ensure_ready's leg is
+    # `ensure_panel(False)` -- it proves the panel SHUTS, and on the common path
+    # where it was never open it proves nothing at all. `spawner_opens()` below
+    # presses comma, watches the panel appear, and shuts it again, checking
+    # BOTH halves. Leaving both in place made this function close the panel,
+    # open it, and close it again, to answer one question.
+    rec = ensure_ready(label='the night', countdown_s=countdown, verbose=True,
+                       panel=False)
     if not rec['ok']:
         where = rec.get('failed')
         if where == 'range':
@@ -203,7 +212,6 @@ def open_rig(sight, out_dir, home=True, countdown=6,
             'focus': 'PUBG is not in the foreground and would not take it',
             'match': 'could not get into a match',
             'tab': 'the inventory screen would not close',
-            'panel': 'the item spawner panel would not close',
         }.get(where, f'not ready: failed at {where!r}')
 
     # ⚠ GDI HERE, BECAUSE THE BURST PATH OWNS DXGI. There is one duplication
