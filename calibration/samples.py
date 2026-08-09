@@ -291,7 +291,31 @@ class Magazine:
         4.1% less than the same counts delivered as mouse.move(), which is how
         K was measured (11 sigma, tools/audit_k.py). The honest identity is
 
-            y_true(t) = y_obs(t) + eta * C(t - L),   eta = 0.959 +- 0.008
+            y_true(t) = y_obs(t) + eta * C(t - L),   eta ~ 0.96 .. 0.97
+
+        ⚠ AND WITH eta THE TWO-ARM CHECK PASSES, which is the strongest thing
+        this model has ever been able to say. Solving for the eta that makes
+        the interleaved pair report the same y_true over the WHOLE path:
+
+            eta = 0.9711,  residual 2.9 counts rms (0.66%), max 8.4
+
+            t=0.5s   OFF 110.4   ON+eta*C 110.9   diff -0.5
+            t=1.0s   OFF 303.1   ON+eta*C 303.7   diff -0.5
+            t=1.5s   OFF 490.4   ON+eta*C 492.8   diff -2.4
+            t=2.0s   OFF 687.2   ON+eta*C 685.5   diff +1.7
+            t=2.5s   OFF 881.4   ON+eta*C 877.9   diff +3.5
+
+        A magazine with NO compensation and one with a full 948-count curve
+        land on the same trajectory to three counts. 0.9711 sits inside the
+        slope regression's [0.9470, 0.9766], so two estimators that share no
+        arithmetic agree.
+
+        ⚠ AND "eps = -0.38%, THE CURVE FULLY ARRIVES" WAS WRONG. That came
+        from the +-10% scale sweep's ZERO CROSSING, which measures whether the
+        curve sits at its own fixed point -- and the loop drives it there, so
+        the crossing is ~1 by construction and says nothing about delivery.
+        The quantity that measures delivery is the SLOPE, which at that lever
+        read -0.948 [-1.10, -0.86] and got reported as "within 15% of 1".
 
         ⚠ THE MISSING eta DOES NOT BREAK THE COMPENSATION, WHICH IS WHY IT
         SURVIVED. The fit consumes its own output, so with eta omitted the loop
