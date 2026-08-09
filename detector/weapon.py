@@ -657,6 +657,90 @@ class Weapon():
         # thing that changes.
         self._final = load_final_curves()
 
+    def _derive(self, ck, sight, fmode):
+        """This gun's nearest measured cell x the scalars between it and here.
+
+        -> (shots, scale, why) or (None, 1.0, ''). `why` is the whole audit
+        trail, meant to be printed: which cell, which factors, what total.
+
+        ⚠ IT SUBSTITUTES ALONG TWO AXES AND REFUSES THE OTHER THREE, and the
+        line is not arbitrary. Posture and optic are believed to scale the
+        WHOLE trajectory by one number; a different gun, a different kit or a
+        different fire mode changes its SHAPE, and a shape cannot be recovered
+        by multiplying. So `weapon`, `config` and `fire_mode` must match
+        exactly, and a miss on those is still no compensation at all.
+
+        ⚠ THE OPTIC AXIS WAS THE ONE MISSING, and its absence looked exactly
+        like the honest answer. Every scoped cell on every gun but three
+        printed `no fitted curve ... NOT compensating`, which is the same line
+        a genuinely unmeasured kit prints -- so "I put a 4x on and it stopped
+        holding the gun down" and "nobody has fired this combination" were
+        indistinguishable from the log. There are 76 curves on disk and 72 of
+        them are red-dot: without this, putting any magnified optic on any gun
+        turned the tool off.
+
+        PUBG scales ADS sensitivity with magnification, so the counts needed to
+        cancel the same angular recoil scale with it too -- one number per
+        optic, config.RECOIL_SIGHT_RATIO, and it composes with the posture
+        factor because they are scalars on the same trajectory.
+
+        ⚠ BOTH NUMBERS ARE PRIORS AND THE OPTIC ONE IS CONTRADICTED. The two
+        measured scoped cells (mp5k bare at 2x and 3x) do not agree with the
+        table and are not monotone in magnification either, which is why the
+        table stays a prior rather than being refitted to them -- see
+        config.RECOIL_SIGHT_RATIO. A MEASURED cell always wins: this runs only
+        after the exact lookup misses.
+
+        ⚠ AND `iron` / `unknown` / an integral optic DERIVE NOTHING, on
+        purpose. They have no entry in the ratio table, so there is no factor
+        to apply and no honest donor to apply it from -- an empty scope slot is
+        not a red dot at a third of the sensitivity, and "the templates could
+        not tell" is not a magnification.
+        """
+        import math
+        want_r = config.RECOIL_SIGHT_RATIO.get(sight)
+        if want_r is None or want_r <= 0:
+            return None, 1.0, ''
+        cands = []
+        for k, shots in self._final.items():
+            w, c, posture, s, fm = k
+            if w != self.name or c != ck or fm != fmode:
+                continue
+            if posture != self.posture and posture != 'standing':
+                continue
+            have_r = config.RECOIL_SIGHT_RATIO.get(s)
+            if have_r is None or have_r <= 0:
+                continue
+            scale, cost, why = 1.0, 0.0, []
+            if posture != self.posture:
+                pf = _get_posture_factor(self.name, self.posture)
+                scale *= pf
+                cost += abs(math.log(pf)) if pf > 0 else 99.0
+                why.append(f'x{pf:.3f} for {self.posture} '
+                           f'(config.POSTURE_FACTOR)')
+            if s != sight:
+                sf = want_r / have_r
+                scale *= sf
+                cost += abs(math.log(sf))
+                why.append(f'x{sf:.3f} for {sight} over {s} '
+                           f'(config.RECOIL_SIGHT_RATIO)')
+            # ⚠ RANKED BY HOW FAR IT IS BEING STRETCHED, not by which axis.
+            # Preferring "same posture" would take a red-dot crouching curve
+            # x3.271 over a 4x standing one x0.80 -- one factor either way, and
+            # the first is four times the extrapolation. Summing |log| of the
+            # factors actually applied compares them in the one unit they share.
+            cands.append((round(cost, 6), k, scale, why, shots))
+        if not cands:
+            return None, 1.0, ''
+        cands.sort(key=lambda t: (t[0], t[1]))
+        _, k, scale, why, shots = cands[0]
+        total = sum(float(s['dy']) for s in shots) * scale
+        return shots, scale, (f'{k[2]} {k[3]} ({sum(float(s["dy"]) for s in shots):.0f}'
+                              f' counts) ' + ' '.join(why) +
+                              f' = {total:.0f} counts. These are PRIORS, not '
+                              f'measured on this gun — fire this cell to '
+                              f'replace them.')
+
     def set_seq(self):
         import config as _cfg
         if getattr(_cfg, 'DEBUG_HOT_RELOAD', False):
@@ -707,41 +791,13 @@ class Weapon():
             key = (self.name, config_key(cfg), self.posture, sight, fmode)
             shots = self._final.get(key)
             scale = 1.0
-            # ⚠ ONE FALLBACK, AND ONLY ALONG POSTURE. Nothing in the store is
-            # anything but `standing`, so crouching and prone missed on every
-            # gun and the honest output -- no compensation -- was also the
-            # output for the two postures a player spends most of a fight in.
-            #
-            # WHAT MAKES THIS DIFFERENT FROM THE FALLBACK BELOW, and the
-            # difference is the whole licence: this substitutes THE SAME CELL'S
-            # OWN CURVE and multiplies it by a measured scalar. It does not
-            # substitute another gun, another kit, another optic or another
-            # fire mode -- every one of those changes the shape, and a shape
-            # cannot be recovered by scaling. Posture is the one axis this
-            # repository has an actual number for (config.POSTURE_FACTOR).
-            #
-            # ⚠ AND IT IS A SCALAR ON A TRAJECTORY, WHICH IS AN ASSUMPTION
-            # THIS REPOSITORY HAS ALREADY SEEN FAIL. The scope ratio was
-            # believed constant on the same reasoning and measures 5.7% of
-            # spread between t=1.2 s and t=2.4 s (calibrate_scope.py). The
-            # posture ratio comes from two burst TOTALS in a coordinate that
-            # no longer exists, so nobody has been able to ask it the same
-            # question. It is stated, printed, and stamped `derived` on the
-            # way out so that it cannot be mistaken for a fitted curve.
-            if not shots and self.posture != 'standing':
-                shots = self._final.get(
-                    (self.name, config_key(cfg), 'standing', sight, fmode))
-                if shots:
-                    scale = _get_posture_factor(self.name, self.posture)
-                    said = ('derived', *key)
-                    if not _MISSING_SAID.get(said):
-                        _MISSING_SAID[said] = True
-                        print(f'[curves] {self.name} {config_key(cfg)} '
-                              f'{sight}: no {self.posture} curve, DERIVING it '
-                              f'from the standing one x{scale:.2f} '
-                              f'(config.POSTURE_FACTOR -- one m762 run in the '
-                              f'retired coordinate, not measured here). Fire '
-                              f'{self.posture} to replace it.', flush=True)
+            if not shots:
+                shots, scale, why = self._derive(config_key(cfg), sight, fmode)
+                if shots and not _MISSING_SAID.get(('derived', *key)):
+                    _MISSING_SAID[('derived', *key)] = True
+                    print(f'[curves] {self.name} {config_key(cfg)} '
+                          f'{self.posture} {sight}: no curve of its own, '
+                          f'DERIVED — {why}', flush=True)
             if shots:
                 t = 0.0
                 self.t_s, self.dx_s, self.dy_s = [], [], []

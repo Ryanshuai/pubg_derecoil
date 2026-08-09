@@ -126,6 +126,14 @@ estimate = "python tools/estimate_cell.py"
 # `[armed]` printed once. Checks BOTH directions: the kit survives a pickup,
 # and a real weapon swap still clears it.
 kit-persist = "python tools/test_kit_persist.py"
+# An optic is a SCALAR, so one measured cell covers every optic. 72 of the 76
+# curves on disk are red-dot and the lookup keys on the sight, so every
+# magnified optic on every gun missed and printed `no fitted curve ... NOT
+# compensating` -- the same line an unmeasured kit prints. Checks both
+# directions: a 4x gets the red dot's curve x one number, AND a measured cell
+# still beats the table, AND the three axes that change the curve's SHAPE
+# (weapon, kit, fire mode) never substitute.
+sight-scale = "python tools/test_sight_scale.py"
 # What a magnified optic does to the counts a gun needs. `scope` reads the
 # store and stops (no game, no hardware); the live run wants --weapon and fires.
 # ⚠ The scope factor is DERIVABLE from config.RECOIL_SIGHT_PROFILES, so this

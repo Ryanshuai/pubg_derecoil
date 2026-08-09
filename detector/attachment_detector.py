@@ -445,12 +445,10 @@ class AttachmentDetector:
         GameState.set_attachments writes those '' onto the weapon and the
         recoil lookup keys on `bare`.
 
-        It bites on the TAB TRANSITION, where tab_watch reads the instant the
-        panel becomes detectable (_set_open sets _next_refresh = 0.0). The
-        panel is legible before its slot tiles are painted, so the first read
-        after every open could report a fully kitted gun as wearing nothing --
-        seen in a play log as `vector | full - | - | - | -` one line after
-        `[tab] open`, followed by the compensation being cleared.
+        Its caller is control/tab_watch.py, which reads the panel exactly once,
+        as it closes. This is the check that says whether there was still a
+        panel there to read: an alt-tab or a dialog closes it with no keypress
+        to watch, and by the time that is noticed the tiles are gone.
 
         A tile that is merely EMPTY is still DRAWN (detector/CLAUDE.md: the
         border ring reads Sobel p90 46-173 empty against 5-26 for no tile at

@@ -148,13 +148,14 @@ TAB_REGIONS = tuple(k for k in HUD_REGIONS if k not in FRAME_REGIONS)
 # 629x557 measures 9.6 ms), so nothing here can run per tick: at the 10 ms
 # dispatcher tick a single 'type' check would be 52% of a core. Everything
 # below is therefore event-driven, with a slow check to catch drift.
+#
+# ⚠ THERE ARE TWO CONSTANTS HERE AND THERE IS NO THIRD. Anything of the form
+# "while the panel is up, do X every N" does not belong in this file, because
+# nothing happens while the panel is up -- see control/tab_watch.py.
 TAB_SETTLE_S = 0.40     # after a Tab key, how long to keep watching for the
                         # screen to actually change. Measured: open lands in
                         # 28-38 ms, close in 77-128 ms. Generous, and it stops
                         # the moment it sees the change.
-TAB_REFRESH_S = 0.10    # while the panel is up, how often to re-read the guns
-                        # so that the last reading is never stale by more than
-                        # this when it closes
 TAB_DRIFT_S = 0.50      # re-check open/closed even with no key event: alt-tab,
                         # a disconnect dialog or another agent can move the
                         # screen out from under us, and a keypress-only scheme
@@ -1530,9 +1531,64 @@ POSTURE_FACTOR = {'standing': 1.0, 'crouching': 0.80, 'prone': 0.56}
 # always. This is the fallback for an optic nobody has fired on that gun, and
 # it is a prior, not a constant. calibrate_scope.py is the file that will
 # settle it; two guns at 2x and 3x is what it needs.
+# ⚠ 2026-08-09: THE DERIVED VALUES ABOVE ARE REFUTED, AT THE ONE OPTIC WHERE A
+# CLEAN MEASUREMENT EXISTS, BY A FACTOR OF 1.92. They are kept in the account
+# above because everything downstream was built on them; they are not the
+# values below.
+#
+# mp5k bare, y_true = y_obs + y_comp summed per magazine, grouped by the
+# `sight` recorded ON each magazine:
+#
+#     red_dot   n=151    y_true 943    1.000
+#     2x        n=  4    y_true 831    0.882      <- table said 1.689
+#     3x        n=  4    y_true 838    0.889      <- table said 2.459
+#
+# ⚠ WHAT MAKES THE 2x ROW STRONG IS THAT IT IS A NULLING MEASUREMENT, and that
+# is the only reason one four-magazine cell gets to overturn a derivation.
+# Those magazines were fired under 840 counts of compensation and came back
+# with a residual of MINUS TWO counts, so K -- the pixels-per-count constant
+# that the 2x has no provenance for -- enters the answer divided by ~400. The
+# red-dot row is nulled the same way (941 played, +6 residual). A ratio between
+# two nulled cells is very nearly a K-free statement.
+#
+# It also reproduces the fitter, which is the check that says the arithmetic
+# above is the same arithmetic: 943 against fit_time_curve's 932 for red_dot
+# (1.2%) and 831 against 827 for the 2x (0.4%).
+#
+# ⚠ THE 3x ROW IS NOT EVIDENCE AND MUST NOT BE READ AS CORROBORATION. It was
+# fired under only 414 counts against a truth near 840, so half the answer
+# comes through K_3x -- and at that little compensation the view moves fast
+# enough that frame pairs approach the correlator's 128 px unambiguous range,
+# where it aliases and UNDER-reads. Its own fitted curve disagrees with the row
+# above by 33% (1253 against 838), while red_dot and 2x agree to ~1%. A number
+# that lands on the answer you like, by a route you cannot audit, is not a
+# second point.
+#
+# SO: ONE measured optic ratio, 0.88, and it is applied to every magnified
+# optic because there is nothing to distinguish them with. That is an
+# extrapolation and it is stated as one. The two candidate laws it chooses
+# between are:
+#
+#     flat          every scope ~0.88     (the game normalises ADS sensitivity)
+#     mag-scaled    0.44 x magnification  (counts scale with zoom)
+#
+# They agree at the 2x by construction and differ by 4x at the 8x. Flat is
+# taken for two reasons: it needs no extrapolation FROM one point, only the
+# application OF it; and its failure mode is under-compensation, which is the
+# state the player already lives with, where mag-scaled's failure mode is
+# driving the crosshair into the ground.
+#
+# ⚠ AND THE PLAY REPORT THAT LOOKS LIKE IT REFUTES THIS DOES NOT. "The high
+# magnification is simply unusable, it feels like the 1x coefficient" was
+# reported on 2026-08-09 against a build where a magnified optic had NO CURVE
+# AT ALL -- 72 of the 76 curves on disk are red-dot and the lookup keyed on the
+# sight, so what was being felt is zero compensation, not a coefficient. It
+# cannot arbitrate between 0.88 and 1.76. The next magazine through a 4x can:
+# detector/weapon.py prints the derived total, so "it now pushes DOWN" means
+# this number is too high and "it still climbs like a bare gun" means too low.
 RECOIL_SIGHT_RATIO = {
     'red_dot': 1.0,
-    '2x': 1.689, '3x': 2.459, '4x': 3.271, '6x': 4.9, '8x': 6.5,
+    '2x': 0.88, '3x': 0.88, '4x': 0.88, '6x': 0.88, '8x': 0.88,
     'hipfire': 3.083,
 }
 KIT_FACTORS_PATH    = os.path.join(DATA_DIR, 'kit_factors.json')

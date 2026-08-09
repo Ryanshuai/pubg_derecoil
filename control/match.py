@@ -63,10 +63,9 @@ class Dispatcher(DaemonLoop):
                 # 2. Process pending detections (target_ts reached)
                 self._process_pending()
 
-                # 3. Tab screen: one grab at most, and only when there is a
-                #    reason. Keeps state.tab_open measured rather than guessed,
-                #    and keeps the loadout fresh while the panel is up so that
-                #    closing it needs no race and no buffered past frame.
+                # 3. Tab screen: one anchor check at most, and only when there
+                #    is a reason. Keeps state.tab_open measured rather than
+                #    guessed. The guns are read once, on the close.
                 self.tab.tick()
                 self._follow_tab()
 

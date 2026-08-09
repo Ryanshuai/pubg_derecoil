@@ -245,10 +245,17 @@ INTENTS = {
         #
         # on_key() is the one that reads like a driver and is not: it is told
         # a key was SEEN, and arms a watch. The keypress is somebody else's.
+        #
+        # ⚠ read_loadout IS GONE FROM THIS LIST BECAUSE IT IS GONE (2026-08-09),
+        # and the deletion is the interface change: reading the guns is no
+        # longer something a caller asks for at a moment of its choosing. It
+        # happens once, when the panel is SEEN to close, off a frame kept from
+        # while it was painted -- so there is no public callable to tag. A
+        # method that let anyone read "now" would be the old race with a new
+        # name.
         R: ['control/inventory.py:InventoryControl.tab_open',
             'control/inventory.py:InventoryControl.await_tab',
             'control/tab_watch.py:TabWatch.measure_open',
-            'control/tab_watch.py:TabWatch.read_loadout',
             'control/tab_watch.py:TabWatch.tick',
             'control/tab_watch.py:TabWatch.on_key',
             'control/tab_watch.py:TabWatch.close'],

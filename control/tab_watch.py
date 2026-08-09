@@ -6,33 +6,70 @@ HUD at the bottom, so having both in one DXGI bounding box cost 5.46 ms of
 every frame — 87% of the capture budget — for a panel that is usually not on
 screen. See config.FRAME_REGIONS.
 
-Two things it replaces, and why each was wrong:
+⚠ ONE READ PER TAB SESSION, TAKEN THE MOMENT THE ANCHOR SAYS CLOSED. NOTHING
+IS READ WHILE THE PANEL IS UP, AND NOTHING IS REMEMBERED BETWEEN TICKS.
 
-`toggle_tab_open` flipped a cached bool on every Tab keypress and let a
-detection 300 ms later correct it. For those 300 ms the flag was a guess, and
-a guess gates a dozen `cond: '!tab_open'` entries — including whether recoil
-compensation runs. A swallowed keypress (docs/game_quirks.md: one issued right
-after a previous toggle simply does not arrive) left it inverted with nothing
-to notice. Here the flag only ever changes because the screen was looked at.
+    panel opens        nothing
+    panel is up        nothing
+    anchor reads shut  ONE grab, ONE classify, publish
 
-`delay: -50` reached backwards into the ring buffer to catch the panel as it
-was 50 ms before the close keypress. That works, and is more robust than
-racing forwards, but it is what forced the Tab regions into every frame in the
-first place. Instead the reading is kept fresh WHILE the panel is up, so when
-it closes the last one taken is already the final state — no race, no buffer.
+The whole file is that sentence. Two things make it work and both are
+measurements rather than hopes:
 
-Nothing here blocks: tick() does at most one grab (~5-10 ms) and returns.
+THE ANCHOR GOES FIRST. `open` is decided by the 41x18 「类型」 header, and that
+text stops being legible EARLY in the close — while the weapon panel, its name
+plates and its slot tiles are all still drawn. So the instant this says shut is
+an instant at which the panel can still be read. There is nothing to race and
+nothing to remember.
+
+THE WATCH IS ALREADY PER-TICK WHERE IT MATTERS. A Tab keypress arms
+TAB_SETTLE_S of tick-rate anchor checks, and the game honours a close in
+77-128 ms — comfortably inside it. So the transition is caught within one
+10 ms tick of it happening, for free, on the path every real close takes.
+
+⚠ AND THE COST IS WHY IT CANNOT SIMPLY POLL. A GDI grab is ~5 ms almost
+regardless of size (41x18 measures 5.2 ms), so at the 10 ms dispatcher tick a
+single unconditional anchor check would be 52% of a core. That is the number
+that shapes this file: checks are event-driven, with a slow drift check to
+catch what no key announced.
+
+⚠ WHAT IS GIVEN UP, PLAINLY: a close that NO KEY announced — alt-tab, a
+disconnect dialog, another agent — is found by the drift check up to
+TAB_DRIFT_S later, and by then the panel really is gone. The grab comes back
+with no tiles painted, `any_drawn` catches it, and the kit is not published.
+That is a missed reading, not a wrong one.
+
+⚠ NOTHING MAY BE ADDED THAT RUNS WHILE THE PANEL IS UP. Not a periodic
+re-read, not a cached last-good reading, not a buffer of past frames, not a
+score over kept frames. Every such scheme has to answer "which moment does
+this describe", and while the panel is up the answer is "one the player has
+already changed" — a gun caught mid-swap, with its muzzle in your hand,
+becomes the gun the compensation is built for. This has been built and removed
+more than once, so the versions are deliberately not described here or
+anywhere else: written down they read as prior art, and prior art comes back.
+`pixi run tab-watch` fails if anything grabs the panel before it closes.
+
+`toggle_tab_open` — the one thing this replaces that is worth remembering —
+flipped a cached bool on every Tab keypress and let a detection 300 ms later
+correct it. For those 300 ms the flag was a guess, and a guess gates a dozen
+`cond: '!tab_open'` entries, including whether recoil compensation runs. A
+swallowed keypress (docs/game_quirks.md: one issued right after a previous
+toggle simply does not arrive) left it inverted with nothing to notice. Here
+the flag only ever changes because the screen was looked at.
+
+Nothing here blocks: tick() does at most one 5 ms anchor check, except on the
+tick where the panel closes, which also grabs and classifies.
 """
 import time
 
-from config import (HUD_REGIONS, TAB_DRIFT_S, TAB_REFRESH_S, TAB_SETTLE_S)
+from config import HUD_REGIONS, TAB_DRIFT_S, TAB_SETTLE_S
 
 ATT_REGIONS = [k for k in HUD_REGIONS if k.startswith('att_')]
 NAME_REGIONS = ['gun_name_1', 'gun_name_2']
 
 
 class TabWatch:
-    """Measured Tab state plus the last loadout seen while it was up.
+    """Measured Tab state plus the loadout read as the panel closed.
 
     detectors is the Dispatcher's registry, shared by reference so anything
     registered later is visible here too. Needs 'tab_type', 'tab_weapon' and
@@ -49,7 +86,6 @@ class TabWatch:
         self._panel_grab = None
         self._watch_until = 0.0      # a key was seen; watch for the change
         self._want = None            # what we expect it to become
-        self._next_refresh = 0.0
         self._next_drift = 0.0
 
     # ── Capture, built lazily so a state-only caller costs nothing ──
@@ -95,7 +131,19 @@ class TabWatch:
             return None
 
     def read_loadout(self):
-        """Grab the weapon panel and read both guns off it. -> dict or None."""
+        """Grab the weapon panel and read both guns off it. -> dict or None.
+
+        ⚠ CALLED ONCE PER TAB SESSION, ON THE CLOSE, AND THE TIMING IS THE
+        DESIGN. See the module docstring: the anchor stops being legible before
+        the panel stops being drawn, so this runs at a moment when there is
+        still a panel to read.
+
+        ⚠ NAMES AND ATTACHMENTS COME OFF ONE FRAME, which is the root
+        CLAUDE.md's second law rather than a convenience: the names are what
+        narrow each slot's template bank, so reading them from a different
+        moment than the tiles means the record describes a gun that was never
+        measured. It is how a UZI came to be wearing a sniper cheek pad.
+        """
         weap = self._detectors.get('tab_weapon')
         att = self._detectors.get('tab_attachment')
         if weap is None and att is None:
@@ -111,34 +159,33 @@ class TabWatch:
                 out['weapons'] = weap.classify(
                     {k: _crop(frame, k) for k in NAME_REGIONS})
             if att is not None:
-                # ⚠ AN UNPAINTED PANEL IS NOT A BARE GUN, AND THIS READ IS THE
-                # ONE MOST LIKELY TO CATCH ONE. _set_open sets _next_refresh
-                # to 0.0, so the first loadout read happens the instant the
-                # screen becomes legible as "open" -- and the panel is legible
-                # before its slot tiles are painted. classify() reports the
-                # unpainted tiles as '' , the same '' an empty slot gives, and
-                # _publish below writes them onto both weapons: a fully kitted
-                # gun becomes `bare` and the compensation is cleared. Seen in
-                # a play log one line after `[tab] open`.
+                # ⚠ AN UNPAINTED PANEL IS NOT A BARE GUN, AND IT IS ALSO THE
+                # EVIDENCE FOR THE PREMISE ABOVE. classify() reports an
+                # unpainted tile as '', the same '' an empty slot gives, and
+                # _publish writes those onto both weapons: a fully kitted gun
+                # becomes `bare` and the compensation is cleared.
                 #
-                # `attachments = None` is already the "nothing to say" value
-                # here -- _publish skips it -- so refusing costs one stale
-                # cycle and the refresh loop reads again in TAB_REFRESH_S.
+                # Both outcomes print, because a log where this always says
+                # "still painted" is what says the anchor really does go first,
+                # and a log where it always says "already gone" says it does
+                # not and this file is built on a false premise. A guard that
+                # only ever refuses silently cannot tell those apart.
+                #
+                # A tile that is merely EMPTY is still DRAWN (detector/
+                # CLAUDE.md: border-ring Sobel p90 46-173 empty against 5-26 for
+                # no tile at all), so this does not refuse a bare gun. It
+                # refuses a panel with no tiles anywhere.
                 if not att.any_drawn(frame):
-                    self._log('panel not painted yet — not publishing '
-                              'attachments (an unpainted tile is not an '
-                              'empty slot)')
+                    self._log('the panel was already gone when the anchor '
+                              'said so — no tiles painted, so the kit is NOT '
+                              'published (an unpainted tile is not an empty '
+                              'slot). Expected after an alt-tab or a dialog, '
+                              'where no key announced the close.')
                 else:
-                    # The names go INTO the attachment read. They were already
-                    # on this frame and were being thrown away, while the
-                    # slots were matched blind against all 55 templates --
-                    # which is how a UZI came to be wearing a sniper cheek pad
-                    # and an SKS an SMG suppressor. This feeds
-                    # state.set_attachments() and from there the recoil scale,
-                    # so a wrong slot is a wrong curve.
-                    named = {i + 1: n
-                             for i, n in enumerate(out['weapons'] or ()) if n}
+                    named = {i + 1: nm
+                             for i, nm in enumerate(out['weapons'] or ()) if nm}
                     out['attachments'] = att.classify(frame, named)
+                    self._log('read at the close, panel still painted')
         except Exception as e:
             self._log(f'panel read failed: {e}')
             return None
@@ -149,70 +196,74 @@ class TabWatch:
     def on_key(self, now=None):
         """A Tab keypress was seen. Watch for the screen to actually change.
 
-        `now` should be the KeyEvent's own timestamp: the event may have sat
-        in the poller's queue for a tick or two, and the settle window should
-        be measured from when the key was pressed, not from when this got
-        around to hearing about it. It also has to be the same clock tick()
-        is driven on, or the window is nonsense.
+        `now` should be the KeyEvent's own timestamp: the event may have sat in
+        the poller's queue for a tick or two, and the settle window should be
+        measured from when the key was pressed, not from when this got around
+        to hearing about it. It also has to be the same clock tick() is driven
+        on, or the window is nonsense.
 
-        The keypress is NOT the state change. It is a request that the game
-        may honour in 28-38 ms (opening), 77-128 ms (closing), or not at all
-        if it was swallowed. So this only arms a watch; `open` moves when the
-        screen does.
+        The keypress is NOT the state change. It is a request that the game may
+        honour in 28-38 ms (opening), 77-128 ms (closing), or not at all if it
+        was swallowed. So this only arms a watch; `open` moves when the screen
+        does.
 
-        If the panel is up, this also takes one last reading straight away --
-        the panel stays fully drawn for another 13-28 ms, so this usually
-        lands, and when it does not the refresh loop's reading from <=100 ms
-        ago is still there.
+        ⚠ IT READS NOTHING, IN EITHER DIRECTION, and must not be made to. A
+        grab here is timed off the KEY rather than off the SCREEN, and the key
+        can arrive a tick or two late — by which point it is a picture of a
+        fading panel. The watch it arms is what catches the close, within one
+        tick of the screen actually changing.
         """
-        if self.open:
-            got = self.read_loadout()
-            if got is not None:
-                self._publish(got)
         now = time.perf_counter() if now is None else now
         self._watch_until = now + TAB_SETTLE_S
         self._want = not self.open
 
     def tick(self, now=None):
-        """One unit of work, at most one grab. Call from the dispatcher loop."""
+        """One unit of work, at most one anchor check. From the dispatch loop."""
         now = time.perf_counter() if now is None else now
 
-        if now < self._watch_until:
-            got = self.measure_open()
-            if got is not None and got != self.open:
-                self._set_open(got)
-                self._watch_until = 0.0
-            elif now + 0.011 >= self._watch_until and self._want is not None:
-                # Last look before giving up. The screen never changed, so the
-                # keypress did not arrive -- leave `open` alone. Guessing here
-                # is exactly what toggle_tab_open did.
+        if self._want is not None and now >= self._watch_until:
+            # The window closed. Either the screen moved (and `open` already
+            # followed it) or the keypress never arrived -- leave `open` alone
+            # and say so. Guessing here is exactly what toggle_tab_open did.
+            if self.open != self._want:
                 self._log(f'Tab key did not take effect (still '
                           f'{"open" if self.open else "closed"})')
-                self._want = None
-            return
+            self._want = None
 
-        if self.open and now >= self._next_refresh:
-            self._next_refresh = now + TAB_REFRESH_S
-            got = self.read_loadout()
-            if got is not None:
-                self._publish(got)
+        watching = now < self._watch_until
+        drifting = now >= self._next_drift
+        if not watching and not drifting:
             return
-
-        if now >= self._next_drift:
+        if drifting:
             self._next_drift = now + TAB_DRIFT_S
-            got = self.measure_open()
-            if got is not None and got != self.open:
-                self._log(f'drifted: screen says {"open" if got else "closed"}')
-                self._set_open(got)
+        got = self.measure_open()
+        if got is not None and got != self.open:
+            if not watching:
+                self._log(f'drifted: screen says '
+                          f'{"open" if got else "closed"}')
+            self._set_open(got)
+            self._watch_until = 0.0
 
     # ── Internals ──
 
     def _set_open(self, value):
+        # ⚠ THE FLAG MOVES FIRST, THEN THE PANEL IS READ. The screen has said
+        # what it says; that is a measurement and it gets recorded even if the
+        # classify below throws or comes back empty. Reading first and flipping
+        # after would let one bad frame hold `tab_open` True, and `tab_open`
+        # gates whether compensation runs at all.
         self.open = value
         self.state.tab_open = value
+        self._log('open' if value else 'closed')
         if value:
-            self._next_refresh = 0.0     # read it immediately
-        self._log(f'{"open" if value else "closed"}')
+            return
+        # The one place the panel is read. Publishing before returning matters:
+        # control/match.py's _follow_tab re-arms the firmware on this same tick,
+        # right after this, and it must upload the curve for what the gun is
+        # wearing now rather than what it wore before you opened the panel.
+        got = self.read_loadout()
+        if got is not None:
+            self._publish(got)
 
     def _publish(self, got):
         """Write a reading through to GameState, as the detections used to."""
