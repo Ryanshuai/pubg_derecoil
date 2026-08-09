@@ -195,9 +195,14 @@ def main():
         print(f'   a high K makes y_obs read low, and the compensation-OFF arm '
               f'reads 6.4% low. Right sign, about half the size.')
     print()
-    print('⚠ NOT WRITTEN ANYWHERE. 1.9 sigma off runs that had to be un-aliased')
-    print('  first is a lead, not a constant. The clean measurement injects')
-    print('  slowly enough that no frame gap approaches 128 px.')
+    print('⚠ SUPERSEDED, AND THIS FILE IS KEPT FOR THE ALIASING, NOT THE K.')
+    print('  Re-measured live 2026-08-08 with the injection spread over 1.0 s:')
+    print('     K = 1.5128  R^2 0.99984  CV 1.1%  sem 0.003  n=32  both dirs')
+    print('     up/down asymmetry 0.19%')
+    print('  So the +6.32% asymmetry above is NOT REAL -- it came from an `up`')
+    print('  arm of n=3, one run, all needing un-aliasing. The argument built')
+    print('  on it (1.5474 is a blend of two directions, K_down is the right')
+    print('  one) is void. config.py now holds the measured 1.5128.')
     return 0
 
 
