@@ -1077,15 +1077,15 @@ class InventoryControl(Driver):
                 # and those are different claims -- an unreadable row is a
                 # detector problem, an empty one means the grab had nothing
                 # to pick up.
-                try:
-                    kind, idx = (src if isinstance(src, tuple) else (None, None))[:2]
-                    if kind in ('inventory', 'ground') and isinstance(idx, int):
-                        v = self.look(frame=f)
-                        lst = v.inventory if kind == 'inventory' else v.nearby
-                        it = lst[idx] if 0 <= idx < len(lst) else None
-                        src_key = None if it is None else (it.key or '?')
-                except Exception as e:
-                    src_key = f'(read failed: {type(e).__name__})'
+                # Off `f`, the frame the row counts below are read from, so
+                # this is one template pass and no extra grab. `_row_key`
+                # answers '(not a row)' for a slot source; keep the
+                # '(no panel to read)' this branch already set in that case,
+                # since it says WHY there is no row rather than merely that
+                # there is not one.
+                got = self._row_key(src, frame=f)
+                if got != '(not a row)':
+                    src_key = got
                 n_src0 = panel_rows(f, panels[0]) if panels[0] else 0
                 n_dst0 = panel_rows(f, panels[1])
                 # BOTH LISTS FULL: the count cannot answer. A panel is a
@@ -1194,13 +1194,42 @@ class InventoryControl(Driver):
             # fallback rather than believing a gesture nothing checked.
             moved = (self._await_panel(panels, n_src0, n_dst0)
                      if panels is not None else None)
+            # ⚠ ONE READ ON THE NON-LANDING PATH, AND IT IS THE FIELD THIS
+            # PACKAGE SPENT TWO INVESTIGATIONS WITHOUT. When `moved` is not
+            # True, the record could not say whether the item had left; the
+            # only way to find out was the NEXT record's `rows_before`, and
+            # that reconstruction has three holes:
+            #
+            #   * the LAST drag of a burst has no next record at all
+            #   * `moved=None` (both lists full, no countable panel) leaves
+            #     the row counts unusable in both records
+            #   * the retry guard above re-reads the row, but only when there
+            #     IS a retry -- a single-attempt failure never got a second
+            #     look
+            #
+            # 2026-08-08: of 749 floor drags, 199 said nothing about their
+            # outcome, and 98% of those had in fact landed. Reconstructing
+            # that needed 514 usable pairs out of 749 records; the other 235
+            # are unanswerable forever.
+            #
+            # Reading the source row afterwards closes it in ONE record:
+            #
+            #   was `X`, now empty     the item left. A False verdict here is
+            #                          the ROW COUNT being wrong, not a miss.
+            #   was `X`, still `X`     it did not move. A real miss.
+            #   was `X`, now `Y`       the list shifted, so something left.
+            #
+            # Only on the failing path, so the happy path pays nothing: one
+            # template pass, and only when the alternative is a record that
+            # cannot be interpreted at all.
+            src_key_after = self._row_key(src) if moved is not True else None
             # `panels` is not passed: rows0 below already carries the only
             # thing the journal did with it -- the two row counts, or None
             # when there was no countable panel to take them from.
             self._journal(src, dst, p0, p1, attempt,
                           (n_src0, n_dst0) if panels is not None else None,
                           gesture, moved, started=t_begin,
-                          src_key=src_key)
+                          src_key=src_key, src_key_after=src_key_after)
             if not gesture and not moved:
                 rec['error'] = 'cursor placement failed'
                 return rec
@@ -3004,8 +3033,15 @@ class InventoryControl(Driver):
 
 
     def _journal(self, src, dst, p0, p1, attempt, rows0, gesture,
-                 moved, started=None, src_key='(not recorded)'):
-        """One line for a drag: the gesture, the geometry and the outcome."""
+                 moved, started=None, src_key='(not recorded)',
+                 src_key_after=None):
+        """One line for a drag: the gesture, the geometry and the outcome.
+
+        `src_key_after` is the source row re-read AFTER a drag that did not
+        report landing, and it is what makes one record self-contained — see
+        drag(). It is None on the landing path, where it would only cost a
+        template pass to confirm what the row count already said.
+        """
         # Pointer.__init__ creates last_drag as {} and drag() only ever
         # reassigns it to a dict, so neither a getattr default nor an `or {}`
         # can fire. Reading it directly is also the thing that would BREAK
@@ -3034,6 +3070,10 @@ class InventoryControl(Driver):
             gesture=bool(gesture), failed_at=d.get('failed_at'),
             rows_before=list(rows0) if rows0 else None,
             src_key=src_key,
+            # ⚠ THE PAIR IS THE POINT. `src_key` alone says what was at the
+            # grab point; the two together say whether it is still there, and
+            # that is the question every reader of this file has actually had.
+            src_key_after=src_key_after,
             poll=self.last_poll if moved is not None else None,
             moved=moved)
         self.last_poll = None
@@ -3083,6 +3123,31 @@ class InventoryControl(Driver):
             return int(self.plate_ink(gun, frame))
         except Exception:
             return None
+
+    def _row_key(self, src, frame=None):
+        """What the ROW at `src` holds right now. -> key | None | '?' | '(…)'
+
+        The three answers are three different claims and the journal needs all
+        of them apart: `None` means the row read as EMPTY, `'?'` means
+        something is there and the templates could not name it (a detector
+        problem, not a game one), and a parenthesised string means the read
+        itself could not be attempted.
+
+        `frame=None` grabs one. Callers already holding the frame they read
+        the row counts off should pass it -- that is one template pass instead
+        of a grab plus a pass.
+        """
+        try:
+            kind, idx = (src if isinstance(src, tuple) else (None, None))[:2]
+            if kind not in ('inventory', 'ground') or not isinstance(idx, int):
+                return '(not a row)'
+            v = self.look(frame=self._frame_for('rows') if frame is None
+                          else frame)
+            lst = v.inventory if kind == 'inventory' else v.nearby
+            it = lst[idx] if 0 <= idx < len(lst) else None
+            return None if it is None else (it.key or '?')
+        except Exception as e:                  # noqa: BLE001 — recorded, not raised
+            return f'(read failed: {type(e).__name__})'
 
     def _await_panel(self, panels, n_src0, n_dst0, timeout=VERIFY_TIMEOUT):
         """Poll until a row leaves the source list or arrives in the target.

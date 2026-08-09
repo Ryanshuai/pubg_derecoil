@@ -280,70 +280,30 @@ class Magazine:
 
             y_true(t) = y_obs(t) + C(t - L)
 
-        ⚠ AND THAT IDENTITY IS STILL MISSING A TERM. Measured 2026-08-08 with
-        --scale-sweep=0,1 -- comp-OFF and comp-ON alternating INSIDE one
-        session, 15 s apart, so session drift cannot align with an arm:
+        ⚠ AND IT NEEDS NO eta. On 2026-08-08 a term was added here --
+        y_true = y_obs + eta*C with eta = 0.9711 -- because two interleaved
+        arms (zero compensation and a full 948-count curve, alternating 15 s
+        apart) disagreed by 3.28% at 4.7 sigma, and one fitted coefficient
+        closed them over the whole path to 2.9 counts rms. IT IS RETRACTED.
 
-            commanding 948 counts of curve moves y_obs by -0.9589 x F
-            bootstrap 95% [-0.9766, -0.9470], which EXCLUDES -1
+        A stronger replication two hours later, THREE arms with the view's
+        excursion spanning 85x:
 
-        So counts delivered as a firmware curve (~1 count/ms) push the screen
-        4.1% less than the same counts delivered as mouse.move(), which is how
-        K was measured (11 sigma, tools/audit_k.py). The honest identity is
+            curve 0    n=5   y_true(2.40s) 853.8 +-5.7   excursion 853.8
+            curve 473  n=5                 853.5 +-3.9              428.8
+            curve 945  n=5                 850.4 +-6.2               10.1
 
-            y_true(t) = y_obs(t) + eta * C(t - L),   eta ~ 0.96 .. 0.97
+        0.4% across the lot. There is no delivery deficit, and the earlier
+        0.9711 was one batch fitted by one coefficient -- the definition of
+        overfitting, called "the strongest thing this model has ever said" at
+        the time.
 
-        ⚠ AND WITH eta THE TWO-ARM CHECK PASSES, which is the strongest thing
-        this model has ever been able to say. Solving for the eta that makes
-        the interleaved pair report the same y_true over the WHOLE path:
-
-            eta = 0.9711,  residual 2.9 counts rms (0.66%), max 8.4
-
-            t=0.5s   OFF 110.4   ON+eta*C 110.9   diff -0.5
-            t=1.0s   OFF 303.1   ON+eta*C 303.7   diff -0.5
-            t=1.5s   OFF 490.4   ON+eta*C 492.8   diff -2.4
-            t=2.0s   OFF 687.2   ON+eta*C 685.5   diff +1.7
-            t=2.5s   OFF 881.4   ON+eta*C 877.9   diff +3.5
-
-        A magazine with NO compensation and one with a full 948-count curve
-        land on the same trajectory to three counts. 0.9711 sits inside the
-        slope regression's [0.9470, 0.9766], so two estimators that share no
-        arithmetic agree.
-
-        ⚠ AND "eps = -0.38%, THE CURVE FULLY ARRIVES" WAS WRONG. That came
-        from the +-10% scale sweep's ZERO CROSSING, which measures whether the
-        curve sits at its own fixed point -- and the loop drives it there, so
-        the crossing is ~1 by construction and says nothing about delivery.
-        The quantity that measures delivery is the SLOPE, which at that lever
-        read -0.948 [-1.10, -0.86] and got reported as "within 15% of 1".
-
-        ⚠ THE MISSING eta DOES NOT BREAK THE COMPENSATION, WHICH IS WHY IT
-        SURVIVED. The fit consumes its own output, so with eta omitted the loop
-        has a fixed point at C* = y_true/(1-d), and what reaches the screen
-        there is (1-d)*C* = y_true EXACTLY. The compensation converges to
-        correct. What is wrong is the CURVE, by +4.3% -- and MODEL.md's claim
-        is that the curve IS y_true(t), so it is the measurement that breaks,
-        not the aim.
-        ⚠ NOT APPLIED HERE. A correction factor that makes the numbers agree,
-        installed before anyone knows why it exists, is how this repository got
-        1.025^255. The mechanism (firmware per-ms rounding, HID report
-        coalescing, or the game sampling many 1-count moves differently from
-        one 250-count move) is separable by delivering the SAME total both ways
-        and measuring the screen. Until then eta is a measurement without a
-        cause, and it is recorded as one.
-
-        and this used to write C(t). The error is +L * F'(t) -- about 7.5
-        counts at t=2 s with L=20 ms -- and it is not merely a bias, because
-        the fit consumes its own output:
-
-            F_{n+1} = y_true + L * F_n'
-
-        An iteration carrying a DERIVATIVE has gain L*omega at frequency omega,
-        so everything above 1/L (~8 Hz at L=20 ms) grows every round, and the
-        17 ms grid reaches 59 Hz. Same shape as the moving average recorded in
-        the root CLAUDE.md, which turned a defence against noise into 1.025^255
-        of amplification -- self-consistent, arithmetically correct, and
-        divergent.
+        ⚠ WHAT KILLED IT IS WORTH MORE THAN THE COEFFICIENT: between the two
+        runs the two arms drifted about 2% in OPPOSITE directions (+1.64% and
+        -1.98%). Interleaving guarantees one session; it does not guarantee
+        the session has no structure inside it, and ~2% of opposed drift is
+        enough to manufacture a 4.7 sigma arm difference. The gate after
+        interleaving is REPLICATION, not a cleverer single run.
 
         Raised from the chair before it had bitten: "两边都知道这个负三十六的
         存在...不自洽的话会震荡，或者越来越错".

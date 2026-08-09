@@ -970,8 +970,18 @@ def stock_parts(sc, kit, keys, also=(), loose_only=False):
     # ⚠ UNWANTED PARTS ARE NOT DRAGGED TO THE FLOOR ANY MORE. They stay in the
     # backpack until the next teardown, where Kit._swap_back clicks every row
     # onto the gun and clear_rack throws the gun wearing them. One right click
-    # apiece instead of one drag apiece, and the drag was the gesture measured
-    # at roughly half success inside this collector.
+    # apiece instead of one drag apiece.
+    #
+    # ⚠ THE ORIGINAL REASON WAS "the drag was measured at roughly half success
+    # inside this collector", AND THAT NUMBER WAS AN ARTEFACT. Re-checked over
+    # the whole journal 2026-08-08: the ~0.5 was the old cursor-based verdict
+    # reporting failures for drags that had already landed -- 147 of 150
+    # "failures" moved the item. With rows as the verdict the same path runs
+    # at 79%. See control/CLAUDE.md, "手势干净但游戏不接".
+    #
+    # The switch is KEPT anyway, on the reason that survives: one right click
+    # is cheaper than one drag whatever their success rates, and the teardown
+    # has to happen regardless. It is no longer justified by a failure rate.
     #
     # DUPLICATES ARE STILL DROPPED (that is tidy's `keep=1` pass, separate from
     # this switch), which is what bounds the backpack: without it a run would
@@ -990,9 +1000,10 @@ def stock_parts(sc, kit, keys, also=(), loose_only=False):
     # need the screen up. See control/stock.restock.
     # ⚠ THE FLOOR IS THE OVERFLOW NET, NOT THE DISPOSAL PATH. Kit._swap_back
     # disposes of junk the cheap way -- click it onto the gun that is about to
-    # be thrown, one right click apiece instead of one drag apiece, and the
-    # drag is the gesture measured at roughly half success inside this
-    # collector. This pass exists for what that CANNOT carry.
+    # be thrown, one right click apiece instead of one drag apiece. This pass
+    # exists for what that CANNOT carry. (The "and the drag only works half the
+    # time" half of this reason was withdrawn 2026-08-08 -- that rate was the
+    # old cursor verdict mislabelling landed drags. The cheapness stands.)
     #
     # The ceiling is five: a gun has five slots, so one teardown takes at most
     # five rows out with it. Anything beyond sits in the backpack, and a part

@@ -172,6 +172,13 @@ def one_line(i, r):
         line += (f'  rel{"±0" if dr == (0, 0) else dr}'
                  f'  rows {r.get("rows_before")}'
                  f'  polls {len(r.get("poll") or [])}')
+        # ⚠ THE VERDICT THE ROW COUNT COULD NOT GIVE. Printed inline rather
+        # than only in --detail because it is the field that decides whether
+        # a MISS on this line is real, and a summary nobody expands is a
+        # field nobody reads.
+        v = row_verdict(r)
+        if v:
+            line += f'  {v}'
     if r.get('plate'):
         line += f'  plate {r["plate"][0]}->{r["plate"][1]}'
     if gun_lost(r):
@@ -179,12 +186,43 @@ def one_line(i, r):
     return line + (f'  [{r["failed_at"]}]' if r.get('failed_at') else '')
 
 
+def row_verdict(r):
+    """Did the item leave, according to the source row itself? -> str | ''
+
+    ⚠ THIS IS THE ONE FIELD THAT MAKES A RECORD SELF-CONTAINED, and every
+    investigation before it existed had to reconstruct it from the NEXT
+    record's `rows_before` -- which is impossible for the last drag of a
+    burst, and impossible whenever the row counts were unusable in either
+    record. 2026-08-08: 749 floor drags, 199 of which reported no outcome at
+    all, and 235 records that no pairing could ever explain.
+
+    Only three answers matter, and they route to three different places:
+
+        LEFT ANYWAY   the row emptied or changed while the count said no.
+                      The DRAG worked; the VERDICT is what failed. Do not
+                      retry -- a retry aims at a list that has shifted.
+        STILL THERE   a real miss. The gesture or the game.
+        (nothing)     the drag landed, or the row was never readable.
+    """
+    if r.get('kind') != 'drag' or 'src_key_after' not in r:
+        return ''
+    before, after = r.get('src_key'), r.get('src_key_after')
+    if after is None or (isinstance(after, str) and after.startswith('(')):
+        return ''
+    if isinstance(before, str) and before.startswith('('):
+        return ''
+    if before is None:
+        return ''
+    return 'LEFT ANYWAY' if after != before else 'STILL THERE'
+
+
 def detail(i, r):
     print(f'\n--- #{i}  {r["kind"]}  {r.get("src")} -> {r.get("dst")}  '
           f'attempt {r.get("attempt")}  pid {r.get("pid")} '
           f'{r.get("proc") or ""}{clock(r)}')
     for k in ('gap_s', 'drag_s', 'steps', 'gesture', 'moved', 'failed_at',
-              'by', 'rows_before', 'plate', 'held', 'was', 'now', 'via',
+              'by', 'rows_before', 'src_key', 'src_key_after', 'plate',
+              'held', 'was', 'now', 'via',
               'slot_state', 'content', 'presses'):
         if r.get(k) is not None:
             print(f'    {k:<12} {r[k]}')
@@ -337,6 +375,32 @@ def summarise(rows):
         if isinstance(k, str) and k.startswith('('):
             return k
         return 'item was there, the game refused'
+
+    # ⚠ FIRST, BECAUSE IT DECIDES WHETHER THE REST OF THIS SECTION IS ABOUT
+    # ANYTHING. Every bucket below asks "why did this drag miss"; this asks
+    # whether it missed at all. Two investigations ran on the assumption that
+    # a non-landing verdict meant a non-landing drag, and 98% of the time it
+    # did not -- the cursor check skipped the read-back and the item was
+    # already on the floor. Records written before src_key_after existed are
+    # simply absent here, which is the honest state: they cannot be judged.
+    judged = [(r, row_verdict(r)) for r in drags]
+    judged = [(r, v) for r, v in judged if v]
+    if judged:
+        left = sum(1 for _, v in judged if v == 'LEFT ANYWAY')
+        stay = len(judged) - left
+        print(f'\ndid the item leave? (source row re-read after the drag, '
+              f'{len(judged)} record(s) carry it)')
+        print(f'  {left:>4}  LEFT ANYWAY — the drag worked and the verdict '
+              f'was wrong. A retry here aims at a shifted list.')
+        print(f'  {stay:>4}  STILL THERE — a real miss.')
+        if left:
+            print(f'  -> {100 * left / len(judged):.0f}% of these '
+                  f'"failures" moved the item.')
+    else:
+        print('\ndid the item leave?  no record carries src_key_after yet — '
+              'it is written on the non-landing path only, from 2026-08-08. '
+              'Until a run produces some, a MISS here cannot be told from a '
+              'verdict that never looked.')
 
     have = [r for r in drags if 'src_key' in r]
     if have:
