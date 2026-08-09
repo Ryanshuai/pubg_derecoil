@@ -95,7 +95,14 @@ SRC_SHA256 = 'e5b5edbe6dd78a3046c625f70c69aeb724895cc516b97cb46ceb417a96d89b3c'
 # whether it is covered.
 OURS = {
     'BERRYLL': 'm762', 'AUGG': 'aug', 'VECTORR': 'vector', 'MP5KK': 'mp5k',
-    'M4166': 'm416', 'AKMM': 'akm', 'SCAR_LL': 'scar_l', 'QBZZ': 'qbz',
+    'M4166': 'm416', 'AKMM': 'akm',
+    # ⚠ 'scar', not 'scar_l'. ROSTER holds one SCAR and calls it `scar`
+    # (display name SCAR-L), so this pattern hung on a weapon name nothing
+    # in the repository uses -- `pixi run kava4` reported the SCAR as
+    # having NO seed while its pattern sat in the file, parsed and unused.
+    # A gun with no seed fires uncompensated, and for an AR that means the
+    # view reaches open sky where phase correlation returns 0 CONFIDENTLY.
+    'SCAR_LL': 'scar', 'QBZZ': 'qbz',
     'G36CC': 'g36c', 'GROZAA': 'groza', 'FAMASS': 'famas', 'K22': 'k2',
     'UMP455': 'ump45', 'VECTORR_': 'vector', 'BIZONN': 'bizon',
     'TOMMYY': 'tommy', 'UZII': 'uzi', 'MP99': 'mp9', 'P900': 'p90',

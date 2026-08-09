@@ -402,7 +402,7 @@ def tidy(ac, want, drop_unwanted=True, verbose=True, keep=1,
     return dropped, stock
 
 
-def spawn_missing(sc, keys, backpack=None, verbose=True):
+def spawn_missing(sc, keys, backpack=None, verbose=True, close=True):
     """L1 — One panel trip that clicks exactly the keys handed to it. THE NAME
     LIES: it computes no shortfall and never looks in the pack — that is
     stock.missing()'s job, upstream in restock().
@@ -410,7 +410,9 @@ def spawn_missing(sc, keys, backpack=None, verbose=True):
     ⚠ ok MEANS THE CLICKS LANDED ON THE PLANNED NODES, not that anything
     reached the backpack. Give it a key twice and you own two.
     ⚠ The panel is closed on the way out, always: the caller's next screen
-    is Tab, and the spawner panel swallows Tab.
+    is Tab, and the spawner panel swallows Tab. `close=False` is the internal
+    half of the parts/gun split below, and the `finally` around that split is
+    what keeps the word "always" true.
 
     One `give_many` for the whole list, not a loop over `give_*`. Each
     individual give_ returns the panel to fully collapsed, so N items from N
@@ -456,6 +458,25 @@ def spawn_missing(sc, keys, backpack=None, verbose=True):
     # Two trips cost one extra sync and one extra collapse. The batching this
     # function exists for is preserved WITHIN each trip, which is where the
     # 2N-category-clicks saving came from.
+    #
+    # ⚠ AND THEY USED TO COST A THIRD THING THIS COMMENT DID NOT COUNT: a
+    # CLOSE AND A RE-OPEN. Each trip is a whole give_many, which opens the
+    # panel and closes it, so the split read
+    #
+    #     sync OPEN [parts] close   sync OPEN [gun] close
+    #
+    # and the middle pair bought nothing. What the measurement above says is
+    # about CLICK ORDER -- parts before gun -- and the panel being up or down
+    # is not what the ordering is about. Two ensure_panel successes at
+    # PANEL_SETTLE_S = 0.5 each, plus two comma presses, plus a sync and a
+    # collapse, per new-weapon cell.
+    #
+    # ⚠ ONLY THE SECOND TRIP NEEDS THE CLOSE, and the asymmetry is exactly the
+    # half being removed: give_many closes BEFORE switch_to_slot2 because that
+    # presses a number key and the panel swallows keys -- and `switch` is
+    # False on the parts trip (no ROSTER key in it) and True on the gun trip.
+    # give_many refuses switch=True with close=False rather than leaving that
+    # as a thing to remember.
     guns = [k for k in wanted if k in ROSTER]
     if guns and len(guns) != len(wanted):
         parts = [k for k in wanted if k not in ROSTER]
@@ -463,8 +484,19 @@ def spawn_missing(sc, keys, backpack=None, verbose=True):
             print(f"      [stock] parts first, gun last — a gun spawned "
                   f"alongside its parts keeps its FACTORY magazine and the "
                   f"slot readback cannot tell (docs/game_quirks.md)")
-        ok = spawn_missing(sc, parts, backpack=None, verbose=verbose)
-        return spawn_missing(sc, guns, backpack=None, verbose=verbose) and ok
+        try:
+            ok = spawn_missing(sc, parts, backpack=None, verbose=verbose,
+                               close=False)
+            return spawn_missing(sc, guns, backpack=None,
+                                 verbose=verbose) and ok
+        finally:
+            # ⚠ THE NET FOR THE WORD "ALWAYS" IN THE DOCSTRING. The parts trip
+            # opts out of its own close, so if it or the gun trip raises,
+            # nothing else here would put the panel down -- and a panel left up
+            # swallows Tab, which fails the NEXT thing rather than this one.
+            # Free on the happy path: the gun trip already closed it and
+            # ensure_panel reads before it presses.
+            sc.ensure_panel(False)
     try:
         # Sync for STABILITY only, not for a full row count.
         #
@@ -486,14 +518,16 @@ def spawn_missing(sc, keys, backpack=None, verbose=True):
         # lands in slot 2 because the rack is not empty -- restock() runs with
         # a gun already held. An empty rack would put it in slot 1 and the
         # press of 2 would select nothing.
-        res = sc.give_many(wanted, switch=any(k in ROSTER for k in wanted))
+        res = sc.give_many(wanted, switch=any(k in ROSTER for k in wanted),
+                           close=close)
         if not res['ok']:
             print(f"      [!] spawner: {res['error']} — re-reading the layout "
                   f"and retrying once")
             sc.menu = None
             sc.sync()
             res = sc.give_many(wanted,
-                               switch=any(k in ROSTER for k in wanted))
+                               switch=any(k in ROSTER for k in wanted),
+                               close=close)
         if not res['ok']:
             print(f"      [!] spawner: {res['error']}")
         elif verbose:
@@ -503,7 +537,11 @@ def spawn_missing(sc, keys, backpack=None, verbose=True):
         # Closed on the way out because the caller's next move is the Tab
         # screen, and the spawner panel swallows Tab. give_many opens it
         # itself, so nothing here opens it.
-        if not sc.ensure_panel(False):
+        #
+        # `close=False` skips it because the caller's next move is ANOTHER
+        # trip through this same function; the split above owns the close for
+        # both of them, in a finally, so the docstring's "always" survives.
+        if close and not sc.ensure_panel(False):
             print("      [!] spawner panel would not close")
             return False
     return res['ok']

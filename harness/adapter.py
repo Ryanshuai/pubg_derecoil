@@ -531,7 +531,31 @@ def _reach(rec, rigging, weapon, cfg):
 # ⚠ AND IT SITS AT INDEX 2 ON PURPOSE. At the END of the cycle a three-magazine
 # cell would fire one arm only and fail closed on `agree_arms=1` -- correct, and
 # useless. Here the second arm appears by magazine 3 whatever `--mags` is.
-ARM_PLAN = (True, True, 0.5, True, True)
+ARM_PLAN = (True, True, 0.8, True, True)
+
+# ⚠ 0.8 AND NOT 0.5, AND THE REASON IS A MEASUREMENT RATHER THAN A PREFERENCE.
+# The vector's first full round put six arms in one pool spanning 0..913 counts
+# and the cells came apart at 8.1-8.8%, with y_true rising MONOTONICALLY with
+# the commanded compensation and the tracker alive on every frame. The slope
+# grows with t -- 0.010/0.028/0.031 at t = 1.2/1.6/2.0 s on comp_smg, and
+# 0.030/0.047/0.077 on flash_smg -- so it is not a gain error, which would be
+# flat in t. It is MODEL.md 6.1's open item (delivery rising with hold
+# duration), reproduced on a second gun under far better conditioning.
+#
+# ⚠ SO THE GATE WAS RIGHT AND THE ARM SPACING WAS MINE. A wide spread makes the
+# out-of-loop check re-discover a KNOWN, unexplained, already-recorded effect in
+# every cell, and no attachment gets measured. Narrowing it does not hide the
+# effect -- the store keeps every magazine and the slope is measurable from
+# them whenever anyone asks -- it stops paying for that discovery once per cell.
+#
+# What the gate still catches at 0.8: the fitter cannot arrange agreement
+# between two arms whatever their spacing, so a wrong curve, a wrong gun, a
+# mislabelled config or a firmware that plays something other than what was
+# uploaded all still show up. That is what it is for.
+#
+# ⚠ AND IT IS A CHOICE WITH A COST. At 0.8 the check cannot see an arm-dependence
+# smaller than a few percent, which is the size of the thing just measured. The
+# effect therefore needs its own probe rather than riding along here.
 
 
 def _blank(cell):

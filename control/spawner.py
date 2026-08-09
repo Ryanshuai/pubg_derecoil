@@ -1415,10 +1415,23 @@ class SpawnerControl(Driver):
                     f'panel up and collapsed?')
         return None
 
-    def give_many(self, keys, switch=True, weapon_times=1):
+    def give_many(self, keys, switch=True, weapon_times=1, close=True):
         """L2 — THE entry point: name keys, this opens the panel, orders the
         list, clicks, and closes the panel again. give() is the one-key
         form and does NOT open anything for itself.
+
+        ⚠ `close=False` LEAVES THE PANEL UP, for a caller making two trips in a
+        row. It exists because control/stock.spawn_missing has to split parts
+        and gun into two trips for a reason about CLICK ORDER (a gun spawned
+        alongside its parts keeps its factory magazine) — and paying a close
+        and a re-open between them buys nothing: the panel state is not what
+        the ordering is about. See spawn_missing.
+
+        ⚠ AND IT IS REFUSED TOGETHER WITH `switch`, which is not a style rule.
+        switch_to_slot2() presses a NUMBER KEY, and keys go to whatever screen
+        is up — that is why the close below sits BEFORE it rather than after.
+        A caller asking for both would silently spawn the gun and then not
+        select it, which reads downstream as "the spawn did not land".
 
         ⚠ ok=True MEANS EVERY CATEGORY WAS PROVED OPEN, NOT THAT ANYTHING
         ARRIVED. No entry click is ever read back: one sent faster than
@@ -1443,6 +1456,11 @@ class SpawnerControl(Driver):
         collapsed panel is not a no-op — it is a click on whatever is drawn
         there instead.
         """
+        if switch and not close:
+            raise ValueError('give_many(switch=True, close=False): '
+                             'switch_to_slot2 presses a number key and the '
+                             'panel swallows it — the panel must come down '
+                             'first (see the docstring)')
         steps = plan(keys, weapon_times=weapon_times)
         if not steps:
             return {'ok': True, 'steps': [], 'clicks': 0, 'error': None}
@@ -1553,7 +1571,15 @@ class SpawnerControl(Driver):
         #
         # Before switch_to_slot2, not after: that presses a number key, and
         # keys go to whatever screen is up.
-        if not self.ensure_panel(False):
+        #
+        # ⚠ AND `close=False` SKIPS IT, which is safe only because `switch` is
+        # refused alongside it at the top of this method. The categories are
+        # left EXPANDED for the next trip, and that is handled rather than
+        # ignored: give_many's own _collapse_all() above reads before it
+        # clicks, so trip two starts from the root either way. Closing used to
+        # do that reset for free (the paragraph above), which is exactly why
+        # skipping the close means the collapse has to earn its keep.
+        if close and not self.ensure_panel(False):
             err = err or 'the item-spawner panel would not close'
         if err is None and switch and any(s['kind'] == 'weapon' for s in steps):
             self.switch_to_slot2()
