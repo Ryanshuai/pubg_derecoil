@@ -107,6 +107,11 @@ plan-order = "python tools/test_plan_order.py"
 # a step written in Markdown is invisible to every import graph.
 pointers = "python tools/check_pointers.py"
 fit-time = "python calibration/fit_time_curve.py --selftest"
+# What is measured, what is guessed, what has never been fired. A REPORT, not
+# a gate — it exits 0 by construction. It earns a task because its answer is a
+# function of the sample store and moves with every magazine, so unlike the
+# probes this directory deleted, it cannot be written down once and retired.
+coverage = "python tools/coverage.py"
 # What a magnified optic does to the counts a gun needs. `scope` reads the
 # store and stops (no game, no hardware); the live run wants --weapon and fires.
 # ⚠ The scope factor is DERIVABLE from config.RECOIL_SIGHT_PROFILES, so this
