@@ -75,10 +75,15 @@ from control.locations import at_ground
 # character and the only backpack ever spawned here is the level 3.
 BACKPACK_DETAIL_MIN = 300
 
-# Bound on tidy()'s repeat-until-clean loop. Each pass drops every duplicate it
-# can see, so this only matters for a backpack far deeper than the 12 visible
-# rows, or for a drop that silently does nothing.
-TIDY_PASSES = 6
+# Bound on tidy()'s loop, counted in DROPS rather than in passes, because a
+# pass is now exactly one drop -- see tidy() for why. Two full windows: enough
+# to clear a pack deeper than the list can show, small enough that a drag which
+# silently does nothing costs seconds rather than a night.
+#
+# it was `TIDY_PASSES = 6` with each pass dropping everything it could see,
+# and that is the arithmetic that made it a bound on nothing: one pass could
+# issue nine drags against row numbers read before the first of them.
+TIDY_DROPS = 24
 
 # The level 3 pack, and the only one this range ever spawns. It is a default
 # rather than a caller's argument because every caller passed the same value —
@@ -292,19 +297,37 @@ def tidy(ac, want, drop_unwanted=True, verbose=True, keep=1,
          leave='shut'):
     """L1 — One bounded sweep: drop every duplicate and unwanted part it can
     SEE. Not "the pack is clean" — the list shows 12 rows, nothing scrolls
-    it, and TIDY_PASSES is the only stop. restock() is the caller.
+    it, and TIDY_DROPS is the only stop. restock() is the caller.
 
     ⚠ `leave` DEFAULTS TO 'shut', so calling this mid-kitting closes a Tab
     screen somebody upstream is holding and the next read re-opens it 0.2 s
     later. Pass leave='as-found' inside a tab_up() session.
 
-    Drops bottom-up within a pass: pulling row i out shifts only the rows
-    below it, so a descending order stays valid without re-reading between
-    drags. Between passes the screen IS re-read, because rows from further
-    down the backpack scroll up into view as the ones above leave.
+    ONE READ, ONE DRAG, ALWAYS. Every iteration re-reads the pack, picks the
+    single bottom-most target, drags it and checks that it went. Asked for
+    directly after the row-shift showed up in a log: the table is stale the
+    moment the first drag lands, so the check belongs BEFORE each drag rather
+    than after the batch.
+
+    THE PARAGRAPH THIS REPLACES WAS AN ARGUMENT, AND IT WAS WRONG IN PRACTICE:
+
+        Drops bottom-up within a pass: pulling row i out shifts only the rows
+        below it, so a descending order stays valid without re-reading between
+        drags.
+
+    The reasoning is sound for a static list and this list is not one. Rows
+    scroll up from below the window as rows above leave -- the same docstring
+    says so two paragraphs down -- and any drag that does not land leaves every
+    address below it describing a different item. On 2026-08-09 the aug's
+    brake_ar cell dropped two items from a nine-row pack and came back without
+    `half_grip`, which neither `dropping` line ever named.
+
+    AND IT COSTS ALMOST NOTHING. read_stock(close=False) keeps the screen up,
+    so an extra read is a classify pass and not a Tab cycle. Four surplus parts
+    is four reads, on a path that already spends seconds per drag.
 
     A pass that drops nothing ends it. Nothing else does, short of
-    TIDY_PASSES.
+    TIDY_DROPS.
 
     BOTH EARLIER STOP CONDITIONS WERE WRONG, and for one reason: the Tab list
     shows twelve rows while the backpack holds far more, so anything read off
@@ -328,7 +351,7 @@ def tidy(ac, want, drop_unwanted=True, verbose=True, keep=1,
     So there is no view-derived stop condition here any more. The drags do
     land -- tools/probe_backpack_depth.py settles it by dropping exactly ONE
     item and watching a previously invisible row take its place -- and
-    TIDY_PASSES is the bound.
+    TIDY_DROPS is the bound.
 
     `leave` DECIDES THE END STATE, and it used to be hard-coded shut. The
     reason given was "the caller's next move is the spawner panel or the
@@ -349,8 +372,9 @@ def tidy(ac, want, drop_unwanted=True, verbose=True, keep=1,
     """
     dropped = 0
     stock = None
+    said = Counter()
     try:
-        for _ in range(TIDY_PASSES):
+        for _ in range(TIDY_DROPS):
             stock = read_stock(ac, close=False)
             if stock is None:
                 return dropped, None
@@ -362,38 +386,30 @@ def tidy(ac, want, drop_unwanted=True, verbose=True, keep=1,
             if not targets:
                 break
             before = _view_sig(stock)
+            # THE BOTTOM-MOST ONE, AND ONLY IT. Bottom-most so that the
+            # rows this read described above it are the least disturbed -- but
+            # the loop no longer RELIES on that, because it reads again before
+            # the next drag.
+            item = max(targets, key=_row_of)
             if verbose:
-                names = Counter(t.key for t in targets)
-                print(f"      [stock] dropping {len(targets)}: "
-                      + ', '.join(f'{k}x{n}' if n > 1 else k
-                                  for k, n in sorted(names.items())))
-            # ⚠ ONE DRAG, ONE READBACK, and the return value is no longer
-            # thrown away. discard() drags and confirms by the row counts, and
-            # this loop ignored that entirely -- `dropped` counted gestures,
-            # not departures. The operator's rule is exactly this shape:
-            # 「拖拽一次一验，连续拖完统一读回会把时序问题伪装成几何问题」.
-            #
-            # And the cost is on record. On 2026-08-09 the aug's brake_ar cell
-            # read a pack of 9 named rows + 1 unnamed -- TWO free slots in a
-            # twelve-row window, nowhere near full -- dropped two items, and
-            # came back without `half_grip`, which had been there and was
-            # never named in either `dropping` line. Then STILL SHORT fired and
-            # blamed a full backpack. Every number in that chain was reported;
-            # the one nobody looked at was whether each drag did what it said.
-            #
-            # A drag that did not land makes every row index below it stale, so
-            # the pass STOPS rather than continuing to drag against a list that
-            # has moved. The next pass re-reads, which is what passes are for.
-            for item in sorted(targets, key=_row_of, reverse=True):
-                rec = ac.discard(item)
-                ok = rec.get('ok') if isinstance(rec, dict) else bool(rec)
-                if not ok:
-                    if verbose:
-                        print(f"      [stock] the drag for {item.key} did not "
-                              f"land — stopping this pass rather than dragging "
-                              f"against row numbers that may have moved")
-                    break
-                dropped += 1
+                said[item.key] += 1
+                n = len(targets)
+                more = f", {n - 1} more to look at after this" if n > 1 else ""
+                again = f" (#{said[item.key]})" if said[item.key] > 1 else ""
+                print(f"      [stock] dropping {item.key}{again}{more}")
+            rec = ac.discard(item)
+            ok = rec.get('ok') if isinstance(rec, dict) else bool(rec)
+            if not ok:
+                # REPORTED AND STOPPED, not retried here. discard() already
+                # retries the gesture; a miss that survives that is not a
+                # timing hiccup, and dragging again at a number this read
+                # produced is exactly the move that lost half_grip.
+                if verbose:
+                    print(f"      [stock] the drag for {item.key} did not "
+                          f"land - stopping. Every row number from this read "
+                          f"is now suspect, and the next caller re-reads.")
+                break
+            dropped += 1
             stock = read_stock(ac, close=False)
             if stock is None:
                 return dropped, None
@@ -416,14 +432,13 @@ def tidy(ac, want, drop_unwanted=True, verbose=True, keep=1,
             # cell failed with `magazine reads ''` while the magazine was in
             # the backpack the whole time.
             #
-            # TIDY_PASSES already bounds the loop, so a drag that genuinely
+            # TIDY_DROPS already bounds the loop, so a drag that genuinely
             # stopped landing costs a handful of passes and says so every time
             # rather than being guessed at once.
             if _view_sig(stock) == before and verbose:
-                print("      [stock] the twelve visible rows read the same "
-                      "after dropping "
-                      f"{len(targets)} — expected when the pack is deeper "
-                      "than the window; continuing")
+                print(f"      [stock] the {INV_ROWS} visible rows read the "
+                      f"same after dropping {item.key} - expected when the "
+                      f"pack is deeper than the window; continuing")
     finally:
         if leave == 'shut':
             ac.ensure_tab(False)
