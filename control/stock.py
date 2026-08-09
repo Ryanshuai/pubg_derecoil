@@ -675,6 +675,33 @@ def weapon_in_hand(timeout_s=3.0):
     The ammo counter is present-or-not: digits there mean a weapon is out and
     the weapon HUD is drawn, which is the same condition the posture and fire
     mode readers need.
+
+    ⚠ AND THE PARAGRAPH ABOVE HAS A COUNTEREXAMPLE, MEASURED 2026-08-08: AN
+    EMPTY MAGAZINE. PUBG draws the count RED at 0 and AmmoDetector's templates
+    are white digits, so classify() answers None on a crop that plainly shows a
+    "0" -- the digit is present, the reader cannot see it, and this function
+    then reports NO WEAPON while the gun is in hand and the HUD is fully drawn.
+
+    Confirmed against two independent readings taken at the same moment:
+
+        rack read (Tab)          {1: 'mp5k', 2: None}      one gun, present
+        ac.hold(1)               True
+        the ammo crop            a large red 0             (saved to disk)
+        AmmoDetector.classify    None
+
+    What it costs: ensure_weapon_in_hand() proves the hold with this function,
+    so a gun that has been fired dry reads as "racked but would not come to
+    hand" and REFUSES -- correctly, given what it was told. Sixteen magazines
+    drain the reserve, and then every caller downstream (posture, fire mode,
+    the gun name, the whole timed-collection path) stops. It cost a session's
+    worth of detour tonight and the message pointed at the rack, which was fine.
+
+    "Present-or-not" was the right idea; the mistake is that PRESENCE WAS
+    TESTED THROUGH A READER THAT HAS ITS OWN BLIND SPOT, and that blind spot is
+    correlated with a state the caller cares about. The fix is a second present-
+    signal that does not go through digit templates (the weapon HUD's own
+    plate/ink, which is what drag-log already uses to tell "gun dropped" from
+    "slot emptied"), or teaching AmmoDetector the red glyphs. Neither is done.
     """
     from detector.ammo_detector import AmmoDetector
     from capture.cropper import capture_screen

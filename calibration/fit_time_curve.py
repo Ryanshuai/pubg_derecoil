@@ -783,11 +783,17 @@ def by_session(mags, gap_min=SESSION_GAP_MIN, min_mags=SESSION_MIN_MAGS,
             print('  That excess appears ONLY where the answer is measurement '
                   '(|y_obs| is the whole of y_true there and near zero on the '
                   'compensated arm), which is where a MULTIPLICATIVE error '
-                  'lands and an additive one could not. It is K, drifting per '
-                  'session. MODEL.md sec.4.2.')
+                  'lands and an additive one could not. MODEL.md sec.4.2.')
+            print('  ⚠ THIS IS THE SCATTER, NOT THE ARMS\' MEAN OFFSET, and '
+                  'they are different quantities. Naming this one K and then '
+                  'predicting the mean offset from it missed by 5.8 sigma '
+                  '(sec.4.2.2): a grid probe pinned K to +-0.02% in the same '
+                  'session and it cannot produce the offset. What this line '
+                  'supports is "multiplicative", not "K".')
             print('  -> collect on the COMPENSATED arm. The closer the curve, '
                   'the smaller |y_obs|, the less of that drift reaches the '
-                  'answer. It is a nulling measurement.')
+                  'answer. It is a nulling measurement, and this holds for any '
+                  'multiplicative error whatever it turns out to be.')
 
     # ── shape, per arm, so pooling's cost is separated from the level's ──
     _shape_by_session(cells, arms, min_mags)
