@@ -173,6 +173,21 @@ def _agreement_band():
     # A burst so short there is no band left. Fails CLOSED, like one arm.
     arms_case('a 1.10 s burst leaves no band and refuses',
               [_Mag(900, 1.10, 400), _Mag(450, 1.10, 400)], 1, True)
+    # ⚠ AN ARM IS A STRENGTH, NOT AN EXACT TOTAL. The second arm is a SCALE of
+    # the current fit and the fit moves every visit, so keying on the commanded
+    # total made every scaled magazine its own arm of one -- and an arm of one
+    # has no median to absorb a bad magazine. Measured on the aug's bare cell:
+    # seven arms agreeing to +-2% and one lone magazine 31% high, reported as a
+    # 31.9% arm disagreement. Here four nearly-equal totals must read as ONE arm.
+    arms_case('near-equal totals are ONE arm, not four',
+              [_Mag(1000, 3.81, 1400), _Mag(1004, 3.81, 1400),
+               _Mag(1009, 3.81, 1400), _Mag(1013, 3.81, 1400),
+               _Mag(500, 3.81, 1400)], 2, False, 2.4)
+    # ⚠ AND THE BUCKET MUST STILL SEPARATE WHAT THE PLAN ACTUALLY FIRES. 0.8 vs
+    # 1.0 is eight times wider than the bucket, so a real second arm survives it
+    # -- otherwise this would be a loosening wearing a fix's clothes.
+    arms_case('...but 0.8 and 1.0 stay two arms',
+              [_Mag(1000, 3.81, 1400), _Mag(800, 3.81, 1400)], 2, False, 2.4)
     # ⚠ MEDIAN, NOT MINIMUM. One trajectory truncated by a lost tracker must
     # not pull the band in on the five good ones -- with min() this cell would
     # collapse to 1.15 and refuse.

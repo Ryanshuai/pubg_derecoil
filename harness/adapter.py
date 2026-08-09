@@ -712,9 +712,36 @@ def _agreement(pool):
     from harness.verdict import AGREE_BAND_S, AGREE_BAND_EDGE_S, AGREE_BAND_MIN_S
 
     lo, hi = AGREE_BAND_S
+    # ⚠ AN ARM IS A COMPENSATION STRENGTH, NOT A BYTE-IDENTICAL CURVE. This
+    # keyed on the exact commanded total, which was fine while the second arm
+    # was ZERO -- every no-comp magazine landed in one group and the group's
+    # MEDIAN protected it from a single bad magazine.
+    #
+    # The moment the second arm became a SCALE of the current fit, that broke:
+    # the fit moves every visit, so 0.8 x it lands on a slightly different total
+    # each time and every scaled magazine became its OWN arm of one. Measured on
+    # the aug's bare cell within the hour:
+    #
+    #     arm 1397 n=1  1504.8      arm 1746 n=4  1140.9
+    #     arm 1412 n=1  1163.5      arm 1765 n=4  1181.3
+    #     arm 1414 n=1  1136.8      arm 1768 n=4  1142.4
+    #     arm 1422 n=1  1172.4      arm 1778 n=4  1150.4
+    #
+    # Seven of eight agree to +-2% and ONE magazine reads 31% high -- alone in
+    # its arm, so nothing medians it away, and the cell failed at 31.9%. The
+    # check was reporting one magazine's noise as an arm disagreement.
+    #
+    # ⚠ THIS IS NOT A LOOSENING. Bucketing by strength RESTORES the protection
+    # the zero arm had by accident; what a wide bucket cannot do is hide a real
+    # arm difference, because two genuinely different strengths still land in
+    # different buckets. A tenth of the pool's median is far finer than the 0.8
+    # vs 1.0 the plan actually fires.
+    totals = [sum(float(k.get('dy', 0.0)) for k in (m.curve or [])) for m in pool]
+    ref = sorted(t for t in totals if t) or [1.0]
+    ref = ref[len(ref) // 2]
     groups = {}
-    for m in pool:
-        key = int(round(sum(float(k.get('dy', 0.0)) for k in (m.curve or []))))
+    for m, tot in zip(pool, totals):
+        key = round(tot / ref, 1) if ref else 0.0
         groups.setdefault(key, []).append(m)
     if len(groups) < 2:
         return len(groups), None, None
