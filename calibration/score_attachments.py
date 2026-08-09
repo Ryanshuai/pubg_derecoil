@@ -25,7 +25,7 @@ translucent panel before a single pixel of it reaches the screen. Every
 extract has since been deleted from the tree — a rendering the reader never
 sees kept winning the fine pass on crops it described worse.
 
-    training_data/pubg_assets/Item/Attachment/
+    data/templates/pubg_assets/Item/Attachment/
         Item_Attach_Weapon_Lower_Foregrip_C.solved.png   48x48, weapon tile
         Item_Attach_Weapon_Lower_Foregrip_C.row.png      80x80, 库存 list row
 

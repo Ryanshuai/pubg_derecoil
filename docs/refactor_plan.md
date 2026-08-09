@@ -32,7 +32,7 @@ a/b 已落地 2026-08-03：`detector/snapshot.py` 的 `snap()` + sidecar，回�
 （`pixi run snaps`）。裁剪图第一次进了管线。
 
 **c. `tools/build_templates.py`** — 扫所有 `kind=crop` 且标签是某个名字的图 →
-按名字聚合、对齐取中位数 → 写 `training_data/<detector>/<名字>.png`。接上
+按名字聚合、对齐取中位数 → 写 `data/templates/<detector>/<名字>.png`。接上
 `calibrate-template` skill：skill 负责采，这个负责入库。
 
 ⚠ **要等真值裁剪图攒够才有意义，现在只有 3 张**（2026-08-07 复核，仍是 3 张）。
@@ -230,12 +230,8 @@ PYTHONIOENCODING=utf-8 pixi run python temp_debug/find_dead.py [--methods]
 
 ## 用一批同源样本当真值，会漏掉它们拍不到的那个状态
 
-`PanelState.expanded` 只能装**一个** `(col,row)`，而 `expansions()` 返回列表。
-于是**只要 col1 开着，`at(2,1)` 永远是 False**——`goto()` 以为那一击失败了，
-collapse 全部再点一次。
-
-实测代价（修复前）：**进 col2 恒定 2 击 8/8，反方向 1 击 8/8**。那个不对称跟
-菜单规则毫无关系，是一行代码把列表塞进了单个槽位。
+案情和实测代价在 `docs/game_quirks.md`（「刷新器菜单：每列各留一个展开」那条的
+「顺带查出的 bug」），这里只留它作为**方法论样本**的那一面：
 
 **它藏这么久的原因写在代码注释里**：「42 帧真值里从没见过两个同时展开」——
 而**那 42 帧全部是从折叠态展开的**，这个状态它们一次都拍不到。

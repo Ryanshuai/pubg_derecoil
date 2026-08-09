@@ -140,8 +140,20 @@ def check(path):
 # and config.py's own comment says why that is the dangerous shape: "dl_models/
 # is not on any layering rule and not walked by most audits, so 'some directory
 # over there uses these' was unfalsifiable from where anyone was standing."
+# ⚠ THE TRAILING `(?!\w)` IS LOAD-BEARING AND IT WAS MISSING, which held this
+# gate RED on a METHOD CALL. `geometry.cut()` in config.py matched as far as
+# the `.c` and was reported as a dead C source file -- a suffix nothing under
+# these directories has ever had -- on a line whose function is very much
+# alive. (The path is deliberately not spelled out here: doing so makes this
+# comment a real dangling reference, which is the gate working.)
+#
+# That is the failure this module's own docstring warns about two paragraphs
+# down, arriving from the other side: "a gate nobody can get green is a gate
+# everybody learns to ignore". It had three findings on 2026-08-09 and all
+# three were its own, so the one thing it exists to catch would have been
+# invisible underneath them.
 _REF = re.compile(r'\b((?:calibration|tools|harness|control|detector|press|'
-                  r'dl_models)/[\w/]+\.(?:py|c|h|md))')
+                  r'dl_models)/[\w/]+\.(?:py|c|h|md))(?!\w)')
 
 
 def dangling_refs(path, root):
@@ -189,6 +201,39 @@ def dangling_refs(path, root):
 # (the file doing the naming, what it names) so an exemption cannot leak to a
 # second citation of the same path somewhere nobody thought about.
 REF_DEBT = {
+    # ── the two gates' own negative fixtures ──
+    # These are not citations of anything. They are paths chosen BECAUSE they
+    # do not exist, so that a check can be shown to fire; the file existing
+    # would silently disarm the case. Exempting them is the only alternative to
+    # this gate being permanently red on two lines whose whole content is
+    # "this path is absent" -- the failure its own docstring names.
+    ('tools/check_layering.py', 'tools/x.py'): Reason(
+        'rule 15 self-test writes a temp file and judges it under a synthetic '
+        'relative path. The path is never opened; only its SHAPE is used, to '
+        'put the fixture inside the rule\'s scope.',
+        CODE,
+        lambda: defines('tools/check_layering.py', 'check_escape_hatch')),
+    ('tools/check_pointers.py', 'detector/nonexistent.py'): Reason(
+        'the case labelled "the near miss it must NOT swallow": a file that is '
+        'absent inside a directory that is present. check_pointers judges the '
+        'containing directory, so this fixture is the one that proves it does '
+        'not silently pass on file existence.',
+        CODE,
+        lambda: defines('tools/check_pointers.py', 'selftest')),
+
+    # ⚠ AND THIS FILE CITES BOTH OF THEM, one line above each Reason. That is
+    # the gate catching its own exemption ledger, which is the behaviour to
+    # keep: an exemption that could be written without being declared would be
+    # a hole the size of "anything I mention while excusing something".
+    ('tools/check_names.py', 'tools/x.py'): Reason(
+        'the entry above has to name what it exempts.',
+        CODE,
+        lambda: defines('tools/check_names.py', 'dangling_refs')),
+    ('tools/check_names.py', 'detector/nonexistent.py'): Reason(
+        'the entry above has to name what it exempts.',
+        CODE,
+        lambda: defines('tools/check_names.py', 'dangling_refs')),
+
     ('calibration/build_kit_factors.py', 'calibration/analyse_factors.py'): Reason(
         'names the module whose deletion is why this builder cannot build. '
         'There is no "where the number lives now" to point at instead: the '

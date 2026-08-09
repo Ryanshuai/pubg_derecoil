@@ -1,9 +1,35 @@
 """Posture detector — standing/crouching/prone from HUD icon.
 
 Pure CV: HSV bright-pixel mask ∩ (Canny edges ∪ Sobel edges), then IoU match
-against the three canonical icon templates from game assets.
+against the three icon masks in data/templates/pubg_assets/posture/.
+~0.5 ms per frame on CPU.
 
-Validated 99.42% accuracy on 1561 training samples, ~0.5ms per frame on CPU.
+⚠ `pubg_assets/` IS A LEGACY DIRECTORY NAME, NOT A PROVENANCE CLAIM. It is
+"what the code loads" (data/templates/README.md); the game art this repo once
+matched against was deleted, and this docstring claimed "from game assets"
+long after that. Nothing here reads an art file.
+
+THIS IS THE ONE PLACE THE ACCURACY NUMBER LIVES. It used to be stated in five
+(here, detector/CLAUDE.md, data/templates/README.md, control/gun.py,
+tools/probe_posture_trace.py) as two different numbers -- "99.42% on 1561
+samples" and "0.993 over 1714 labelled crops" -- and NEITHER corpus is on
+disk, so neither could be recomputed. Both are withdrawn.
+
+What replaces them is reproducible, because the samples are checked in
+(calibration/artifacts/posture/traces/*/trace.jsonl, 5 runs). Ground truth
+there is the CAMERA, not a label: probe_posture_trace confirms each transition
+by view displacement and never reads this detector to decide what happened.
+
+    in ADS, >100 ms after the posture key      2517 / 2517   = 100.00%
+        standing 775/775  crouching 869/869  prone 873/873, zero confusion
+    including the first 100 ms                              =  98.27%
+        every miss is the icon not yet updated, not a misread
+
+⚠ AND THE CONDITION MATTERS MORE THAN THE NUMBER: the icon is only DRAWN in
+ADS. Over the same traces, readable 5132/5267 = 97.4% with the scope up and
+0/3133 without it. No accuracy figure means anything out of ADS, and no
+quantity of samples would change that -- config.py's retry_ms/retries exist
+for exactly this.
 """
 import os
 

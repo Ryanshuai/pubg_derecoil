@@ -7,20 +7,17 @@
 WHY ENUMERATE INSTEAD OF STORING PER-SLOT COEFFICIENTS.
 
 Because the slots are NOT orthogonal, and that is measured, not assumed.
-calibration/build_kit_factors.py settled it on eight weapons and 28 cells:
 
-  * slots multiply on ARs (<=2.8%) and FAIL on SMGs -- mp5k
-    muzzle+grip+stock is +17.0% off the product, vector +10.1%
-  * the same part is a different number on different weapons -- comp_smg is
-    0.594 on the mp5k and 0.711 on the vector, 5.5 sigma apart
-  * WHICH edge couples is per-weapon too: muzzle x grip for the mp5k, but the
-    vector fails on muzzle+stock and grip+stock while muzzle x grip multiplies
-  * posture x kit interacts with OPPOSITE SIGNS on two ARs (m416 +13.8/+21.6%,
-    m762 -6.2/-7.0%, all >3.7 sigma)
+⚠ THE FOUR MEASUREMENTS THAT SETTLE IT ARE IN calibration/build_kit_factors.py's
+HEADER AND ARE NOT REPEATED HERE. That file is the one that took them (eight
+weapons, 28 cells, 2026-08-05) and the one that writes the table they justify;
+this file only lays the grid out. A second copy of four numbers is two things
+free to drift, and the sigma figures are exactly the kind that get rounded on
+the way past.
 
-A product of per-slot numbers cannot represent any of that. A table can. So
-the table has a row for every combination the weapon can physically wear, and
-a measurement replaces an estimate wherever one exists.
+A product of per-slot numbers cannot represent what those four say. A table
+can. So the table has a row for every combination the weapon can physically
+wear, and a measurement replaces an estimate wherever one exists.
 
 WHAT THIS FILE DOES NOT DO. It does not fit, average, merge or decide
 anything. It lays out the grid and marks each cell's provenance. Deciding how

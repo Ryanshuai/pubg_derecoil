@@ -4,7 +4,7 @@ Matches white text in gun name region against OCR templates.
 
 A weapon may have more than one template, because the plate is whatever the
 game's language setting prints: 自动装填步枪 in Chinese, SLR in English. Every
-variant lives in training_data/ocr_white/ under the same weapon code with a
+variant lives in data/templates/ocr_white/ under the same weapon code with a
 tag after it, and the best-scoring one wins:
 
     slr.png       either the sole variant, or the default one

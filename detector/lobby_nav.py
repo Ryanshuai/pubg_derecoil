@@ -19,7 +19,7 @@ is stuck there.
 
 Tabs are FOUND by projection, per calibrate-screen: sum the bright mask down y
 over the bar's strip, and the runs are the labels. They are NAMED by matching
-each run against one stored mask per label — `training_data/pubg_assets/lobby/
+each run against one stored mask per label — `data/templates/pubg_assets/lobby/
 tabs/<bar>_<NAME>.<lang>.png`, built by `calibration/build_lobby_tab_templates.py`.
 
 NAMING USED TO COME FROM POSITION, and that broke on the Chinese client

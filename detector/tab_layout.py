@@ -209,7 +209,7 @@ PARK_XY = (200, 1380)
 # Measured: open 0.922..1.000, closed 0.000..0.352 over 5 screens and 96 ADS
 # frames, threshold 0.60.
 #
-# Templates are per language and live in training_data/pubg_assets/tab/.
+# Templates are per language and live in data/templates/pubg_assets/tab/.
 # Rebuild them with tools/probe_tab_anchor.py --write after a game update or
 # a language change.
 # ════════════════════════════════════════════════════════════

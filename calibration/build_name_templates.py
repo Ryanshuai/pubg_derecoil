@@ -119,7 +119,7 @@ def main():
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--write', action='store_true',
-                    help='install into training_data/ocr_white/')
+                    help='install into data/templates/ocr_white/')
     ap.add_argument('--holdout', type=int, default=3,
                     help='backgrounds per weapon kept out of the build and '
                          'used to score it (default 3)')

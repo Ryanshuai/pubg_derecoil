@@ -9,7 +9,7 @@ model of what either weapon looks like.
 
 ⚠ It used to ALSO run a four-hypothesis alpha-unmix (white/red x held/stowed)
 against the weapon's own icon, and that machinery is gone. It was measured on
-the 254 labelled pairs in training_data/highlight_eval and contributed
+the 254 labelled pairs in data/templates/highlight_eval and contributed
 NOTHING: 254/254 with it, 254/254 without, and 6x faster without (0.60 ms per
 pair against 3.6). The ALIGN_JITTER knob it was wired through went with it —
 that knob's own comment already recorded three jitter settings scoring

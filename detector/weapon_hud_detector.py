@@ -11,7 +11,14 @@ their silhouettes overlap at IoU 0.549 -- and its class list had drifted eight
 weapons away from the roster, including calling the Kar98k `98k`, a name
 nothing downstream recognises.
 
-HOW IT WORKS, and every step of it was measured against the alternative:
+⚠ THE NUMBERS BEHIND EVERY CHOICE BELOW ARE IN calibration/build_weapon_hud_bank.py
+AND ARE NOT REPEATED HERE. That file ran the held-out comparison (art 0.489 ->
+solved templates -> real exemplars -> +PCA) and writes the bank this loads, so
+it is where a re-measurement would land. Anyone about to "improve" this by
+feeding it the game's own art should read that header first; the answer is
+already there, and it is the second-largest gap this repo has measured.
+
+HOW IT WORKS:
 
   feature    dewhite (background subtracted, see dl_models/icon_merging) then
              divided by the crop's own p99. The HUD draws the icon at alpha
@@ -25,11 +32,6 @@ HOW IT WORKS, and every step of it was measured against the alternative:
              at 64d, the difference being noise the projection discards. Also
              53 MB -> 3 MB and a 170x smaller matmul.
   verdict    cosine to the nearest exemplar of each weapon, with a margin gate.
-
-The game's own extracted art was tried first and scores 0.489. It is the INPUT
-to the game's compositing and the detector only ever sees the output -- the
-same finding as the attachment bank, and the reason no game-file art is left
-anywhere in this tree.
 
 ⚠ THE BANK ONLY KNOWS WEAPONS IT HAS FRAMES OF. A weapon with no captures
 cannot be read, and will be answered as the nearest weapon that does have

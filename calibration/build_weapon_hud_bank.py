@@ -1,6 +1,6 @@
 """Build the weapon-HUD exemplar bank from labelled screen captures.
 
-Writes training_data/weapon_hud_bank.npz: a PCA basis plus the projection of
+Writes data/templates/weapon_hud_bank.npz: a PCA basis plus the projection of
 every reference frame, which is what detector/weapon_hud_detector.py loads.
 
 WHY EXEMPLARS AND NOT ONE TEMPLATE PER WEAPON. The HUD draws each icon at

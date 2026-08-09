@@ -1,11 +1,11 @@
 """When is the posture icon readable, and does it agree with the character?
 
-WHY NOT MORE ICON SAMPLES. Recognition is not the problem. Over the 1714
-labelled crops the current reader scores 0.993, and three alternatives
-(background-subtracted mask, corpus-solved templates, both) land between 0.993
-and 0.995 — none wins, and none changes the one recorded "failure", because
-that crop is labelled prone and DRAWS A CROUCH. More icons cannot move a
-number that is already right.
+WHY NOT MORE ICON SAMPLES. Recognition is not the problem — the number is in
+detector/posture_detector.py's docstring, and THIS PROBE'S OWN OUTPUT is what
+it now rests on. Three alternatives (background-subtracted mask, corpus-solved
+templates, both) all land within 0.002 of the current reader; none wins, and
+none changes the one recorded "failure", because that crop is labelled prone
+and DRAWS A CROUCH. More icons cannot move a number that is already right.
 
 WHAT IS PROBABLY WRONG IS THE TIMING. config.py reads posture on three events:
 

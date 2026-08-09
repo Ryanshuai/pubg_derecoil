@@ -171,7 +171,7 @@ Muzzle_FlashHider_SniperRifle_C   963.1   ← 第三名，远 45 倍
 21:10:59  mp5k + scope_4x   red_dot -> red_dot           MISS   journal 491
 ```
 
-而 `pixi run drag-log` 说两次失手的**手势都是干净的**：`place 1/-`（一次定住）、`grab±0`（落点零偏差）、`plate 889->898`（枪没掉）。**手势干净而游戏不接 = 拒绝。**
+而 `pixi run drag-log` 说两次失手的**手势都是干净的**（三个字段的实际读数在 `control/CLAUDE.md` 那一节）。**手势干净而游戏不接 = 拒绝。**
 
 ⚠ 由此多出**第三种失败签名**：`reads <旧件>`（游戏拒绝），并列于 `reads ''`（根本没落位）和 `reads '?'`（落位了但认不出）。**它最像本项目的 bug，而分辨它需要同场对照**——不是重读日志，重读日志正是产出那句被推翻的话的办法。
 
@@ -183,7 +183,7 @@ Muzzle_FlashHider_SniperRifle_C   963.1   ← 第三名，远 45 倍
 
 ### `factor_model.md` 进不进 git —— 不进（2026-08-05）
 
-⚠ **这句已经不成立**：2026-08-08 语料搬去 `calibration/artifacts/`，`.gitignore` 跟着搬走，**`docs/` 现在是跟踪的**，这份 checklist 也有版本历史了。唯一单列忽略的是 `docs/model_error_history.md`。
+⚠ **这句已经不成立**——`docs/` 现在是跟踪的，这份 checklist 也有版本历史了。经过和现状归 `calibration/CLAUDE.md`「产物往哪写」那一节持有。
 
 ### vss 的一切 —— 根因不是 vss，是 `build_weapon` 从来不设 `scope`
 

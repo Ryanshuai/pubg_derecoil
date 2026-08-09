@@ -103,10 +103,12 @@ construction — a saturated crop matches every template pixel but fills the
 union too, capping it at `|template|/|crop|` ≈ 0.28. Measured: open
 0.922–1.000, closed 0.000–0.352.
 
-**Do not reach for `TM_CCORR_NORMED`.** Tried on this exact anchor, it
-inverted the problem: negatives 0.985–0.999 against positives 0.887–1.000. A
-normalised correlation over a dark or flat window says nothing about whether
-the strokes are there.
+**Do not reach for `TM_CCORR_NORMED`.** Tried on this exact anchor, it inverted
+the problem — the numbers and the reason IoU bounds the failure case by
+construction are in `tools/probe_tab_anchor.py`'s `anchor_score`, which is the
+function that took them. Not copied here: a measurement with two homes is two
+homes free to drift, and this one is quoted to argue against a change somebody
+will propose again.
 
 **UI text anchors need one template per language.** The same header renders
 `类型` in the old captures and `Type` in the current client. Each scores the
