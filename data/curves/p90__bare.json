@@ -1,6 +1,6 @@
 {
  "weapon": "p90",
- "sight": "INTEGRAL \u2014 the p90 has no scope slot; this file says red_dot and that is wrong",
+ "sight": "integral",
  "posture": "standing",
  "config": {},
  "shots": [
@@ -868,5 +868,5 @@
  "total_counts": 626.924,
  "span_s": 2.89,
  "scaled_by": "NOTHING further. These are final mouse counts; set_seq emits them with no factors.",
- "unusable": "The p90 cannot wear a red dot (SLOTS[\"p90\"] is empty, two frames). This seed was written under --sight red_dot, so its K is another gun's. Kept, not deleted: it is a community guess either way, and deleting it would only hide that the gun was queued at all. It must not be fitted against until the integral optic has a K."
+ "unusable": "The p90 has no scope slot (SLOTS['p90'] is empty, three sources) and its integral optic has no K in RECOIL_SIGHT_PROFILES, so this seed was written under --sight red_dot and its K belongs to another gun. Kept, not deleted: it is a community guess either way. Measuring the p90 starts with calibrate_k for that optic, not with a fit."
 }

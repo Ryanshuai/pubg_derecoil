@@ -124,6 +124,11 @@ class Rigging:
         # {weapon: every part this weapon's configs will ever ask for}. The
         # unit a stocking trip works in -- see _reach.
         self.parts_for = parts_for or {}
+        # ⚠ SET BY A HEAVY RESET, CONSUMED BY _reach. Re-entering the range
+        # empties the rack -- Kitter.find_gun's own docstring says so -- so
+        # after one, "is the gun already here" has a known answer and does not
+        # need asking. See _reach for what asking it cost.
+        self.rack_emptied = False
 
     def close(self):
         for name in ('rig', 'kit', 'session'):
@@ -425,7 +430,27 @@ def _reach(rec, rigging, weapon, cfg):
     # Nothing is inherited by keeping it: want_for pins every controlled slot,
     # filled or empty, so kit.apply below strips whatever the previous config
     # left on. That is the same guarantee the spawn-fresh path relied on.
-    already = kit.find_gun(weapon) is not None
+    # ⚠ A RANGE RE-ENTRY EMPTIES THE RACK, SO DO NOT ASK. 「重进游戏肯定枪没
+    # 了啊」, and Kitter.find_gun's docstring has said the same thing all along:
+    # "range re-entry empties the rack, so 'the first' comes round again every
+    # eviction".
+    #
+    # Asking anyway cost a cell on 2026-08-09. After a HEAVY reset the readback
+    # answered that the p90 was in slot 1 -- SILENTLY, because find_gun prints
+    # only when the slot differs from the one it is already pointing at, and
+    # the previous attempt had pointed it at slot 1. So `already` came back
+    # True, the gun was left out of the spawn batch, and the very next
+    # find_gun in the same cell reported both slots empty. One function, two
+    # opposite answers, a backpack spawn in between, and the claim that decided
+    # it never printed a word.
+    #
+    # The flag is cleared here rather than by reset(), so a reset whose cell
+    # never runs cannot leave it set for a later one.
+    if rigging.rack_emptied:
+        rigging.rack_emptied = False
+        already = False
+    else:
+        already = kit.find_gun(weapon) is not None
     if not already:
         kit.clear_rack()
     # ⚠ THIS CELL'S PARTS, NOT THE WHOLE NIGHT'S, AND THE BACKPACK IS WHY. It
@@ -912,6 +937,13 @@ def reset(rigging, level=LIGHT):
     same thing on purpose rather than by the clock.
     """
     if level >= HEAVY:
+        # ⚠ RECORDED BEFORE THE CALL, not after it. Re-entering the range
+        # empties the rack -- this function's own docstring says so two lines
+        # up -- and a re-entry that fails PART WAY has emptied it just the
+        # same. Setting the flag first means the truth survives the failure;
+        # setting it after would leave `_reach` believing in a rack that a
+        # half-finished re-entry already cleared.
+        rigging.rack_emptied = True
         got, _ = rigging.session.ensure(force=True)
         if not got:
             return False

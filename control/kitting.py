@@ -577,9 +577,17 @@ class Kitter:
 
         for slot, key in sorted(racked.items()):
             if key == weapon:
-                if slot != self.slot:
-                    print(f"      {weapon} is in rack slot {slot}, not "
-                          f"{self.slot} — kitting slot {slot}")
+                # ⚠ SAY IT EVEN WHEN NOTHING MOVED. This printed only when the
+                # slot DIFFERED from the one already pointed at, so "the gun is
+                # already here" -- the claim that decides whether a gun gets
+                # spawned at all -- was silent on exactly the path where it is
+                # most load-bearing. On 2026-08-09 it answered slot 1 on an
+                # empty rack after a range re-entry, said nothing, and the very
+                # next call in the same cell reported both slots empty.
+                where = (f"      {weapon} is in rack slot {slot}"
+                         + (f", not {self.slot} — kitting slot {slot}"
+                            if slot != self.slot else " (already racked)"))
+                print(where)
                 self.slot = slot
                 return slot
 
