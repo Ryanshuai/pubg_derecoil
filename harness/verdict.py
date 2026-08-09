@@ -127,6 +127,19 @@ AGREE_SPREAD_MAX = 0.05
 # says never up, and one of them is lying.
 ADS_FRAC_MIN = 0.30
 
+# The `ads_end` floor, and it is 1.0 rather than a fraction because the two
+# quantities are not the same kind of thing. `ads_frac` is a per-FRAME ratio
+# within one burst, and it reads low under recoil shake — that is why its floor
+# is 0.30. `ads_end_ok` is the fraction of MAGAZINES whose burst ended scoped:
+# a whole magazine, one endpoint each, no shake in it. One magazine out of five
+# ending out of the scope is one magazine analysed with a constant that is
+# wrong by ~3x, and it belongs in the cell's numbers rather than in a tolerance.
+#
+# ⚠ An UNREADABLE end counts against this (adapter counts only `is True`),
+# because "nobody could tell" and "it was fine" are the two states this file
+# exists to keep apart.
+ADS_END_MIN = 1.0
+
 # NOT a target -- a floor under a known defect. Phase-correlation tracking is
 # lost after 3-4 magazines of 5 ("the reference match has wrapped"), so half of
 # every cell is currently thrown away. Raise this as the wrap is fixed; if it
@@ -137,32 +150,12 @@ TRACK_ALIVE_MIN = 0.50
 # tracker eats one or two, so three is what is left on a good night.
 MAGS_MIN = 3
 
-# DERIVED, then checked against real magazines.
-#
-# What is measured is not a fit residual -- interval_from_span uses the two
-# endpoints of the magazine, so its residual is ZERO BY CONSTRUCTION and a
-# gate on it would pass everything. What the harness measures instead is
-# DISAGREEMENT BETWEEN MAGAZINES, which is what that function's own docstring
-# asks the caller to require: "a missed LAST change shortens the span and
-# reads as a faster gun ... it shows up as a rate that disagrees between
-# magazines of the same cell".
-#
-# The threshold follows from what an interval error DOES. It is not an offset,
-# it compounds: round k lands k*d/T bullets late for an interval error of d.
-# Over a 42-round magazine at T=83 ms, d = 1.0 ms puts the last round
-# 41*1.0/83 = 0.49 bullets off -- which is IMPULSE_OFF_MAX, deliberately, so
-# the two timing gates allow the same error at the same place rather than
-# each allowing its own.
-#
-# Measured for scale: four AUG magazines fired 2026-08-03 read 83.08, 82.93,
-# 82.73 and 83.39 ms -- a spread of 0.24 ms, four times inside this.
-#
-# This used to import rpm_store.RESID_MS_MAX (12.0) "so the two cannot drift".
-# They are not the same quantity: that one bounds a straight-line fit through
-# per-round counter transitions located to ~25 ms, and borrowing it let 11.5 ms
-# of disagreement -- 5.5 bullets of phase by the end of the magazine -- pass as
-# a good cell. Caught by tools/test_harness.py the hour the check was written.
-RATE_RESID_MS_MAX = 1.0
+# ⚠ RATE_RESID_MS_MAX WAS HERE AND IS GONE WITH ITS CHECK (2026-08-09). See
+# the block where item 3 used to be. Its derivation is worth one line, because
+# it is the reason the number was 1.0 and not a round guess: an interval error
+# COMPOUNDS -- round k lands k*d/T bullets late -- so over a 42-round magazine
+# at T = 83 ms, d = 1.0 ms puts the last round half a bullet off. Four AUG
+# magazines measured 83.08 / 82.93 / 82.73 / 83.39 ms, a spread of 0.24.
 
 OK = 'ok'
 
@@ -175,9 +168,9 @@ def judge(rec):
     the two things this function exists to keep apart. Each check therefore
     fails closed, and says which field was missing.
     """
-    m = {k: rec.get(k) for k in ('reached', 'mags_kept', 'agree_arms',
+    m = {k: rec.get(k) for k in ('reached', 'n_kept', 'agree_arms',
                                  'agree_spread', 'ads_frac',
-                                 'track_alive_frac', 'rate_resid_ms',
+                                 'track_alive_frac',
                                  'rounds')}
 
     def bad(why, detail):
@@ -202,21 +195,47 @@ def judge(rec):
                    'the configuration was never reached')
 
     # 2. Enough magazines to fit on.
-    kept = rec.get('mags_kept')
+    # ⚠ `n_kept`, AND IT READ `mags_kept` UNTIL 2026-08-09. Nothing has ever
+    # written that name: adapter.RECORD_FIELDS declares `n_kept`, CONTRACT.md
+    # documents `n_kept`, and adapter._fill writes `n_kept`. So this check
+    # answered "mags_kept missing" for EVERY cell -- a gate that cannot pass,
+    # the same defect that got the impulse check deleted. tools/test_harness's
+    # own header asserted the opposite ("adapter.py writes mags_kept"), which
+    # is how the test and this file agreed with each other about a third file
+    # neither had read. `pixi run harness` now checks the field names against
+    # RECORD_FIELDS so prose cannot be the only thing holding them together.
+    kept = rec.get('n_kept')
     if kept is None:
-        return bad('mags', 'mags_kept missing')
+        return bad('mags', 'n_kept missing')
     if kept < MAGS_MIN:
         return bad('mags', f'{kept} magazines kept, need {MAGS_MIN}')
 
-    # 3. Fire rate. A wrong interval is not a small error: it puts round n's
-    #    pulse 0.01*x*n rounds late, so it compounds along the very axis being
-    #    fitted.
-    resid = rec.get('rate_resid_ms')
-    if resid is None:
-        return bad('rate', rec.get('rate_note') or 'rate_resid_ms missing')
-    if resid > RATE_RESID_MS_MAX:
-        return bad('rate', f'the magazines disagree about the fire rate by '
-                           f'{resid:.2f} ms, over {RATE_RESID_MS_MAX:.1f}')
+    # ⚠ 3. THE FIRE-RATE CHECK IS GONE (2026-08-09), and deleted rather than
+    #    stubbed. It asked whether the magazines of a cell DISAGREED about the
+    #    bullet interval -- a real question when `fire_magazine` polled the ammo
+    #    counter and derived each magazine's rate from what it saw. The timed
+    #    path does not poll: `fire_magazine_timed` holds the trigger for
+    #    `(mag_size - 1 + margin) * interval_s`, both of them INPUTS, so every
+    #    magazine of a cell has the same interval BY CONSTRUCTION.
+    #
+    #    Nothing had written `rate_resid_ms` since the coordinate changed, so
+    #    this answered "rate_resid_ms missing" on every cell -- the same defect
+    #    as the impulse check, and the same remedy.
+    #
+    #    ⚠ AND THE OBVIOUS REPAIR IS THE TRAP. Computing it from `hold_s` looks
+    #    like a fix and is algebra on the inputs: it returns 0.00 ms for every
+    #    cell, forever. That is this repository's most expensive shape -- a
+    #    criterion that is self-consistent, arithmetically correct, and blind --
+    #    and it was written, measured at exactly 0.0, and removed the same hour.
+    #
+    #    WHAT COVERS THE NEED NOW: the shape it guarded is "one magazine is not
+    #    like its siblings", and two checks see that from the trajectory side
+    #    instead of from the clock. fit()'s not-a-burst gate excludes a magazine
+    #    whose trace is not a burst, and collect_timed refuses a magazine whose
+    #    CAPACITY disagrees with the store -- which is the specific failure the
+    #    rate check was written for (a short magazine reads as a faster gun).
+    #    Restoring a real rate check means measuring the rate again, and this
+    #    path has no observable for it.
 
     # 4. THE out-of-loop check, and the reason the other three are not enough.
     #    A run can satisfy every check above and still be measuring on a grid
@@ -249,12 +268,36 @@ def judge(rec):
 
     # 5. Was the player actually aiming? Firing from the hip measures a
     #    different weapon.
+    # ⚠ TWO DIFFERENT ADS READINGS, AND THE ONE THIS CHECK ASKED FOR DOES NOT
+    # EXIST ON THIS COLLECTION PATH. `ads_frac` is a per-frame fraction, and the
+    # timed grabber captures the tracker's patches while AdsDetector reads the
+    # SCREEN CENTRE -- not among them. All 167 stored magazines carry nan, so
+    # this returned "ads_frac missing" for every cell: the third unpassable gate
+    # in this file, after the impulse check and the m416-shaped agree band.
+    #
+    # `ads_end_ok` is what the path CAN produce: ensure_ads before the trigger,
+    # one in_ads() read at release. It is weaker on purpose and the weakness is
+    # stated -- it cannot see a burst that dropped out and came back. It catches
+    # one that dropped out and STAYED out, which is the case worth ~3x in K.
+    #
+    # ⚠ FALLING BACK IS NOT LOOSENING. Both are required to be PRESENT; what
+    # changed is which quantity answers. A record with neither still fails, so
+    # "nobody measured it" and "it was fine" stay apart.
     ads = rec.get('ads_frac')
-    if ads is None:
-        return bad('ads', 'ads_frac missing')
-    if ads < ADS_FRAC_MIN:
-        return bad('ads', f'aiming for {ads:.0%} of polls, want '
-                          f'{ADS_FRAC_MIN:.0%}')
+    if ads is not None:
+        if ads < ADS_FRAC_MIN:
+            return bad('ads', f'aiming for {ads:.0%} of polls, want '
+                              f'{ADS_FRAC_MIN:.0%}')
+    else:
+        ends = rec.get('ads_end_ok')
+        if ends is None:
+            return bad('ads', 'neither ads_frac nor ads_end_ok — nothing says '
+                              'this burst was aimed')
+        # A whole pool, so anything under 1.0 is a magazine that ended out of
+        # the scope and was analysed with the scoped K anyway.
+        if ends < ADS_END_MIN:
+            return bad('ads', f'{ends:.0%} of the pool ended in ADS, want '
+                              f'{ADS_END_MIN:.0%}')
 
     # 6. How much of each magazine the tracker survived. Last because it is a
     #    known defect rather than a symptom of anything: a cell can be perfect
@@ -277,10 +320,8 @@ PROBE_FOR = {
                 'directory, state.json. Not a game problem.',
     'state':    'the cell never reached its configuration — control/, not '
                 'measurement. Read the evidence frame first.',
-    'mags':     'tools/probe_ammo_during_fire.py — magazines were discarded, '
-                'find out at which stage',
-    'rate':     'calibration/rpm_store.py + the cell trace — the fire rate '
-                'never settled',
+    'mags':     'the fit dropped magazines — read `dropped[]` first, the '
+                'outliers may be the majority',
     'agree':    "MODEL.md's out-of-loop check -- fire more than one curve "
                 "strength, INTERLEAVED (calibration/collect_timed.py "
                 "--scale-sweep). One arm is NOT CHECKED, not passed, and "

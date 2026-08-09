@@ -68,7 +68,13 @@ RECORD_FIELDS = {
                           'over the WHOLE accumulated pool, not tonight\'s',
     'n_total':            'int   — magazines in the pool',
     'fired':              'int   — magazines this cell actually fired',
-    'ads_frac':           'float — fraction of polls the crosshair said aiming',
+    'ads_frac':           'float — fraction of polls the crosshair said aiming. '
+                          '⚠ nan on every magazine this path writes: the '
+                          'timed grabber has no screen-centre crop.',
+    'ads_end_ok':         'float — fraction of the pool whose burst ENDED in '
+                          'ADS. Two endpoints, not a ratio, and the one ADS '
+                          'reading this collection path can actually make. '
+                          'An unreadable end counts as a failure.',
     'track_alive_frac':   'float — frame pairs the correlator could place',
     'agree_arms':         'int   — how many DIFFERENT compensation curves the '
                           'pool contains. Under 2 the pooling assumption is '
@@ -256,19 +262,77 @@ def measure(rigging, cell, mags):
     harness being wrong (bad arguments, missing hardware), and the loop lets
     those out.
     """
-    from control.kitting import (SIGHT_FOR, note_fits, parse_config,
-                                     stock_parts, want_for)
-    from control.spawner import ROSTER
+    from control.kitting import SIGHT_FOR
 
     weapon, posture = cell['weapon'], cell['posture']
     # WHICH SLOTS THIS CELL FILLS. Defaulted to 'bare' so a manifest written
     # before configs existed still resumes, and so a caller that does not care
     # gets what this always did.
     cfg = cell.get('config') or 'bare'
-    rig, kit, sc = rigging.rig, rigging.kit, rigging.sc
+    rig, kit = rigging.rig, rigging.kit
     rec = _blank(cell)
 
     rig.set_sight(SIGHT_FOR.get(weapon, cell.get('sight', 'red_dot')))
+
+    # ⚠ ONE TRIP INTO THE BACKPACK FOR THE WHOLE CELL. Everything from here to
+    # the readback needs the Tab screen UP and none of it needs it OPENED, so
+    # the state is established once and declared -- Kitter.session()'s own
+    # docstring has said exactly that since 2026-08-06, and until now its ONLY
+    # caller was apply(), one of its own methods. The mechanism was built, the
+    # four internal closes were gated on it, and nobody held it for a weapon.
+    #
+    # What it cost, counted on this function: find_gun opened and closed,
+    # clear_rack opened and closed, stock_parts opened, the second find_gun
+    # closed, apply opened and closed, read_loadout opened and closed. FIVE
+    # cycles per cell, in the one path that runs unattended all night.
+    #
+    # The spawner still needs the screen DOWN, and it takes it: restock presses
+    # Tab shut before spawn_missing and tidy re-opens through read_stock. That
+    # is a real close/open pair with a reason, which is the distinction this
+    # block is drawing -- not "never toggle Tab", but "toggle it for the
+    # spawner, not for a dict comparison".
+    #
+    # ⚠ AND IT MUST NOT COVER THE FIRING. _collect is deliberately outside:
+    # magazines are fired with the inventory shut, and holding it here would be
+    # the same class of error one level up.
+    with kit.session():
+        reached = _reach(rec, rigging, weapon, cfg)
+    if not reached:
+        return rec
+
+    # ── the measurement, MODEL.md's way ──────────────────────────────────
+    #
+    # ⚠ WHAT CHANGED IS NOT THE ARITHMETIC, IT IS WHAT COMES BACK. measure_cell
+    # returned a JUDGED cell: magazines already dropped by collection-time
+    # gates, per-bullet counts already binned, and an EMA already applied to
+    # the curve on disk. Three decisions taken before anything else was
+    # visible. Now the run APPENDS RAW SAMPLES and decides nothing: the
+    # clustering picks the main cluster at fit time with every magazine in
+    # view, and the fit is a full refit over the accumulated pool.
+    #
+    # ⚠ TWO ARMS, DELIBERATELY. verdict.judge's out-of-loop check needs
+    # magazines fired under DIFFERENT curves — that is the only way to test
+    # the assumption pooling rests on, and a fit cannot arrange it. The split
+    # is here rather than in the night loop because it is a property of one
+    # cell's measurement, and a caller that asked for one magazine should not
+    # silently get an unverifiable cell.
+    return _collect(rec, rigging, weapon, posture, mags, rec['scope_asset'])
+
+
+def _reach(rec, rigging, weapon, cfg):
+    """Spawn, kit and read the gun back. -> bool, with `reached_why` set on False.
+
+    ⚠ EVERY LINE IN HERE NEEDS THE TAB SCREEN UP AND NONE OF THEM OPENS IT.
+    That is the whole reason it is a function: measure() holds one
+    kit.session() around the call, so the `with` can end before the firing
+    starts. Splitting it changed no refusal — each one below is the one
+    measure() has always made, in the order it always made it.
+    """
+    from control.kitting import (note_fits, parse_config, stock_parts,
+                                 want_for)
+    from control.spawner import ROSTER
+
+    kit, sc = rigging.kit, rigging.sc
 
     # ⚠ KEEP THE GUN IF IT IS ALREADY THERE. The plan runs every config of one
     # weapon before moving to the next, so consecutive cells almost always
@@ -293,13 +357,13 @@ def measure(rigging, cell, mags):
     if not stock_parts(sc, kit, rigging.parts, also=() if already else (weapon,),
                        loose_only=True):
         rec['reached_why'] = f'could not stock the parts or produce {weapon}'
-        return rec
+        return False
     # Where the gun actually landed, read rather than assumed. An empty rack
     # takes the first gun into slot 1, and range re-entry empties the rack --
     # which is why this is re-read even on the `already` path.
     if kit.find_gun(weapon) is None:
         rec['reached_why'] = f'{weapon} is not in the rack after the spawn'
-        return rec
+        return False
 
     # Bare: pinned sight and magazine, every other controlled slot forced
     # EMPTY rather than left alone. The rule and the reason live in
@@ -312,7 +376,7 @@ def measure(rigging, cell, mags):
     fill = parse_config(cfg)
     if fill is None:
         rec['reached_why'] = f'unknown config {cfg!r}'
-        return rec
+        return False
     want = want_for(weapon, ROSTER.get(weapon, (None,))[0], fill)
     if kit.apply(want, weapon=weapon) is None:
         # ⚠ FOUR FIELDS, AND THE FOURTH DECIDES WHETHER THIS IS EVIDENCE.
@@ -334,7 +398,7 @@ def measure(rigging, cell, mags):
         rec['reached_why'] = ('kit: ' + '; '.join(
             f'{s} {w}' for s, _, w, _ in kit.last_bad)) if kit.last_bad \
             else 'the kit would not go on'
-        return rec
+        return False
     note_fits(rigging.facts, weapon, want)
 
     # ⚠ WHAT THE GUN TURNED OUT TO BE WEARING IS THE POOLING KEY, AND NOTHING
@@ -362,7 +426,7 @@ def measure(rigging, cell, mags):
         # read_config prints WHICH of its refusals fired -- no gun, the wrong
         # gun, a second gun on the rack, or unreadable slots.
         rec['reached_why'] = 'could not read the attachment slots back'
-        return rec
+        return False
     worn_sight, scope_asset = read_sight(lo)
     if worn_sight is None or worn_sight != rigging.rig.sight:
         # K comes from the optic. The magazine records the FLAG, so a
@@ -370,29 +434,12 @@ def measure(rigging, cell, mags):
         # worth about 3x between iron sights and a red dot.
         rec['reached_why'] = (f'the cell says sight {rigging.rig.sight!r} and '
                               f'the gun wears {worn_sight!r}')
-        return rec
+        return False
     rec['config_read'] = config_read
     rec['sight_read'] = worn_sight
     rec['scope_asset'] = scope_asset
     print(f'      wearing {config_read or "(nothing)"}, sight {worn_sight}')
-
-    # ── the measurement, MODEL.md's way ──────────────────────────────────
-    #
-    # ⚠ WHAT CHANGED IS NOT THE ARITHMETIC, IT IS WHAT COMES BACK. measure_cell
-    # returned a JUDGED cell: magazines already dropped by collection-time
-    # gates, per-bullet counts already binned, and an EMA already applied to
-    # the curve on disk. Three decisions taken before anything else was
-    # visible. Now the run APPENDS RAW SAMPLES and decides nothing: the
-    # clustering picks the main cluster at fit time with every magazine in
-    # view, and the fit is a full refit over the accumulated pool.
-    #
-    # ⚠ TWO ARMS, DELIBERATELY. verdict.judge's out-of-loop check needs
-    # magazines fired under DIFFERENT curves — that is the only way to test
-    # the assumption pooling rests on, and a fit cannot arrange it. The split
-    # is here rather than in the night loop because it is a property of one
-    # cell's measurement, and a caller that asked for one magazine should not
-    # silently get an unverifiable cell.
-    return _collect(rec, rigging, weapon, posture, mags, scope_asset)
+    return True
 
 
 # How the magazines of one cell are split between compensation arms. The
@@ -470,6 +517,27 @@ def _fill(rec, res, pool, fired):
     # clean ones carry one fired half from the hip.
     ads = [m.ads_frac for m in pool if m.ads_frac == m.ads_frac]
     rec['ads_frac'] = float(min(ads)) if ads else None
+
+    # ⚠ AND `ads_frac` IS `nan` ON EVERY MAGAZINE THIS PATH HAS EVER WRITTEN.
+    # The timed grabber captures the tracker's patches and AdsDetector reads the
+    # SCREEN CENTRE, which is not among them, so the per-frame fraction cannot
+    # be formed here at all -- 167 magazines in the store carry nan, and the
+    # min() above therefore hands judge() a None on every cell. Another gate
+    # that could not pass.
+    #
+    # What DOES exist is `ads_end`: ensure_ads before the trigger, one in_ads()
+    # read at release. Two endpoints, not a ratio. It cannot see a burst that
+    # dropped out and came back; it catches one that dropped out and stayed out,
+    # which is the case worth ~3x in K.
+    #
+    # ⚠ THREE-VALUED ON PURPOSE. None means the read failed, and it is counted
+    # as a failure, not skipped -- "nobody could tell" is the state this whole
+    # layer exists to keep apart from "it was fine". The fraction is over the
+    # WHOLE pool for the same reason the min() above is.
+    ends = [m.ads_end for m in pool]
+    rec['ads_end_ok'] = (float(sum(1 for e in ends if e is True)) / len(ends)
+                         if ends else None)
+
 
     # Frame pairs the correlator placed, over the pool. `oor` is recorded per
     # pair and NOT dropped at collection (calibration/samples.py), so this is a

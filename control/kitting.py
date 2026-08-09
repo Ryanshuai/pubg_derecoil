@@ -502,13 +502,23 @@ class Kitter:
         Measured before it existed: 184 blocks of four or more consecutive Tab
         toggles with no gesture between them, 1477 key presses, 80% of every
         Tab press in the shared journal.
+
+        ⚠ `_session` IS SAVED AND RESTORED, NOT SET AND CLEARED. It used to
+        assign False in the finally, which is right for one level and wrong the
+        moment this nests -- and it nests as soon as anybody holds a session
+        around a whole cell, because apply() opens one of its own inside. The
+        inner exit would then hand back `_session = False` to an outer holder,
+        and the next find_gun would shut the screen it was holding: the churn
+        this class exists to prevent, reappearing only in the arrangement that
+        prevents the most of it.
         """
         with self.ac.tab_up() as ok:
+            was = self._session
             self._session = True
             try:
                 yield ok
             finally:
-                self._session = False
+                self._session = was
 
     def find_gun(self, weapon):
         """Point this Kitter at whichever rack slot holds `weapon`. -> slot|None

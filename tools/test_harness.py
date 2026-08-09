@@ -33,21 +33,19 @@ for _s in (sys.stdout, sys.stderr):
 
 from harness.verdict import (judge, PROBE_FOR, OK,            # noqa: E402
                              ADS_FRAC_MIN, TRACK_ALIVE_MIN, MAGS_MIN,
-                             AGREE_ARMS_MIN, AGREE_SPREAD_MAX,
-                             RATE_RESID_MS_MAX)
+                             AGREE_ARMS_MIN, AGREE_SPREAD_MAX)
 
 # A record that passes everything. Every case below is this, one field moved.
 #
 # ⚠ THE FIELD NAMES MOVED AND THIS FILE DID NOT, so `pixi run harness` was RED
 # on an ImportError for CLUSTER_MIN. The measurement layer's names won --
-# harness/adapter.py writes `mags_kept` and a `rate_resid_ms` -- but every
-# BEHAVIOUR asserted below is unchanged, including the one that mattered:
-# MODEL.md's out-of-loop check, which verdict.py had meanwhile replaced with an
-# round-alignment check whose technique is rejected (MODEL.md's ruled-out
-# table) and whose probe no longer exists.
-GOOD = dict(reached=True, mags_kept=6, fired=3, ads_frac=0.95,
+# harness/adapter.py writes `n_kept` and a `rate_resid_ms` -- and that claim is
+# now CHECKED by _field_names() below rather than asserted here, because it
+# was false for a year. Every BEHAVIOUR asserted below is unchanged,
+# including the one that mattered: MODEL.md's out-of-loop check, which
+# verdict.py had meanwhile replaced with a rejected round-alignment check.
+GOOD = dict(reached=True, n_kept=6, fired=3, ads_frac=0.95,
             track_alive_frac=0.99, agree_arms=2, agree_spread=0.03,
-            rate_resid_ms=0.2,
             span_s=3.8, total_counts=900.0, spread_counts=25.0)
 
 
@@ -57,6 +55,60 @@ def case(name, rec, want_usable, want_why):
     mark = 'ok  ' if ok else 'FAIL'
     print(f'  {mark}  {name:<46s} {v["why"]:<9s} {v.get("detail", "")[:44]}')
     return 0 if ok else 1
+
+
+def _field_names():
+    """Every field judge() reads must be one measure() declares. -> failures.
+
+    ⚠ THIS IS THE CHECK THAT WOULD HAVE MADE TONIGHT UNNECESSARY. judge() read
+    `mags_kept`, `rate_resid_ms` and `rate_note`; adapter writes `n_kept` and
+    never wrote a rate at all. So the FIRST check after `reached` answered
+    "mags_kept missing" on every cell that has ever been judged, and the two
+    behind it were unreachable. Three unpassable gates, in the file whose whole
+    job is to refuse.
+
+    ⚠ AND THE TEST AGREED WITH THE BUG. This file's header said "the
+    measurement layer's names won -- harness/adapter.py writes `mags_kept` and
+    a `rate_resid_ms`", and GOOD was built from that sentence. Both files were
+    describing a third file neither had read, and they were consistent with
+    each other the whole time. Prose cannot hold two modules together; this
+    reads the actual names out of both.
+
+    Parsed rather than imported so it sees what judge() ASKS FOR, including
+    fields whose absence is the failure being tested.
+    """
+    import ast
+    import re
+    from harness.adapter import RECORD_FIELDS
+    bad = 0
+    src = open(os.path.join(ROOT, 'harness', 'verdict.py'), encoding='utf-8').read()
+    reads = set()
+    for node in ast.walk(ast.parse(src)):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == 'get' and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == 'rec'):
+            reads.add(node.args[0].value)
+    # `crashed` and `traceback` are the loop's, not the measurement's: night.py
+    # writes them when measure() raised, which is the one case where there is
+    # no record to speak of.
+    reads -= {'crashed', 'traceback'}
+    print('\n=== the record judge() reads is the record measure() writes ===')
+    missing = sorted(reads - set(RECORD_FIELDS))
+    print(f'  {"ok  " if not missing else "FAIL"}  '
+          f'{"every field judge() reads is declared":<46s} '
+          f'{len(reads)} read'
+          + (f'   MISSING {missing}' if missing else ''))
+    bad += bool(missing)
+    # The other direction is NOT an error -- measure() records things for the
+    # morning that judge() has no threshold for (the curve, the dropped list) --
+    # so it is reported and not failed.
+    extra = sorted(set(RECORD_FIELDS) - reads)
+    print(f'        (measure() also records {len(extra)} field(s) judge() has '
+          f'no threshold for: {", ".join(extra[:6])}{"..." if len(extra) > 6 else ""})')
+    return bad
 
 
 class _Mag:
@@ -148,28 +200,51 @@ def main():
     # ⚠ THE POOL, NOT THE NIGHT. Samples accumulate forever, so a thin night
     # on top of a fat history is a good cell.
     bad += case(f'{MAGS_MIN} in the cluster is enough',
-                dict(GOOD, mags_kept=MAGS_MIN), True, OK)
+                dict(GOOD, n_kept=MAGS_MIN), True, OK)
     bad += case(f'{MAGS_MIN - 1} is not',
-                dict(GOOD, mags_kept=MAGS_MIN - 1), False, 'mags')
+                dict(GOOD, n_kept=MAGS_MIN - 1), False, 'mags')
     bad += case('an absent count is not a pass',
-                {k: v for k, v in GOOD.items() if k != 'mags_kept'},
+                {k: v for k, v in GOOD.items() if k != 'n_kept'},
                 False, 'mags')
 
-    print('\n=== 2b. the fire rate settled ===')
-    bad += case('a settled rate passes',
-                dict(GOOD, rate_resid_ms=RATE_RESID_MS_MAX), True, OK)
-    bad += case('magazines disagreeing about the rate fails',
-                dict(GOOD, rate_resid_ms=RATE_RESID_MS_MAX + 0.1),
-                False, 'rate')
-    bad += case('an absent rate is not a pass',
-                {k: v for k, v in GOOD.items() if k != 'rate_resid_ms'},
-                False, 'rate')
+    # ⚠ 2b WAS THE FIRE-RATE CHECK AND IT IS GONE (2026-08-09). It asked whether
+    # the magazines of a cell DISAGREED about the bullet interval, which is a
+    # real question only when the interval is MEASURED. fire_magazine_timed
+    # holds the trigger for (mag_size - 1 + margin) * interval_s — both of them
+    # inputs — so every magazine of a cell has the same interval by
+    # construction, and nothing had written the field since the coordinate
+    # changed. The repair that looks obvious is the trap: computing it from
+    # `hold_s` returns 0.00 ms for every cell, forever.
+    #
+    # ⚠ THE CASES ARE DELETED RATHER THAN LEFT PASSING. Three synthetic records
+    # would exercise the thresholds perfectly while the quantity behind them no
+    # longer exists — a green suite standing over a check that cannot run, which
+    # is exactly how this file came to assert the wrong field names for a year.
 
     print('\n=== 3. was the burst aimed ===')
     bad += case(f'{ADS_FRAC_MIN:.0%} passes',
                 dict(GOOD, ads_frac=ADS_FRAC_MIN), True, OK)
     bad += case('just under does not',
                 dict(GOOD, ads_frac=ADS_FRAC_MIN - 0.01), False, 'ads')
+
+    # ⚠ AND `ads_frac` DOES NOT EXIST ON THE PATH THAT ACTUALLY COLLECTS. All
+    # 167 stored magazines carry nan, because the timed grabber captures the
+    # tracker's patches and AdsDetector reads the screen centre. So the check
+    # above passed the test suite and refused every real cell, which is the same
+    # shape as the impulse gate. `ads_end_ok` is the reading that exists.
+    noads = {k: v for k, v in GOOD.items() if k != 'ads_frac'}
+    bad += case('...and with no fraction, the ENDPOINTS answer',
+                dict(noads, ads_end_ok=1.0), True, OK)
+    bad += case('one magazine ending out of the scope fails',
+                dict(noads, ads_end_ok=0.8), False, 'ads')
+    # Neither reading is still a refusal: the fallback changes WHICH quantity
+    # answers, not whether one has to.
+    bad += case('neither reading is not a pass', noads, False, 'ads')
+    # ⚠ The fraction still WINS when both are present, so a path that grows a
+    # real per-frame reading is not silently overridden by the weaker one.
+    bad += case('the fraction outranks the endpoints when both exist',
+                dict(GOOD, ads_frac=ADS_FRAC_MIN - 0.01, ads_end_ok=1.0),
+                False, 'ads')
 
     print('\n=== 4. THE OUT-OF-LOOP CHECK — the arms must agree ===')
     # The fitter never sees which arm a magazine came from, so agreement
@@ -212,12 +287,13 @@ def main():
                 dict(GOOD, crashed=True, reached=False), False, 'crash')
 
     bad += _agreement_band()
+    bad += _field_names()
 
     print('\n=== every `why` routes somewhere ===')
     # A verdict nobody can act on is a verdict that gets ignored. The routing
     # lives beside the thresholds so it cannot fall out of step; this checks
     # that it did not.
-    whys = {'crash', 'state', 'mags', 'rate', 'ads', 'agree', 'tracking'}
+    whys = {'crash', 'state', 'mags', 'ads', 'agree', 'tracking'}
     missing = sorted(whys - set(PROBE_FOR))
     extra = sorted(set(PROBE_FOR) - whys)
     print(f'  {"ok  " if not missing and not extra else "FAIL"}  '

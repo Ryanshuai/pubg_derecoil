@@ -547,14 +547,32 @@ def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
     try:
         for i in range(max(1, mags)):
             comp = arm_plan[i % len(arm_plan)]
+            rig.arm(w)
             if comp:
-                curve = rig.arm(w)
+                # ⚠ THE CURVE IS READ BACK OFF THE FIRMWARE, NOT TAKEN FROM
+                # arm(). `Rig.arm` returns the KNOT COUNT -- an int -- and this
+                # line said `curve = rig.arm(w)`, so the magazine was handed a
+                # number where a list of knots belongs. It died with "'int'
+                # object is not iterable" at magazine 1 of every cell, which is
+                # the third symptom of the same fact: this function has never
+                # run. main() has always done arm-then-read_pattern.
+                #
+                # And the readback is not a formality. y_true = y_obs + y_comp
+                # is exact only if y_comp is what ACTUALLY PLAYED: int16
+                # quantisation with a carry sits between the request and the
+                # wire, and the fire delay shifts every knot time. Storing the
+                # commanded curve would record the request and call it the
+                # measurement.
+                curve = rig.mouse.read_pattern() or []
+                if not curve:
+                    return fired, (f'magazine {i + 1}: the firmware reports no '
+                                   f'pattern, so y_comp is unknown and this '
+                                   f'magazine could not be added back')
             else:
                 # The pattern is still UPLOADED so the firmware holds the same
                 # one either way; only the enable differs. The empty list is
                 # what samples.Magazine reads as "nothing played", which is
                 # what y_true = y_obs requires.
-                rig.arm(w)
                 rig.fire.disarm()
                 curve = []
             mag, why = fire_one_into_store(
@@ -570,7 +588,18 @@ def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
             prior.add(mag.magazine_size)
             fired += 1
     except Exception as e:                      # noqa: BLE001 — reported
-        return fired, f'{type(e).__name__} during magazine {fired + 1}: {e}'
+        # ⚠ THE TRACEBACK GOES WITH IT. This returned `f'{type(e).__name__}
+        # during magazine N: {e}'` and nothing else, so a live failure arrived
+        # as "TypeError during magazine 1: 'int' object is not iterable" with no
+        # line -- and the run that produced it is not repeatable. Three faults
+        # in this function were diagnosed by reading the source against main()
+        # instead of being read off the failure, which is the same shape as
+        # grepping a live run's output: the evidence exists once and gets
+        # thrown away at the moment it is needed.
+        import traceback
+        print(traceback.format_exc())
+        return fired, (f'{type(e).__name__} during magazine {fired + 1}: {e}\n'
+                       + traceback.format_exc())
     finally:
         try:
             grabber.close()

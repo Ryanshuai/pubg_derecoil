@@ -432,8 +432,57 @@ def load(weapon, config=None, path=None):
         except json.JSONDecodeError:
             continue
         known = {f for f in Magazine.__dataclass_fields__}
-        out.append(Magazine(**{k: v for k, v in d.items() if k in known}))
+        m = Magazine(**{k: v for k, v in d.items() if k in known})
+        why = _unusable(m)
+        if why:
+            _SKIPPED_SAID.setdefault(p, set())
+            if why not in _SKIPPED_SAID[p]:
+                _SKIPPED_SAID[p].add(why)
+                print(f'[samples] {os.path.basename(p)}: skipping magazine(s) '
+                      f'— {why}. NOT deleted; they are on disk and unpoolable.',
+                      flush=True)
+            continue
+        out.append(m)
     return out
+
+
+# One line per (file, reason), because a pool is loaded on every fit and the
+# same skip would otherwise print on every one of them.
+_SKIPPED_SAID = {}
+
+
+def _unusable(m):
+    """Why this magazine cannot be POOLED, or None. Never a reason to delete.
+
+    ⚠ THE STORE NEVER DELETES, AND THAT IS NOT THE SAME AS "EVERY RECORD IS
+    USABLE". The rule exists so an inconvenient MEASUREMENT cannot be quietly
+    dropped. A record whose `y_comp` cannot be reconstructed is not an
+    inconvenient measurement -- MODEL.md's whole licence to pool is
+    y_true = y_obs + y_comp, so a magazine that cannot supply the second term
+    is not an estimate of y_true at all.
+
+    ⚠ AND IT MUST BE A SKIP, NOT A CRASH. Seven vector magazines were written
+    with `curve` set to 124 -- the KNOT COUNT, because collect_into_store said
+    `curve = rig.arm(w)` and Rig.arm returns an int. Every fit of those cells
+    then died inside comp_counts_at with "'int' object is not iterable", four
+    layers down, naming neither the file nor the magazine. One malformed record
+    took out the whole cell including the six good magazines beside it.
+
+    Reconstructing the curve is NOT on the table: the seed file that played is
+    still on disk, but int16 quantisation with a carry sits between the request
+    and the wire, so rebuilding it would be MODEL.md 2.3's forbidden move --
+    inventing a number to fill a gap that a measurement was supposed to fill.
+    """
+    c = m.curve
+    if c is None or (isinstance(c, list) and not c):
+        return None            # an empty list IS a reading: nothing played
+    if not isinstance(c, list):
+        return (f'`curve` is {type(c).__name__} {c!r}, not a list of knots, so '
+                f'y_comp is unknown and y_true = y_obs + y_comp cannot be '
+                f'formed')
+    if not all(isinstance(k, dict) and 't_ms' in k and 'dy' in k for k in c):
+        return '`curve` holds entries that are not knots'
+    return None
 
 
 def configs_for(weapon):
