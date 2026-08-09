@@ -92,6 +92,7 @@ from control.session import ensure_ready                          # noqa: E402
 from capture.cropper import DXGISyncGrabber                      # noqa: E402
 from detector.view_tracker import MagazineRecorder                # noqa: E402
 from calibration.weapon_build import build_weapon                 # noqa: E402
+from config import RECOIL_COMP_LAG_MS                             # noqa: E402
 
 
 def measure(tracker, ts, patches, human_fn=None):
@@ -378,6 +379,12 @@ def one_magazine(rig, grabber, weapon, mag_size, interval_s, curve,
         oor=[bool(x) for x in oor],
         magazine_size=int(mag_size or 0),
         hold_s=float(out['hold_s']),
+        # ⚠ STAMPED AT FIRING TIME, not looked up when the magazine is read
+        # back. It is how long an emitted count took to reach the screen ON
+        # THIS MACHINE ON THIS DAY, and y_true = y_obs + C(t - L) is wrong by
+        # L*F' without it -- which the fit then amplifies, because it consumes
+        # its own output. See samples.Magazine.comp_lag_s.
+        comp_lag_s=RECOIL_COMP_LAG_MS / 1000.0,
         fps=(len(t) - 1) / span if span > 0 else float('nan'),
         ads_end=ads_end,
         ts=datetime.now().strftime('%m%d_%H%M%S'),

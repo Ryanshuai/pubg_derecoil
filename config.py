@@ -1412,6 +1412,34 @@ COUNTS_PER_PIXEL = 0.5
 #
 RECOIL_FIRE_DELAY_MS = -36
 
+# How long an EMITTED count takes to become a photon: Pico USB report, the game
+# sampling input, view rotation, render, present. The other half of the pair
+# above, and the two are different numbers doing different jobs:
+#
+#   RECOIL_FIRE_DELAY_MS   shifts WHEN the firmware emits. CHOSEN -- it is the
+#                          offset that minimises measured drift, and with an
+#                          amplitude term in the residual that optimum is not -L.
+#   RECOIL_COMP_LAG_MS     how late the emission APPEARS. MEASURED, and used by
+#                          the ANALYSIS: y_true(t) = y_obs(t) + C(t - L).
+#
+# ⚠ THE ANALYSIS USED C(t) AND THAT IS A DIVERGENT LOOP, not just a bias. The
+# fit consumes its own output, so writing C(t) makes
+#
+#     F_{n+1} = y_true + L * F_n'
+#
+# an iteration carrying a DERIVATIVE, with gain L*omega at frequency omega.
+# Above 1/L (~8 Hz here) every round amplifies, and the 17 ms grid reaches
+# 59 Hz. The root CLAUDE.md records the same shape costing 1.025^255.
+#
+# tools/probe_input_latency.py, 40 trials, present times, observed T = 11.84 ms:
+#     mean 27.63 sd 5.20 sem 0.82  ->  L = 21.7 (mean - T/2),  L = 18.3 (min)
+# 20 is between them and inside the sem of neither being ruled out.
+#
+# ⚠ Stored PER MAGAZINE (samples.Magazine.comp_lag_s), never read from here at
+# analysis time. A constant read later describes the machine as it is now, and
+# a magazine fired last week went through a different display chain.
+RECOIL_COMP_LAG_MS = 20
+
 
 # ════════════════════════════════════════════════════════════
 # Debug / detection

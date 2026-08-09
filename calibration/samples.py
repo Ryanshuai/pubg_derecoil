@@ -193,6 +193,22 @@ class Magazine:
     # mid-burst; it catches dropping out and STAYING out, which is worth
     # ~3x in K and is what actually happens.
     ads_end: object = None
+    # ⚠ THE OTHER HALF OF RECOIL_FIRE_DELAY_MS, and the two must agree or the
+    # loop diverges -- see y_true_counts for the L*omega argument.
+    #
+    # The offset shifts WHEN the firmware emits; this is how long an emitted
+    # count takes to become a photon. Both are needed and they are different
+    # numbers: the offset is chosen (it minimises drift, and with an amplitude
+    # term in the residual that optimum is NOT -L), while this is measured
+    # (tools/probe_input_latency.py, 40 trials: 21.7 ms by mean-minus-half-a-
+    # frame, 18.3 by the minimum).
+    #
+    # Stored PER MAGAZINE rather than read from config at analysis time, for
+    # the reason this file keeps paying for: a constant read later describes
+    # the machine as it is NOW, and a magazine fired last week was fired
+    # through a different display chain. None means "not recorded" -- the
+    # magazines from before this existed -- and is treated as 0.
+    comp_lag_s: object = None
     fps: float = float('nan')
     ts: str = ''
     note: str = ''
@@ -236,12 +252,43 @@ class Magazine:
         while the trigger is down, so a curve longer than the burst is not
         delivered in full -- and the difference goes straight into y_true,
         because nothing else in this expression can absorb it.
+
+        ⚠ AND THE TWO TERMS ARE NOT ON THE SAME SIDE OF THE SCREEN unless
+        `comp_lag_s` is set. `y_obs` is what the screen DID; the curve is what
+        the firmware EMITTED, and emitted counts take L to become photons. So
+        the honest expression is
+
+            y_true(t) = y_obs(t) + C(t - L)
+
+        and this used to write C(t). The error is +L * F'(t) -- about 7.5
+        counts at t=2 s with L=20 ms -- and it is not merely a bias, because
+        the fit consumes its own output:
+
+            F_{n+1} = y_true + L * F_n'
+
+        An iteration carrying a DERIVATIVE has gain L*omega at frequency omega,
+        so everything above 1/L (~8 Hz at L=20 ms) grows every round, and the
+        17 ms grid reaches 59 Hz. Same shape as the moving average recorded in
+        the root CLAUDE.md, which turned a defence against noise into 1.025^255
+        of amplification -- self-consistent, arithmetically correct, and
+        divergent.
+
+        Raised from the chair before it had bitten: "两边都知道这个负三十六的
+        存在...不自洽的话会震荡，或者越来越错".
+
+        ⚠ `comp_lag_s` IS None ON EVERY MAGAZINE FIRED BEFORE 2026-08-08, and
+        None means "not recorded", which is treated as 0 -- exactly what those
+        magazines' y_true already assumed. It is NOT rounded to the current
+        constant: L is a property of the machine at the time of firing, and
+        stamping today's value onto a magazine fired under an unknown one is
+        the record describing a different object than the one measured.
         """
         t, y_obs = self.y_obs_counts()
         if not self.comp_enabled:
             return t, y_obs
         tc = np.minimum(t, self.hold_s) if self.hold_s > 0 else t
-        return t, y_obs + comp_counts_at(self.curve, tc)
+        lag = self.comp_lag_s or 0.0
+        return t, y_obs + comp_counts_at(self.curve, np.maximum(tc - lag, 0.0))
 
     def n_frames(self):
         return len(self.t)
