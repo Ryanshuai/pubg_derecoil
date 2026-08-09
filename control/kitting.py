@@ -4,7 +4,8 @@
 
     kit = Kitter(rig)
     kit.aim_at('m416')
-    kit.apply(want_for('m416', 'ar', {'muzzle', 'grip'}), weapon='m416')
+    kit.apply(want_for('m416', 'AR', parse_config('muzzle+grip=half_grip')),
+              weapon='m416')
 
 ⚠ THIS FILE IS THE HALF OF A 3364-LINE MODULE THAT SURVIVED OF TWO DIFFERENT
 JOBS. The other one was the bullet-bucket measurement loop — measure_cell,
@@ -273,25 +274,57 @@ MAG_FOR_CLASS = {'AR': 'ext_ar', 'DMR': 'ext_ar', 'LMG': 'ext_ar',
 
 
 def parse_config(name):
-    """A config name is the set of slots to FILL, joined by '+'.
+    """The slots a config FILLS, and with WHAT. -> {slot: part or None}
 
-    'bare' fills nothing; 'muzzle+grip+stock' fills all three. Any subset is
-    legal, so one --configs spells out a full 2^N factorial or any fraction of
-    one, and adding a slot to TEST_SLOTS needs no change here.
+    'bare' fills nothing; 'muzzle+grip+stock' fills all three with the class's
+    representative part (PART_FOR_CLASS). `slot=part` names one explicitly:
+
+        'bare'                              {}
+        'muzzle+grip'                       {'muzzle': None, 'grip': None}
+        'grip=half_grip'                    {'grip': 'half_grip'}
+        'muzzle=flash_smg+grip'             {'muzzle': 'flash_smg', 'grip': None}
+
+    ⚠ None MEANS "THE DEFAULT PART", NOT "EMPTY". A slot absent from the
+    mapping is the one that ends up empty — want_for pins those to None
+    explicitly, because an unmentioned slot is whatever PUBG last bolted on.
+    The two Nones look alike and mean opposite things, which is why they never
+    meet: this mapping only ever holds slots to FILL.
+
+    ⚠ THE `slot=part` HALF IS WHAT MAKES AN ATTACHMENT CAMPAIGN EXPRESSIBLE.
+    Without it a config is only "which slots are filled", so vert_grip against
+    half_grip cannot be said at all -- and a campaign whose whole question is
+    "which part, in which slot" then has no way to ask it. gray_order was
+    written for exactly this vocabulary and could not be reached from the CLI
+    until the vocabulary carried a part.
 
     Returns None for a name that mentions a slot this tool does not control.
     """
     if name == 'bare':
-        return frozenset()
+        return {}
     if name == 'both':          # kept: the 2x2 runs already logged say 'both'
-        return frozenset(('muzzle', 'grip'))
-    slots = frozenset(p.strip() for p in name.split('+') if p.strip())
-    return slots if slots <= frozenset(TEST_SLOTS) else None
+        return {'muzzle': None, 'grip': None}
+    out = {}
+    for piece in name.split('+'):
+        piece = piece.strip()
+        if not piece:
+            continue
+        slot, _, part = piece.partition('=')
+        slot, part = slot.strip(), part.strip()
+        if slot not in TEST_SLOTS:
+            return None
+        out[slot] = part or None
+    return out
 
 
 def config_name(slots):
-    """Canonical name for a slot set, so --resume matches across runs."""
-    return '+'.join(s for s in TEST_SLOTS if s in slots) or 'bare'
+    """Canonical name for a fill mapping, so --resume matches across runs.
+
+    ⚠ A DEFAULT PART STAYS ANONYMOUS. `{'muzzle': None}` is 'muzzle', not
+    'muzzle=comp_ar', so every cell name this project has already logged reads
+    and resumes exactly as before; only a cell that NAMES a part spells it out.
+    """
+    return '+'.join(s if not slots[s] else f'{s}={slots[s]}'
+                    for s in TEST_SLOTS if s in slots) or 'bare'
 
 
 def effective_config(weapon, cfg, parts):
@@ -308,11 +341,22 @@ def effective_config(weapon, cfg, parts):
     on without firing a shot: half the roster silently produced no data.
     Degrading the config instead still yields a curve, correctly labelled with
     what was actually on the gun.
+
+    ⚠ AN EXPLICITLY NAMED PART IS CHECKED, NOT ASSUMED. `fits` is asked about
+    the part that will actually go on, so `grip=tilted_grip` degrades away on
+    the vector (attachment_catalog.EXCLUDE, confirmed by hand) exactly the way
+    a missing slot does -- rather than being planned, spawned, dragged and
+    refused by the game four times.
     """
-    keep = {s for s in parse_config(cfg)
-            if parts.get(s) and has_slot(weapon, s)
-            and fits(weapon, parts[s])}
-    return config_name(frozenset(keep))
+    keep = {}
+    for slot, part in parse_config(cfg).items():
+        chosen = part or parts.get(slot)
+        if chosen and has_slot(weapon, slot) and fits(weapon, chosen):
+            # ⚠ `part`, NOT `chosen`. Storing the resolved default here would
+            # rename every already-logged cell -- 'muzzle' becomes
+            # 'muzzle=comp_ar' -- and --resume matches on the name.
+            keep[slot] = part
+    return config_name(keep)
 
 
 def supported_configs(weapon, configs):
@@ -365,10 +409,11 @@ def fixed_kit(weapon, cls):
     return out
 
 
-def want_for(weapon, cls, fill=frozenset()):
+def want_for(weapon, cls, fill=None):
     """The full `want` dict for one config: pinned kit plus the test slots.
 
-    `fill` names the TEST_SLOTS to fill; every other slot the weapon HAS is
+    `fill` is parse_config's mapping {slot: part or None} — None being "the
+    class's representative part". Every other slot the weapon HAS is
     pinned to None, meaning it must end up EMPTY rather than be left alone.
     PUBG bolts whatever is in the backpack onto a gun the moment it arrives,
     so an unnamed slot holds whatever the last strip left lying around — the
@@ -384,9 +429,16 @@ def want_for(weapon, cls, fill=frozenset()):
     growing a second copy of the force-empty rule, which is the one that has
     already been got wrong once.
     """
+    fill = fill or {}
     parts = PART_FOR_CLASS.get(cls, {})
     want = fixed_kit(weapon, cls)
-    want.update({s: (parts.get(s) if s in fill else None)
+    # ⚠ TWO DIFFERENT NONES MEET HERE AND MUST NOT BE CONFUSED. `fill[s] is
+    # None` means "fill this slot with the class default"; a slot ABSENT from
+    # `fill` means "this slot must end up EMPTY". Testing membership first and
+    # the value second is what keeps them apart -- `fill.get(s) or parts.get(s)`
+    # alone would read an absent slot as a defaulted one and quietly fill every
+    # slot on the gun.
+    want.update({s: ((fill.get(s) or parts.get(s)) if s in fill else None)
                  for s in TEST_SLOTS if has_slot(weapon, s)})
     return want
 

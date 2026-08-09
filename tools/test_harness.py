@@ -59,6 +59,78 @@ def case(name, rec, want_usable, want_why):
     return 0 if ok else 1
 
 
+class _Mag:
+    """The two things _agreement reads off a magazine, and nothing else.
+
+    A real Magazine needs a store, a curve, a tracker and a session; the check
+    under test needs the commanded total and the trajectory. Faking exactly
+    those two keeps the case about the BAND and not about sample plumbing.
+    """
+
+    def __init__(self, commanded, end_s, y_end, n=200):
+        self.curve = [{'dy': float(commanded)}]
+        self._t = [end_s * i / (n - 1) for i in range(n)]
+        self._y = [y_end * i / (n - 1) for i in range(n)]
+
+    def y_true_counts(self):
+        return self._t, self._y
+
+
+def _agreement_band():
+    """The comparison band, on bursts of different LENGTHS.
+
+    ⚠ THIS IS THE CASE THAT WAS UNMEASURABLE. AGREE_BAND_S tops out at 2.4 s
+    because an m416 magazine runs 3.81; the vector fires 1130 rpm and is empty
+    by ~1.7 s, so every one of its magazines was skipped, `curves` came back
+    empty, and every vector cell failed on "only 1 curve arm" with flawless
+    data. The gate could not pass, which is the same defect that got the
+    impulse check deleted.
+    """
+    from harness.adapter import _agreement
+    bad = 0
+
+    def arms_case(name, pool, want_arms, want_spread_none, want_hi=None):
+        nonlocal bad
+        arms, spread, band = _agreement(pool)
+        ok = (arms == want_arms
+              and (spread is None) == want_spread_none
+              and (want_hi is None or abs(band[1] - want_hi) < 1e-6))
+        print(f'  {"ok  " if ok else "FAIL"}  {name:<46s} '
+              f'arms={arms} spread='
+              f'{"None" if spread is None else f"{spread:.3f}"} '
+              f'band={None if band is None else f"{band[0]:.2f}..{band[1]:.2f}"}')
+        bad += 0 if ok else 1
+
+    print('\n=== 4b. the comparison band is capped by the BURST ===')
+    # An m416: 3.81 s, comfortably past 2.4, so the constant stands unchanged.
+    arms_case('a long burst keeps the full 1.0..2.4 band',
+              [_Mag(900, 3.81, 1400), _Mag(450, 3.81, 1400)], 2, False, 2.4)
+    # A vector: 1.70 s. Two arms agreeing perfectly must READ as two arms.
+    arms_case('a 1.70 s burst is compared, not skipped',
+              [_Mag(900, 1.70, 700), _Mag(450, 1.70, 700)], 2, False, 1.65)
+    # ⚠ AND IT STILL REFUSES. Without this the fix reads as "make short bursts
+    # pass", which is what an unpassable gate turns into when it is loosened
+    # rather than corrected.
+    arms_case('...and disagreeing arms still fail there',
+              [_Mag(900, 1.70, 700), _Mag(450, 1.70, 770)], 2, False, 1.65)
+    v = judge(dict(GOOD, agree_spread=_agreement(
+        [_Mag(900, 1.70, 700), _Mag(450, 1.70, 770)])[1]))
+    print(f'  {"ok  " if v["why"] == "agree" else "FAIL"}  '
+          f'{"...and judge() calls that unusable":<46s} {v["why"]}')
+    bad += 0 if v['why'] == 'agree' else 1
+    # A burst so short there is no band left. Fails CLOSED, like one arm.
+    arms_case('a 1.10 s burst leaves no band and refuses',
+              [_Mag(900, 1.10, 400), _Mag(450, 1.10, 400)], 1, True)
+    # ⚠ MEDIAN, NOT MINIMUM. One trajectory truncated by a lost tracker must
+    # not pull the band in on the five good ones -- with min() this cell would
+    # collapse to 1.15 and refuse.
+    arms_case('one truncated magazine does not move the band',
+              [_Mag(900, 2.99, 1000), _Mag(900, 2.99, 1000),
+               _Mag(900, 1.20, 400),
+               _Mag(450, 2.99, 1000), _Mag(450, 2.99, 1000)], 2, False, 2.4)
+    return bad
+
+
 def main():
     bad = 0
     print('\n=== the happy record, and every field that can spoil it ===')
@@ -138,6 +210,8 @@ def main():
                      agree_arms=1, track_alive_frac=0.0), False, 'state')
     bad += case('a crash wins over state',
                 dict(GOOD, crashed=True, reached=False), False, 'crash')
+
+    bad += _agreement_band()
 
     print('\n=== every `why` routes somewhere ===')
     # A verdict nobody can act on is a verdict that gets ignored. The routing

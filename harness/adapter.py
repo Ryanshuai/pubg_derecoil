@@ -56,6 +56,14 @@ RECORD_FIELDS = {
                           'it is labelled with? Everything else is a lie if '
                           'this is False.',
     'reached_why':        'str   — why not, when reached is False',
+    'config_read':        'dict  — what the gun turned out to be WEARING, as '
+                          'catalogue keys. THE POOLING KEY, not bookkeeping: '
+                          'magazines are stored and fitted under it, so a '
+                          'wrong one merges two different guns into one curve.',
+    'sight_read':         'str   — the optic read off the gun, not the flag. '
+                          'K comes from it and is worth ~3x.',
+    'scope_asset':        'str   — the same optic as the raw asset the curve '
+                          'lookup keys on.',
     'n_kept':             'int   — magazines in the fitter\'s main cluster, '
                           'over the WHOLE accumulated pool, not tonight\'s',
     'n_total':            'int   — magazines in the pool',
@@ -67,6 +75,10 @@ RECORD_FIELDS = {
                           'untested and judge() fails the cell closed.',
     'agree_spread':       'float — how far those arms disagree about y_true in '
                           'the mid-band, as a fraction. THE out-of-loop check.',
+    'agree_band':         '(lo, hi) — the seconds the arms were compared over. '
+                          'NOT the constant: the upper end is capped by the '
+                          'burst, because 2.4 s is an m416 number and a vector '
+                          'magazine is empty by 1.7 s.',
     'span_s':             'float — how long the fitted curve runs',
     'total_counts':       'float — y_true at the end of the span',
     'spread_counts':      'float — median disagreement between kept magazines',
@@ -136,15 +148,23 @@ def open_rig(sight, out_dir, home=True, countdown=6,
     # What the run needs on hand. Same derivation as harvest's, because it is
     # the same question: only the slots some config actually fills, plus the
     # pinned sight and magazine.
-    wanted_slots = frozenset().union(*(parse_config(c) for c in configs)) \
-        if configs else frozenset()
+    #
+    # ⚠ THE PARTS THE CONFIGS NAME, NOT JUST THE SLOTS THEY FILL. This read
+    # `[table.get(s) for s in wanted_slots]` while a config was only "which
+    # slots", so it could only ever stock the class representative. The moment
+    # a config could say `grip=half_grip` that became a silent hole: the
+    # planner schedules the cell, the backpack never holds the part, ensure_kit
+    # cannot fit it, and read_config refuses -- one failure per cell, four in a
+    # row, and the night halts on a stocking bug wearing a kitting bug's face.
+    fills = [f for f in (parse_config(c) for c in (configs or ())) if f]
     parts = {SCOPE_PART}
     for w in weapons:
         cls = ROSTER.get(w, (None,))[0]
         table = PART_FOR_CLASS.get(cls, {})
-        parts.update(x for x in
-                     [table.get(s) for s in wanted_slots] +
-                     [MAG_FOR_CLASS.get(cls)] if x)
+        for fill in fills:
+            parts.update(x for x in (p or table.get(s)
+                                     for s, p in fill.items()) if x)
+        parts.update(x for x in [MAG_FOR_CLASS.get(cls)] if x)
 
     # ⚠ THE FIVE LEGS BEFORE ANYTHING IS BUILT, and this door of all doors.
     # It used to open with a bare ensure_focus + sleep(0.6) and then lean on
@@ -307,6 +327,45 @@ def measure(rigging, cell, mags):
         return rec
     note_fits(rigging.facts, weapon, want)
 
+    # ⚠ WHAT THE GUN TURNED OUT TO BE WEARING IS THE POOLING KEY, AND NOTHING
+    # HERE WAS READING IT. `_collect` did `rec.get('config_read') or {}` and
+    # NOTHING IN THIS REPOSITORY HAS EVER WRITTEN THAT FIELD -- so every cell
+    # of every night appended its magazines to `<weapon>__bare`, fitted the
+    # bare pool, and reported a number. Fourteen different configurations of
+    # one gun would land in one file, each magazine plausible, the cv fine, and
+    # the curve right for none of them. It is the repository's second
+    # cross-layer law failing in the one place that fires unattended.
+    #
+    # It survived because night defaults to `--configs bare`, where the wrong
+    # key and the right key are the same string. The moment a campaign names a
+    # part, they stop being the same string.
+    #
+    # ⚠ ONE TRIP, TWO ANSWERS. read_loadout takes a single loadout and
+    # read_config/read_sight are pure functions of it, so the config and the
+    # optic describe the same observation by construction rather than by a
+    # check somebody has to remember (calibration/CLAUDE.md, rule 14).
+    from calibration.collect_timed import (read_config, read_loadout,
+                                           read_sight)
+    lo = read_loadout()
+    config_read = read_config(lo, weapon)
+    if config_read is None:
+        # read_config prints WHICH of its refusals fired -- no gun, the wrong
+        # gun, a second gun on the rack, or unreadable slots.
+        rec['reached_why'] = 'could not read the attachment slots back'
+        return rec
+    worn_sight, scope_asset = read_sight(lo)
+    if worn_sight is None or worn_sight != rigging.rig.sight:
+        # K comes from the optic. The magazine records the FLAG, so a
+        # disagreement here is invisible to everything downstream -- and it is
+        # worth about 3x between iron sights and a red dot.
+        rec['reached_why'] = (f'the cell says sight {rigging.rig.sight!r} and '
+                              f'the gun wears {worn_sight!r}')
+        return rec
+    rec['config_read'] = config_read
+    rec['sight_read'] = worn_sight
+    rec['scope_asset'] = scope_asset
+    print(f'      wearing {config_read or "(nothing)"}, sight {worn_sight}')
+
     # ── the measurement, MODEL.md's way ──────────────────────────────────
     #
     # ⚠ WHAT CHANGED IS NOT THE ARITHMETIC, IT IS WHAT COMES BACK. measure_cell
@@ -323,7 +382,7 @@ def measure(rigging, cell, mags):
     # is here rather than in the night loop because it is a property of one
     # cell's measurement, and a caller that asked for one magazine should not
     # silently get an unverifiable cell.
-    return _collect(rec, rigging, weapon, posture, mags)
+    return _collect(rec, rigging, weapon, posture, mags, scope_asset)
 
 
 # How the magazines of one cell are split between compensation arms. The
@@ -352,16 +411,20 @@ def _blank(cell):
     return rec
 
 
-def _collect(rec, rigging, weapon, posture, mags):
+def _collect(rec, rigging, weapon, posture, mags, scope_asset=None):
     """Fire into the sample store, then fit the whole accumulated pool."""
     from calibration import samples as S
     from calibration.collect_timed import collect_into_store
     from calibration.fit_time_curve import fit
 
-    config = rec.get('config_read') or {}
+    # ⚠ NO `or {}` FALLBACK. It used to be `rec.get('config_read') or {}`,
+    # which turned "nobody read it" into the positive claim "the gun is bare" —
+    # and since nothing wrote the field, that claim was made on every cell.
+    # measure() refuses above when the readback fails, so by here it is real.
+    config = rec['config_read']
     fired, err = collect_into_store(
         rigging.rig, weapon, config, posture, mags, ARM_PLAN,
-        note_prefix=f'night {rec["cell"]} ')
+        note_prefix=f'night {rec["cell"]} ', scope_asset=scope_asset)
     if err:
         rec['reached_why'] = err
         if not fired:
@@ -406,14 +469,19 @@ def _fill(rec, res, pool, fired):
     bad = sum(int(sum(bool(x) for x in m.oor)) for m in pool)
     rec['track_alive_frac'] = float((n - bad) / n) if n else None
 
-    arms, spread = _agreement(pool)
+    arms, spread, band = _agreement(pool)
     rec['agree_arms'] = arms
     rec['agree_spread'] = spread
+    # ⚠ THE BAND THAT WAS ACTUALLY USED, because it is no longer the constant.
+    # verdict's failure line quotes it, and quoting AGREE_BAND_S while the
+    # comparison ran somewhere else is a report describing a different
+    # measurement from the one it judged.
+    rec['agree_band'] = band
     return rec
 
 
 def _agreement(pool):
-    """THE OUT-OF-LOOP CHECK. -> (n_arms, spread) or (n_arms, None).
+    """THE OUT-OF-LOOP CHECK. -> (n_arms, spread, band) — spread/band may be None.
 
     Magazines fired under DIFFERENT curves must, once each one's own y_comp is
     added back, estimate the SAME y_true. That is the assumption that makes
@@ -433,9 +501,19 @@ def _agreement(pool):
     it on the one part MODEL.md says is not understood. It is also the reason
     this returns a fraction OF y_true rather than counts: a 30-count
     disagreement means something different on a Vector than on an MG3.
+
+    ⚠ AND THE UPPER END IS CAPPED BY THE BURST, WHICH IS NOT A DETAIL. 2.4 s is
+    an m416 number and an m416 magazine runs 3.81 s. The vector fires 1130 rpm
+    and empties in about 1.7 s, so NOT ONE of its magazines reaches 2.4 s, the
+    `tt[-1] < hi` line below skips every single one, `curves` comes back empty
+    and the cell fails on "agree_arms=1" -- with perfect data, forever. That is
+    an unpassable gate, and this repository has already binned one for exactly
+    that (the impulse check: nothing had written its field since the coordinate
+    changed, so item 4 answered "not checked" for every cell). A gate that
+    cannot pass is not a strict gate, it is a broken one.
     """
     import numpy as np
-    from harness.verdict import AGREE_BAND_S
+    from harness.verdict import AGREE_BAND_S, AGREE_BAND_EDGE_S, AGREE_BAND_MIN_S
 
     lo, hi = AGREE_BAND_S
     groups = {}
@@ -443,29 +521,51 @@ def _agreement(pool):
         key = int(round(sum(float(k.get('dy', 0.0)) for k in (m.curve or []))))
         groups.setdefault(key, []).append(m)
     if len(groups) < 2:
-        return len(groups), None
+        return len(groups), None, None
+
+    # ⚠ THE MEDIAN END, NOT THE MINIMUM. Burst length inside one cell is almost
+    # a constant -- 115 m416 magazines span 3.80-3.81 s, 173 mp5k ones
+    # 2.97-2.99 -- so the median is the weapon's own reach, while the minimum
+    # is whatever the worst magazine did. Taking the minimum would let one
+    # trajectory truncated by a lost tracker pull the band in on everybody
+    # else, which is a cell quietly changing its own measurement conditions.
+    traj = {}
+    for m in pool:
+        tt, yy = m.y_true_counts()
+        if len(tt) >= 2:
+            traj[id(m)] = (tt, yy)
+    ends = sorted(t[-1] for t, _ in traj.values())
+    if not ends:
+        return 1, None, None
+    hi = min(hi, float(ends[len(ends) // 2]) - AGREE_BAND_EDGE_S)
+    if hi - lo < AGREE_BAND_MIN_S:
+        # Still FAILS CLOSED, and for a reason worth telling apart from the one
+        # above: there is no band to compare in, not "the arms disagreed".
+        return 1, None, (lo, hi)
 
     grid = np.linspace(lo, hi, 25)
     curves = []
     for key, mags in sorted(groups.items()):
         ys = []
         for m in mags:
-            tt, yy = m.y_true_counts()
-            if len(tt) < 2 or tt[-1] < hi:
+            got = traj.get(id(m))
+            if got is None or got[0][-1] < hi:
                 continue
-            ys.append(np.interp(grid, tt, yy))
+            ys.append(np.interp(grid, got[0], got[1]))
         if ys:
             curves.append(np.nanmedian(np.vstack(ys), axis=0))
     if len(curves) < 2:
         # Arms exist but not enough of them reach the band. Reported as one
         # arm rather than as agreement: a comparison that could not be made is
         # not a comparison that passed.
-        return 1, None
+        return 1, None, (lo, hi)
     M = np.vstack(curves)
     ref = float(np.nanmedian(M[:, -1]))
     if not ref:
-        return len(curves), None
-    return len(curves), float(np.nanmax(np.nanmax(M, 0) - np.nanmin(M, 0)) / abs(ref))
+        return len(curves), None, (lo, hi)
+    return (len(curves),
+            float(np.nanmax(np.nanmax(M, 0) - np.nanmin(M, 0)) / abs(ref)),
+            (lo, hi))
 
 
 def reset(rigging, level=LIGHT):

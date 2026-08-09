@@ -56,9 +56,25 @@ FAILS = []
 
 
 def cost(seq):
-    """Attachment changes a night pays to walk `seq` in order."""
-    s = [parse_config(c) or frozenset() for c in seq]
-    return sum(len(a ^ b) for a, b in zip(s, s[1:]))
+    """Attachment changes a night pays to walk `seq` in order.
+
+    ⚠ A SECOND, INDEPENDENT COPY OF THE COST, deliberately not night's
+    `_slot_changes`. The floor below is brute-forced with THIS function, so
+    importing the implementation's would let a wrong cost agree with itself and
+    still report "reaches the floor". The old copy was `len(a ^ b)` on
+    frozensets, and it had to change here for the same reason it changed there:
+    a config can now name its part, and on sets 'grip=vert_grip' and
+    'grip=half_grip' are the same config.
+
+    ⚠ Membership and value, not value alone: a slot absent and a slot taking
+    the class default BOTH read None, so comparing `.get` alone scores the
+    whole factorial at zero. This function got that wrong first and the two
+    checks below said so.
+    """
+    s = [parse_config(c) for c in seq]
+    return sum(sum(1 for slot in set(a) | set(b)
+                   if (slot in a, a.get(slot)) != (slot in b, b.get(slot)))
+               for a, b in zip(s, s[1:]))
 
 
 def check(label, cond, detail=''):
@@ -107,6 +123,36 @@ def main():
     dup = ['bare', 'muzzle', 'bare']
     check('it neither drops nor merges duplicates',
           sorted(order_configs(dup)) == sorted(dup), f'{order_configs(dup)}')
+
+    print()
+    print('a config can NAME its part, and a swap is one change — not zero')
+    # ⚠ THE CASE THAT MAKES A CAMPAIGN SCHEDULABLE, and the one a set-based
+    # cost cannot even express. Under `len(a ^ b)` on slot names these two are
+    # the SAME config, so the planner would rate a real grip swap as free and
+    # cheerfully interleave them with cells that cost something.
+    check('swapping the part in one slot costs 1',
+          cost(['grip=vert_grip', 'grip=half_grip']) == 1,
+          f'{cost(["grip=vert_grip", "grip=half_grip"])}')
+    check('...and is still cheaper than swapping two slots',
+          cost(['muzzle=comp_smg+grip=vert_grip',
+                'muzzle=flash_smg+grip=half_grip']) == 2)
+    # A named part that IS the class default must stay anonymous, or every
+    # already-logged cell id changes and --resume stops matching.
+    check('a defaulted slot keeps its short name',
+          plan_cells(['m416'], ['standing'], 'red_dot',
+                     ['muzzle'])[0][3] == 'muzzle')
+    # The mixed axis: one slot named, one defaulted, in the same config.
+    mixed = plan_cells(['m416'], ['standing'], 'red_dot',
+                       ['muzzle+grip=half_grip'])
+    check('a half-named config survives planning',
+          [c[3] for c in mixed] == ['muzzle+grip=half_grip'], f'{mixed}')
+    # The vector cannot wear tilted_grip (attachment_catalog.EXCLUDE, confirmed
+    # by hand). An explicitly named part has to degrade the way a missing slot
+    # does -- otherwise the cell is planned, spawned, dragged and refused.
+    vec = plan_cells(['vector'], ['standing'], 'red_dot',
+                     ['grip=tilted_grip', 'grip=half_grip'])
+    check('a part the weapon refuses degrades out of the plan',
+          [c[3] for c in vec] == ['bare', 'grip=half_grip'], f'{vec}')
 
     print()
     print('end to end, through plan_cells')

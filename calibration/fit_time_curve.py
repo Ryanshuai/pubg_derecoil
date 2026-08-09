@@ -655,6 +655,11 @@ def selftest():
 SESSION_GAP_MIN = 5.0            # same cut as the nine-run table in the history
 SESSION_MIN_MAGS = 4             # below this a "session fit" is one magazine
 SESSION_T_REF = 2.40             # where y_true is read, as in the noise floor
+# How far below the median burst end to read when 2.40 s is past it. Same
+# derivation and same value as harness/verdict.AGREE_BAND_EDGE_S -- burst
+# length inside a cell scatters by 0.01-0.02 s, so this is ~3x that and keeps
+# essentially every magazine in the table rather than half of them.
+T_REF_EDGE_S = 0.05
 ARM_ROUND = -2                   # curve totals binned to 100 counts
 
 
@@ -717,7 +722,25 @@ def _compare(curves, grid):
 def by_session(mags, gap_min=SESSION_GAP_MIN, min_mags=SESSION_MIN_MAGS,
                t_ref=SESSION_T_REF):
     """Two-way: (session x curve arm). See the block comment above for why the
-    arm axis is not optional."""
+    arm axis is not optional.
+
+    ⚠ 2.40 IS AN M416 INSTANT AND NOT EVERY BURST LASTS THAT LONG. The vector
+    fires 1130 rpm and empties in ~1.7 s, so `_y_at` returns None for every one
+    of its magazines and this printed "no magazine reaches t = 2.40 s" -- true,
+    and useless: the diagnostic simply does not exist for the fastest guns on
+    the roster. It reads LATE-BUT-INSIDE instead, and SAYS which instant it
+    used, because a table headed 2.40 s that was read at 1.65 s is the second
+    cross-layer law in the root CLAUDE.md.
+    """
+    ends = sorted(t[-1] for t in (m.y_true_counts()[0] for m in mags)
+                  if len(t) >= 2)
+    if ends:
+        reach = float(ends[len(ends) // 2]) - T_REF_EDGE_S
+        if reach < t_ref:
+            print(f'  [i] no magazine of this weapon reaches t = {t_ref:.2f} s '
+                  f'(the median burst ends at {ends[len(ends) // 2]:.2f} s) — '
+                  f'reading at {reach:.2f} s instead')
+            t_ref = reach
     cells = {}
     for s in _sessions(mags, gap_min):
         ts = getattr(s[0], 'ts', '?')

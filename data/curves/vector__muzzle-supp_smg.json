@@ -1,0 +1,638 @@
+{
+ "weapon": "vector",
+ "sight": "red_dot",
+ "posture": "standing",
+ "config": {
+  "muzzle": "supp_smg"
+ },
+ "shots": [
+  {
+   "delay_ms": 0,
+   "dx": 0.0,
+   "dy": 3.164
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 3.616
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 3.616
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 3.616
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 3.616
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 3.616
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 4.068
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 4.068
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 4.972
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 4.972
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 4.972
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 4.972
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 4.972
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 4.972
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 4.972
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 5.876
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 5.876
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 5.876
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 5.876
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 5.876
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 5.876
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 5.876
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 5.876
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 5.876
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 9.04
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 9.04
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 9.04
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 0.0
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  }
+ ],
+ "padded_knots": 68,
+ "kit_factor": 1.0,
+ "seed": true,
+ "source": "SEED, NOT A FIT — https://github.com/Kava4/PUBG-LOGITECH-NO-RECOIL (branch main, PUBG-Logitech-No-Recoil.lua), x0.452 counts/unit. Community guesses, close enough to keep the view on screen while this gun is measured. The first `collect-timed` + `fit_time_curve` for this configuration OVERWRITES this file, which is the intent.",
+ "grid_ms": 17,
+ "total_counts": 961.8559999999999,
+ "span_s": 2.091,
+ "scaled_by": "NOTHING further. These are final mouse counts; set_seq emits them with no factors."
+}

@@ -429,7 +429,7 @@ def one_magazine(rig, grabber, weapon, mag_size, interval_s, curve,
 
 
 def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
-                       note_prefix=''):
+                       note_prefix='', scope_asset=None):
     """Fire `mags` magazines into the sample store, alternating curve arms.
 
     -> (fired, error|None). Never raises for a game problem: a burst that threw
@@ -452,9 +452,25 @@ def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
     from calibration.weapon_build import build_weapon
     from capture.cropper import DXGISyncGrabber
 
-    w = build_weapon(weapon, posture=posture)
+    # ⚠ THE CURVE IS LOOKED UP BY THE CONFIG THAT IS ON THE GUN, and this line
+    # read `build_weapon(weapon, posture=posture)` — a BARE gun with no optic.
+    # main() above carries a long comment about exactly this fault ("every
+    # compensating run on a kitted gun played the curve stored for a bare one
+    # through iron sights") and was fixed on 2026-08-08; THIS path, in the same
+    # file, was not. A fix applied to one of two call sites and a fix not
+    # applied at all look identical from outside.
+    #
+    # Under MODEL.md it is not a slightly-wrong curve, it is another gun's:
+    # plan A does no interpolation, so the key either hits or misses. The
+    # magazine stays HONEST either way — y_comp is read back off the firmware —
+    # but the compensation is sized for the wrong gun, |y_obs| is large instead
+    # of near zero, and the nulling that makes this measurement precise is
+    # thrown away. On a kitted vector the bare curve OVER-compensates and drives
+    # the view into the ground, where the correlator is as blind as it is in
+    # open sky.
+    w = build_weapon(weapon, posture, dict(config or {}, scope=scope_asset))
     if w is None or not len(getattr(w, 't_s', ())):
-        return 0, f'no pattern for {weapon}'
+        return 0, f'no pattern for {weapon} {S.config_key(config)}'
 
     grabber = DXGISyncGrabber(rig.tracker.regions())
     fired = 0

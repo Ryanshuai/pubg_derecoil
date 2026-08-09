@@ -64,6 +64,28 @@ HALT_STREAK = 4
 ATTEMPTS = 2
 
 
+def _slot_changes(a, b):
+    """How many attachment ACTIONS separate two fill mappings.
+
+    ⚠ SWAPPING A PART IS ONE CHANGE, NOT TWO, and it is not zero either. This
+    replaced `len(a ^ b)` on frozensets when a config gained the power to name
+    its part: on sets, {'grip'} and {'grip'} are identical, so 'grip=vert_grip'
+    and 'grip=half_grip' would have cost NOTHING to reorder between -- the
+    planner would rank a real grip swap as free and schedule around a fiction.
+    Counting slots whose VALUE differs answers the question the caller is
+    actually asking: how many slots does the kitter have to touch.
+
+    ⚠ MEMBERSHIP FIRST, VALUE SECOND, and `a.get(s) != b.get(s)` alone is
+    WRONG here for the same reason it is wrong in want_for: 'bare' and 'muzzle'
+    both answer None for the muzzle -- one because the slot is absent, one
+    because it takes the class default -- so a plain .get comparison rates the
+    whole 2^3 factorial as costing ZERO. `pixi run plan-order` caught that on
+    the case that pins 13 -> 7.
+    """
+    return sum(1 for s in set(a) | set(b)
+               if (s in a, a.get(s)) != (s in b, b.get(s)))
+
+
 def order_configs(configs):
     """Reorder configs so consecutive cells differ by as FEW slots as possible.
 
@@ -118,13 +140,15 @@ def order_configs(configs):
         return names
 
     def cost(order):
-        return sum(len(parsed[a] ^ parsed[b]) for a, b in zip(order, order[1:]))
+        return sum(_slot_changes(parsed[a], parsed[b])
+                   for a, b in zip(order, order[1:]))
 
     idx = list(range(len(names)))
     start = min(idx, key=lambda i: (len(parsed[i]), names[i]))
     greedy, rest = [start], [i for i in idx if i != start]
     while rest:
-        nxt = min(rest, key=lambda i: (len(parsed[i] ^ parsed[greedy[-1]]),
+        nxt = min(rest, key=lambda i: (_slot_changes(parsed[i],
+                                                     parsed[greedy[-1]]),
                                        names[i]))
         greedy.append(nxt)
         rest.remove(nxt)

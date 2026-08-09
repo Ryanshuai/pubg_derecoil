@@ -321,10 +321,29 @@ def write_seeds(names, pats, posture, sight, config=None, span_s=None,
         raw, padded = _pad_to_span(pats[lua], span)
         kit_f = 1.0
         if config:
-            from detector.weapon_attachments import attachment_factor
-            kit_f = attachment_factor(ours, config.get('muzzle', '') or '',
-                                      config.get('grip', '') or '',
-                                      config.get('stock', '') or '', posture)
+            # ⚠ ASSETS, NOT CATALOGUE KEYS. attachment_factor's slots are
+            # "attachment_detector class names" (its docstring) and it looks
+            # them up through _ASSET_TO_KEY, whose ⚠ says an unrecognised part
+            # POISONS THE WHOLE ANSWER on purpose -- `_worn_keys` returns None
+            # and the lookup drops to the wiki tier. `comp_smg` is not an
+            # asset, so this asked for a MEASURED 0.7197 and got 1.0 back,
+            # printing `kit x1.0000` on every kitted seed while looking exactly
+            # like a gun with no measurements. The poison rule did its job; the
+            # caller was speaking the wrong language.
+            from detector.attachment_catalog import ATTACHMENTS
+            from detector.weapon_attachments import explain_factor
+
+            def _asset(key):
+                return (ATTACHMENTS.get(key) or {}).get('asset', '') if key else ''
+
+            kit_f, src, _ = explain_factor(ours,
+                                           _asset(config.get('muzzle')),
+                                           _asset(config.get('grip')),
+                                           _asset(config.get('stock')), posture)
+            # A seed does not have to be RIGHT, but it does have to be KNOWN --
+            # so say which tier answered rather than letting a wiki 1.0 pass
+            # for a measurement.
+            kit_src = src
         shots = [{'delay_ms': GRID_MS if i else 0,
                   'dx': round(dx * UNIT_COUNTS * kit_f, 4),
                   'dy': round(dy * UNIT_COUNTS * kit_f, 4)}
@@ -374,7 +393,7 @@ def write_seeds(names, pats, posture, sight, config=None, span_s=None,
         if padded:
             note.append(f'+{padded} padded to {span:.2f}s at the plateau')
         if config:
-            note.append(f'kit x{kit_f:.4f}')
+            note.append(f'kit x{kit_f:.4f} ({kit_src})')
         print(f'  seeded {ours:8s} {total:7.0f} counts over {doc["span_s"]:.2f}s '
               f'({len(shots)} knots{", " + ", ".join(note) if note else ""}) '
               f'-> {os.path.relpath(path, ROOT)}')

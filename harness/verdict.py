@@ -56,6 +56,28 @@ AGREE_ARMS_MIN = 2
 # claims to model. MODEL.md's own two-arm table is read at 2.40 s.
 AGREE_BAND_S = (1.0, 2.4)
 
+# ⚠ 2.4 IS AN M416 NUMBER AND NOT EVERY GUN LIVES THAT LONG. An m416 magazine
+# runs 3.81 s and an mp5k 2.99, so the band fitted inside both and nobody had
+# to think about it. The vector fires 1130 rpm and empties in ~1.7 s: not one
+# of its magazines can reach 2.4 s, so _agreement skipped every one of them and
+# the cell failed on "agree_arms=1" with flawless data. A gate that cannot pass
+# is not a gate -- the impulse check was deleted for the same defect.
+#
+# So the upper end is capped at the pool's own reach. EDGE is the margin below
+# the median magazine end: burst length inside a cell is nearly constant (115
+# m416 magazines span 0.01 s, 173 mp5k ones 0.02 s), so 0.05 is about three
+# times the observed scatter and keeps essentially every magazine inside the
+# comparison instead of half of them.
+AGREE_BAND_EDGE_S = 0.05
+
+# And below this there is no band left to compare in. Not a weaker check -- a
+# DIFFERENT one: MODEL.md's own two-arm table is read at a single instant, so a
+# narrow band is not worthless. What this refuses is `hi` collapsing onto or
+# under `lo`, where the grid is degenerate or inverted and the number it
+# returns would describe nothing. The vector, the fastest gun on the roster,
+# still leaves 0.6 s; anything under this is a burst that barely clears `lo`.
+AGREE_BAND_MIN_S = 0.25
+
 # A FRACTION of y_true, not counts: 30 counts means something different on a
 # Vector than on an MG3.
 #
@@ -215,9 +237,14 @@ def judge(rec):
         return bad('agree', 'agree_spread missing — the arms exist but not '
                             'enough of them reach the comparison band')
     if spread > AGREE_SPREAD_MAX:
+        # ⚠ THE BAND THAT RAN, not the constant. The upper end is capped by the
+        # burst (adapter._agreement), so on a fast gun the comparison happens
+        # somewhere other than 1.0..2.4 -- and a failure line naming a band the
+        # measurement never used is a report about a different measurement.
+        band = rec.get('agree_band') or AGREE_BAND_S
         return bad('agree', f'{arms} arms disagree about y_true by '
-                            f'{spread:.1%} over t={AGREE_BAND_S[0]:.1f}'
-                            f'..{AGREE_BAND_S[1]:.1f}s, over '
+                            f'{spread:.1%} over t={band[0]:.2f}'
+                            f'..{band[1]:.2f}s, over '
                             f'{AGREE_SPREAD_MAX:.0%}')
 
     # 5. Was the player actually aiming? Firing from the hip measures a
