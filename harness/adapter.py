@@ -149,8 +149,7 @@ def open_rig(sight, out_dir, home=True, countdown=6,
     "PUBG is not running" is an answer the morning can read, and a traceback
     out of a 4 a.m. process is not.
     """
-    from control.kitting import (Kitter, MAG_FOR_CLASS, PART_FOR_CLASS,
-                                     SCOPE_PART, parse_config, stock_parts)
+    from control.kitting import (Kitter, parse_config, stock_parts, want_for)
     from calibration.kit_facts import KitFacts
     from calibration.range_session import get_session
     from calibration.sweep import Rig
@@ -168,21 +167,29 @@ def open_rig(sight, out_dir, home=True, countdown=6,
     # planner schedules the cell, the backpack never holds the part, ensure_kit
     # cannot fit it, and read_config refuses -- one failure per cell, four in a
     # row, and the night halts on a stocking bug wearing a kitting bug's face.
-    fills = [f for f in (parse_config(c) for c in (configs or ())) if f]
-    parts = {SCOPE_PART}
-    # ⚠ ALSO KEPT PER WEAPON, because that is the unit the pack is stocked in.
-    # `parts` is every part every weapon's configs name -- useful for nothing
-    # but a sanity print -- while what a stocking trip should ask for is THIS
-    # GUN'S whole test set: 「要一次加上所有这个枪待测配件」.
-    parts_for = {}
+    # ⚠ ASK want_for, DO NOT RE-DERIVE. This block used to build the list from
+    # SCOPE_PART, PART_FOR_CLASS and MAG_FOR_CLASS by hand -- a second copy of a
+    # rule control.kitting already owns -- and the copy was missing the half
+    # that matters: `fixed_kit` pins the magazine only `if has_slot(weapon,
+    # 'magazine')`, and this did not ask. The mg3 is belt-fed and its catalogue
+    # entry has said `('scope',)` all along; the hand-rolled copy still put
+    # `ext_ar` on its shopping list, so every mg3 cell spawned an AR magazine
+    # that cannot fit, failed to fit it, and dropped it again.
+    #
+    # It cost nothing while `parts` was only a hint for restock_fn. It started
+    # costing the moment parts_for became the list a stocking trip actually
+    # buys -- which is this session's change, so the fix belongs with it.
+    #
+    # `{}` is always in the list because a bare config parses to an empty fill
+    # and would otherwise contribute nothing, while the PINNED kit (sight, and
+    # magazine where the gun has one) is exactly what a bare cell still needs.
+    fills = [f for f in (parse_config(c) for c in (configs or ())) if f] + [{}]
+    parts, parts_for = set(), {}
     for w in weapons:
         cls = ROSTER.get(w, (None,))[0]
-        table = PART_FOR_CLASS.get(cls, {})
-        mine = {SCOPE_PART}
+        mine = set()
         for fill in fills:
-            mine.update(x for x in (p or table.get(s)
-                                    for s, p in fill.items()) if x)
-        mine.update(x for x in [MAG_FOR_CLASS.get(cls)] if x)
+            mine.update(v for v in want_for(w, cls, fill).values() if v)
         parts_for[w] = mine
         parts.update(mine)
 
