@@ -21,7 +21,10 @@ run m762  "bare,muzzle=comp_ar,muzzle=flash_ar,muzzle=supp_ar,muzzle=brake_ar,gr
 run ace32 "bare,muzzle=comp_ar,muzzle=flash_ar,muzzle=supp_ar,muzzle=brake_ar,grip=vert_grip,grip=half_grip,grip=tilted_grip,stock=heavy_stock,stock=tactical_stock"
 run groza "bare,muzzle=supp_ar"
 run mg3   "bare"
-run p90   "bare"
+# p90 REMOVED 2026-08-09: it has no attachment slots, so it cannot be
+# given a red dot, and its integral optic has no K in
+# RECOIL_SIGHT_PROFILES. Measuring it starts with calibrate_k, not here.
+# Evidence: docs/p90_has_no_slots.png, docs/p90_no_slots_0802_scan.png
 
 echo ""
 echo "################ QUEUE COMPLETE ################"

@@ -391,9 +391,15 @@ SLOTS = {
     # the VSS does with its fixed PSO-1, per this file's header. Same answer
     # shape as win94 above: no slots, because the gun has an integrated optic.
     #
-    # Source frames, both kept:
+    # ⚠ AND IT REPLICATES ON AN INDEPENDENT FRAME SEVEN DAYS EARLIER.
+    # docs/p90_no_slots_0802_scan.png is the P90 in slot 2 of the 2026-08-02
+    # scan_compat capture: same blank strip. Two frames, two sessions, one
+    # answer -- which is what this repository means by measured.
+    #
+    # Source frames, all kept:
     #   calibration/artifacts/nights/night_20260809_0546/fail_p90_standing_red_dot/tab.png
     #   calibration/artifacts/nights/night_20260809_0827/fail_mg3_standing_red_dot/tab.png
+    #   calibration/artifacts/compat/runs/20260802_155222/p90.png
     #
     # On that frame the Red Dot Sight the night asked for is sitting in
     # VICINITY / Ground. `[!] scope should be red_dot, reads ''` is the honest
@@ -423,7 +429,11 @@ SLOTS = {
     # is drawn and existence is unreadable there. An 'empty' slot is an
     # INVITATION to drag, and a drag at a slot that does not exist is how
     # attachments -- and whole guns -- end up on the ground.
-    'p90':      {'slots': (), 'conf': 'measured-screenshot'},
+    # ⚠ AND THE OPERATOR CONFIRMED IT INDEPENDENTLY (2026-08-09):「p90 不能装
+    # 瞄具，我确认过」. So this row has three sources that cannot have copied each
+    # other -- a 08-02 scan frame, a 08-09 night frame, and somebody who plays
+    # the game. That is the strongest confidence any row in this table has.
+    'p90':      {'slots': (), 'conf': 'measured+confirmed'},
     # Non-replaceable laser sight and silencer as standard.
     'mp9':      {'slots': ('scope', 'magazine', 'stock'), 'conf': 'measured'},
     # No grip slot (ring 18.6) and no stock (14.2). The grip was a guess,
@@ -567,13 +577,33 @@ EXCLUDE = {
     # an inference from two failures -- it is the game refusing a pairing it
     # never claimed.
     #
-    # ⚠ THE SLOT IS REAL AND THAT IS WHY THIS BELONGS HERE RATHER THAN IN
-    # SLOTS. scan_compat measured `p90: ('magazine',)` by reading the tile, and
-    # that reading stands: the P90 draws a magazine slot. What it does NOT take
-    # is the SMG magazine the class table hands it -- `compatible()` was
-    # inheriting the whole SMG magazine list without anything having measured
-    # it, which is the gap attachment_catalog's own docstring flags for
-    # EXCLUDE/ONLY/GRIP_ONLY.
+    # ⚠ "THE SLOT IS REAL" IS FALSE AND THIS ENTRY IS NOW DEAD WEIGHT, kept
+    # only because the way it got here is worth more than the line. It read:
+    #
+    #     scan_compat measured `p90: ('magazine',)` by reading the tile, and
+    #     that reading stands: the P90 draws a magazine slot.
+    #
+    # The scan's own capture refutes it. In
+    # calibration/artifacts/compat/runs/20260802_155222/p90.png the P90 is in
+    # slot TWO -- slot one holds an AUG (label 'AUG', 40 rounds, 5.56mm, four
+    # tiles) -- and the P90's strip is blank, exactly as it is in the 2026-08-09
+    # night frame seven days later. docs/p90_no_slots_0802_scan.png is that half.
+    #
+    # A file named p90.png whose measurement came off an AUG is root CLAUDE.md's
+    # second law verbatim: the record described one object and the measurement
+    # was taken from another, and nothing raised.
+    #
+    # ⚠ AND THE FALSE `magazine` DID NOT COME FROM THE AUG EITHER -- SlotDetector
+    # answers `magazine: 'empty'` on the P90's blank strip, on BOTH frames. Its
+    # existence test is a gradient on the tile's border ring, and with no tile
+    # drawn it reads the weapon render behind it. 'empty' is the word that means
+    # "drag here"; 'absent' is the word that means "do not". This is the one gun
+    # where every slot gets the wrong one.
+    #
+    # With SLOTS['p90'] now empty, fits() rejects everything before this set is
+    # ever consulted, so it can go the next time somebody is in here. The
+    # 5.7mm-vs-SMG-magazine reasoning below was sound and is simply about a slot
+    # that does not exist.
     'p90':   {'ext_smg', 'quickext_smg', 'quick_smg'},
 }
 

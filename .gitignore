@@ -108,3 +108,4 @@ docs/kava4/*.lua
 # of the answer is one cleanup away from gone -- exactly how 40 weapons' curves
 # were lost while `git status` stayed clean.
 !docs/p90_has_no_slots.png
+!docs/p90_no_slots_0802_scan.png
