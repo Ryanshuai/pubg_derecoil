@@ -58,7 +58,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config as cfg                                       # noqa: E402
 from calibration import samples as S                       # noqa: E402
 from control.spawner import ROSTER                         # noqa: E402
-from detector.attachment_catalog import has_slot            # noqa: E402
+from detector.attachment_catalog import ATTACHMENTS, fits, has_slot  # noqa: E402
 from harness.adapter import _agreement                     # noqa: E402
 from harness.verdict import AGREE_ARMS_MIN, AGREE_SPREAD_MAX  # noqa: E402
 
@@ -66,6 +66,27 @@ from harness.verdict import AGREE_ARMS_MIN, AGREE_SPREAD_MAX  # noqa: E402
 # click with a re-chamber in between, which is not the quantity this repo
 # fits, so an empty row for a Kar98k is not a gap.
 SPRAY_CLASSES = ('AR', 'SMG', 'LMG')
+
+# Parts the campaign does not fire. THE OPERATOR'S CALL, 2026-08-09, taken on
+# the gap list this file printed: these three grips are not worth a cell.
+#
+# ⚠ IT IS A PLAN, NOT A CAPABILITY. `kitting.ensure_kit` will still fit any of
+# them on request and `fits()` still says yes — a gun CAN wear a laser. What
+# this says is that nobody is going to spend magazines finding out what it
+# does, and the difference matters because the first is a fact about the game
+# and the second is a decision about tonight.
+#
+# The one data-side note, and it covers exactly one of the three: `laser`
+# measured 1.0058 on the m762 (n=5, data/kit_factors.json) — an identity, so
+# a cell for it would cost 10 magazines to re-learn that it changes nothing.
+# `light_grip` 0.8748 and `thumb_grip` 0.7847 are NOT identities; they are
+# skipped because they were not asked for, and saying otherwise would dress a
+# preference up as a measurement.
+#
+# ⚠ NEVER DROPPED SILENTLY. `--gaps` prints what this removed on its own line,
+# because a plan that quietly bounds its own coverage reads afterwards as
+# "we covered everything".
+NOT_WORTH_FIRING = ('laser', 'light_grip', 'thumb_grip')
 
 
 def _curve_state(path):
@@ -103,12 +124,69 @@ def _cells():
     return out
 
 
+def _round1(weapon):
+    """{slot: [part, ...]} — every part that fits, per slot the gun HAS.
+
+    ⚠ ASK THE CATALOGUE, NOT THE STORE. An axis a gun does not own is not a
+    cheap cell, it is four guaranteed failures and a halted night (the
+    calibrate-recoil skill's round-1 rule), and `has_slot` carries
+    `conf=measured` per weapon rather than a guess off the wiki.
+    """
+    out = {}
+    for slot in ('muzzle', 'grip', 'stock'):
+        if not has_slot(weapon, slot):
+            continue
+        parts = sorted(k for k, at in ATTACHMENTS.items()
+                       if at['slot'] == slot and fits(weapon, k))
+        if parts:
+            out[slot] = parts
+    return out
+
+
+def gaps():
+    """What a gun that HAS been fired still owes round 1."""
+    have = {n[:-len('.jsonl')] for n in os.listdir(S.SAMPLE_DIR)
+            if n.endswith('.jsonl')}
+    fired = sorted({h.split('__', 1)[0] for h in have})
+    total, skipped = 0, 0
+    for weapon in fired:
+        missing = collections.OrderedDict()
+        for slot, parts in _round1(weapon).items():
+            gone = [p for p in parts
+                    if f'{weapon}__{slot}-{p}' not in have]
+            skipped += sum(1 for p in gone if p in NOT_WORTH_FIRING)
+            gone = [p for p in gone if p not in NOT_WORTH_FIRING]
+            if gone:
+                missing[slot] = gone
+        if f'{weapon}__bare' not in have:
+            missing['bare'] = ['']
+        n = sum(len(v) for v in missing.values())
+        total += n
+        cls = (ROSTER.get(weapon) or ('?',))[0]
+        if not missing:
+            print(f'{weapon:<8} {cls:<4} round 1 COMPLETE')
+            continue
+        print(f'{weapon:<8} {cls:<4} {n} cell(s) short')
+        for slot, gone in missing.items():
+            print(f'    {slot:<7} {" ".join(gone)}')
+    print(f'\n{total} round-1 cells across {len(fired)} fired weapon(s).')
+    print(f'{skipped} more are NOT PLANNED — {", ".join(NOT_WORTH_FIRING)}. '
+          f'They fit and they are unmeasured; nobody is firing them.')
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--weapon', help='only this gun')
     ap.add_argument('--cells', action='store_true',
                     help='one row per cell instead of one per gun')
+    ap.add_argument('--gaps', action='store_true',
+                    help='round-1 cells a FIRED gun still owes: bare plus '
+                         'every compatible part alone, minus what is in the '
+                         'store')
     a = ap.parse_args()
+    if a.gaps:
+        return gaps()
 
     cells = _cells()
     by_weapon = collections.defaultdict(list)
