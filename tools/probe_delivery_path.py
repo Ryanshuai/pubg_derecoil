@@ -101,10 +101,23 @@ DEAD_PX = 2.0        # a trial that moved less than this measured nothing
 TEXTURE_MIN = 40.0   # Laplacian variance the patches need to be trackable
 ALIAS_PX = 110.0     # per-frame ceiling; RECOIL_PATCH_H/2 is 128
 PATCH_WAIT_S = 4.0   # how long a trial may wait for a trackable patch
-# A `none` arm -- button held, pattern off -- that MOVES means a weapon is
-# out and the trigger is firing it. Measured across two runs at every hold:
-# 0.0 to 0.3 px. Five is twenty times the largest honest reading.
-NONE_MAX_PX = 5.0
+# ⚠ A `none` ARM THAT MOVES IS NOT ENOUGH TO CALL IT GUNFIRE, and a flat
+# threshold on it was wrong. It was set at 5 px because the punch had measured
+# 0.0-0.3 across two runs -- and then a third run, with no weapon out (HUD ink
+# 0.00%), read 33 px. The bare-handed punch DOES move the camera; how much
+# depends on the stance and the view, and two runs were not a sample.
+#
+# Raising the threshold would be turning a red gate green. The honest
+# discriminator is that the two things have different SHAPES:
+#
+#     a punch      one animation. Its displacement barely grows with the hold
+#     gunfire      recoil accumulates. 2.5 s is ~10x what 0.25 s is
+#
+# So the pre-flight holds the button at both ends and compares. Either way the
+# punch cancels in curve/move -- all three arms press the same button -- so
+# this gate exists only to catch a WEAPON, not to keep the punch out.
+NONE_GROWTH_MAX = 3.0    # long/short above this and it is accumulating recoil
+NONE_FLOOR_PX = 3.0      # below this at the long hold, nothing is firing
 # Per-trial cost beyond the hold itself: arming the pattern, flushing frames,
 # reading the click back. Only used for the up-front time estimate.
 TRIAL_OVERHEAD_S = 0.35
@@ -472,6 +485,42 @@ def _arms_at(t):
     return ('curve', 'move')
 
 
+def _no_weapon_firing(rig, grabber):
+    """Hold the button at both ends of the sweep with the pattern OFF.
+
+    A punch is one animation and barely grows with the hold; recoil
+    accumulates. So the RATIO between a long hold and a short one separates
+    them, and no absolute threshold has to be guessed -- which is what the
+    first version did, at 5 px, on a punch that had only ever been seen at
+    0.0-0.3 and then turned up at 33.
+    """
+    short = max(abs(one_hold_trial(rig, grabber, HOLD_SWEEP[0], s, 'none')[0])
+                for s in (+1, -1))
+    long_ = max(abs(one_hold_trial(rig, grabber, HOLD_SWEEP[-1], s, 'none')[0])
+                for s in (+1, -1))
+    if not (np.isfinite(short) and np.isfinite(long_)):
+        print('  [!] the pre-flight could not find a patch — NOT A VERDICT')
+        return False
+    growth = long_ / max(short, 0.1)
+    print(f'  pattern OFF: {HOLD_SWEEP[0]:.2f}s -> {short:.1f} px, '
+          f'{HOLD_SWEEP[-1]:.2f}s -> {long_:.1f} px   growth {growth:.1f}x')
+    if long_ < NONE_FLOOR_PX:
+        print('  nothing is firing (both ends are noise)')
+        return True
+    if growth < NONE_GROWTH_MAX:
+        print(f'  it does not grow with the hold, so it is the bare-handed '
+              f'PUNCH, not recoil. It presses in all three arms and cancels '
+              f'out of curve/move.')
+        return True
+    print(f'[!] REFUSING: with the pattern OFF the view moved {short:.1f} px at '
+          f'{HOLD_SWEEP[0]:.2f}s and {long_:.1f} px at {HOLD_SWEEP[-1]:.2f}s — '
+          f'it GROWS with the hold ({growth:.1f}x), which is accumulating '
+          f'recoil, not a punch. A WEAPON IS OUT and the trigger is firing it. '
+          f'Its 2-4% per-magazine scatter is bigger than the 2% being measured. '
+          f'Holster it (X) and re-run.')
+    return False
+
+
 def hold_sweep(rig, grabber, trials):
     from calibration.samples import comp_counts_at
     # ⚠ THE PRE-FLIGHT HUD CHECK IS GONE, and what replaced it is the `none`
@@ -489,6 +538,8 @@ def hold_sweep(rig, grabber, trials):
     # reading of the thing that actually matters, taken in the measurement's
     # own conditions, and no threshold about HUD pixels can fool it.
     holster(rig)                      # best effort, and it says what it saw
+    if not _no_weapon_firing(rig, grabber):
+        return 7
     curve = _arm_sweep_curve(rig.mouse, +1)
     rig.mouse.set_recoil_enabled(False)
     held = sum(k.get('dy', 0.0) for k in curve)
@@ -550,16 +601,6 @@ def hold_sweep(rig, grabber, trials):
                     if worst > ALIAS_PX:
                         line += f'  ALIASED({worst:.0f})'
                         continue
-                    if arm == 'none' and abs(px) > NONE_MAX_PX:
-                        print(line + f'  {px:.1f}')
-                        print(f'[!] ABORT: the button was held with the pattern '
-                              f'OFF and the view moved {abs(px):.1f} px '
-                              f'(> {NONE_MAX_PX:.0f}). A WEAPON IS OUT and the '
-                              f'trigger is firing it. Its recoil cancels '
-                              f'between the arms but its 2-4% per-magazine '
-                              f'scatter does not, and that is bigger than the '
-                              f'2% being measured. Holster it (X) and re-run.')
-                        return 7
                     got[t][arm].append(sign * px)
                     line += f' {sign * px:8.1f}'
                 print(line)
