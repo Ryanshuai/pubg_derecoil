@@ -1442,6 +1442,49 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 
 WEAPON_SCALES_PATH  = os.path.join(DATA_DIR, 'weapon_scales.json')
 POSTURE_SCALES_PATH = os.path.join(DATA_DIR, 'posture_scales.json')
+
+# How much less recoil the same gun makes crouching and prone. ONE PAIR FOR
+# EVERY WEAPON, and the "one" is the whole point -- see the interaction note
+# at the bottom, which is real and is being ignored on purpose.
+#
+# ⚠ THIS IS DERIVED, NOT MEASURED IN THIS COORDINATE. Nothing in
+# calibration/artifacts/recoil/samples is anything but `standing`; every one of
+# the 74 fitted curves is standing. What is below comes from ONE run in the
+# retired bullet-bucket coordinate, m762, bare cell against bare cell:
+#
+#     standing    2171.8 counts     ortho8_0805
+#     crouching   1740.9            posture_x_kit_0805_m762
+#     prone       1218.3            same run
+#
+#     crouching / standing = 0.802        prone / standing = 0.561
+#
+# (Both survive only as `counts` inside data/kit_factors.json; the raw runs
+# went with the coordinate. n=6 a side.)
+#
+# ⚠ AND IT IS A CROSS-RUN RATIO, which build_kit_factors says not to take:
+# standing comes from a different sitting than the other two, and between
+# sittings is worth 2.7%. Crouching-vs-prone is the sound comparison here
+# because those two share a run; each against standing carries that 2.7%.
+#
+# Two weaker sources agree with the crouching number and neither is a
+# measurement: the per-type default this replaced also said 0.80, and the
+# operator's hand-tuned data/posture_scales.json has four of six crouching
+# entries in 0.75-0.84. PRONE HAS NO SUCH AGREEMENT -- that default said 0.50
+# against the measured 0.561, 12% apart, which is why the measured value wins
+# and the default is gone rather than kept as a second opinion.
+#
+# ⚠ WHAT IS KNOWINGLY THROWN AWAY: posture x kit interacts, with OPPOSITE
+# SIGNS on two ARs (m416 +13.8/+21.6%, m762 -6.2/-7.0%, all >3.7 sigma,
+# calibration/build_kit_factors.py). A single scalar cannot represent that and
+# is not trying to. It is here so that crouching compensates approximately
+# instead of not at all, which was the state until 2026-08-09.
+#
+# ⚠ AND NOBODY HAS CHECKED IT ACROSS THE BURST. The scope ratio was assumed
+# constant the same way and turned out to span 5.7% between t=1.2 s and
+# t=2.4 s (calibration/calibrate_scope.py). These are two endpoint totals from
+# a coordinate that no longer exists, so the same question cannot even be
+# asked of them. Measuring one gun crouching answers it.
+POSTURE_FACTOR = {'standing': 1.0, 'crouching': 0.80, 'prone': 0.56}
 KIT_FACTORS_PATH    = os.path.join(DATA_DIR, 'kit_factors.json')
 KIT_RECORDS_PATH    = os.path.join(DATA_DIR, 'kit_records.jsonl')
 

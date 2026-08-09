@@ -54,6 +54,11 @@ class Robot:
         self.dispatcher.start()
         print("init done", flush=True)
 
+    # How long the dispatcher gets to notice stop() before we disarm anyway.
+    # A tick is 10 ms plus whatever one pass of detectors costs, so this is
+    # two orders of margin -- it is a deadline, not an expected duration.
+    JOIN_TIMEOUT_S = 2.0
+
     def shutdown(self):
         """Stop the threads, THEN disarm.
 
@@ -64,17 +69,31 @@ class Robot:
         join() in between is what stops the loop from re-arming it.
 
         It also saves the scales, so this no longer does.
+
+        The join is BOUNDED, and the disarm runs whether or not it came back
+        in time. Ordering the two is a preference; disarming is not. A loop
+        wedged inside a detector would otherwise take the Pico with it, and
+        three agents share that port -- the next run would measure a gun
+        nobody is holding.
         """
         self.poller.stop()
         self.capture.stop()
         self.dispatcher.stop()
-        self.dispatcher.join()
+        self.dispatcher.join(self.JOIN_TIMEOUT_S)
+        if self.dispatcher.is_alive():
+            print(f'[shutdown] dispatcher still running after '
+                  f'{self.JOIN_TIMEOUT_S}s -- disarming anyway', flush=True)
         self.dispatcher.shutdown()
 
 
 if __name__ == '__main__':
     robot = Robot()
     try:
-        robot.dispatcher.join()
+        # NOT dispatcher.join(). See DaemonLoop.wait -- a no-timeout join on
+        # Windows holds a pending SIGINT until it returns, and this loop only
+        # returns on f13, so Ctrl-C was never delivered at all.
+        robot.dispatcher.wait()
+    except KeyboardInterrupt:
+        print('\n[robot] Ctrl-C', flush=True)
     finally:
         robot.shutdown()

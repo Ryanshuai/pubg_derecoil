@@ -194,7 +194,7 @@ _part_factors = _kit_file.get('parts', {})
 _ASSET_TO_KEY = {v['asset']: k for k, v in ATTACHMENTS.items() if v.get('asset')}
 
 
-def _worn_keys(muzzle, grip, stock):
+def worn_keys(muzzle, grip, stock):
     """{slot: catalogue key} for what is fitted, or None if a part is unknown.
 
     ⚠ AN UNRECOGNISED ASSET POISONS THE WHOLE ANSWER, on purpose. A part this
@@ -266,7 +266,7 @@ def measured_kit_factor(gun_name, posture, muzzle='', grip='', stock=''):
     per_weapon = _kit_factors.get(gun_name)
     if not per_weapon:
         return None
-    worn = _worn_keys(muzzle, grip, stock)
+    worn = worn_keys(muzzle, grip, stock)
     if worn is None:
         return None
     kit = '+'.join(sorted(f'{s}={worn[s]}' for s in _KIT_SLOTS if s in worn))
@@ -319,7 +319,7 @@ def explain_factor(gun_name, muzzle='', grip='', stock='',
         return got, 'kit', {}
 
     # ── tier 2: this gun's own single-part measurements ──
-    worn = _worn_keys(muzzle, grip, stock)
+    worn = worn_keys(muzzle, grip, stock)
     if worn:
         per_slot, any_measured = {}, False
         for slot in _KIT_SLOTS:

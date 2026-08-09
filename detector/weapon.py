@@ -170,6 +170,11 @@ def load_curves():
 # layers already, so the copy bought nothing and risked the failure that
 # docstring described -- two authors drifting, and a lookup that just misses.
 from config import config_key, fire_tag                    # noqa: E402,F401
+# ⚠ THE ONE PLACE THAT KNOWS 'Muzzle_Compensator_Large_C' IS 'comp_ar'.
+# set_seq needs it because the detector speaks assets and the curve store
+# speaks catalogue keys; weapon_attachments imports only config and the
+# catalogue, so this is not a cycle.
+from detector.weapon_attachments import worn_keys          # noqa: E402
 
 
 # Guns whose optic is part of the WEAPON, not of the scope slot. An empty
@@ -445,36 +450,57 @@ _weapon_scales = _load_scales()
 # standing is always 1.0 (not stored).
 POSTURE_SCALES_PATH = config.POSTURE_SCALES_PATH
 
-# Default posture factors by weapon type
-_POSTURE_DEFAULTS = {
-    'ar':  {'crouching': 0.80, 'prone': 0.50},
-    'smg': {'crouching': 0.80, 'prone': 0.50},
-    'dmr': {'crouching': 0.80, 'prone': 0.50},
-    'mg':  {'crouching': 0.50, 'prone': 0.30},
-    'shotgun': {'crouching': 0.80, 'prone': 0.50},
-}
+# ⚠ THE PER-TYPE DEFAULT TABLE THAT STOOD HERE IS GONE (2026-08-09), replaced
+# by config.POSTURE_FACTOR -- one pair for every weapon, and config owns it.
+# It was a second author of the same quantity with nothing behind it: its
+# ar/smg/dmr crouching agreed with the one real measurement (0.80) and its
+# prone did not (0.50 against 0.561), and no reader could tell which half was
+# which. `mg` at 0.50/0.30 was a third opinion again, for a class with one
+# fired weapon and no posture data at all.
+
 
 def _load_posture_scales():
     if os.path.exists(POSTURE_SCALES_PATH):
         with open(POSTURE_SCALES_PATH, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            d = json.load(f)
+        # ⚠ `_`-PREFIXED KEYS ARE NOT WEAPONS. `_retired` holds the values the
+        # operator tuned before 2026-08-09 by ↑↓, and they are kept rather
+        # than deleted while being kept OUT of the lookup: they were tuned to
+        # scale curves that no longer exist (the whole bullet-bucket set was
+        # deleted with that coordinate), so they are corrections to a baseline
+        # this repository cannot produce any more. A number whose subject is
+        # gone is not a weaker number, it is a number about something else.
+        return {k: v for k, v in d.items() if not k.startswith('_')}
     return {}
 
+
 def _save_posture_scales(scales):
+    # Merge rather than overwrite: the caller holds only the live half, and
+    # writing that back alone would delete `_retired` on the first ↑ press.
+    on_disk = {}
+    if os.path.exists(POSTURE_SCALES_PATH):
+        with open(POSTURE_SCALES_PATH, 'r', encoding='utf-8') as f:
+            on_disk = json.load(f)
+    keep = {k: v for k, v in on_disk.items() if k.startswith('_')}
     with open(POSTURE_SCALES_PATH, 'w', encoding='utf-8') as f:
-        json.dump(scales, f, indent=2, ensure_ascii=False)
+        json.dump({**keep, **scales}, f, indent=2, ensure_ascii=False)
+
 
 _posture_scales = _load_posture_scales()
 
-def _get_posture_factor(weapon_name, weapon_type, posture):
-    """Return posture factor for a weapon. standing=1.0 always."""
+
+def _get_posture_factor(weapon_name, posture):
+    """How much of the standing curve this posture needs. standing = 1.0.
+
+    config.POSTURE_FACTOR is the value and carries the provenance; the
+    per-weapon file is the operator's live ↑↓ override on top of it.
+    """
     if posture == 'standing':
         return 1.0
-    per_weapon = _posture_scales.get(weapon_name, {})
+    per_weapon = _posture_scales.get(weapon_name) or {}
     if posture in per_weapon:
         return per_weapon[posture]
-    defaults = _POSTURE_DEFAULTS.get(weapon_type, {'crouching': 0.80, 'prone': 0.50})
-    return defaults.get(posture, 1.0)
+    return config.POSTURE_FACTOR.get(posture, 1.0)
 
 
 class Weapon():
@@ -573,7 +599,7 @@ class Weapon():
             self.scale = max(0.01, round(self.scale + delta, 3))
             _weapon_scales[self.name] = self.scale
         else:
-            cur = _get_posture_factor(self.name, self.type, self.posture)
+            cur = _get_posture_factor(self.name, self.posture)
             new_f = max(0.01, round(cur + delta, 3))
             if self.name not in _posture_scales:
                 _posture_scales[self.name] = {}
@@ -581,7 +607,7 @@ class Weapon():
         self.set_seq()
 
     def get_posture_factor(self):
-        return _get_posture_factor(self.name, self.type, self.posture)
+        return _get_posture_factor(self.name, self.posture)
 
     @staticmethod
     def save_scales():
@@ -626,20 +652,86 @@ class Weapon():
         if getattr(_cfg, 'DEBUG_HOT_RELOAD', False):
             self._hot_reload()
 
-        posture_f = _get_posture_factor(self.name, self.type, self.posture)
-
         if self.type in ['ar', 'smg', 'mg', 'dmr', 'shotgun']:
             # PLAN A: one fitted curve per exact attachment combination, no
             # interpolation between them. When this gun's combination has been
             # measured, that curve IS the answer -- emitted with NO factors,
             # because scope, scale, attachments and posture are all already
             # baked into the counts it was fitted from.
-            cfg = {'muzzle': self.muzzle, 'grip': self.grip,
-                   'stock': self.butt}
+            # ⚠ CATALOGUE KEYS, NOT ASSET NAMES, AND THIS WAS THE WHOLE GAME.
+            # `self.muzzle` is what the DETECTOR read off the tile --
+            # 'Muzzle_Compensator_Large_C'. Every curve on disk is named with
+            # what the EXPERIMENT asked for -- 'comp_ar'. Those are two names
+            # for one part, and this built the key straight out of the first:
+            #
+            #   looked up   m416 grip-Lower_ForeGrip_C_muzzle-Muzzle_Compen...
+            #   on disk     m416 grip-vert_grip_muzzle-comp_ar_stock-tactic...
+            #
+            # so EVERY KITTED GUN MISSED, on every gun, since plan A shipped.
+            # It could not be seen from either end: the store is full of
+            # kitted cells, the runtime prints one honest "NOT compensating"
+            # line per configuration, and a player putting a compensator on
+            # simply stops being helped. `scope` escaped only because
+            # `_sight_of` has always had a translation table.
+            #
+            # ⚠ AND AN UNRECOGNISED PART POISONS THE WHOLE KEY, on purpose --
+            # worn_keys returns None rather than dropping it. Dropping one
+            # would look up the kit MINUS that part and fire a curve fitted
+            # without it, which is the 1521-against-895 failure below wearing
+            # a different hat.
+            cfg = worn_keys(self.muzzle, self.grip, self.butt)
             sight = _sight_of(self.scope, self.name)
+            if cfg is None:
+                said = ('unnamed', self.name, self.muzzle, self.grip,
+                        self.butt)
+                if not _MISSING_SAID.get(said):
+                    _MISSING_SAID[said] = True
+                    print(f'[curves] {self.name}: a fitted part has no '
+                          f'catalogue name (muzzle={self.muzzle!r} '
+                          f'grip={self.grip!r} stock={self.butt!r}) -- NOT '
+                          f'compensating, because the kit it belongs to '
+                          f'cannot be named either.', flush=True)
+                self.dx_s, self.dy_s, self.t_s = [], [], []
+                return
             fmode = fire_tag(self.name, self.fire_mode)
-            shots = self._final.get((self.name, config_key(cfg),
-                                     self.posture, sight, fmode))
+            key = (self.name, config_key(cfg), self.posture, sight, fmode)
+            shots = self._final.get(key)
+            scale = 1.0
+            # ⚠ ONE FALLBACK, AND ONLY ALONG POSTURE. Nothing in the store is
+            # anything but `standing`, so crouching and prone missed on every
+            # gun and the honest output -- no compensation -- was also the
+            # output for the two postures a player spends most of a fight in.
+            #
+            # WHAT MAKES THIS DIFFERENT FROM THE FALLBACK BELOW, and the
+            # difference is the whole licence: this substitutes THE SAME CELL'S
+            # OWN CURVE and multiplies it by a measured scalar. It does not
+            # substitute another gun, another kit, another optic or another
+            # fire mode -- every one of those changes the shape, and a shape
+            # cannot be recovered by scaling. Posture is the one axis this
+            # repository has an actual number for (config.POSTURE_FACTOR).
+            #
+            # ⚠ AND IT IS A SCALAR ON A TRAJECTORY, WHICH IS AN ASSUMPTION
+            # THIS REPOSITORY HAS ALREADY SEEN FAIL. The scope ratio was
+            # believed constant on the same reasoning and measures 5.7% of
+            # spread between t=1.2 s and t=2.4 s (calibrate_scope.py). The
+            # posture ratio comes from two burst TOTALS in a coordinate that
+            # no longer exists, so nobody has been able to ask it the same
+            # question. It is stated, printed, and stamped `derived` on the
+            # way out so that it cannot be mistaken for a fitted curve.
+            if not shots and self.posture != 'standing':
+                shots = self._final.get(
+                    (self.name, config_key(cfg), 'standing', sight, fmode))
+                if shots:
+                    scale = _get_posture_factor(self.name, self.posture)
+                    said = ('derived', *key)
+                    if not _MISSING_SAID.get(said):
+                        _MISSING_SAID[said] = True
+                        print(f'[curves] {self.name} {config_key(cfg)} '
+                              f'{sight}: no {self.posture} curve, DERIVING it '
+                              f'from the standing one x{scale:.2f} '
+                              f'(config.POSTURE_FACTOR -- one m762 run in the '
+                              f'retired coordinate, not measured here). Fire '
+                              f'{self.posture} to replace it.', flush=True)
             if shots:
                 t = 0.0
                 self.t_s, self.dx_s, self.dy_s = [], [], []
@@ -647,8 +739,8 @@ class Weapon():
                     if i:
                         t += s['delay_ms'] / 1000.0
                     self.t_s.append(t)
-                    self.dx_s.append(float(s['dx']))
-                    self.dy_s.append(float(s['dy']))
+                    self.dx_s.append(float(s['dx']) * scale)
+                    self.dy_s.append(float(s['dy']) * scale)
                 return
             # ⚠ NO FALLBACK TO ANOTHER COMBINATION. Under plan A a miss means
             # this configuration has not been measured, and the honest output

@@ -347,7 +347,7 @@ def write_seeds(names, pats, posture, sight, config=None, span_s=None,
             # ⚠ ASSETS, NOT CATALOGUE KEYS. attachment_factor's slots are
             # "attachment_detector class names" (its docstring) and it looks
             # them up through _ASSET_TO_KEY, whose ⚠ says an unrecognised part
-            # POISONS THE WHOLE ANSWER on purpose -- `_worn_keys` returns None
+            # POISONS THE WHOLE ANSWER on purpose -- `worn_keys` returns None
             # and the lookup drops to the wiki tier. `comp_smg` is not an
             # asset, so this asked for a MEASURED 0.7197 and got 1.0 back,
             # printing `kit x1.0000` on every kitted seed while looking exactly
