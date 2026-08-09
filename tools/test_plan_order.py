@@ -23,13 +23,12 @@ implementation.
 that file does not import. It asks harness.verdict for CLUSTER_MIN and
 AGREE_SPREAD_MAX, and verdict has neither -- the thresholds became MAGS_MIN and
 RATE_RESID_MS_MAX, `n_kept` became `mags_kept`, the two-arm agreement check
-became a fire-rate check, and a fifth check (impulse) appeared. That is a
-PRE-EXISTING break, not one this file's subject caused, and repairing it means
-first settling a contradiction nobody here can settle by fiat: the root
-CLAUDE.md says verdict's 4th check is "different curve arms must agree on one
-y_true" and names the impulse probe as deleted, while verdict.py's 4th check IS
-the impulse. Until that is decided, `pixi run harness` is red and this gate
-stays out of its way rather than inheriting its import.
+became a fire-rate check, and a fifth check appeared. That is a
+PRE-EXISTING break, not one this file's subject caused. ✅ SETTLED 2026-08-09:
+MODEL.md is the law and its out-of-loop check is the arm agreement, so
+verdict.py's 4th check is that again and `pixi run harness` is green. This
+gate still does not inherit that import -- keeping them independent is why
+this one kept working while the other was broken.
 
 WHAT THE SAVING IS WORTH, measured rather than asserted (the shared gesture
 journal, calibration/artifacts/drag/journal.jsonl, 2026-08-08):

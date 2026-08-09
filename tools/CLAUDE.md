@@ -278,7 +278,11 @@ plan_cells 排完    bare muzzle muzzle+grip grip grip+stock … 7 次换件
 
 值多少,是量的不是断言的(`journal.jsonl`,2026-08-08):**1115 次打向枪槽的手势换来 789 次落位(1.41 次/件),21% 的装配要重试。** 装配是这个项目最大的单一废跑来源,所以少 46% 的装配就是少 46% 次「抽到那一下没落位」。
 
-⚠ **它不在 `tools/test_harness.py` 里,而那才是第一眼会去找的地方——因为那个文件 import 不进来。** 它跟 `harness/verdict.py` 要 `CLUSTER_MIN` 和 `AGREE_SPREAD_MAX`,而两个都没了(变成 `MAGS_MIN` / `RATE_RESID_MS_MAX`,`n_kept` 变成 `mags_kept`,两臂一致检查换成了弹速检查,还多出第五项 impulse)。**这是既有破损,`pixi run harness` 现在是红的**,而修它要先裁一个谁都不该单方面裁的矛盾:根 `CLAUDE.md` 说 verdict 第 4 项是「不同曲线臂必须给同一个 `y_true`」并且说 impulse 探针已删,而 `verdict.py` 第 4 项**就是** impulse。
+⚠ **它不在 `tools/test_harness.py` 里,而那才是第一眼会去找的地方。** ~~那个文件 import 不进来~~ —— **2026-08-09 修好了**,而它红的原因是一个真矛盾:`MODEL.md` 说 verdict 第 4 项是「不同曲线臂必须给同一个 `y_true`」,而 `verdict.py` 第 4 项是 impulse(在第 k 发放尖峰看哪一发动)。
+
+**裁法由 `MODEL.md` 给,而三条证据全指同一边**:impulse 的探针和坐标都已删除、没人再写那个字段(**所以它对每一格都返回失败——一道过不了的闸不是闸**)、`harness/adapter.py` 早就在写 `agree_arms`/`agree_spread` 了,而测试文件一直在测臂间一致。**是代码退化了,不是文档过时。**
+
+⚠ **而 impulse 这个技术本身是被否掉的,不是被取代**:时刻记不准、两套坐标本来就对应不准、**弹药计数器一梭 42 发只读得出约五次**(`control/fire.py`),根本没有逐发分辨率。见 `MODEL.md` 的已排除表。
 
 `placement` 是 2026-08-08 补的，钉的是「进局要不要传送」那张表（`ensure_in_match` 的 `range_name`）。**十一例里六例是「不该传送」的**，因为一个只验「该传的时候传了」的闸门，在「永远传」下面也全绿——而永远传就是那个操作员点名要停掉的开销（每把枪一次开图/读/关图）。注入的 bug 各自被咬：把跳过分支拿掉 → **第 3b、4、2 三例红**（实测）；把 `entered` 换成 `actions > 0`（代码注释里点名的那个弱写法）→ 第 3、5、5b 三例红。
 

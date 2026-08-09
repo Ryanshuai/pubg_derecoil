@@ -1437,10 +1437,14 @@ COUNTS_PER_PIXEL = 0.5
 #
 # So neither end is reachable by this constant alone, and 13 stays because
 # it loses less: +7.4 gained on bullet 0 against +18.4 given up on 41.
-# The ends belong to the delivery gain (75% at bullet 0, 63% at 39,
-# measured by an A/B impulse probe that was deleted with the
-# bullet-bucket coordinate on 2026-08-08 -- THESE TWO NUMBERS ARE NOW
-# THE ONLY RECORD OF IT), which is a different repair.
+# ⚠ THE ENDS USED TO BE BLAMED ON A "delivery gain" OF 75% AT BULLET 0
+# AND 63% AT 39, AND THAT CLAIM IS WITHDRAWN. Both numbers came from an
+# A/B round-alignment probe, and that technique is rejected outright
+# (MODEL.md's ruled-out table): the instant is not recorded accurately,
+# the two coordinates cannot be put in correspondence, and the ammo
+# counter reads about five times in a 42-round magazine, so it cannot
+# say which of forty-two rounds moved. Whatever the ends are, those two
+# numbers are not evidence for it.
 #
 # ⚠ AND DO NOT RE-DERIVE THIS FROM S_recoil. probe_shot_latency reports
 # "pattern start offset = S_recoil - L = 21" and that is the same coarse

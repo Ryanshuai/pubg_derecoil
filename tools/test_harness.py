@@ -12,7 +12,7 @@ one direction tested is a check that has been seen to pass. This file pairs
 each threshold with the record just inside it and the record just outside.
 
 PORTED TO MODEL.md ON 2026-08-08. Four of the old criteria — the fire-rate
-disagreement, the impulse offset, the collection-time magazine count and the
+disagreement, the collection-time magazine count and the
 convergence window — were questions about the bullet-bucket coordinate, and
 they did not get easier to satisfy, they stopped being askable. What replaced
 them is check 4 below, which is the one worth reading: the model's licence to
@@ -43,7 +43,8 @@ from harness.verdict import (judge, PROBE_FOR, OK,            # noqa: E402
 # harness/adapter.py writes `mags_kept` and a `rate_resid_ms` -- but every
 # BEHAVIOUR asserted below is unchanged, including the one that mattered:
 # MODEL.md's out-of-loop check, which verdict.py had meanwhile replaced with an
-# impulse check whose probe no longer exists.
+# round-alignment check whose technique is rejected (MODEL.md's ruled-out
+# table) and whose probe no longer exists.
 GOOD = dict(reached=True, mags_kept=6, fired=3, ads_frac=0.95,
             track_alive_frac=0.99, agree_arms=2, agree_spread=0.03,
             rate_resid_ms=0.2,

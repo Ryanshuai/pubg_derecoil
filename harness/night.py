@@ -353,7 +353,8 @@ def main():
     ap.add_argument('--sight', default='red_dot')
     ap.add_argument('--mags', type=int, default=5)
     # ⚠ --impulse-off AND --no-ema WENT ON 2026-08-08 WITH THE MODEL.
-    # The impulse probe checked that the measurement grid and the firmware's
+    # The round-alignment probe (rejected outright, see harness/verdict.py)
+    # checked that the measurement grid and the firmware's
     # playback grid shared an origin; under MODEL.md they do by construction,
     # and the out-of-loop check that replaced it is arranged PER CELL by
     # adapter.measure firing more than one compensation arm. --no-ema had

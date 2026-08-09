@@ -22,11 +22,18 @@ A measure() that returned ok=True would be grading its own homework — the
 failure mode Anthropic's harness work names explicitly, and the same shape as
 this project's closed-loop blindness. So measure() reports, verdict judges.
 
-WHAT REPLACED THE IMPULSE CHECK (2026-08-08). This file used to carry an
-`impulse_off_rounds` from a per-session probe: fire a curve spiked on one
-bullet, watch which round moves, and refuse the night if the measurement grid
-and the firmware's playback grid disagreed about their origin. Under MODEL.md
-they cannot — both are anchored to the click, which this repo sends itself.
+WHAT REPLACED THE ROUND-ALIGNMENT CHECK (2026-08-08). This file used to carry
+an `impulse_off_rounds`: spike one bullet, watch which round moves.
+
+⚠ THAT TECHNIQUE IS REJECTED, not merely retired. Three independent reasons,
+any one of them fatal: the instant is not recorded accurately, the two
+coordinates cannot be put in correspondence to begin with, and THE AMMO
+COUNTER DOES NOT RESOLVE ROUNDS -- control/fire.py records that it reads about
+five times in a 42-round magazine while firing. A check whose observable
+resolves five times cannot say which of forty-two rounds moved.
+
+It also has no referent under MODEL.md: there is ONE origin, the click, and
+this repo sends it.
 
 The NEED for a check the fit could not arrange did not go away, and `measure()`
 now produces one per cell: it fires the magazines under MORE THAN ONE

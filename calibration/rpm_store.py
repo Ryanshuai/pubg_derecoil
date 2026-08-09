@@ -56,7 +56,7 @@ REWRITE_FRAC = 0.005
 #
 # 1.0 ms is derived: an interval error d compounds, so round k lands k*d/T
 # bullets late, and 41 * 1.0/83 = 0.49 bullets over a full magazine -- matching
-# the half-round the impulse check allows, deliberately, so the two timing
+# half a round, deliberately, so the two timing
 # gates permit the same error. Real spread for scale: 0.24 ms over those four
 # AUG magazines.
 #

@@ -35,15 +35,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # estimate the SAME y_true. The fitter never sees which arm a magazine came
 # from, so it is the one signal a fit cannot arrange.
 #
-# ⚠ IT USED TO BE AN IMPULSE CHECK AND THAT WAS A REGRESSION. `impulse_off_
-# rounds` asked WHICH ROUND moved, i.e. it lived in the bullet-index
-# coordinate, and both that coordinate and its probe
-# (tools/probe_impulse_align.py) were deleted on 2026-08-08. Nothing has
-# written that field since, so item 4 answered "no impulse check was run" for
-# EVERY cell -- a gate that cannot pass is not a gate. Meanwhile
-# harness/adapter.py had already migrated: it computes _agreement(pool) and
-# writes agree_arms / agree_spread, and imports AGREE_BAND_S from here, which
-# did not exist either. The whole path was dead at both ends.
+# ⚠ IT USED TO ASK WHICH ROUND MOVED, AND THAT TECHNIQUE IS REJECTED OUTRIGHT
+# -- not merely superseded. Three independent reasons, and any one is fatal:
+# the instant is not recorded accurately, the two coordinates cannot be put in
+# correspondence to begin with, and THE AMMO COUNTER DOES NOT RESOLVE ROUNDS
+# (control/fire.py: it reads about five times in a 42-round magazine while
+# firing). Nothing has written that field since the coordinate went, so item 4
+# answered "no check was run" for EVERY cell -- a gate that cannot pass is not
+# a gate. MODEL.md's ruled-out table.
 #
 # ⚠ ONE ARM IS "NOT CHECKED", NOT "PASSED". _agreement returns (1, None) for a
 # single-arm pool and this refuses it. That asymmetry is the entire value of
@@ -84,7 +83,7 @@ AGREE_SPREAD_MAX = 0.05
 #
 # It cost a good cell within the hour: the akm measured 0.897 and then 0.898 on
 # two full attempts, with 5/5 magazines kept, rate spread 0.19 ms, tracking 99%
-# and the impulse dead on. Twice rejected for two tenths of a point.
+# and every other check clean. Twice rejected for two tenths of a point.
 #
 # Kept here rather than deleted as redundant, and kept at the SAME value: this
 # layer has to judge a record even if the measurement layer's gate is changed,
