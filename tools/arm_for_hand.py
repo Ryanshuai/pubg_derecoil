@@ -46,6 +46,9 @@ def main():
     ap.add_argument('--hold-s', type=float, default=1800.0,
                     help='how long to keep the port (and therefore the '
                          'pattern) alive. See the note at the bottom.')
+    ap.add_argument('--fire-delay-ms', type=float, default=None,
+                    help='override RECOIL_FIRE_DELAY_MS for THIS PROCESS ONLY. '
+                         'See the note where it is applied.')
     ap.add_argument('--off', action='store_true',
                     help='disarm and clear instead')
     a = ap.parse_args()
@@ -80,6 +83,32 @@ def main():
               f'({b["hold_drawdown"]:.1%} drawdown under the trigger)')
 
     ks = r['knots']
+
+    # ⚠ IN MEMORY, FOR THIS PROCESS, AND NOT IN config.py. RECOIL_FIRE_DELAY_MS
+    # is added to every knot time by upload_pattern, and it governs every
+    # collection run in this repository -- so editing the constant to try a
+    # feel would make the next batch of samples incomparable with today's 204.
+    # Same reason build_weapon's `rpm` override exists: one measurement is not
+    # yet a fact, and the store happens after magazines AGREE.
+    #
+    # What it is: 13 ms, measured once on an AUG (n=36) in the BULLET-BIN
+    # coordinate, where the curve was indexed by round and the offset aligned
+    # "round k" with the click. In the time coordinate the fitted curve is
+    # ALREADY y_true(t) with t measured from the click, so the offset is a
+    # straight delay -- harmless mid-burst, where a shifted ramp is still a
+    # ramp, and at the very start "late" means "absent". Reported from the
+    # chair: 压得挺准，就是第一发没压.
+    #
+    # ⚠ 13 ms does NOT account for the size. The residual works out to an
+    # equivalent lag of 75..138 ms, so this flag can only test one term of
+    # several. A run that comes back unchanged has REFUTED this suspect, which
+    # is worth as much as one that improves.
+    if a.fire_delay_ms is not None:
+        was = p.pico.RECOIL_FIRE_DELAY_MS
+        p.pico.RECOIL_FIRE_DELAY_MS = a.fire_delay_ms
+        print(f'\n  RECOIL_FIRE_DELAY_MS {was} -> {a.fire_delay_ms} '
+              f'(this process only; config.py is untouched)')
+
     p.pico.upload_pattern([k['dx'] for k in ks], [k['dy'] for k in ks],
                           [k['t_ms'] / 1000.0 for k in ks])
     p.pico.set_recoil_enabled(True)

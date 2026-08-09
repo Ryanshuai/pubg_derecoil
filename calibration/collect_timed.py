@@ -477,6 +477,13 @@ def main():
                          'value strips the slot. The config is still READ BACK '
                          'afterwards and it is the readback, never this '
                          'string, that keys the samples.')
+    ap.add_argument('--fire-delay-ms', type=float, default=None,
+                    help='override RECOIL_FIRE_DELAY_MS for THIS RUN ONLY. '
+                         'upload_pattern adds it to every knot time, so it '
+                         'decides WHEN the compensation plays relative to the '
+                         'click. Nothing needs recording: read_pattern returns '
+                         'the shifted times, so curve[0]["t_ms"] IS the offset '
+                         'that played, on every magazine already stored.')
     ap.add_argument('--countdown', type=int, default=6)
     a = ap.parse_args()
 
@@ -772,10 +779,26 @@ def main():
             w.dy_s = [v * a.scale for v in w.dy_s]
             w.dx_s = [v * a.scale for v in w.dx_s]
             print(f'  curve scaled x{a.scale}')
+        # ⚠ ON THE INSTANCE, FOR THIS RUN, AND NOT IN config.py. The constant
+        # governs every collection this repository does, so editing it to run
+        # one sweep would make the next batch incomparable with the 204 stored.
+        #
+        # Nothing extra needs recording: upload_pattern shifts the knot TIMES
+        # and read_pattern returns the shifted ones, so `curve[0]['t_ms']` on
+        # every magazine already on disk IS the offset that played. Verified on
+        # the 2026-08-08 17:29 batch, which reads 13.
+        if a.fire_delay_ms is not None:
+            was = rig.mouse.RECOIL_FIRE_DELAY_MS
+            rig.mouse.RECOIL_FIRE_DELAY_MS = a.fire_delay_ms
+            print(f'  RECOIL_FIRE_DELAY_MS {was} -> {a.fire_delay_ms} '
+                  f'(this run only)')
         rig.arm(w)
         if a.no_comp:
             rig.fire.disarm()
         curve = rig.mouse.read_pattern() or []
+        if curve:
+            print(f'  the curve starts at t={curve[0]["t_ms"]} ms — that IS '
+                  f'the fire delay that will play')
         if not curve and not a.no_comp:
             print('  [!] the firmware reports no pattern — refusing. A '
                   'magazine whose curve is unknown cannot be added back, '

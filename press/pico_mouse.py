@@ -303,6 +303,34 @@ class PicoMouse:
         offset = self.RECOIL_FIRE_DELAY_MS / 1000.0
         m_t = [t + offset for t in m_t]
 
+        # ⚠ A NEGATIVE OFFSET HAS NOWHERE TO PLAY, so what it would have played
+        # before the click is FOLDED INTO THE FIRST KNOT rather than dropped.
+        # The firmware's clock starts at the click; a knot at t < 0 is a
+        # negative int16 on the wire and an instruction the player cannot obey.
+        #
+        # Dropping those knots would quietly change HOW MUCH compensation the
+        # curve carries as well as when -- and this offset is supposed to move
+        # only the when. Folding keeps the total exact: everything owed before
+        # t=0 is delivered as a step at t=0, which is what "shift the curve
+        # earlier" means once the clock has a floor.
+        #
+        # Asked for from the chair while working out whether the compensation
+        # should lead the recoil: "甚至最开头可能得是一段负数,然后把那段负数的
+        # 都积累到最开始的一个压枪上".
+        if m_t and m_t[0] < 0:
+            k = 0
+            fold_x = fold_y = 0.0
+            while k < len(m_t) and m_t[k] < 0:
+                fold_x += m_dx[k]
+                fold_y += m_dy[k]
+                k += 1
+            if k >= len(m_t):          # the whole curve is before the click
+                m_dx, m_dy, m_t = [fold_x], [fold_y], [0.0]
+            else:
+                m_dx = [m_dx[k] + fold_x] + m_dx[k + 1:]
+                m_dy = [m_dy[k] + fold_y] + m_dy[k + 1:]
+                m_t = [0.0] + m_t[k + 1:]
+
         nn = min(len(m_dx), self.MAX_POINTS)
         # QUANTISE WITH A CARRY, because the wire format is int16 per knot and
         # `int()` on each one independently throws away up to a count EVERY

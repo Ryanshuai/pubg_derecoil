@@ -1351,7 +1351,52 @@ COUNTS_PER_PIXEL = 0.5
 # counter, W = S_ammo - L = 54.3 - 38 = 16.3, and 13 is inside L's own
 # +-5.1 ms. Measured 2026-08-07, m416, 40 taps: paired gap median 0.0 ms,
 # with 5 of 40 taps reading recoil 12-17 ms LATE and none early.
-RECOIL_FIRE_DELAY_MS = 13
+#
+# ════════════════════════════════════════════════════════════════════════
+# ⚠ 2026-08-08: EVERYTHING ABOVE IS THE BULLET-BIN COORDINATE, AND THE SIGN
+# FLIPPED WHEN THE MODEL MOVED TO TIME.
+# ════════════════════════════════════════════════════════════════════════
+#
+# All of it answers "when does round k's kick land relative to the click",
+# because the curve was indexed by ROUND and had to be aligned to one. That
+# question is gone. Under MODEL.md the curve IS y_true(t) -- the screen's
+# displacement at time t after the click, MEASURED ON THE SCREEN -- so the
+# recoil's own path to the photons is already baked into it and cancels.
+#
+# What does NOT cancel is the compensation's own path, which the recoil never
+# travels: Pico -> USB report -> the game sampling input -> view rotation ->
+# render -> present. To cancel a displacement that APPEARS at screen-time t,
+# the counts have to be EMITTED at t - L. The offset is therefore -L, and it
+# is a property of this machine and this display chain rather than of any gun.
+#
+# L MEASURED DIRECTLY, tools/probe_input_latency.py, 20 trials, no weapon
+# needed: mean 45.6 ms, median 45.6, sd 4.5. The probe declares its own bias --
+# about half a frame of quantisation, 3.3 ms at the 152 fps it ran at -- so the
+# honest value is ~42 ms and -46 is inside it.
+#
+# CONFIRMED INDEPENDENTLY by firing it. mp5k bare, red dot, standing, the SAME
+# 917.9-count curve in every arm, only the offset moved (signed y_obs, counts):
+#
+#     offset      @0.5 s   @1.5 s   @2.98 s
+#      +80         +35.4    +48.2     +44.3
+#      +13         +18.0    +31.8     +43.8      <- what this constant WAS
+#      -46          -0.4    +22.0      +9.0      <- outlier magazine excluded
+#      -60          -7.7     +1.1      +9.8
+#
+# 68-76 px of residual drift over a 40-round burst becomes 14-15 px. The two
+# methods -- a probe that never fires a shot, and 20 magazines that never
+# measure a latency -- agree on the same constant.
+#
+# ⚠ THE STORED SAMPLES DO NOT NEED RE-FIRING. y_true is independent of the
+# offset by construction, and that is not an assumption here: 26 magazines
+# fired across three different offsets clustered as ONE population (separation
+# 4.70x against a gate of 8.0), and the fitter cannot see which arm a magazine
+# came from.
+#
+# ⚠ AND IT DOES NOT EXPLAIN EVERYTHING. A residual of ~9 counts survives at the
+# optimum, and a two-arm decomposition puts ~4.7% of it in AMPLITUDE rather
+# than timing. That is a separate repair; see MODEL.md.
+RECOIL_FIRE_DELAY_MS = -46
 
 
 # ════════════════════════════════════════════════════════════
