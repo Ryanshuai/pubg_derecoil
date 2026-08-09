@@ -145,8 +145,35 @@ def scale_mode(mags, D):
     sl, ic = np.polyfit(S_, fc, 1)
     print()
     print(f'F coef vs commanded scale:  slope {sl:+.3f}  intercept {ic:+.3f}')
-    print(f'   slope should be -1.000 if the firmware delivers proportionally'
-          f'   -> off by {100*(abs(sl)-1):+.1f}%')
+
+    # ⚠ THE SLOPE IS ALSO A SECOND, INDEPENDENT READ OF K, AND IT MUST BE
+    # PRINTED WITH ITS INTERVAL OR IT WILL BE READ AS A FINDING. y_obs is
+    # measured as (screen px)/K while the curve is in true counts read off the
+    # firmware, so a K that is high by delta makes this slope -1/(1+delta).
+    # The point estimate says K is 5% high. The interval says nothing at all:
+    # five magazines an arm over a +-10% lever cannot resolve K to better than
+    # about +-12%, and K wants to be known to ~1%. Widening the sweep (0.7 /
+    # 1.0 / 1.3) doubles the lever for the same magazine count.
+    def _slope(pick):
+        f = []
+        for s in ss:
+            y = np.nanmedian([resample(m, GRID) for m in pick[s]], axis=0)
+            ok = np.isfinite(y)
+            A = np.column_stack([F[ok], Fp[ok]])
+            c, *_ = np.linalg.lstsq(A, y[ok], rcond=None)
+            f.append(c[0])
+        return np.polyfit(S_, np.array(f), 1)[0]
+
+    rng = np.random.default_rng(11)
+    bs = np.array([_slope({s: [by[s][i] for i in
+                               rng.integers(0, len(by[s]), len(by[s]))]
+                           for s in ss}) for _ in range(400)])
+    blo, bhi = np.percentile(bs, [2.5, 97.5])
+    print(f'   theory -1.000; bootstrap 95% [{blo:+.3f}, {bhi:+.3f}]  '
+          + ('CONTAINS -1' if blo <= -1.0 <= bhi else 'EXCLUDES -1'))
+    print(f'   read as K: {100*(abs(sl)-1):+.1f}% '
+          f'[{100*(abs(bhi)-1):+.1f}%, {100*(abs(blo)-1):+.1f}%] — '
+          f'too blunt to use, and say so rather than quoting the point')
     if abs(sl) > 1e-6:
         s0 = -ic / sl
         print(f'   zero crossing s0 = {s0:.4f}  ->  eps = 1 - 1/s0 = '
