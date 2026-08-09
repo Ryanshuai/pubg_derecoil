@@ -57,35 +57,39 @@ is named in the output and in the written file, never silently substituted.
               direction: the view drifts up rather than being driven down.
 
     optic     r(sight) = <weapon>__bare__<sight> / <weapon>__bare when both
-              exist. Otherwise r = SCOPE_SLOPE x magnification -- see below.
+              exist. Otherwise config.RECOIL_SIGHT_RATIO -- see below.
 
 
-⚠ THE OPTIC LAW IS TWO POINTS ON ONE GUN AND IT IS THE WEAKEST LINK
-───────────────────────────────────────────────────────────────────
-Measured on the mp5k, bare cell, 4 magazines each:
+⚠ THE OPTIC TERM IS THE WEAKEST LINK, AND ONE VERSION OF IT ALREADY SHIPPED
+WRONG
+──────────────────────────────────────────────────────────────────────────
+The first version of this file fitted r = 0.442 x magnification to the mp5k's
+two scoped cells (2x 0.8803, 3x 1.3304 -- 0.4402 and 0.4435 per unit, 0.75%
+apart, which looked like a law). It shipped a 4x prior at 1.768 and the
+operator reported the high magnification as simply unusable, "like the 1x
+coefficient is what is being played".
 
-    r(2x) = 0.8803   / 2  =  0.4402
-    r(3x) = 1.3304   / 3  =  0.4435          0.75% apart
+⚠ THE LAW WAS FITTED TO TWO POINTS THAT DISAGREE WITH PHYSICS AND WITH EACH
+OTHER. Written out as counts, the mp5k bare cell nulls at
 
-so r is proportional to magnification with a constant near 0.442 -- and the
-RED DOT DOES NOT LIE ON THAT LINE (it is 1.0 at mag 1, not 0.44). That is not
-noise: PUBG scales ADS sensitivity differently for a 1x sight than for a
-magnified optic, so a discontinuity between them is what the game does.
+    red dot  ~900        2x  834        3x  624
 
-⚠ It also REFUTES the derivation config.RECOIL_SIGHT_PROFILES supports, which
-predicts 1.689 at 2x and 2.459 at 3x. Both are outside the measured intervals
-by roughly a factor of two, and calibrate_scope says so in as many words: "the
-optic is NOT a plain constant here -- do not derive scoped curves; measure
-them." THIS FILE DERIVES THEM ANYWAY, on purpose, because a wrong curve that
-keeps the gun on screen beats no curve at all while you wait for the right one
--- but that is a licence to PLAY on it, not to conclude anything from it.
+-- which is NOT MONOTONE IN MAGNIFICATION. More zoom cannot need less
+compensation for a fixed angular kick. Four magazines with a 92-count lever
+between the arms is not enough to measure r, and a straight line through two
+such points is not a law however tight it looks.
 
-⚠ AND r IS NOT EVEN CONSTANT ACROSS ONE BURST: it spans 5.6-5.7% between
-t=1.2 s and t=2.4 s on both magnifications. A single scalar cannot represent
-that and is not trying to.
+So the optic term now comes from config.RECOIL_SIGHT_RATIO: ONE NUMBER PER
+OPTIC, relative to the red dot, which is what the operator asked for after
+this went wrong. It replaces a two-field derivation (`mag` x `K`) precisely
+because nobody could tell which field to correct.
 
-⚠ TWO POINTS, ONE GUN, AND 4x IS AN EXTRAPOLATION PAST BOTH. Firing any second
-gun at 2x and 3x is what would turn this from a pattern into a law.
+⚠ A MEASURED CELL FOR THAT GUN AND OPTIC STILL BEATS THE TABLE. The table is
+the fallback for an optic nobody has fired on that gun.
+
+⚠ AND r IS NOT CONSTANT ACROSS ONE BURST even where it is measured: it spans
+5.6-5.7% between t=1.2 s and t=2.4 s on both magnifications. A single scalar
+cannot represent that and is not trying to.
 """
 import argparse
 import json
@@ -102,13 +106,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config as cfg                                       # noqa: E402
 from detector.attachment_catalog import ATTACHMENTS        # noqa: E402
-from detector.weapon import _SCOPE_TO_MAG                  # noqa: E402
-
-# counts-ratio per unit magnification, from the mp5k's 2x and 3x cells. See
-# the module docstring for why the red dot is not on this line.
-SCOPE_SLOPE = 0.442
-SCOPE_SLOPE_SRC = ('mp5k bare 2x/3x, 4 magazines each: 0.4402 and 0.4435 per '
-                   'unit magnification, 0.75% apart')
 
 REF_SIGHT = 'red_dot'
 
@@ -126,18 +123,6 @@ def _stem(weapon, config_key_str, sight):
     return f'{weapon}__{config_key_str or "bare"}{tag}'
 
 
-def _mag_of(sight):
-    for asset, mag in _SCOPE_TO_MAG.items():
-        if asset and _sight_name(mag) == sight:
-            return mag
-    return None
-
-
-def _sight_name(mag):
-    return {1: 'red_dot', 2: '2x', 3: '3x', 4: '4x', 6: '6x', 8: '8x',
-            15: '15x'}.get(mag, 'red_dot')
-
-
 def optic_ratio(weapon, sight, why):
     """counts at `sight` / counts at the red dot, and how we know."""
     if sight == REF_SIGHT:
@@ -150,16 +135,15 @@ def optic_ratio(weapon, sight, why):
                    f'({here["total_counts"]:.0f}/{ref["total_counts"]:.0f} '
                    f'counts, bare)')
         return r
-    mag = _mag_of(sight)
-    if not mag:
-        why.append(f'optic  r({sight}) = 1.0  ⚠ UNKNOWN MAGNIFICATION — the '
-                   f'prior is the red dot\'s, which is certainly wrong')
+    r = cfg.RECOIL_SIGHT_RATIO.get(sight)
+    if r is None:
+        why.append(f'optic  r({sight}) = 1.0  ⚠ NOT IN config.'
+                   f'RECOIL_SIGHT_RATIO — the prior is the red dot\'s, which '
+                   f'is certainly wrong. Add the sight to that table.')
         return 1.0
-    r = SCOPE_SLOPE * mag
-    why.append(f'optic  r({sight}) = {r:.4f}  ⚠ EXTRAPOLATED: '
-               f'{SCOPE_SLOPE} x {mag} ({SCOPE_SLOPE_SRC}), and NOT from this '
-               f'gun. config.RECOIL_SIGHT_PROFILES would predict something '
-               f'~2x different and is refuted by those two cells.')
+    why.append(f'optic  r({sight}) = {r:.4f}  ⚠ NOT MEASURED on any gun — '
+               f'config.RECOIL_SIGHT_RATIO, one number per optic, move it '
+               f'there if play says it is off')
     return r
 
 

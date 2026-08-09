@@ -1485,6 +1485,42 @@ POSTURE_SCALES_PATH = os.path.join(DATA_DIR, 'posture_scales.json')
 # a coordinate that no longer exists, so the same question cannot even be
 # asked of them. Measuring one gun crouching answers it.
 POSTURE_FACTOR = {'standing': 1.0, 'crouching': 0.80, 'prone': 0.56}
+
+# How many counts a burst needs through this optic, relative to the RED DOT.
+# ONE NUMBER PER SIGHT. That is the whole design of this table.
+#
+# ⚠ IT REPLACES A DERIVATION, AND THE DERIVATION IS WHAT BROKE. The counts
+# ratio used to be computed as `mag_s * K_ref / (mag_ref * K_s)` out of
+# RECOIL_SIGHT_PROFILES -- two fields, two authors, for one quantity nobody
+# could correct in one place. Nothing consuming it could tell whether a wrong
+# answer came from `mag`, from `K`, or from the formula, and 2026-08-09 a 4x
+# prior shipped at 1.768 that the operator reported as "the high magnification
+# is simply unusable, it feels like the 1x coefficient". A number you cannot
+# move in one edit is a number that does not get corrected.
+#
+# The values below ARE that derivation's answers, kept because they are the
+# only ones with the magnification actually in them, and now written out so
+# a play test can move ONE of them:
+#
+#     2x 1.689    3x 2.459    4x 3.271    hipfire 3.083
+#
+# ⚠ AND THEY ARE NOT MEASURED. K for 2x/3x/4x has no provenance in this file
+# (the red dot's carries pages); these are physics plus an unmeasured constant.
+# What IS measured contradicts them: mp5k bare through a 2x nulls at 834 counts
+# against 900 at the red dot -- ratio 0.88 where this says 1.689 -- and through
+# a 3x at 624, which is LESS THAN THE 2x. A quantity that is not monotone in
+# magnification is not measured yet, it is noise from four magazines with a
+# 92-count lever between the arms.
+#
+# ⚠ SO THE RULE IS: a MEASURED cell for that gun and optic beats this table,
+# always. This is the fallback for an optic nobody has fired on that gun, and
+# it is a prior, not a constant. calibrate_scope.py is the file that will
+# settle it; two guns at 2x and 3x is what it needs.
+RECOIL_SIGHT_RATIO = {
+    'red_dot': 1.0,
+    '2x': 1.689, '3x': 2.459, '4x': 3.271, '6x': 4.9, '8x': 6.5,
+    'hipfire': 3.083,
+}
 KIT_FACTORS_PATH    = os.path.join(DATA_DIR, 'kit_factors.json')
 KIT_RECORDS_PATH    = os.path.join(DATA_DIR, 'kit_records.jsonl')
 
