@@ -142,6 +142,37 @@ class Magazine:
     dy_px: list = field(default_factory=list)
     # What the HAND contributed over the same pair, in counts, off the Pico's
     # passthrough. Screen motion is hand + compensation + recoil.
+    #
+    # ⚠ THE SIGN IS `+ human` AND THAT IS NOW MEASURED, not argued. It had
+    # never been exercised: 2 nonzero values out of 131146 intervals across the
+    # whole store, because every magazine is fired with nobody touching the
+    # mouse. And the two sources DISAGREED on paper --
+    # press/firmware/src/main.c:604 says "so the PC can SUBTRACT the hand",
+    # this file adds it.
+    #
+    # Both are right, because the conventions are opposite: the firmware
+    # accumulates raw_dy (mouse down positive) while the correlator reports
+    # view rotation (up positive), so the hand arrives already negated.
+    # tools/probe_human_sign.py, hand moved by a human for 12 s, per-FRAME
+    # regression (a cumulative sum cannot do this -- it is destroyed by the
+    # pitch clamp and by hip fire's K):
+    #
+    #     screen_px = -0.0464 * hand_counts,  r = -0.825, 162 moving frames
+    #
+    # Slope NEGATIVE -> `+ human` removes the hand. Settled.
+    #
+    # ⚠ BUT THE MAGNITUDE SAYS THE TERM DOES NOT YET WORK. |slope| is 0.0464
+    # px/count against a K of 1.5413 -- 33x short. If the screen and the hand
+    # measured the same rotation over the same interval it would BE K. They do
+    # not: `human_totals` is a snapshot of a cumulative counter while the
+    # correlator's dy covers a whole frame interval, so the two are correlated
+    # (r = -0.83) and not ALIGNED. Subtracting per frame removes about 3% of
+    # the hand, not the hand.
+    #
+    # And the frames where a hand really moves are the ones nearest the
+    # correlator's 128 px wrap ceiling, so they are the least trustworthy ones.
+    # This term is no longer "unverified"; it is verified and known not to work
+    # yet, which is a different and more useful state.
     human_dy: list = field(default_factory=list)
     # Pairs the correlator could not place (peak wrapped). NOT dropped here --
     # dropping is a fit-time decision and this store does not make those.
