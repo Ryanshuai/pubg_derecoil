@@ -90,3 +90,11 @@ press/firmware/.vscode
 # 单列一条而不是忽略整个 docs/ —— docs/ 里那十个跟踪着的文件是有人会读的散文,
 # 而这一个不是。
 docs/model_error_history.md
+
+# ── 上游 Kava4 脚本:2.8 MB 的第三方 Lua,不进 git ──
+# 它是 tools/import_kava4.py 的输入,不是这个仓库的源码,而钩子对 2 MB 以上的
+# 新文件说不——那条规矩是对的。**记录不在这个文件里**:docs/kava4/patterns.json
+# (解析产物,跟踪着) 记着每把枪的逐步 dy、17 ms 网格和 kava 标量,
+# tools/import_kava4.py 的文件头记着 URL 和它自己的 sha256。
+# 要重新取:见 import_kava4.py 缺文件时打印的那条 curl。
+docs/kava4/*.lua

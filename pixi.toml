@@ -120,6 +120,13 @@ bias-judge = "python tools/probe_correlator_bias.py --selftest"
 # is what licenses using the cheap one everywhere. It also holds the ruling-out
 # of two mechanisms (int-with-carry, a slow main loop) so they stay ruled out.
 comp-counts = "python tools/test_comp_counts.py"
+# Parse the vendored community patterns and report what they cover. A gun with
+# no curve fires with NO compensation, and for a high-recoil weapon that is not
+# merely inaccurate -- the view reaches open sky, where phase correlation
+# returns 0 CONFIDENTLY and the magazine is lost with every gate green. Read
+# only; `--seed <guns>` is what writes, and it refuses over both a fitted file
+# and a store that can already answer.
+kava4 = "python tools/import_kava4.py"
 # "Replicate it" has no meaning on pooled data -- a fit eats the whole store at
 # once. This is the shape that rule takes there: cut by (session x curve arm)
 # and ask whether the slices agree, with the baseline computed from the

@@ -148,7 +148,15 @@ def load_curves():
         # at all (see Weapon._hot_reload).
         if fname.endswith('.bak.json'):
             continue
-        with open(os.path.join(CURVE_DIR, fname), 'r') as f:
+        # ⚠ encoding IS NOT OPTIONAL, and its absence here was a live trap
+        # until 2026-08-09. load_final_curves twenty lines down always passed
+        # encoding='utf-8'; this one took the platform default, which on
+        # Windows is cp1252 -- so ONE curve file containing a non-ASCII note
+        # raised UnicodeDecodeError out of BulletCalculator.__init__ and took
+        # down every build_weapon call for EVERY gun, with a traceback
+        # pointing at a codec rather than at a file. Found by writing a seed
+        # whose provenance line had a Chinese word in it.
+        with open(os.path.join(CURVE_DIR, fname), 'r', encoding='utf-8') as f:
             data = json.load(f)
         weapon = data['weapon']          # e.g. 'akm' or 'akm_att'
         out.setdefault(weapon, {})[data.get('stance', 'standing')] = \
@@ -193,6 +201,10 @@ def _sight_of(scope_asset):
 
 
 _MISSING_SAID = {}
+# Same shape, opposite event: MISSING says "no curve at all", SEED says "a
+# curve, but somebody else's guess". Both are once-per-key, because load runs
+# per burst and a per-magazine line would train the operator to skim past it.
+_SEED_SAID = {}
 
 
 def load_final_curves():
@@ -246,6 +258,21 @@ def load_final_curves():
         key = (data['weapon'], config_key(data.get('config')),
                data.get('posture', data.get('stance', 'standing')),
                data.get('sight', 'red_dot'))
+        # ⚠ A SEED IS NOT A FIT AND MUST NOT LOOK LIKE ONE. tools/import_kava4
+        # writes community patterns here so a gun with no measurement of its
+        # own still has SOMETHING to fire -- without one the view climbs into
+        # open sky, where phase correlation returns 0 confidently and the
+        # magazine is lost with every gate green (docs/timing.md). But the file
+        # lands under the same name a real fit does, so from the outside the
+        # two are indistinguishable, which is the root CLAUDE.md's second law
+        # exactly. Say it once per curve, not per magazine.
+        if data.get('seed') and not _SEED_SAID.get(key):
+            _SEED_SAID[key] = True
+            print(f'[curves] {key[0]} {key[1]} {key[2]} {key[3]} is a SEED, '
+                  f'not a measurement -- {data.get("total_counts", 0):.0f} '
+                  f'counts imported from a community script to keep the view '
+                  f'on screen. Fire it, fit it, and the fit replaces it.',
+                  flush=True)
         out[key] = data['shots']
     return out
 
@@ -542,7 +569,7 @@ class Weapon():
             if not _MISSING_SAID.get(said):
                 _MISSING_SAID[said] = True
                 print(f'[curves] no fitted curve for {self.name} '
-                      f'{config_key(cfg)} {self.posture} {sight} — NOT '
+                      f'{config_key(cfg)} {self.posture} {sight} -- NOT '
                       f'compensating. Measure it with `pixi run collect-timed '
                       f'--weapon {self.name} --sight {sight}`.', flush=True)
             self.dx_s, self.dy_s, self.t_s = [], [], []
