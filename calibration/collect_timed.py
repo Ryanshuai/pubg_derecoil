@@ -392,24 +392,20 @@ def one_magazine(rig, grabber, weapon, mag_size, interval_s, curve,
     # Before the reload: R drops out of ADS on its own (docs/game_quirks.md),
     # so a read taken after it would report the reload, not the burst.
     #
-    # ⚠ BUT NOT AT THE INSTANT OF RELEASE, WHICH IS WHAT THIS DID. AdsDetector
-    # answers by the ABSENCE of the hip crosshair, and detector/CLAUDE.md
-    # records it reading low WHILE THE VIEW IS SHAKING: 387/387 correct on a
-    # still VSS and 0.79 on the same VSS firing, scaling with recoil across the
-    # roster. Read on the last shaking frame it therefore measures the recoil,
-    # not the optic.
+    # ⚠ AND A 0.5 s SETTLE WAS TRIED HERE AND REVERTED THE SAME HOUR, because
+    # the line above is not about R being PRESSED. PUBG auto-reloads when the
+    # magazine empties, and the burst empties it -- so the drop out of ADS
+    # begins on its own, with nothing in this repository sending anything.
+    # Waiting for the shake to stop waits past it:
     #
-    # Measured 2026-08-09 the moment a second gun ran: the vector -- 2.2 s
-    # burst, 620-870 counts -- read 100% on every cell, and the AUG -- 3.9 s,
-    # ~1400 counts -- read 50-60% with magazines whose y_true agreed to under
-    # 2%. Two guns, one detector, and the difference is how hard the screen was
-    # moving when the question was asked.
+    #     read at release        vector 100%,  aug 50-60%
+    #     read 0.5 s later       0% on every magazine of every cell
     #
-    # ADS_SETTLE_S is the same wait GunDriver already uses after the ADS
-    # animation, so the number is not new here. R is not pressed until
-    # wait_reload, several calls later, so nothing is racing it.
-    from control.gun import ADS_SETTLE_S
-    time.sleep(ADS_SETTLE_S)
+    # The shake is real (detector/CLAUDE.md: 387/387 on a still VSS, 0.79 on
+    # the same VSS firing, scaling with recoil) and it is why the FLOOR on this
+    # reading had to go. It is not fixable by waiting: the two windows do not
+    # overlap. Anything that wants a clean post-burst ADS reading has to catch
+    # it before the auto-reload, which is where this already is.
     try:
         ads_end = bool(rig.gun.in_ads())
     except Exception as e:                       # noqa: BLE001

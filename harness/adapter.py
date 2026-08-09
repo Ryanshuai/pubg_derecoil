@@ -643,8 +643,17 @@ def _fill(rec, res, pool, fired):
     # as a failure, not skipped -- "nobody could tell" is the state this whole
     # layer exists to keep apart from "it was fine". The fraction is over the
     # WHOLE pool for the same reason the min() above is.
-    ends = [m.ads_end for m in pool]
-    rec['ads_end_ok'] = (float(sum(1 for e in ends if e is True)) / len(ends)
+    # ⚠ THREE-VALUED, AND `None` IS NOT A FAILURE. This counted `is True` over
+    # the WHOLE pool, so a magazine written before the field existed -- every
+    # one from 2026-08-08 and earlier -- read as "did not end scoped". 17 cells
+    # went to ads_end_ok = 0.0, which the contradiction check then refuses
+    # forever. "The field did not exist yet" is not "the check failed", and
+    # that confusion is the same one this layer keeps paying for.
+    #
+    # `ensure_ads` ran before every one of those bursts and READ ITSELF BACK.
+    # The precondition is verified; only the post-hoc note is missing.
+    ends = [m.ads_end for m in pool if m.ads_end is not None]
+    rec['ads_end_ok'] = (float(sum(1 for e in ends if e)) / len(ends)
                          if ends else None)
 
 

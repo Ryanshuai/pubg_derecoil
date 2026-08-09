@@ -246,9 +246,13 @@ def main():
     # every trigger and NOT ONE burst agrees.
     bad += case('a pool where nothing ended scoped IS',
                 dict(noads, ads_end_ok=0.0), False, 'ads')
-    # Neither reading is still a refusal: the fallback changes WHICH quantity
-    # answers, not whether one has to.
-    bad += case('neither reading is not a pass', noads, False, 'ads')
+    # ⚠ AND NEITHER READING IS A PASS, WHICH IS THE ONE ABSENCE THIS FILE LETS
+    # THROUGH. It asserted the opposite for one night, and the cost was 17
+    # existing cells: `ads_end` is NEW, every magazine stored before 2026-08-09
+    # carries None, and counting None as "did not end scoped" refused all of
+    # them forever. ensure_ads reads itself back before every trigger and firing
+    # cannot change ADS, so the check is not missing — only its corroboration.
+    bad += case('neither reading passes on the precondition', noads, True, OK)
     # ⚠ The fraction still WINS when both are present, so a path that grows a
     # real per-frame reading is not silently overridden by the weaker one.
     bad += case('the fraction outranks the endpoints when both exist',

@@ -305,19 +305,29 @@ def judge(rec):
             return bad('ads', f'aiming for {ads:.0%} of polls, want '
                               f'{ADS_FRAC_MIN:.0%}')
     else:
+        # ⚠ ABSENCE PASSES HERE, AND THIS IS THE ONLY CHECK IN THIS FILE WHERE
+        # IT DOES. Everywhere else a missing field means "nobody measured it"
+        # and the cell fails closed. Here the measurement is somewhere else and
+        # it is STRONGER: GunDriver.ensure_ads enters the scope before every
+        # trigger, reads the screen back and retries, and firing cannot change
+        # ADS -- right click is a toggle and nothing touches it during a burst.
+        # `ads_end` is an afterthought on top of a verified precondition, so its
+        # absence removes a corroboration rather than the check.
+        #
+        # It matters because the field is NEW. Every magazine stored before
+        # 2026-08-09 carries None, and counting those as "did not end scoped"
+        # sent 17 existing cells to 0.0 and refused them permanently -- "the
+        # field did not exist yet" read as "the check failed", which is the same
+        # confusion in a sixth costume.
         ends = rec.get('ads_end_ok')
-        if ends is None:
-            return bad('ads', 'neither ads_frac nor ads_end_ok — nothing says '
-                              'this burst was aimed')
-        # ⚠ THE CONTRADICTION, NOT A TOLERANCE. `<=` and not `<`: the refusal
-        # is "NOT ONE magazine in this pool ended scoped", which contradicts the
-        # ensure_ads that ran before every trigger and read itself back. A
-        # reading that false-alarms at ~50% under AR recoil cannot produce 0 of
-        # N on a genuinely scoped pool; a cell that never scoped produces
-        # exactly that.
-        if ends <= ADS_END_MIN:
-            return bad('ads', f'{ends:.0%} of the pool ended in ADS — '
-                              f'ensure_ads verified the scope before every '
+        # ⚠ THE CONTRADICTION, NOT A TOLERANCE. `<=` and not `<`: the refusal is
+        # "NOT ONE magazine that WAS read ended scoped", which contradicts the
+        # ensure_ads before every trigger. A reading that false-alarms at ~50%
+        # under AR recoil cannot produce 0 of N on a genuinely scoped pool; a
+        # cell that never scoped produces exactly that.
+        if ends is not None and ends <= ADS_END_MIN:
+            return bad('ads', f'{ends:.0%} of the read magazines ended in ADS '
+                              f'— ensure_ads verified the scope before every '
                               f'trigger and not one burst agrees; one of them '
                               f'is lying')
 
