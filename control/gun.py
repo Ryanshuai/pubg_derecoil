@@ -64,6 +64,11 @@ ADS_PROBE_S = 0.15
 ADS_WATCH_S = 2.5         # how long to watch for the icon after a right-click;
                           # measured ~0.85 s idle and slower right after firing
 POSTURE_WATCH_S = 1.5     # same, for the C/Z animation
+# How long to keep re-READING the fire mode before calling it unreadable. It is
+# a re-read, never a re-press: B is a cycle. 0.5 s is ~4 reads at the HUD's
+# refresh and the icon is either drawn or it is not -- there is no animation to
+# wait out, unlike the posture icon's 34-68 ms after a C/Z.
+FIRE_MODE_READ_S = 0.5
 POSTURE_SETTLE_S = 0.6
 TAB_OPEN_S = 0.55
 TAB_CLOSE_S = 0.35
@@ -597,9 +602,22 @@ class GunDriver:
         B is a cycle, not a switch, so this presses and WATCHES rather than
         pressing once and hoping. Returns the mode it ended in, or None if the
         detector cannot see one at all (which is not the same as being wrong).
+
+        ⚠ AN UNREADABLE FRAME MUST NOT BE PRESSED THROUGH, and it used to be.
+        A single None from read_fire_mode() left the loop comparing None to
+        `want`, which is never equal, so it pressed B AGAIN -- on a CYCLE, with
+        no idea where it was. That is the exact thing this class exists to stop,
+        and it was in the one method that had never been called.
+
+        Measured on the night runs' own evidence frames: 14 of 51 in-game
+        frames read None (the HUD is not drawn with empty hands, mid-swap, or
+        with a screen up), against 37 that read a mode -- so this is the common
+        case, not an edge one. Both reads are therefore polled to a DEADLINE,
+        the same shape as the posture detector's retry: read again, do not
+        press again.
         """
         want = want or self.FIRE_MODE_FOR.get(weapon, 'full')
-        seen = self.read_fire_mode()
+        seen = self._fire_mode_settled()
         if seen is None:
             return None
         for _ in range(tries):
@@ -608,8 +626,23 @@ class GunDriver:
             self.mouse.key(HID_KEY_B, 60)
             time.sleep(0.35)
             self.flush(3)
-            seen = self.read_fire_mode()
+            got = self._fire_mode_settled()
+            if got is None:
+                # The press happened; what it landed on is unknown. Saying so
+                # is the only honest answer -- another blind B would be a
+                # second unobserved step around the cycle.
+                return None
+            seen = got
         return seen
+
+    def _fire_mode_settled(self, timeout_s=FIRE_MODE_READ_S):
+        """The mode off the HUD, re-reading until one appears or time is up."""
+        end = time.perf_counter() + timeout_s
+        while True:
+            got = self.read_fire_mode()
+            if got is not None or time.perf_counter() >= end:
+                return got
+            self.flush(2)
 
     # ── inventory ──
     #
