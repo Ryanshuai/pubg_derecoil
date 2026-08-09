@@ -169,7 +169,7 @@ def load_curves():
 # here so detector/ does not import calibration/". config is imported by both
 # layers already, so the copy bought nothing and risked the failure that
 # docstring described -- two authors drifting, and a lookup that just misses.
-from config import config_key, fire_tag                    # noqa: E402,F401
+from config import config_key, parse_config_key, fire_tag  # noqa: E402,F401
 # ⚠ THE ONE PLACE THAT KNOWS 'Muzzle_Compensator_Large_C' IS 'comp_ar'.
 # set_seq needs it because the detector speaks assets and the curve store
 # speaks catalogue keys; weapon_attachments imports only config and the
@@ -657,18 +657,128 @@ class Weapon():
         # thing that changes.
         self._final = load_final_curves()
 
+    def _compose(self, ck, fmode):
+        """This kit, built from THIS GUN's own bare and single-part cells.
+
+        -> {(weapon, ck, posture, sight, fmode): (shots, why)}, one entry per
+        (posture, sight) at which the bare cell AND every slot's single-part
+        cell exist. Empty when the kit cannot be built that way.
+
+        Each part's coefficient is that part's own cell over the bare cell, by
+        TOTAL counts, and the coefficients multiply onto the bare SHAPE. That
+        is the same decomposition data/kit_factors.json stores -- its `_note`
+        says "relative to that weapon's BARE cell in the same run" -- so this
+        keeps one convention rather than inventing a second one.
+
+        ⚠ IT ASSUMES THE SLOTS DO NOT COUPLE, WHICH IS KNOWN TO BE FALSE, and
+        the size of the lie is measured ON THIS DATA, IN THIS COORDINATE. Every
+        measured multi-part cell on disk is a hold-out for it -- compose the
+        cell, compare to the fit that exists (2026-08-09, n=8, seeds excluded):
+
+            m416 vert+comp                  895 -> 822   -8.2%
+            m416 vert+comp+tactical         895 -> 814   -9.1%
+            m416 vert+tactical             1006 -> 1073   +6.7%
+            m416 comp+tactical             1003 -> 1119  +11.6%
+            mp5k vert+comp                  440 -> 376  -14.6%
+            mp5k vert+comp+heavy            397 -> 305  -23.1%
+            mp5k vert+heavy                 541 -> 547   +1.1%
+            mp5k comp+heavy                 465 -> 423   -9.1%
+
+            median |err| 9.1%, range -23.1% .. +11.6%
+
+        ⚠ AND IT IS NOT ONE-SIDED, so it cannot be corrected by a constant. Four
+        cells under, four over. Anyone tempted to fit a coupling term to these
+        eight numbers is fitting 8 points of a 41-dimensional model, which is
+        the root CLAUDE.md's first law.
+
+        That is the honest reason it may fire and the honest reason it is
+        labelled a prior: 9% off is worth ~800 counts of held recoil, and 100%
+        off is what "no curve" delivers.
+
+        ⚠ DO NOT QUOTE data/kit_factors.json's 6.7% FOR THIS. That number
+        (detector/CLAUDE.md's factor table) is the same idea measured in the
+        OLD SCALAR coordinate over a different 9 cells, and it is the number
+        this docstring carried for its first hour. Two mechanisms, two data
+        sets, one plausible-looking figure -- the table above is the one that
+        describes the code underneath it.
+
+        ⚠ AND IT IS ALL-OR-NOTHING PER SLOT. A kit missing one part's cell
+        composes NOTHING rather than composing the rest -- dropping a slot
+        would fire a curve fitted without that part, which is the same error
+        `worn_keys` refuses in set_seq by poisoning the whole key. Same reason,
+        one axis over.
+
+        ⚠ NEVER ACROSS GUNS. Every donor here is `self.name`. `comp_smg` is
+        0.5907 on the mp5k and 0.7197 on the vector -- 5.5 sigma apart, one
+        wiki number for both -- so a coefficient is a fact about a gun, not
+        about a part.
+        """
+        cfg = parse_config_key(ck)
+        # The round trip is the proof that ck is a key at all; parse_config_key
+        # asks callers for it by name. len < 2 means the exact lookup already
+        # asked for this same cell and missed, so there is nothing to build.
+        if cfg is None or config_key(cfg) != ck or len(cfg) < 2:
+            return {}
+        out = {}
+        for (w, c, posture, sight, fm), bare in self._final.items():
+            if w != self.name or c != 'bare' or fm != fmode:
+                continue
+            base = sum(float(s['dy']) for s in bare)
+            if base <= 0:
+                continue
+            # Donors are taken at the SAME (posture, sight) as the bare cell,
+            # so a coefficient is never a ratio between two optics wearing one
+            # part -- that would fold the optic's K into the part's number.
+            f, why, ok = 1.0, [], True
+            for slot, part in sorted(cfg.items()):
+                one = self._final.get(
+                    (self.name, config_key({slot: part}), posture, sight, fm))
+                if not one:
+                    ok = False
+                    break
+                r = sum(float(s['dy']) for s in one) / base
+                f *= r
+                why.append(f'x{r:.3f} ({slot}-{part})')
+            if not ok:
+                continue
+            out[(self.name, ck, posture, sight, fm)] = ([
+                {'delay_ms': s['delay_ms'], 'dx': float(s['dx']) * f,
+                 'dy': float(s['dy']) * f} for s in bare
+            ], f'COMPOSED from {self.name} bare {posture} {sight} '
+               f'({base:.0f} counts) ' + ' '.join(why) +
+               f' -> {base * f:.0f} counts, slot coupling ASSUMED AWAY '
+               f'(hold-out on 8 measured kits: median 9.1%, '
+               f'-23.1%..+11.6%).')
+        return out
+
     def _derive(self, ck, sight, fmode):
         """This gun's nearest measured cell x the scalars between it and here.
 
         -> (shots, scale, why) or (None, 1.0, ''). `why` is the whole audit
         trail, meant to be printed: which cell, which factors, what total.
 
-        ⚠ IT SUBSTITUTES ALONG TWO AXES AND REFUSES THE OTHER THREE, and the
+        ⚠ IT SUBSTITUTES ALONG THREE AXES AND REFUSES THE OTHER TWO, and the
         line is not arbitrary. Posture and optic are believed to scale the
-        WHOLE trajectory by one number; a different gun, a different kit or a
-        different fire mode changes its SHAPE, and a shape cannot be recovered
-        by multiplying. So `weapon`, `config` and `fire_mode` must match
-        exactly, and a miss on those is still no compensation at all.
+        WHOLE trajectory by one number; a different gun or a different fire
+        mode changes its SHAPE, and a shape cannot be recovered by multiplying.
+        So `weapon` and `fire_mode` must match exactly, and a miss on those is
+        still no compensation at all.
+
+        ⚠ THE KIT AXIS IS THE THIRD ONE AND IT IS THE WEAKEST (added
+        2026-08-09). `_compose` builds the kit out of this gun's bare and
+        single-part cells, which is a scalar per SLOT rather than a scalar on
+        the trajectory -- so it assumes the slots do not couple, and they do.
+        It runs ONLY when this kit has no cell of its own at any optic or
+        posture: `cands` below is already filtered to `c == ck`, so an empty
+        pool is exactly "nobody has ever fired this kit". A cell measured on
+        this exact kit carries the coupling, and a composition is the one thing
+        that assumes the coupling away, so it must never outrank one.
+
+        What its absence cost, measured off the play log 2026-08-09: a scar
+        wearing a compensator and a vertical grip printed `no fitted curve` and
+        got NOTHING, while all four of the cells needed to build it -- bare,
+        muzzle-comp_ar, grip-vert_grip -- sat on disk. 76 curves, 50 of them
+        single-part, and every two-part kit on 8 of the 12 guns was dead.
 
         ⚠ THE OPTIC AXIS WAS THE ONE MISSING, and its absence looked exactly
         like the honest answer. Every scoped cell on every gun but three
@@ -701,45 +811,69 @@ class Weapon():
         want_r = config.RECOIL_SIGHT_RATIO.get(sight)
         if want_r is None or want_r <= 0:
             return None, 1.0, ''
-        cands = []
-        for k, shots in self._final.items():
-            w, c, posture, s, fm = k
-            if w != self.name or c != ck or fm != fmode:
-                continue
-            if posture != self.posture and posture != 'standing':
-                continue
-            have_r = config.RECOIL_SIGHT_RATIO.get(s)
-            if have_r is None or have_r <= 0:
-                continue
-            scale, cost, why = 1.0, 0.0, []
-            if posture != self.posture:
-                pf = _get_posture_factor(self.name, self.posture)
-                scale *= pf
-                cost += abs(math.log(pf)) if pf > 0 else 99.0
-                why.append(f'x{pf:.3f} for {self.posture} '
-                           f'(config.POSTURE_FACTOR)')
-            if s != sight:
-                sf = want_r / have_r
-                scale *= sf
-                cost += abs(math.log(sf))
-                why.append(f'x{sf:.3f} for {sight} over {s} '
-                           f'(config.RECOIL_SIGHT_RATIO)')
-            # ⚠ RANKED BY HOW FAR IT IS BEING STRETCHED, not by which axis.
-            # Preferring "same posture" would take a red-dot crouching curve
-            # x3.271 over a 4x standing one x0.80 -- one factor either way, and
-            # the first is four times the extrapolation. Summing |log| of the
-            # factors actually applied compares them in the one unit they share.
-            cands.append((round(cost, 6), k, scale, why, shots))
+
+        def stretch(cells):
+            """(cost, key, scale, why, shots) per cell of THIS kit in `cells`."""
+            out = []
+            for k, shots in cells.items():
+                w, c, posture, s, fm = k
+                if w != self.name or c != ck or fm != fmode:
+                    continue
+                if posture != self.posture and posture != 'standing':
+                    continue
+                have_r = config.RECOIL_SIGHT_RATIO.get(s)
+                if have_r is None or have_r <= 0:
+                    continue
+                scale, cost, why = 1.0, 0.0, []
+                if posture != self.posture:
+                    pf = _get_posture_factor(self.name, self.posture)
+                    scale *= pf
+                    cost += abs(math.log(pf)) if pf > 0 else 99.0
+                    why.append(f'x{pf:.3f} for {self.posture} '
+                               f'(config.POSTURE_FACTOR)')
+                if s != sight:
+                    sf = want_r / have_r
+                    scale *= sf
+                    cost += abs(math.log(sf))
+                    why.append(f'x{sf:.3f} for {sight} over {s} '
+                               f'(config.RECOIL_SIGHT_RATIO)')
+                # ⚠ RANKED BY HOW FAR IT IS BEING STRETCHED, not by which axis.
+                # Preferring "same posture" would take a red-dot crouching curve
+                # x3.271 over a 4x standing one x0.80 -- one factor either way,
+                # and the first is four times the extrapolation. Summing |log|
+                # of the factors applied compares them in the one unit they
+                # share.
+                out.append((round(cost, 6), k, scale, why, shots))
+            return out
+
+        cands, notes = stretch(self._final), {}
+        # ⚠ LAST RESORT, AND THE ORDERING IS THE WHOLE SAFEGUARD. See the third
+        # note in the docstring: an empty pool here means this kit has never
+        # been fired at ANY optic or posture, which is the only state in which
+        # assuming the slots away beats saying nothing.
+        if not cands:
+            composed = self._compose(ck, fmode)
+            notes = {k: v[1] for k, v in composed.items()}
+            cands = stretch({k: v[0] for k, v in composed.items()})
         if not cands:
             return None, 1.0, ''
         cands.sort(key=lambda t: (t[0], t[1]))
         _, k, scale, why, shots = cands[0]
         total = sum(float(s['dy']) for s in shots) * scale
-        return shots, scale, (f'{k[2]} {k[3]} ({sum(float(s["dy"]) for s in shots):.0f}'
-                              f' counts) ' + ' '.join(why) +
-                              f' = {total:.0f} counts. These are PRIORS, not '
-                              f'measured on this gun — fire this cell to '
-                              f'replace them.')
+        # A composed cell states its own provenance -- which cells were divided
+        # by which -- because "scar bare red_dot" alone would name a donor this
+        # curve was never copied from.
+        head = notes.get(k) or (f'{k[2]} {k[3]} '
+                                f'({sum(float(s["dy"]) for s in shots):.0f} '
+                                f'counts)')
+        # ⚠ `= total` ONLY WHEN A FACTOR WAS APPLIED. It exists to show the
+        # result AFTER the stretch; on a composition that needed no stretch the
+        # note already ends with that same number, and printing it twice reads
+        # like two different quantities agreeing.
+        tail = (' '.join(why) + f' = {total:.0f} counts.') if why else ''
+        return shots, scale, ' '.join(x for x in (
+            head, tail, 'These are PRIORS, not measured on this gun — fire '
+            'this cell to replace them.') if x)
 
     def set_seq(self):
         import config as _cfg

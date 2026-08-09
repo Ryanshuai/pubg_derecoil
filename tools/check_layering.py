@@ -21,9 +21,14 @@ six directories, only 3 of them detectors, so half the repo reached into the
 MEANING layer to get pixels. screen_capture.py and key_poller.py sat at the
 repo root, which admits exactly two kinds of module -- the assembly root that
 knows every layer (robot.py) and layer-less primitives that know none
-(config.py, daemon_loop.py, whose docstring says so). Those two knew config
-and cropper, so they were neither; they were on the root floor by default,
-not by criterion.
+(config.py, daemon_loop.py, logbook.py, whose docstrings say so). Those two
+knew config and cropper, so they were neither; they were on the root floor by
+default, not by criterion.
+
+⚠ logbook.py joined that second kind on 2026-08-09 and its emptiness is load
+bearing, not incidental: `note` is called from control/ AND detector/, so the
+moment it imports anything from this repository it becomes an edge between
+whatever it imports and every layer that logs. It imports datetime, os, sys.
 
     calibration/ says WHAT to measure, HOW to compute it, and WHERE the
                 artifacts go. Driving the game is control/'s job. Not a

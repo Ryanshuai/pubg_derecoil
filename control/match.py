@@ -18,6 +18,7 @@ from daemon_loop import DaemonLoop
 from collections import deque
 
 from config import KEY_ACTION_TABLE, DETECT_TABLE, MISMATCH_TABLE
+from logbook import note
 from calibration.mismatch import MismatchCollector
 from control.tab_watch import TabWatch
 from detector.weapon import Weapon
@@ -196,14 +197,21 @@ class Dispatcher(DaemonLoop):
         log meant reconstructing it from KEY_ACTION_TABLE by hand -- and what
         that reconstruction found was that `tab` sets it True with no `cond`,
         so the same key disarms on the way IN and again on the way OUT.
+
+        ⚠ ANNOUNCED TO THE LOG FILE, NOT TO THE TERMINAL (2026-08-09). That
+        same "twice per Tab" is why: 31 of one play log's 234 lines were this
+        one line, flipping back and forth, and its readers are all
+        after-the-fact -- nobody watches a boolean while playing. What the
+        player needs on screen when compensation stops is `[armed] CLEARED`,
+        which still prints and names its cause.
         """
         s = self.state
         for item in state_list:
             if isinstance(item, tuple) and len(item) == 2:
                 attr, val = item
                 if attr == 'stop_recoil' and bool(val) != bool(s.stop_recoil):
-                    print(f'[state] stop_recoil {bool(s.stop_recoil)} -> '
-                          f'{bool(val)}   (after {self._cause})', flush=True)
+                    note(f'[state] stop_recoil {bool(s.stop_recoil)} -> '
+                         f'{bool(val)}   (after {self._cause})')
                 # Method call: ('set_active_by_key', 1)
                 method = getattr(s, attr, None)
                 if callable(method):
@@ -277,14 +285,15 @@ class Dispatcher(DaemonLoop):
         if self._tab_was and not now and self.state.stop_recoil:
             self.state.stop_recoil = False
             self._cause = 'tab seen to close'
-            # ⚠ IT PRINTS, because the key path prints and this one did not --
-            # so a log showed `stop_recoil False -> True` on every Tab press
-            # and never once showed it coming back. Reading it, the tool looked
-            # permanently disarmed after the first inventory, which is exactly
-            # the bug this function fixed. One direction of a two-directional
-            # flag is worse than neither: it reads as evidence.
-            print(f'[state] stop_recoil True -> False   '
-                  f'(after {self._cause})', flush=True)
+            # ⚠ IT IS RECORDED, because the key path records it and this one
+            # did not -- so a log showed `stop_recoil False -> True` on every
+            # Tab press and never once showed it coming back. Reading it, the
+            # tool looked permanently disarmed after the first inventory, which
+            # is exactly the bug this function fixed. One direction of a
+            # two-directional flag is worse than neither: it reads as evidence.
+            # Both directions go to the FILE now; see _apply_state.
+            note(f'[state] stop_recoil True -> False   '
+                 f'(after {self._cause})')
             self._apply_hw(['recoil_on', 'upload_pattern'])
         self._tab_was = now
 

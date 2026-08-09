@@ -77,6 +77,7 @@ class FakeState:
         self.weapon_pred = ('', '')
         self.attachments = {}
         self.synced = 0
+        self.statuses = 0
 
     @property
     def weapon_name(self):
@@ -95,6 +96,19 @@ class FakeState:
 
     def set_attachments(self, slot, att):
         self.attachments[slot] = att
+
+    def print_status(self):
+        """The status table. Modelled, not stubbed, because it PRINTS.
+
+        The panel is the one place a loadout actually changes, and until
+        2026-08-09 nothing here asked for the table — it hung off the
+        dispatcher's detection queue alone, so a Tab read reached the screen
+        only when some unrelated posture or highlight read happened to run
+        next. It has to print for the channel case below to be able to say
+        that the table is what SURVIVES on the terminal.
+        """
+        self.statuses += 1
+        print('----\n  * the table', flush=True)
 
 
 class FakeScreen:
@@ -221,14 +235,14 @@ class FakeScreen:
         return G()
 
 
-def build():
+def build(verbose=False):
     screen = FakeScreen()
     state = FakeState()
     w = TabWatch(state, {'tab_type': screen.type_det(),
                          'tab_weapon': screen.weapon_det(),
                          'tab_attachment': screen.att_det(),
                          'gun_tag': screen.tag_det()},
-                 verbose=False, shot_dir=SHOT_DIR)
+                 verbose=verbose, shot_dir=SHOT_DIR)
     w._type_grab = screen.grabber(counts=False)
     w._panel_grab = screen.grabber()
     return w, state, screen
@@ -511,6 +525,43 @@ check('and the name carries the edge, and only the edge',
       [n.split('_')[-1] for n in new], ['press.png', 'release.png'])
 check('and NOT into the directory real play writes to',
       os.path.abspath(SHOT_DIR) != os.path.abspath(REAL_SHOT_DIR), True)
+
+print('\n=== the chatter goes to the FILE, the table to the TERMINAL ===')
+# ⚠ THIS IS A PROHIBITION ON A CHANNEL, not on content, and it is written that
+# way because the content is fine — every line here is worth keeping. What was
+# wrong is WHERE it went: measured on two real play logs, `[tab]` was 154 of
+# 234 lines and 116 of 172, so the status table (3 lines, and the only thing
+# anybody reads while playing) scrolled off the top between every pair of Tab
+# presses.
+#
+# ⚠ AND THE TABLE HAS TO BE ON THE TERMINAL, which is the half a "no [tab] on
+# screen" assertion alone would let through: silencing the chatter and losing
+# the table too passes that and leaves an empty screen.
+import io                                                        # noqa: E402
+import logbook                                                   # noqa: E402
+
+wA, stateA, screenA = build(verbose=True)
+term, fh = io.StringIO(), io.StringIO()
+saved, sys.stdout = sys.stdout, logbook._Tee(term, fh)
+try:
+    screenA.open = False
+    wA.on_key(time.perf_counter(), 'press')      # opens it
+    screenA.open = True
+    wA.on_key(time.perf_counter(), 'release')    # reads it, then it closes
+    screenA.open = False
+finally:
+    sys.stdout = saved
+
+t_txt, f_txt = term.getvalue(), fh.getvalue()
+check('the panel WAS read (else this proves nothing)', screenA.att_reads, 1)
+check('and the table was printed for it', stateA.statuses, 1)
+check('the file got the [tab] chatter',
+      sum('[tab]' in ln for ln in f_txt.splitlines()) >= 4, True)
+check('the terminal got NONE of it', '[tab]' in t_txt, False)
+check('the terminal got the table', t_txt.splitlines(),
+      ['----', '  * the table'])
+check('and the file has the table too (a copy, not a move)',
+      '* the table' in f_txt, True)
 
 print('\n=== idle costs nothing but the drift check ===')
 w6, state6, screen6 = build()

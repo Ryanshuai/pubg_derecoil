@@ -3,6 +3,7 @@
 No key dispatch, no detection scheduling, no hardware communication.
 Just state and methods to change it.
 """
+from logbook import note
 from detector.weapon import Weapon
 
 
@@ -100,9 +101,13 @@ class GameState:
                 was = w.name
                 w.set('name', name)
                 self.clear_attachments(slot)
-                print(f'[state] gun {slot}: {was or "(empty)"} -> {name}, '
-                      f'kit cleared (a different weapon wears different '
-                      f'parts; Tab will read the new one)', flush=True)
+                # To the FILE: the status table shows the consequence -- the
+                # new name with a row of `-` where the kit was -- on the very
+                # next print, and it shows it more legibly than a sentence
+                # does. What the file keeps is WHEN, and what it was before.
+                note(f'[state] gun {slot}: {was or "(empty)"} -> {name}, '
+                     f'kit cleared (a different weapon wears different '
+                     f'parts; Tab will read the new one)')
                 w.set_seq()
 
     # ════════════════════════════════════════════════════════════

@@ -94,6 +94,7 @@ import time
 import numpy as np
 
 from config import HUD_REGIONS, TAB_DRIFT_S, TAB_SETTLE_S
+from logbook import note
 
 ATT_REGIONS = [k for k in HUD_REGIONS if k.startswith('att_')]
 NAME_REGIONS = ['gun_name_1', 'gun_name_2']
@@ -191,6 +192,38 @@ class TabWatch:
         self._type_grab = self._panel_grab = None
 
     def _log(self, msg):
+        """A line for the LOG FILE. Not the terminal. See logbook.py.
+
+        ⚠ THIS CHANNEL IS 66% OF EVERY PLAY LOG, and that is what moved it off
+        the screen. Measured on two real sessions 2026-08-09: 154 of 234 lines
+        and 116 of 172 were `[tab]`. Every Tab press writes six of them -- the
+        snap, the panel verdict, the two slot reads, the loadout, the flag --
+        and the status table, which is the only thing anybody reads while
+        playing, is three. So the reading scrolled itself away.
+
+        NOTHING IS LOST: the file still gets all of it, timestamped, which is
+        the form the question takes afterwards ("what did it see at 15:24").
+        `_warn` is the other half -- see there for what still reaches the
+        screen and why the split is where it is.
+        """
+        if self.verbose:
+            note(f'[tab] {msg}')
+
+    def _warn(self, msg):
+        """A line for the TERMINAL. For when the reading did not happen.
+
+        ⚠ THE SPLIT IS NOT "IMPORTANT vs UNIMPORTANT", IT IS "DID THE THING
+        HAPPEN". `_log` narrates a Tab that worked; this one says a Tab that
+        did not -- the grab raised, the classify raised, a kit was refused
+        because nothing can name the gun. Those change what the operator
+        should do NEXT, and they are rare by construction: a session with one
+        of these per Tab is a session that is broken, and then the flood is
+        the message.
+
+        A quiet failure here is the exact shape this repository keeps paying
+        for -- `read_loadout` returning None looks identical to a Tab nobody
+        pressed, and the loadout simply keeps whatever it last knew.
+        """
         if self.verbose:
             print(f'[tab] {msg}', flush=True)
 
@@ -236,7 +269,7 @@ class TabWatch:
                 frame = self._panel_frame()
             return bool(det.any_drawn(frame))
         except Exception as e:
-            self._log(f'open-check failed: {e}')
+            self._warn(f'open-check failed: {e}')
             return None
 
     def _anchor_says(self):
@@ -378,7 +411,7 @@ class TabWatch:
         try:
             frame = self._panel_frame()
         except Exception as e:
-            self._log(f'panel grab failed: {e}')
+            self._warn(f'panel grab failed: {e}')
             return None
         self._log(f'snap ({tag}){self._save(frame, tag)}')
         return frame
@@ -467,7 +500,7 @@ class TabWatch:
                     out['attachments'] = {g: v for g, v in kit.items()
                                           if out['present'].get(g)}
         except Exception as e:
-            self._log(f'panel read failed: {e}')
+            self._warn(f'panel read failed: {e}')
             return None
         self._log(_describe(out))
         return out
@@ -642,6 +675,15 @@ class TabWatch:
         The name checked is the EFFECTIVE one -- weapon_hud's reading counts,
         so a gun already identified from the HUD keeps its kit even when the
         Tab plate is unreadable.
+
+        ⚠ AND IT PRINTS THE STATUS TABLE AT THE END, which it did not until
+        2026-08-09. `print_status` hung off `_process_pending` alone, so a Tab
+        read reached the screen only when some UNRELATED detection happened to
+        run next -- 24 Tab reads produced 8 tables in one play log, and each of
+        those 8 described the state at whatever moment the next posture or
+        highlight read landed. The panel is where a loadout actually changes;
+        it is the one place the table must not lag. It is deduped on content,
+        so a Tab that changed nothing costs nothing.
         """
         self.loadout = got
         if got['weapons'] is not None:
@@ -651,12 +693,20 @@ class TabWatch:
             eff = self.state.weapon_name
             for gun_id, a in got['attachments'].items():
                 if not eff[gun_id - 1]:
-                    self._log(f'gun {gun_id}: slots read but the name plate '
-                              f'was not, so the kit describes a gun nothing '
-                              f'can name — NOT published (an unnamed gun '
-                              f'matches every template blind)')
+                    self._warn(f'gun {gun_id}: slots read but the name plate '
+                               f'was not, so the kit describes a gun nothing '
+                               f'can name — NOT published (an unnamed gun '
+                               f'matches every template blind)')
                     continue
                 self.state.set_attachments(gun_id, a)
+        # getattr, not try/except AttributeError: the latter would also
+        # swallow one raised INSIDE print_status, and detector/game_state.py's
+        # _fmt says in as many words that it reads the Weapon fields directly
+        # SO THAT a class that moved them raises here instead of quietly
+        # printing three blanks.
+        show = getattr(self.state, 'print_status', None)
+        if callable(show):
+            show()
 
 
 def _crop(frame, key):

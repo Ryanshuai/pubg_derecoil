@@ -143,6 +143,15 @@ sight-scale = "python tools/test_sight_scale.py"
 # that said `closing` and show bare grass -- a stale `open` flag, which is what
 # this replaces. Nothing consumes it yet.
 gun-tag = "python detector/gun_tag_detector.py --selftest"
+# `print` goes to the terminal AND the file; `note` goes to the file ONLY.
+# Measured on two real play logs: `[tab]` and `[state]` were 79% and 82% of
+# what reached the screen, and the status table — the one thing a player reads
+# while playing — was 8 lines of 234, scrolled away between every pair of Tab
+# presses. Nothing is dropped; it all still lands in the file, timestamped.
+# ⚠ The two cases that matter are NEGATIVE: a note must not reach the terminal,
+# and with no log open it must NOT be swallowed (the terminal is then the only
+# record). A test asserting only "it wrote something" passes under both bugs.
+logbook = "python logbook.py --selftest"
 # What a magnified optic does to the counts a gun needs. `scope` reads the
 # store and stops (no game, no hardware); the live run wants --weapon and fires.
 # ⚠ The scope factor is DERIVABLE from config.RECOIL_SIGHT_PROFILES, so this

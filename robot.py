@@ -13,9 +13,14 @@ the answer was already gone.
 That is the same shape as the rule in the root CLAUDE.md about not grepping a
 live run: a session you cannot replay is the one session whose evidence you
 must not throw away. A play session is exactly that.
+
+⚠ AND THE LOG IS NOT THE TERMINAL, since 2026-08-09. `logbook.note` writes to
+the file only, and the routine per-event chatter goes through it: measured on
+two real play logs, `[tab]` and `[state]` were 79% and 82% of what reached the
+screen, which scrolled the status table -- the only thing a player reads while
+playing -- off the top between every pair of Tab presses. The lines are all
+still in the file. See logbook.py.
 """
-import datetime
-import os
 import sys
 
 # Force UTF-8 stdout so CN attachment names don't crash print_status
@@ -28,76 +33,9 @@ except (AttributeError, OSError):
     pass
 
 
-class _Tee:
-    """Write to the terminal AND to a timestamped file. Never swallows the
-    terminal.
+import os
 
-    ⚠ THE FILE IS THE COPY, NOT THE DESTINATION. If the log file cannot be
-    opened or a write to it raises, the terminal write has already happened
-    and the failure is dropped -- a broken log must not be able to take down
-    a session that is otherwise fine, and least of all one that is driving
-    hardware.
-
-    ⚠ THE CLOCK GOES IN THE FILE ONLY, and that asymmetry is the point. The
-    terminal is read LIVE, where the order is the timing and a column of
-    timestamps is noise. The file is read AFTERWARDS, against a burst the
-    reader remembers and cannot place: without a clock, `[armed] CLEARED` and
-    a burst three seconds later are one line apart and look simultaneous.
-    Every line this process prints is a state CHANGE, so the gaps between them
-    carry as much as the lines do -- and they were being thrown away.
-
-    Prefixing is per LINE, not per write: `print` issues the text and the
-    newline as two calls, and stamping both would put a bare timestamp on the
-    end of every line.
-    """
-
-    def __init__(self, stream, fh):
-        self._stream, self._fh = stream, fh
-        self._at_line_start = True
-
-    def write(self, s):
-        n = self._stream.write(s)
-        try:
-            for part in s.splitlines(keepends=True):
-                if self._at_line_start and part.strip():
-                    self._fh.write(datetime.datetime.now().strftime(
-                        '%H:%M:%S.%f')[:-3] + ' ')
-                self._fh.write(part)
-                self._at_line_start = part.endswith('\n')
-            self._fh.flush()
-        except (OSError, ValueError):
-            pass
-        return n
-
-    def flush(self):
-        self._stream.flush()
-
-    def __getattr__(self, name):
-        return getattr(self._stream, name)
-
-
-def start_log(root=None):
-    """Tee stdout+stderr into calibration/artifacts/robot/<stamp>.log.
-
-    -> the path, or None if it could not be opened. One file per run, because
-    the question a log answers here is always "what happened in THAT session".
-    """
-    root = root or os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                'calibration', 'artifacts', 'robot')
-    try:
-        os.makedirs(root, exist_ok=True)
-        stamp = datetime.datetime.now().strftime('%m%d_%H%M%S')
-        path = os.path.join(root, f'{stamp}.log')
-        fh = open(path, 'a', encoding='utf-8', errors='replace')
-    except OSError as e:
-        print(f'[log] cannot open a log file ({e}) -- terminal only',
-              flush=True)
-        return None
-    sys.stdout = _Tee(sys.stdout, fh)
-    sys.stderr = _Tee(sys.stderr, fh)
-    print(f'[log] {path}', flush=True)
-    return path
-
+from logbook import start_log
 from detector.game_state import GameState
 from detector.weapon_hud_detector import WeaponHudDetector
 from detector.fire_mode_detector import FireModeDetector
