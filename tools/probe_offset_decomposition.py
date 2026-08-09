@@ -74,10 +74,18 @@ def scale_arm_of(m):
 
 
 def arm_of(m):
-    """Which offset this magazine was fired at, from its own curve. None if it
-    is not one of the sweep's arms."""
+    """Which offset this magazine was fired at. None if it is not on an arm.
+
+    ⚠ THE STORED FIELD FIRST, AND THE KNOT COUNT ONLY AS A FALLBACK. The
+    signature is not injective: the 2026-08-08 confirmation sweep fired -50 and
+    -36 and BOTH came back with 174 knots. Reading the arm off the shape would
+    have merged two arms into one and the line through them would still have
+    looked like a line.
+    """
     if not m.curve or not m.comp_enabled:
         return None
+    if m.fire_delay_ms is not None:
+        return int(round(float(m.fire_delay_ms)))
     return ARMS.get(len(m.curve))
 
 
@@ -255,6 +263,19 @@ def main():
     if not mags:
         print('[!] no sweep magazines found')
         return 1
+    # ⚠ ONE BATCH AT A TIME. The two offset sweeps fired DIFFERENT curves (943
+    # and 968.6 counts), and F is taken from one arm and applied to all of
+    # them -- pooling would fit a 968 residual against a 943 curve and read the
+    # 2.6% as amplitude. Prefer the magazines that carry their own offset;
+    # falling back means the knot-count signature, which is not injective.
+    labelled = [m for m in mags if m.fire_delay_ms is not None]
+    if labelled:
+        print(f'using the {len(labelled)} magazine(s) that RECORD their offset '
+              f'(of {len(mags)} on an arm)')
+        mags = labelled
+    else:
+        print(f'⚠ no magazine records its offset — falling back to the knot '
+              f'count, which cannot separate -36 from -50')
 
     by_arm = {}
     for m in mags:
@@ -363,6 +384,28 @@ def main():
     print('   observed whole-path RMS  '
           + '  '.join(f'{d:+d}:{rms[d]:.1f}' for d in ds)
           + f'   -> parabola minimum {-q[1] / (2 * q[0]):+.1f} ms')
+
+    # ⚠ AND ITS INTERVAL, because this is the number that gets written into
+    # config.RECOIL_FIRE_DELAY_MS and a point estimate off four arms of four
+    # magazines is not a licence to edit a constant. Bootstrapped over
+    # MAGAZINES within arm -- the unit that goes wrong as a whole.
+    def _argmin(pick):
+        r = []
+        for d in ds:
+            y = np.nanmean([resample(m, GRID) for m in pick[d]], axis=0)
+            r.append(float(np.sqrt(np.nanmean(y ** 2))))
+        c = np.polyfit(np.array(ds, dtype=float), np.array(r), 2)
+        return -c[1] / (2 * c[0]) if c[0] > 0 else np.nan
+
+    rng2 = np.random.default_rng(23)
+    mins = np.array([_argmin({d: [by_arm[d][i] for i in
+                                  rng2.integers(0, len(by_arm[d]),
+                                                len(by_arm[d]))]
+                              for d in ds}) for _ in range(400)])
+    mins = mins[np.isfinite(mins) & (mins > ds[0] - 40) & (mins < ds[-1] + 40)]
+    mlo, mhi = np.percentile(mins, [2.5, 97.5])
+    print(f'   bootstrap 95% [{mlo:+.1f}, {mhi:+.1f}] ms  (n={len(mins)} of 400 '
+          f'in range)')
 
     print()
     print('read it like this:')

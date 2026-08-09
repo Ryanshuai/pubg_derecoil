@@ -1459,10 +1459,44 @@ COUNTS_PER_PIXEL = 0.5
 # THEREFORE CLOSED. It could never have been closed by more impulse trials.
 #
 # With eps = 0 the drift-minimising offset and -L COINCIDE, because the only
-# thing that separated them was the shortfall. -36 now over-leads by 17 ms and
-# the constant should be about -19. NOT CHANGED HERE YET: that prediction gets
-# fired as an offset sweep before it is believed, on the rule that put every
-# number above where it is.
+# thing that separated them was the shortfall. So -36 over-leads by ~17 ms and
+# the constant should be about -19.
+#
+# FIRED 2026-08-08, --fire-delay-sweep=-50,-36,-19,-5 rotated per magazine off
+# ONE 968.6-count fit, 16 magazines, mp5k bare. Per-MAGAZINE whole-path RMS:
+#
+#     -50    6.7  12.0  16.6  28.3    mean 15.9
+#     -36    5.4   8.3  17.4  22.7    mean 13.5
+#     -19    5.7   6.5   6.6   8.5    mean  6.8
+#      -5    5.8   6.3   6.8  11.9    mean  7.7
+#
+#     -36 vs -19   +6.6 counts  95% [-0.2, +13.7]   P(-19 better)  97%
+#     -50 vs -19   +9.1         95% [+1.9, +17.2]   P             100%
+#      -5 vs -19   +0.9         95% [-1.3,  +3.6]   P              71%
+#
+# ⚠ -19 IS NOT SEPARABLE FROM -5, and it is set anyway, because it is where two
+# INDEPENDENT things intersect: the RMS optimum (parabola minimum -19.3) and -M
+# from the two well-conditioned lag readings (18.3..21.7 impulse, 18.9
+# in-regime). Nothing measures M anywhere near 5. Half the interval, all of the
+# support.
+#
+# ⚠ THE OVER-LEADING ARMS ARE ERRATIC, NOT MERELY BIASED, and that was not
+# predicted: -50 and -36 spread 6.7..28.3 and 5.4..22.7 while -19 and -5 sit
+# inside 5.7..8.5 and 5.8..11.9. Leading too far makes the residual sensitive
+# to something that varies magazine to magazine. Unexplained; recorded because
+# a mean would have hidden it and the spread is the larger effect.
+#
+# ⚠ AND THE MECHANISM PREDICTION MISSED, on a criterion that was set wrong.
+# The claim was "F' coef = M + D, a line of slope 1 through -M, and any arm off
+# it kills this" -- observed -19.4 / +7.4 / +4.9 / +16.0 against a predicted
+# -31.1 / -17.1 / 0.0 / +13.9, slope 0.67 [0.34, 1.03]. But that coefficient is
+# a DIFFERENCE OF MEANS, and this very file records "five magazines an arm
+# cannot carry a difference of two means" -- the prediction was made at FOUR.
+# Its interval on M, [18.4, 48.0], contains 18.9, so the mechanism is untested
+# rather than refuted. The per-magazine RMS above is what is well-conditioned
+# at n=4: a scalar per magazine, not a difference. Root CLAUDE.md, "判据必须能
+# 看见它要管的那个维度", again -- this time the blind criterion was the one
+# written to check the previous blind criterion.
 #
 # ⚠ AND THE INTERLEAVING EARNED ITS KEEP. A -46 arm fired in its own earlier
 # run reads +31.4 counts at t=2.0 s where the interleaved -50 and -30 either
@@ -1471,7 +1505,7 @@ COUNTS_PER_PIXEL = 0.5
 # across runs before this was unreliable, including the first sweep that put
 # the optimum "near -60".
 #
-RECOIL_FIRE_DELAY_MS = -36
+RECOIL_FIRE_DELAY_MS = -19
 
 # How long an EMITTED count takes to become a photon: Pico USB report, the game
 # sampling input, view rotation, render, present. The other half of the pair
