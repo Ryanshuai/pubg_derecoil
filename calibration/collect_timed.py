@@ -510,10 +510,17 @@ def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
     the same run. The grabber, the tracker and the frame timing are the
     measurement, and the measurement belongs to calibration/.
 
-    `arm_plan` is a sequence of bools: True fires under the uploaded curve,
-    False uploads it and then disarms so the burst measures y_true directly.
+    `arm_plan` is a sequence, one entry per magazine, cycled:
+
+        True    fire the curve as fitted
+        False   upload it and DISARM, so the burst measures y_true directly
+        float   fire the curve scaled by this much
+
     More than one distinct arm is what makes the cell checkable at all --
-    harness/verdict.py's out-of-loop check compares them.
+    harness/verdict.py's out-of-loop check compares them -- and the float is
+    what the second arm should be. See adapter.ARM_PLAN for why zero is the
+    worst choice available: its |y_obs| is the whole recoil, and the vector
+    failed two cells on it the first night it ran.
     """
     from calibration import samples as S
     from calibration.weapon_build import build_weapon
@@ -539,14 +546,59 @@ def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
     if w is None or not len(getattr(w, 't_s', ())):
         return 0, f'no pattern for {weapon} {S.config_key(config)}'
 
+    # ⚠ FIRE WHAT THE STORE ALREADY KNOWS, NOT THE FILE. build_weapon reads
+    # data/curves, which for an unmeasured cell holds a SEED -- a community
+    # guess scaled by a wiki factor. Firing that is not wrong (y_comp is read
+    # back off the firmware, so y_true is exact whatever played) but it is
+    # IMPRECISE, and the imprecision is not uniform: the further the
+    # compensation is from the truth, the further the view travels, and the
+    # more of the answer has to come off the screen instead of off the device.
+    #
+    # That is what failed the vector's flash_smg cell twice on 2026-08-09 --
+    # a wiki-guessed seed of 914 counts against a real 750, so the arms
+    # disagreed by 9% while comp_smg, which had a MEASURED seed, agreed to 3.4%.
+    #
+    # This is `--from-fit`, which main() has had as a flag since the coordinate
+    # changed and the unattended path never used. It is not iteration and there
+    # are no rounds: the fit eats the whole pool every time, so this is simply
+    # "use the best estimate that exists" (MODEL.md).
+    try:
+        from calibration.fit_time_curve import fit as _fit
+        prev = [m for m in S.load(weapon, config) if m.comp_enabled]
+        if prev:
+            r = _fit(prev)
+            if r.get('ok'):
+                ks = r['knots']
+                w.t_s = [k['t_ms'] / 1000.0 for k in ks]
+                w.dy_s = [k['dy'] for k in ks]
+                w.dx_s = [k['dx'] for k in ks]
+                print(f'      firing the FIT over {r["n_kept"]}/{r["n_total"]} '
+                      f'stored magazines ({r["total_counts"]:.1f} counts), not '
+                      f'the file')
+    except Exception as e:                          # noqa: BLE001 — reported
+        print(f'      [!] could not fit from the store ({e}) — firing the '
+              f'curve on disk')
+
     # Every magazine this weapon has ever fired, so a cell that suddenly holds
     # a different number of rounds is refused rather than compared.
     prior = {m.magazine_size for m in S.all_magazines(weapon) if m.magazine_size}
+    base_dy, base_dx = list(w.dy_s), list(w.dx_s)
     grabber = DXGISyncGrabber(rig.tracker.regions())
     fired = 0
     try:
         for i in range(max(1, mags)):
-            comp = arm_plan[i % len(arm_plan)]
+            arm = arm_plan[i % len(arm_plan)]
+            # ⚠ bool IS a subclass of int, so the order matters: True/False are
+            # the enable, anything else is a multiplier.
+            scale = (1.0 if arm else 0.0) if isinstance(arm, bool) else float(arm)
+            comp = scale > 0
+            # ⚠ OFF THE BASE, NEVER OFF THE LAST MAGAZINE'S. Scaling w.dy_s in
+            # place makes arm k equal base*s_0*s_1*...*s_k, which is monotone in
+            # time and looks exactly like a very strong amplitude effect --
+            # precisely the artefact this sweep exists to rule out. main()'s
+            # loop keeps a base copy for the same reason.
+            w.dy_s = [v * scale for v in base_dy]
+            w.dx_s = [v * scale for v in base_dx]
             rig.arm(w)
             if comp:
                 # ⚠ THE CURVE IS READ BACK OFF THE FIRMWARE, NOT TAKEN FROM

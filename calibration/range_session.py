@@ -229,8 +229,18 @@ class AutoSession(RangeSession):
         from control.session import ensure_ready
         # countdown_s=0: the operator is not standing by mid-run, and the
         # countdown exists to give a human time to alt-tab away at the start.
+        #
+        # ⚠ THE PANEL LEG IS SKIPPED WHEN at_spawner CAN DO ITS JOB, because
+        # the two overlap and the pair is a round trip: ensure_ready's leg is
+        # `ensure_panel(False)`, which proves the panel SHUTS and (on the usual
+        # path, where it was never up) proves nothing at all, while
+        # `_at_spawner` presses comma, watches the panel appear and shuts it
+        # again. Running both closes the panel, opens it, and closes it again
+        # to answer one question. With no at_spawner_fn the leg is all there
+        # is, so it stays.
         rec = ensure_ready(label='re-entering the range', countdown_s=0,
-                           verbose=True, match_timeout=timeout_s)
+                           verbose=True, match_timeout=timeout_s,
+                           panel=self._at_spawner is None)
         if not rec.get('ok'):
             print(f"    [!] could not get back into the range: "
                   f"failed at {rec.get('failed')}")

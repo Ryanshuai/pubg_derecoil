@@ -6,6 +6,19 @@
 
 ⚠ **「不该有」指的是不该自己实现，不是不该调。** 这一层每个驱动游戏的入口（`collect_timed` / `collect_templates` / `scan_compat` / `scan_fits` / `calibrate_k` / `capture_ads`，以及 `harness/night.py`）开场统一调 `control.session.ensure_ready()`——那是 `control/` 的东西，正是 `pixi run layering` 第 9 条要求的方向。它是**五步**：进程起着 → 焦点 → 在局内 → Tab 收起 → 刷新器面板收起。
 
+### ⚠ 而第五步（面板收起）**有一个更强的替代品**，两个都跑就是原路返回（2026-08-09）
+
+| | 证明了什么 |
+|---|---|
+| `ensure_ready` 的 panel 腿 = `ensure_panel(False)` | 面板**关得掉**。而常见路径上它本来就没开，于是**什么都没证明** |
+| 「刷新器开得起来吗」 = `ensure_panel(True)` 然后 `(False)` | 面板**开得起来、也关得掉**，而且这是**唯一能把训练场和别的模式分开的观测** |
+
+两个都在，`open_rig` 就变成 **关 → 开 → 关**，为了回答一个问题。所以有 `at_spawner` 的调用方传 `panel=False`，让那一个探针同时当三件事用：开局拒绝、panel 腿、以及——
+
+**`AutoSession(at_spawner_fn=...)` 这个参数从来没人传过。** 不传它，`enter()` 走到 `if self._at_spawner is None: return True` 就返回了，而类自己的 docstring 写着这会「reports success while parked somewhere with nothing to spawn from」。**判据一直存在，而且 `open_rig` 开局手做了一遍**——只是没接到那个**再进来时**需要它的对象上，而再进来正是把人扔在出生场地、甚至扔进别的模式的那条路。
+
+⚠ **顺带删掉一次 `session.ensure()`**：它的注释说留着是为了「`_entered` 从一个验证过的会话盖时间戳」，**而它不盖**——`mark_entered()` 只在 `enter()` 真跑了才调，顺利路径上 `ensure()` 在那之前就返回了。它是 `playable` 的第三次读，而 `ensure_ready` 已经证过 `IN_GAME` 并且传送落地了。**会话改成在训练场证完之后才构造，`__init__` 的时间戳因此本来就是诚实的。**
+
 ⚠ **「走到 200m 靶道」以前是这里的第六步，2026-08-08 搬进了 `LobbyControl.ensure_in_match()`。** 它不是「游戏听不听得见我」而是「有没有人会撞我」：出生点是主场地，人多的服上有车穿过，而**被撞掉的弹匣不会自己报告**——轨迹里只是混进了别人的物理，每一道闸照样绿。搬家的理由是这一层付的账：`AutoSession.enter()` 回到局内**不经过 `ensure_ready`**，于是那个「已经在靶道了」的标志留着不动，下一次 `ensure_ready` 跳过一次从未发生的传送，**一轮 harvest 的后半程 45 分钟全在车流里打完**。现在**移动角色的模块就是知道角色被移动过的模块**，`ensure_ready` 只把 `range_name` 透传下去。
 
 ⚠ **而那个标志同一天晚些时候整个删了**（`_PLACED` / `placed_at` / `forget_placement`）。规矩缩成一条子句，操作员的原话：**传送 ⟺ 这次调用自己走进了这一局**，「已经在训练场里」就当**已经切换过了**。对这一层的影响只有一处，而它正好是本层唯一看得见那个事件的地方：`ManualSession` 等一个**人**回到局内，以前是在 `enter()` 开头调 `forget_placement()` 让后面某次 `ensure_ready` 去传送，**现在是 `in_range()` 认了之后自己 `_place_on_lane()` 传一次**——同一条规矩、同一个事件，由看见它的那个人执行，而且描述的是已经发生的事而不是将来的事。⚠ 三个 `get_session` 调用方**全是 `'auto'`**，所以实际跑的路径上一点都没变（`AutoSession` 走 `ensure_in_match`，`entered=True`，照样传送）。

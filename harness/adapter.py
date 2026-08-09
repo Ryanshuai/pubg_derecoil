@@ -86,6 +86,9 @@ RECORD_FIELDS = {
                           'burst, because 2.4 s is an m416 number and a vector '
                           'magazine is empty by 1.7 s.',
     'span_s':             'float — how long the fitted curve runs',
+    'grid_ms':            'float — the fitted curve knot spacing. Carried so a '
+                          'usable cell can SHIP without refitting.',
+    'samples_per_knot':   'float — how much data each knot rests on',
     'total_counts':       'float — y_true at the end of the span',
     'spread_counts':      'float — median disagreement between kept magazines',
     'curve':              'list  — the fitted knots, for the log',
@@ -230,27 +233,71 @@ def open_rig(sight, out_dir, home=True, countdown=6,
     kit = Kitter(rig)
     kit.restock_fn = lambda need: stock_parts(sc, kit, set(need) | parts)
 
-    # Constructed AFTER the gate rather than driving it: its job is the
-    # 17-minute recycle during the night, and ensure() is a cheap no-op here
-    # (in_range() is true, the budget is fresh) — kept so `_entered` is stamped
-    # from a session that has actually been verified.
-    session = get_session('auto')
-    ok, _ = session.ensure()
-    if not ok:
-        rig.close()
-        kit.close()
-        return None, 'could not get into a match'
+    def spawner_opens():
+        """comma produces the item spawner, and then puts it away. -> bool
 
-    # "Are we in the training range?" has one honest answer: the item spawner
-    # opens. Nothing else tells the range apart from any other match.
-    in_range = sc.ensure_panel(True)
-    sc.ensure_panel(False)
-    if not in_range:
+        ⚠ THE RANGE TEST, AND THERE IS NO OTHER. `IN_GAME`, `playable` and a
+        landed teleport are all true of any match; the item spawner exists in
+        exactly one mode, so this is the only observation that tells the
+        training range from a normal round.
+
+        ONE PROBE, THREE JOBS, and the three used to be three probes:
+
+            the startup refusal      here, below
+            ensure_ready's panel leg subsumed -- see `panel=False` above.
+                                     That leg only proves the panel SHUTS; this
+                                     proves it OPENS and shuts, which is
+                                     strictly more, and the pair of them made
+                                     open_rig close the panel, open it, and
+                                     close it again
+            the session's own check  AutoSession.at_spawner_fn, which was
+                                     passed NOTHING -- see below
+
+        Both halves are checked. Dropping ensure_panel(False)'s answer (which
+        this function used to do) leaves the panel covering the screen, and
+        comma's menu swallows Tab, so every cell after it fails to open the
+        backpack for a reason nothing prints.
+        """
+        if not sc.ensure_panel(True):
+            return False
+        if not sc.ensure_panel(False):
+            print('      [!] the item spawner panel opened and would not '
+                  'close — it swallows Tab, so nothing after this can read '
+                  'the backpack')
+            return False
+        return True
+
+    if not spawner_opens():
+        # ⚠ sc TOO. It was left out of every abort path here, and it is the one
+        # that has certainly opened a Pointer by now -- ensure_panel presses
+        # comma. A refusal that keeps the serial port makes the next run's
+        # `other_agents` report this dead process as a live agent.
         rig.close()
         kit.close()
-        session.close()
+        sc.close()
         return None, ('in a match, but the item spawner will not open — not '
                       'the training range, or not at a spawn point')
+
+    # ⚠ `in_range_fn` IS THE WHOLE POINT OF THIS ARGUMENT AND IT WAS NEVER
+    # PASSED. Without it AutoSession.enter() returns True at `if
+    # self._at_spawner is None`, skipping the only check that can tell the
+    # training range from any other mode — and its own docstring says so:
+    # "without it this reports success while parked somewhere with nothing to
+    # spawn from ... no other mode has an item spawner". So the check was being
+    # made by hand here, at startup, and the RE-ENTRY path — the one that lands
+    # the character at the spawn compound after an eviction, and the one that
+    # can land it in the wrong mode entirely — re-derived "we are fine" without
+    # it.
+    #
+    # Constructed AFTER the range is proved rather than driving it, and the
+    # ordering is now honest about `_entered`: it is stamped by __init__, right
+    # here, once everything above has agreed. The `session.ensure()` that used
+    # to sit on this line was documented as being kept "so `_entered` is
+    # stamped from a session that has actually been verified" — and it stamps
+    # nothing: ensure() only calls mark_entered() when enter() ran, and on the
+    # happy path it returns before that. It was a third reading of `playable`,
+    # after ensure_ready had already proved IN_GAME and landed the teleport.
+    session = get_session('auto', in_range_fn=spawner_opens)
 
     os.makedirs(out_dir, exist_ok=True)
     log = open(os.path.join(out_dir, 'cells.jsonl'), 'a', encoding='utf-8')
@@ -455,13 +502,36 @@ def _reach(rec, rigging, weapon, cfg):
 # and one magazine is enough to compare against — the arms are compared as
 # whole trajectories, not averaged.
 #
-# ⚠ `False` MEANS NO CURVE AT ALL, which measures y_true directly. It is the
-# cheapest second arm and the one the mid-band measurement used
-# (docs/model_error_history.md). It is NOT a better
-# arm: that section measured its y_true at t=3.8 s as the lowest of four, 13%
-# under the plateau, and named "the no-comp arm is an unbiased anchor" as one
-# of the things it got wrong.
-ARM_PLAN = (True, True, False)
+# ⚠ THE SECOND ARM IS A WEAKER CURVE, NOT NO CURVE (2026-08-09), and the zero
+# arm was costing cells. `False` means the pattern is uploaded and left OFF, so
+# |y_obs| is the WHOLE recoil -- the view travels the full distance and the
+# correlator has the longest way to lose it. It was already on record as the
+# worst of four arms (13% under the plateau at t=3.8 s, and "the no-comp arm is
+# an unbiased anchor" is listed among the things this project got wrong), and
+# the vector measured it again the first night it ran:
+#
+#     comp_smg   comp 630.9 614.2 619.6 628.0   no-comp 610.1   ->  3.4%  pass
+#     flash_smg  comp 758.2 731.2 756.8 733.9   no-comp 688.7   ->  9.0%  FAIL
+#     flash_smg  comp 750.8 924.4 750.5 767.0   no-comp 730.3   ->  7.3%  FAIL
+#
+# The zero arm is the low reading in all three, and the gap grows as the
+# compensation weakens: comp_smg fires a MEASURED seed, flash_smg a wiki guess.
+# So the cells that most need measuring are the ones the zero arm fails.
+#
+# 0.5 satisfies the gate for the same reason zero did -- it is a DIFFERENT
+# curve, and the fitter cannot see which arm a magazine came from -- while
+# keeping |y_obs| an order of magnitude smaller. That is the nulling property
+# the whole measurement rests on: the closer the compensation, the more of the
+# answer comes from a curve read off the device rather than off the screen.
+#
+# ⚠ ONE IN FIVE, NOT ONE IN THREE, asked for 2026-08-09: 「1/5这样的密度吧」.
+# The arms are compared as whole trajectories rather than averaged, so one
+# magazine is enough to compare against and the extra two bought nothing.
+#
+# ⚠ AND IT SITS AT INDEX 2 ON PURPOSE. At the END of the cycle a three-magazine
+# cell would fire one arm only and fail closed on `agree_arms=1` -- correct, and
+# useless. Here the second arm appears by magazine 3 whatever `--mags` is.
+ARM_PLAN = (True, True, 0.5, True, True)
 
 
 def _blank(cell):
@@ -517,6 +587,13 @@ def _fill(rec, res, pool, fired):
     rec['span_s'] = res['span_s']
     rec['total_counts'] = res['total_counts']
     rec['spread_counts'] = res['spread_counts']
+    # ⚠ CARRIED SO THE CURVE CAN BE SHIPPED WITHOUT REFITTING. night._ship
+    # hands the record to fit_time_curve._write_curve, which needs these two;
+    # without them it raised KeyError inside a try/except and the cell reported
+    # usable while shipping nothing -- a fix that looks applied and never runs,
+    # which is this repository's most-repeated shape.
+    rec['grid_ms'] = res['grid_ms']
+    rec['samples_per_knot'] = res.get('samples_per_knot')
     rec['curve'] = res['knots']
     rec['dropped'] = res['dropped']
 

@@ -256,6 +256,45 @@ def plan_cells(weapons, postures, sight, configs=('bare',)):
             for p in postures]
 
 
+def _ship(rec, cell):
+    """Put a USABLE cell's fitted curve where the RUNTIME reads it.
+
+    ⚠ NOTHING DID THIS, so an unattended night measured every cell and shipped
+    none of them. The fit went into the record and the seed stayed on disk, and
+    the next visit to that cell fired the community guess again. Firing a seed
+    is not WRONG -- y_comp is read back off the firmware, so y_true is exact
+    whatever played -- but it is imprecise in a way that compounds: the further
+    the compensation is from the truth, the further the view travels, and the
+    more of the answer has to come off the screen instead of off the device.
+    The vector's flash_smg cell failed the arms check twice on a wiki-guessed
+    seed of 914 counts against a real 750, while comp_smg, whose seed was
+    MEASURED, passed at 3.4%.
+
+    ⚠ ONLY WHEN judge() SAID USABLE, and that is why it lives in the loop
+    rather than in measure(). A cell that failed its arms check has a fit too,
+    and it is the one thing that must never reach the runtime: the fit always
+    succeeds, so "there is a curve" is not evidence about the curve.
+
+    Asked for 2026-08-09:「每次结尾都更新曲线？」
+    """
+    from calibration.fit_time_curve import _write_curve
+    from calibration.samples import config_key
+    try:
+        # Every key _write_curve needs, by name and NOT with `.get`: a missing
+        # one has to raise here rather than write a curve with a hole in it.
+        res = {'knots': rec['curve'], 'n_kept': rec['n_kept'],
+               'grid_ms': rec['grid_ms'], 'total_counts': rec['total_counts'],
+               'span_s': rec['span_s'],
+               'spread_counts': rec.get('spread_counts'),
+               'samples_per_knot': rec.get('samples_per_knot')}
+        _write_curve(res, cell['weapon'], config_key(rec.get('config_read')),
+                     rec.get('sight_read') or cell.get('sight') or 'red_dot',
+                     cell['posture'], rec.get('n_total'))
+    except Exception as e:                          # noqa: BLE001 — reported
+        print(f'   [!] the cell is usable but its curve did not ship ({e}). '
+              f'The samples are on disk; `fit_time_curve --write` ships it.')
+
+
 def run(manifest, rigging, mags, out_dir):
     """The loop. -> 'done' | 'halted'"""
     for cell in list(manifest.pending()):
@@ -298,6 +337,7 @@ def run(manifest, rigging, mags, out_dir):
 
         if ver and ver['usable']:
             manifest.mark(cid, USABLE, verdict=ver, attempts=attempt)
+            _ship(rec, cell)
             print(f"   usable")
         else:
             where = os.path.join(out_dir, f'fail_{cid.replace("|", "_")}')
