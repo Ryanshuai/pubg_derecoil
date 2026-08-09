@@ -558,8 +558,6 @@ def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
     # the view into the ground, where the correlator is as blind as it is in
     # open sky.
     w = build_weapon(weapon, posture, dict(config or {}, scope=scope_asset))
-    if w is None or not len(getattr(w, 't_s', ())):
-        return 0, f'no pattern for {weapon} {S.config_key(config)}'
 
     # ⚠ FIRE WHAT THE STORE ALREADY KNOWS, NOT THE FILE. build_weapon reads
     # data/curves, which for an unmeasured cell holds a SEED -- a community
@@ -593,6 +591,22 @@ def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
     except Exception as e:                          # noqa: BLE001 — reported
         print(f'      [!] could not fit from the store ({e}) — firing the '
               f'curve on disk')
+
+    # ⚠ THE REFUSAL COMES AFTER THE STORE, AND IT WAS BEFORE IT. Two correct
+    # rejections deadlocked: the seed writer SKIPS a configuration the store can
+    # already fit ("a seed here would be a guess in the path a measurement
+    # already covers"), and this refused any configuration with no file on disk.
+    # So exactly the cells that are best measured -- the ones with data --
+    # answered `no pattern for m416 grip-vert_grip` and fired nothing.
+    #
+    # The order is the fix: ask the store first, and refuse only when NEITHER
+    # the store nor the disk can supply a curve. A gun with no curve at all is
+    # still refused, and for the reason that has not changed -- it would fire
+    # uncompensated into open sky, where phase correlation returns 0
+    # CONFIDENTLY and the magazine is lost with every gate green.
+    if w is None or not len(getattr(w, 't_s', ())):
+        return 0, (f'no pattern for {weapon} {S.config_key(config)} — neither '
+                   f'a fitted curve on disk nor enough in the store to fit one')
 
     # Every magazine this weapon has ever fired, so a cell that suddenly holds
     # a different number of rounds is refused rather than compared.
