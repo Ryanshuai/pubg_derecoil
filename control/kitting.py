@@ -54,91 +54,54 @@ from calibration.kit_facts import KitFacts
 # one. Two copies drifted and the scope fix reached only this file --
 # see calibration/weapon_build.py.
 
-# ── when a cell is allowed to write its own curve ───────────────────────────
+# ── ⚠ SEVEN EMA/CONVERGENCE THRESHOLDS STOOD HERE AND ARE GONE (2026-08-09) ──
 #
-# The thresholds come from 2026-08-06's ten cells, split by hand into the nine
-# that deserved to ship and the one that did not:
+# EMA_MIN_MAGS, EMA_SPREAD_MAX, EMA_RESID_MAX_FRAC, EMA_CONVERGED_Z,
+# EMA_TOL_FRAC, EMA_APPLY_REL, EMA_APPLY_MIN -- 85 lines deciding when a cell
+# had converged enough to write its own curve. ⚠ THEY HAD ZERO READERS: the
+# loop that consumed them is the bullet-bucket half this file's docstring says
+# went on 2026-08-08, and the constants were left behind.
 #
-#     shipped      relative spread 0.03% .. 1.10%   (at three magazines)
-#     the bad one                   7.79%
+# ⚠ THE DEAD-PARAMETER GATE DID NOT CATCH THEM. `pixi run params` scans
+# function parameters and call sites; a module-level constant nobody imports is
+# invisible to it. What found these was reading the tree against MODEL.md.
 #
-# so 3% sits in a 7x gap. `spread` is the standard deviation of the accepted
-# magazines' residuals divided by the curve total, which is what makes a
-# 22-round VSS comparable with a 42-round AUG.
-EMA_MIN_MAGS = 3            # before anything is written at all
-EMA_SPREAD_MAX = 0.03       # of the curve total, across those magazines
-EMA_RESID_MAX_FRAC = 0.50   # a residual this big is a fault, not a refinement
-# ── converged means the residual is gone, not that the steps got small ──────
+# They are DELETED rather than commented out because MODEL.md abolished the
+# question they answer, not just the code:
 #
-# It used to compare the size of an UPDATE against the cell's scatter, and that
-# test is very nearly vacuous. An update is alpha x residual and the scatter is
-# sigma, so "moved < scatter" is just
+#     没有 α、没有 EMA、没有轮次 -- 「这一格收敛没有」这个问题不存在,
+#     只剩「样本够不够」
 #
-#     |residual| < sigma / alpha
+# A fit that eats the whole store at once has no rounds to converge over, so a
+# tuned convergence threshold sitting in control/ does not read as dead code.
+# It reads as current policy, which is exactly how the root CLAUDE.md's
+# 1.025^255 filter survived 255 rounds.
 #
-# and with the VSS's measured sigma of 34.6 counts at alpha 0.167 that is
-# |residual| < 207 -- 12% of its curve. Measured 2026-08-06: a 40-magazine run
-# stopped after FOUR, declaring convergence at +55.1 counts with a standard
-# error of 17, i.e. 3.2 sigma from zero.
+# TWO LESSONS OUTLIVE THE MECHANISM, so they are kept and nothing else is:
 #
-# So ask the question convergence actually is: given how many magazines this
-# cell has fired, can the residual still be told apart from zero? That is a
-# t-test against the cell's own sem, it needs no tuning constant, and it gets
-# STRICTER as evidence accumulates rather than weaker.
+# 1. CONVERGED MEANS THE RESIDUAL IS GONE, NOT THAT THE STEPS GOT SMALL. The
+#    old test compared an UPDATE against the cell's scatter, and since an update
+#    is alpha x residual that reduces to |residual| < sigma/alpha -- at the
+#    VSS's measured sigma of 34.6 counts and alpha 0.167, 12% of its curve.
+#    Measured 2026-08-06: a 40-magazine run stopped after FOUR, declaring
+#    convergence at +55.1 counts with a sem of 17, 3.2 sigma from zero.
 #
-# The per-magazine noise this is measured against, for scale: VSS bare, 16
-# magazines, curve frozen -- sd 34.6 counts (2.1% of the curve), lag-1
-# autocorrelation -0.075, sd/MAD 0.94. Independent, near-normal, stationary
-# within a session. That is what makes sem = sd/sqrt(k) the right ruler.
-EMA_CONVERGED_Z = 2.0       # confidence multiplier on the cell's own sem
-# ⚠ AND A TOLERANCE, because a t-test alone cannot say what convergence means.
-# "|mean| < Z x sem" is the statement THERE IS NO EVIDENCE OF A RESIDUAL, and
-# that is satisfied by measuring badly: replayed over 2026-08-06's cells it
-# declared the night's worst cell converged -- +144 counts of residual with a
-# sem of 98, t = 1.5 -- because its own noise hid it. What is wanted is
-# EVIDENCE OF NO RESIDUAL, which is an equivalence test: the whole interval
-# has to sit inside a band worth caring about.
+# 2. "NO EVIDENCE OF X" IS SATISFIED BY MEASURING BADLY. Replacing it with
+#    |mean| < Z x sem declared the night's WORST cell converged -- +144 counts
+#    with a sem of 98, t = 1.5 -- because its own noise hid the residual. What
+#    is wanted is EVIDENCE OF NO X, an equivalence test where the whole interval
+#    sits inside a band worth caring about, so a noisy cell fails too.
 #
-#     |mean| + Z * sem  <  EMA_TOL_FRAC * curve
+# Both are the root CLAUDE.md's 判据必须能看见它要管的那个维度 in another
+# costume, and MODEL.md's stopping rule is written the second way on purpose:
+# every term measured by something other than reading the source, and every
+# remaining disagreement smaller than the noise floor.
 #
-# so a big residual fails it AND a noisy cell fails it, and the only way to
-# pass is to fire enough magazines to shrink sem.
-#
-# 1% of the curve, because 0.5% is the floor this loop cannot go below anyway:
-# ALPHA_MAG_FLOOR = 0.10 leaves a permanent sigma*sqrt(a/(2-a)) of noise
-# written into the curve, which at the VSS's measured sigma of 34.6 counts is
-# 7.9 -- 0.5% of its 1676. A target under that is asking the loop to beat its
-# own design. 1% is twice the floor and, at sigma = 2.1% of the curve, needs
-# k > (2*2.1/1)^2 ~ 18 magazines. That is the real cost of convergence and it
-# is why runs of 3 magazines never reached it.
-EMA_TOL_FRAC = 0.01
-# How far a write may sit from alpha x the reported residual before the loop
-# is not applying what it measured. 30% covers smoothing and the shape term
-# redistributing; the real failure was 7 against 16, i.e. 57% off.
-EMA_APPLY_REL = 0.30
-# Below this the cumulative test abstains.
-#
-# ⚠ PROVISIONAL, and the honest reason is written here rather than implied by a
-# round number. The test compares what the curve moved against alpha x the
-# reported residual, and it has an error of its own -- measured 2026-08-06 over
-# the 7 VSS magazines that rebuild() would still accept, |error| ran 0.6 to
-# 10.6 counts and CORRELATED WITH THE SIZE OF THE WRITE (r = 0.83), so it is
-# proportional rather than a fixed offset. Where that proportionality comes
-# from is not established; the sample is 7 and biased, because rebuild refuses
-# any magazine whose pattern_counts no longer matches the curve, which after a
-# few writes is most of them.
-#
-# 15 gave the test 1.5x headroom over its own error and it duly cried STALLED
-# twice on healthy runs (+10 against +26, +18 against -20 -- the second of
-# those was real). 60 is 6x the worst error seen. It costs sensitivity: a
-# mechanism dropping HALF of every correction is only caught once the running
-# total due passes 60 counts, which at alpha 0.10 is six magazines of a 100-
-# count residual.
-#
-# What would replace this guess: many magazines against a FROZEN curve, which
-# is the only way rebuild will accept enough of them to characterise its own
-# error. That run has not been done.
-EMA_APPLY_MIN = 60.0
+# The per-magazine noise the above was measured against, kept because it is a
+# MEASUREMENT and still true: VSS bare, 16 magazines, curve frozen -- sd 34.6
+# counts (2.1% of the curve), lag-1 autocorrelation -0.075, sd/MAD 0.94.
+# Independent, near-normal, stationary within a session. MODEL.md sec.4.2 now
+# carries the same quantity as CV 2-4% per magazine.
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Runs are measurements, not source: they land under docs/ with the rest of

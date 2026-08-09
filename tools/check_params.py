@@ -53,6 +53,98 @@ DIRS = ('control', 'calibration', 'harness', 'press', 'detector')
 
 
 # ════════════════════════════════════════════════════════════
+# A measured constant may be WRITTEN AS A NUMBER in exactly one place
+# ════════════════════════════════════════════════════════════
+#
+# Asked for by the operator on 2026-08-09, looking at a docstring example:
+#
+#     这个怎么还 hard code，code 那么 hard code 那么多地方呢？
+#
+# The diagnosis turned out to be narrower than the complaint and the complaint
+# was still right. NO RUNNING CODE HARDCODES K -- config.RECOIL_SIGHT_PROFILES
+# owns it and every path reads it (sweep.Rig.K -> rig.K -> Magazine.K). What
+# was scattered is the NUMBER WRITTEN IN PROSE: docstring examples, comments
+# citing it as evidence, an illustration of the 3x scope ratio. Six copies, and
+# the red dot's K has moved three times (1.5474 -> 1.5128 -> the value config
+# holds now), so each move left every copy quietly wrong. Two separate passes
+# hand-patched them. ⚠ Note this sentence names the two SUPERSEDED values and
+# not the live one -- that is the rule below, obeyed by its own docstring.
+#
+# ⚠ THE STALENESS IS SILENT AND THAT IS THE WHOLE POINT. A wrong number in a
+# docstring does not fail anything; it gets read and believed. This repo's own
+# first law says the same thing about templates -- drift does not raise, it
+# returns a confident wrong answer.
+#
+# THE RULE: the value config CURRENTLY holds may not appear as a literal
+# anywhere else under DIRS + tools. Superseded values (1.5474, 1.5128) are
+# FINE and deliberately allowed -- a record that says "X was replaced by Y" is
+# how this repo keeps its retractions, and a superseded number cannot be
+# mistaken for a live second source. Only the live one can.
+#
+# ⚠ THE CHECK READS config AT RUNTIME, so it cannot itself go stale. That is
+# the property that makes it worth having rather than a second copy of the
+# list. It also means moving K in config immediately reds any prose that
+# happens to name the new value -- which is exactly the event to catch.
+#
+# ⚠ IT IS DELIBERATELY PYTHON-ONLY. Markdown legitimately publishes the value
+# -- MODEL.md IS the spec and docs/ carries supersession tables. The failure
+# being prevented is a reader of SOURCE believing there is a second authority.
+OWNED_CONSTANTS = {}        # filled by _owned_constants(), keyed value -> name
+
+
+def _owned_constants():
+    """{float: 'where it lives'} for constants config is the sole author of."""
+    if OWNED_CONSTANTS:
+        return OWNED_CONSTANTS
+    sys.path.insert(0, str(ROOT))
+    import config                                            # noqa: E402
+    for sight, prof in config.RECOIL_SIGHT_PROFILES.items():
+        k = prof.get('K')
+        # A value that rounds the same at 2dp as at 4dp (the hip-fire 0.50) is
+        # too round to police -- it collides with unrelated arithmetic, and a
+        # rule that cries wolf gets muted, which is worse than no rule. Every
+        # value carrying real precision is policed, scoped optics included.
+        if k is not None and round(k, 4) != round(k, 2):
+            OWNED_CONSTANTS[round(float(k), 4)] = (
+                f"config.RECOIL_SIGHT_PROFILES['{sight}']['K']")
+    return OWNED_CONSTANTS
+
+
+def _literal_copies(files=None):
+    """-> [(rel, line, text, owner)] for live constants written out elsewhere."""
+    owned = _owned_constants()
+    if not owned:
+        return []
+    out, seen = [], set()
+    paths = files if files is not None else [
+        p for d in DIRS + ('tools',) for p in (ROOT / d).rglob('*.py')]
+    for path in paths:
+        # A (rel, text) pair is the self-test's seam -- the same predicate runs
+        # over invented source and over the tree, so the cases below prove the
+        # thing main() uses rather than a parallel copy of it.
+        if isinstance(path, tuple):
+            rel, text = path
+        else:
+            p = pathlib.Path(path)
+            try:
+                rel = p.relative_to(ROOT).as_posix()
+            except ValueError:
+                rel = p.as_posix()
+            try:
+                text = p.read_text(encoding='utf-8', errors='replace')
+            except OSError:
+                continue
+        for i, line in enumerate(text.splitlines(), 1):
+            for value, owner in owned.items():
+                # One line naming two owned constants is ONE offence. Reporting
+                # it twice makes the count a lie and invites fixing half of it.
+                if f'{value:g}' in line and (rel, i) not in seen:
+                    seen.add((rel, i))
+                    out.append((rel, i, line.strip()[:88], owner))
+    return out
+
+
+# ════════════════════════════════════════════════════════════
 # The ledger
 # ════════════════════════════════════════════════════════════
 #
@@ -430,9 +522,28 @@ def selftest():
             bad += 1
             print(f'  ✗ arity {src.splitlines()[-1]!r} -> {got}, '
                   f'expected {want}')
-    n = len(SELFTEST) + len(ARITY_SELFTEST)
+    # ⚠ BOTH SIDES, because a copy-scan that only ever sees clean files is a
+    # scan that has been watched passing. The live value must BITE and a
+    # superseded one must NOT -- that second case is the whole design, since
+    # retraction records are how this repo keeps what it disproved.
+    owned = _owned_constants()
+    if not owned:
+        bad += 1
+        print('  ✗ no owned constants resolved — the copy-scan is inert')
+    else:
+        live = next(iter(owned))
+        cases = [(f'    K = {live:g}   # a prose copy', 1),
+                 ('    K = 1.5474  # superseded, a record', 0),
+                 ('    K = prof["K"]  # reads config', 0)]
+        for src, want in cases:
+            got = len(_literal_copies([('<test>', src)]))
+            if got != want:
+                bad += 1
+                print(f'  ✗ copy-scan {src.strip()!r} -> {got}, expected {want}')
+
+    n = len(SELFTEST) + len(ARITY_SELFTEST) + 3
     bite = (sum(1 for _, _, w in SELFTEST if w)
-            + sum(1 for _, w in ARITY_SELFTEST if w))
+            + sum(1 for _, w in ARITY_SELFTEST if w) + 1)
     if bad:
         print(f'\n✗ self-test {n - bad}/{n}')
         return 1
@@ -486,6 +597,18 @@ def main():
     for key, why in led_bad:
         rc = 1
         print(f'✗ {key}  (ledger reason)\n    {why}')
+
+    copies = _literal_copies()
+    if copies:
+        rc = 1
+        owner = copies[0][3]
+        print(f'✗ {len(copies)} prose cop(y/ies) of a constant config owns. '
+              f'It has one author ({owner}); a number written out here is a '
+              f'second one that nothing keeps in step:')
+        for rel, ln, text, _ in copies:
+            print(f'    {rel}:{ln}  {text}')
+        print('\n  Name the constant instead of the number, or cite the value '
+              'it REPLACED — a superseded number is a record and passes.\n')
 
     calls = arity()
     if calls:

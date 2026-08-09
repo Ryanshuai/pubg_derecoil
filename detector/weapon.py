@@ -230,9 +230,12 @@ def load_final_curves():
         # ⚠ THE SIGHT IS PART OF THE KEY, and leaving it out is a bug this
         # repository has already paid for once. PUBG scales ADS sensitivity
         # with magnification, so the counts needed to cancel the same angular
-        # recoil scale with it too: K is 0.5 hip-firing, 1.5474 on a red dot,
-        # 1.885 on a 4x. A curve fitted at the red dot, played while hip
-        # firing, is out by a factor of three.
+        # recoil scale with it too: K is 0.5 hip-firing, roughly 1.5 on a red
+        # dot and 1.9 on a 4x -- config.RECOIL_SIGHT_PROFILES is the source and
+        # the exact values are deliberately not repeated here, because this
+        # line carried a stale one for a day (1.5474 after config had moved).
+        # A curve fitted at the red dot, played while hip firing, is out by a
+        # factor of three, and that ratio is what this comment is about.
         #
         # `build_weapon` never setting `scope` cost every magnification above
         # 1x its compensation until 2026-08-05 (aug at 4x: +265% residual,

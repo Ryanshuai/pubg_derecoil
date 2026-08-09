@@ -9,7 +9,8 @@ assist wants exactly the same thing, which is why it lives here rather than
 inside the calibration rig it was written for.
 
     from control.aim import ViewDriver
-    view = ViewDriver(tracker, mouse, frames, K=1.5474, sight='red_dot')
+    view = ViewDriver(tracker, mouse, frames, sight='red_dot',
+                      K=RECOIL_SIGHT_PROFILES['red_dot']['K'])
     view.set_reference()          # remember where this cell aims
     ...                           # fire a magazine
     view.recenter()               # and put it back, provably
@@ -605,8 +606,10 @@ class ViewDriver:
 
         K is pixels per count; pixels per degree scales with magnification, so
         DEGREES per count goes as K / mag and the counts needed for a given
-        rotation go as mag / K. Between the red dot (1/1.5474) and the VSS's
-        fixed PSO-1 (4/1.875) that is a factor of 3.30.
+        rotation go as mag / K. Between the red dot (mag 1) and the VSS's fixed
+        PSO-1 (mag 4) that is a factor of about 3.3 -- computed from
+        RECOIL_SIGHT_PROFILES rather than quoted, because the red dot's K has
+        moved three times and every prose copy of it went stale silently.
 
         Everything that drives the view by an absolute count — homing into the
         pitch stop, rising to level — has to multiply by this or it moves the

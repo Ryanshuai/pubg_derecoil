@@ -2,7 +2,8 @@
 
     from calibration.samples import Magazine, append, load
 
-    append(Magazine(weapon='m416', config={...}, sight='red_dot', K=1.5474,
+    append(Magazine(weapon='m416', config={...}, sight='red_dot',
+                    K=RECOIL_SIGHT_PROFILES['red_dot']['K'],
                     t=[...], dy_px=[...], curve=[{'t_ms':13,'dy':40.0}, ...]))
 
     mags = load('m416', config={...})
@@ -173,7 +174,7 @@ class Magazine:
     # Slope NEGATIVE -> `+ human` removes the hand. Settled.
     #
     # ⚠ BUT THE MAGNITUDE SAYS THE TERM DOES NOT YET WORK. |slope| is 0.0464
-    # px/count against a K of 1.5413 -- 33x short. If the screen and the hand
+    # px/count against the red dot's K -- 33x short. If the screen and the hand
     # measured the same rotation over the same interval it would BE K. They do
     # not: `human_totals` is a snapshot of a cumulative counter while the
     # correlator's dy covers a whole frame interval, so the two are correlated

@@ -66,7 +66,7 @@ view cannot walk into the pitch clamp or onto open sky. Both were paid for.
 --------------------------------------------------------------------------------
 WHAT THE TWO-ARM VERSION SAID (2026-08-08, still true, just not the whole story)
 
-    one-pair    1.5413 +- 0.0011      many-pairs  1.6574 +- 0.0046
+    one-pair    (the stored K) +- 0.0011    many-pairs  1.6574 +- 0.0046
     many - one  +7.54%, 24.4 sigma over a median of 223 pairs
               = 0.036 px of over-read per pair AT delta = 0.48 px
 
@@ -88,6 +88,14 @@ import numpy as np
 
 from control.session import ensure_ready
 from calibration.sweep import Rig
+# ⚠ READ, NOT COPIED. This file used to compute `k_true/<literal> - 1` against
+# a hardcoded red-dot K, which is a SECOND author for a value config owns --
+# and that constant has moved three times, so the literal was silently wrong
+# for a stretch after each move. `pixi run params` now reds on any live copy.
+# (This comment names no number, which is the rule it is describing.)
+from config import RECOIL_SIGHT_PROFILES
+
+STORED_K = RECOIL_SIGHT_PROFILES['red_dot']['K']
 
 # ⚠ THE GATE IS 127, NOT 118. An earlier 118 threw away EVERY one-pair trial at
 # 70 counts (they read 123.1 px) -- a gate meant to catch wraps, killing
@@ -552,8 +560,8 @@ def report(rows):
               f'K {v["K"]:.4f} +- {v["K_sem"]:.4f}   resid {rr:+.4f}')
     print(f'  K_true = {k_true:.4f} +- {se_k:.4f}      '
           f'b = {b1:+.3f} +- {se_b:.3f} px per pair')
-    print(f'  stored K = 1.5413 (the old one-pair arm at 70 counts) — '
-          f'{100*(k_true/1.5413-1):+.2f}%')
+    print(f'  stored K = {STORED_K:.4f} (the old one-pair arm at 70 counts) — '
+          f'{100*(k_true/STORED_K-1):+.2f}%')
     if abs(b1) > 3 * se_b and np.isfinite(se_b):
         print('  the slope is real: a single pair over-reads by a FIXED amount, '
               'so the old one-pair K was itself biased by b/70')
@@ -657,7 +665,7 @@ def report(rows):
     print(f'  summed bias   {tot_bias:12.0f} px   '
           f'= {100*tot_bias/tot_true:+.2f}% of every trajectory')
     print(f'  K_eff for a real burst = {k_true*(1+tot_bias/tot_true):.4f}   '
-          f'(K_true {k_true:.4f}, stored 1.5413)')
+          f'(K_true {k_true:.4f}, stored {STORED_K:.4f})')
     print('  ⚠ THIS is the number config.py should hold, not K at any single '
           'step. A bias that is a fixed FRACTION of each pair is absorbed into '
           'K and cancels; only the part of b/delta that VARIES with delta '

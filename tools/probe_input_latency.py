@@ -28,9 +28,14 @@ exactly L. So:
     the offset is  -L.  A LEAD, not a lag, and S does not enter at all.
 
 Confirmed 2026-08-08 by firing it: over 25 magazines swept per-magazine across
-five offsets off ONE fitted curve, the residual drift minimises near -L, and
-config.RECOIL_FIRE_DELAY_MS went from +13 to -46 on the strength of the two
-agreeing.
+five offsets off ONE fitted curve, the residual minimises near -L, and
+config.RECOIL_FIRE_DELAY_MS moved off +13 on the strength of the two agreeing.
+
+⚠ IT LANDED AT -19, NOT THE -46 THIS PARAGRAPH USED TO NAME. A later sweep read
+per-magazine RMS at four offsets -- -50 -> 15.9, -36 -> 13.5, -19 -> 6.8,
+-5 -> 7.7 -- and -19 is where the RMS optimum and -M intersect. MODEL.md sec.3
+carries it as D = -19 ms, flagged because -19 and -5 are not separable. Do not
+quote -46 from here: it was one arm of one sweep and it is not the stored value.
 
 Nothing here touches the game beyond moving the view a little, and it does not
 need a weapon in hand.

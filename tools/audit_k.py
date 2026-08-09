@@ -49,18 +49,33 @@ multiple of 256 away from its observation, WITHOUT assuming K:
     +240 (down)  n=10   1.5182 +- 0.0387
     up/down asymmetry +6.32%   (control/aim.py measured 5.37% independently)
 
-⚠ AND THE CONSTANT IN USE, 1.5474, IS A BLEND OF TWO DIRECTIONS THAT DIFFER BY
-6.3%, WHILE THE RECOIL ONLY EVER GOES ONE WAY. Which one is right is not a
-matter of taste: the curve is a schedule of DOWNWARD counts, so converting
-screen pixels into "counts of compensation owed" is K_down. That is 1.5002, and
-1.5474 is 3.15% above it -- about 1.9 sigma, and the right sign to account for
-roughly half of the two arms' 6.4%.
+⚠⚠ THAT +6.32% IS DEAD, AND WITH IT EVERYTHING THIS FILE CONCLUDED FROM IT.
+MODEL.md's ruled-out table: measured cleanly it is 0.19%. The 6.32% above comes
+from n=3 in ONE direction, in ONE run, AFTER an alias restoration -- i.e. from
+the smallest and most heavily processed number on the page. THE ALIASING FINDING
+ITSELF STANDS (MODEL.md sec.3.1 carries it); what does not stand is reading a
+direction-dependent K off three de-aliased rows.
 
-⚠ SO THE HYPOTHESIS THIS FILE OPENED WITH WAS BACKWARDS FOR THE UP DIRECTION.
-K_up is 1.5950 and the constant is 3.0% BELOW it; had the recoil's own
-direction been the one that mattered, correcting K would have made the two-arm
-gap WORSE, not better. Recorded because the sign was decided by the physics
-(what the curve commands), not by which way made the discrepancy shrink.
+The two paragraphs that stood here argued from it: that the constant in use was
+"a blend of two directions differing by 6.3%", that K_down = 1.5002 was the
+right one because the curve commands downward counts, and that the constant sat
+3.15% above it -- "the right sign to account for roughly half of the two arms'
+6.4%". With the asymmetry at 0.19% there are no two directions to blend, the
+6.4% two-arm gap has since been attributed elsewhere, and the "right sign"
+agreement was a coincidence between two numbers that are both retracted.
+
+⚠ AND THE CONSTANT IS NO LONGER 1.5474 EITHER, NOR THE 1.5128 THAT BRIEFLY
+REPLACED IT. config.RECOIL_SIGHT_PROFILES has held the live red_dot value since
+2026-08-08 (MODEL.md sec.3, bracketed by two live-fire runs at 1.5416 / 1.5250
+and flagged 🟡 because those two disagree by 1.08%, so one of them is wrong).
+Anything below quoting 1.5474 as "the constant in use" is reading a value that
+was replaced. ⚠ The live number is deliberately not written here -- `pixi run
+params` reds on any copy of it, because this file is exactly where a stale one
+would sit unnoticed.
+
+⚠ WHAT TO KEEP FROM THIS FILE: the aliasing mechanism, the fact that
+max_abs_frame cannot see it, and the three requirements at the bottom. What to
+drop: every conclusion whose premise was the asymmetry.
 
 WHAT A CLEAN MEASUREMENT NEEDS, all three, none of which the stored runs did:
   - inject slowly enough that no inter-frame gap approaches 128 px. At
@@ -83,6 +98,12 @@ sys.path.insert(0, ROOT)
 
 SPREAD_TOL = 0.02      # patches must agree to 2% of their median; see the gap
 K_DIR = os.path.join(ROOT, 'calibration', 'artifacts', 'k')
+
+
+def _stored_k(sight='red_dot'):
+    """The live constant, READ. Never typed -- see the header's last ⚠."""
+    from config import RECOIL_SIGHT_PROFILES
+    return RECOIL_SIGHT_PROFILES[sight]['K']
 
 
 def clean_rows(sight):
@@ -192,8 +213,8 @@ def main():
         print(f'K in use vs K_down (the direction the curve commands):')
         print(f'   {in_use:.4f} vs {down.mean():.4f} +- {sem:.4f}  ->  in use is '
               f'{bias:+.2f}%  ({abs(in_use - down.mean())/sem:.1f} sigma)')
-        print(f'   a high K makes y_obs read low, and the compensation-OFF arm '
-              f'reads 6.4% low. Right sign, about half the size.')
+        print(f'   ⚠ THIS COMPARISON IS RETRACTED, see below — it only means '
+              f'something if the two directions really differ.')
     print()
     print('⚠ SUPERSEDED, AND THIS FILE IS KEPT FOR THE ALIASING, NOT THE K.')
     print('  Re-measured live 2026-08-08 with the injection spread over 1.0 s:')
@@ -202,7 +223,16 @@ def main():
     print('  So the +6.32% asymmetry above is NOT REAL -- it came from an `up`')
     print('  arm of n=3, one run, all needing un-aliasing. The argument built')
     print('  on it (1.5474 is a blend of two directions, K_down is the right')
-    print('  one) is void. config.py now holds the measured 1.5128.')
+    print('  one) is void, and so is the "right sign, about half the size"')
+    print('  line above it -- both halves of that agreement are retracted.')
+    print()
+    print('  ⚠ AND THE STORED CONSTANT IS NEITHER 1.5474 NOR 1.5128 ANY MORE.')
+    print(f'  config.RECOIL_SIGHT_PROFILES holds red_dot = {_stored_k():.4f}')
+    print('  (MODEL.md sec.3), bracketed by two live-fire runs at 1.5416 and')
+    print('  1.5250 that disagree by 1.08% -- so one of THOSE is wrong, and')
+    print('  MODEL.md 2.3 says that means a fault to find, not a value that')
+    print('  moved. ⚠ Printed from config, never typed: a literal here is the')
+    print('  copy `pixi run params` exists to red on.')
     return 0
 
 

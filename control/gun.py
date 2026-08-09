@@ -269,8 +269,9 @@ class GunDriver:
         the icon alone, on the belief that the icon only renders while aiming.
         That belief let a whole burst go out in third person with no sight up,
         pass the 80% ADS gate, and report residuals of +588 counts — the
-        analysis applies the scoped K=1.55 to motion that happened at the
-        hip's 0.50.
+        analysis applies the SCOPED K to motion that happened at the hip's
+        0.50, and the two differ by about 3x (RECOIL_SIGHT_PROFILES; the
+        scoped value is not quoted here because it has moved three times).
 
         `settle_s` IS AFTER THE CONFIRMATION, NOT INSTEAD OF IT, and only on
         the path that actually clicked. The crosshair is the first thing to go

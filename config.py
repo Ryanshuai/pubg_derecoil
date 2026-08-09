@@ -255,7 +255,9 @@ RECOIL_MAD_FLOOR = 0.5
 # any counts-to-pixels claim about hip fire: redo it armed first. Labels lie
 # easily here — calibrate_k's `--ads` held the right button, which is SHOULDER
 # AIM, so four runs carried the wrong state; and an ADS-verified red dot
-# re-measured 1.29 against the 1.5474 below.
+# re-measured 1.29 against the 1.5474 that stood below AT THE TIME (the table
+# now reads 1.5413; the 1.29 is what makes the point either way, since it is
+# 16% off both).
 #   red_dot   1.5413   -         0.3%   7   <- 2026-08-08, ONE correlation
 #   2x        1.8254   0.99948   2.0%   3
 #   3x        1.8802   0.99977   1.4%   3
@@ -329,6 +331,12 @@ RECOIL_SIGHT_PROFILES = {
     # store at 1.5128 is legitimate, and it is not done silently here. Doing it
     # takes the two arms from 6.41% (5.3 sigma) to 4.07% (3.4 sigma): a third
     # of the gap, right sign. The rest is still open.
+    #
+    # ⚠ READ THE NEXT PARAGRAPH BEFORE ACTING ON THIS ONE. Everything above is
+    # the record AS IT STOOD, kept in order because each layer says what
+    # overturned the one before it -- but 1.5128 was itself retired hours later
+    # and re-analysing the store at it would now be re-analysing at a value
+    # nothing holds. The live constant is the last one named in this block.
     # ⚠ 1.5128 -> 1.5413, and the reason retires BOTH earlier numbers. K was
     # measured two ways that disagreed by 9.4 sigma (1.5171 with duplicate
     # frames dropped, 1.5520 with them kept), and the only difference between
@@ -1577,9 +1585,16 @@ COUNTS_PER_PIXEL = 0.5
 #
 # ⚠ -19 IS NOT SEPARABLE FROM -5, and it is set anyway, because it is where two
 # INDEPENDENT things intersect: the RMS optimum (parabola minimum -19.3) and -M
-# from the two well-conditioned lag readings (18.3..21.7 impulse, 18.9
-# in-regime). Nothing measures M anywhere near 5. Half the interval, all of the
-# support.
+# from the two well-conditioned lag readings (18.3..21.7 STEP, 18.9 in-regime).
+# Nothing measures M anywhere near 5. Half the interval, all of the support.
+#
+# ⚠ "STEP" USED TO READ "impulse" AND THAT WORD IS NOW LOAD-BEARING IN THE
+# WRONG DIRECTION. The round-alignment technique called `impulse` -- put a spike
+# on round k, see which round moves -- is REJECTED (MODEL.md's ruled-out table).
+# This reading is a DIFFERENT TECHNIQUE that happens to have shared a word:
+# tools/probe_input_latency.py sends one mouse.move() and times when the SCREEN
+# starts moving. It never touches the ammo counter and has no round index in
+# it, so nothing here inherits that rejection.
 #
 # ⚠ THE OVER-LEADING ARMS ARE ERRATIC, NOT MERELY BIASED, and that was not
 # predicted: -50 and -36 spread 6.7..28.3 and 5.4..22.7 while -19 and -5 sit
@@ -1601,10 +1616,19 @@ COUNTS_PER_PIXEL = 0.5
 #
 # ⚠ AND THE INTERLEAVING EARNED ITS KEEP. A -46 arm fired in its own earlier
 # run reads +31.4 counts at t=2.0 s where the interleaved -50 and -30 either
-# side of it read -4.7 and +1.0. Thirty counts of between-session drift, on the
-# same gun, the same lane, twenty minutes apart. Every offset comparison made
-# across runs before this was unreliable, including the first sweep that put
-# the optimum "near -60".
+# side of it read -4.7 and +1.0. Thirty counts apart, on the same gun, the same
+# lane, twenty minutes apart. Every offset comparison made across runs before
+# this was unreliable, including the first sweep that put the optimum "near
+# -60".
+#
+# ⚠ AND IT IS NOT "BETWEEN-SESSION DRIFT", which is what this comment called it
+# until 2026-08-09. MODEL.md 2.3: two readings that disagree mean AT LEAST ONE
+# IS WRONG, and "it drifted" is a placeholder for a measurement fault nobody
+# has located -- naming it makes an open problem read as a closed one. The same
+# shape has already produced one retraction here: nine runs' "2.7% step" turned
+# out to be arm and run co-varying. What is measured above is the DISAGREEMENT
+# and its size; the cure (interleave, never compare arms across runs) is what
+# was tested, and it works whichever reading is the wrong one.
 #
 RECOIL_FIRE_DELAY_MS = -19
 

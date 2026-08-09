@@ -1054,8 +1054,9 @@ class LobbyControl(Driver):
         entered = not rec['states'] or rec['states'][0] != LobbyState.IN_GAME.value
         # ⚠ REPORTED, because it is not only the teleport rule. A caller that
         # is MEASURING needs to know the match it is in is not the match it
-        # started in: every constant that drifts per session drifted, and a
-        # reading taken before the walk-back cannot be paired with one taken
+        # started in: nothing established before the walk-back has been
+        # re-established after it (not "the constants drifted" -- MODEL.md 2.3),
+        # so a reading taken before cannot be paired with one taken
         # after. 2026-08-08 paid for this once -- a K reading was taken, the
         # game fell back to the lobby, and pairing the two would have been the
         # exact confound MODEL.md's noise floor spends a section removing.

@@ -2,10 +2,22 @@
 
     pixi run python tools/probe_delivery_path.py --trials 8
 
-eta = 0.96..0.97 is measured twice over (calibration/samples.py) and has no
-cause. It is the last unexplained term in MODEL.md's identity:
+⚠ ETA IS CLOSED, AND THIS FILE HELPED CLOSE IT (2026-08-09). It used to open
+"eta = 0.96..0.97 is measured twice over and has no cause; it is the last
+unexplained term". Three readings later -- 0.971 / 1.004 / 0.980, mean
+0.9850 +- 0.0098 -- the mean sits 1.52 sigma from 1 and the scatter (1.73%) is
+what an arm difference carries by construction (1.50%). IT IS NOISE. MODEL.md's
+ruled-out table has it, along with all four candidate mechanisms refuted
+separately. The identity has no eta and never gained one:
 
-    y_true(t) = y_obs(t) + C(t - M)        <- and eta is NOT in it, see below
+    y_true(t) = y_obs(t) + C(t - M)
+
+WHAT THIS FILE IS STILL FOR is the other thing it found, which did NOT close:
+--hold-sweep's curve/move ratio RISES with hold duration (+0.0148/s and
++0.0242/s in two runs), and px-per-count cannot know how long a button was
+held. That is MODEL.md 6.1 item 1 -- comp_counts_at not reproducing the
+firmware -- and it is the last open model problem. The eta framing below is
+kept because the arms and the refutations are still the measurement.
 
 Two mechanisms fit every number, and the recoil data cannot separate them
 because a burst only ever delivers compensation one way:

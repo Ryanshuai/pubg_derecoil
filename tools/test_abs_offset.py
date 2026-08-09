@@ -46,10 +46,16 @@ import cv2
 import numpy as np
 
 from config import (RECOIL_PATCH, RECOIL_PATCH_H, RECOIL_PATCH_XS,
-                    RECOIL_BAND_Y, SCREEN_W)
+                    RECOIL_BAND_Y, SCREEN_W, RECOIL_SIGHT_PROFILES)
 from detector.view_tracker import ViewTracker
 
-K = 1.5474          # red dot, measured
+# ⚠ READ FROM config, NOT COPIED. This line said `K = 1.5474  # red dot,
+# measured` until 2026-08-09, which was the value config held before
+# 2026-08-08 -- a hardcoded copy of a measured constant goes stale silently and
+# nothing here would have failed. K only scales the px->counts column printed
+# below and the fake truth in the ViewDriver case; the assertions are on
+# placement in PIXELS, so this is a display fix, not a behaviour change.
+K = RECOIL_SIGHT_PROFILES['red_dot']['K']
 SHIFTS_PX = [0, 20, 40, 77, 100, 128, 200, 300, 400]
 PRED_ERRORS = [0, 10, 20, 40, 60]      # px of error in the predicted offset
 TOL_PX = 4.0        # a placement is right if it is within this of the truth

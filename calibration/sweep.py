@@ -338,8 +338,9 @@ class Rig:
 
         This exists because the VSS cannot be measured any other way — it
         carries a fixed 4x and takes no sight, so a run pinned to the red dot
-        analyses its 1.875 counts-per-pixel view with 1.5474 and reports a
-        recoil of MINUS 482 counts.
+        analyses a PSO-1 view with the red dot's K — the two differ by about
+        20% and the sign of the answer does not survive it: MINUS 482 counts.
+        (Both values live in RECOIL_SIGHT_PROFILES and are not repeated here.)
         """
         if sight == self.sight:
             return False

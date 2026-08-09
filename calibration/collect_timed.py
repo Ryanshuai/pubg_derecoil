@@ -533,7 +533,8 @@ def main():
                          'off one fit. This is how the offset gets measured '
                          'rather than guessed: the curve is held fixed and '
                          'only the offset moves, and the arms interleave in '
-                         'time so session drift cannot align with an arm.')
+                         'time so nothing that varies between runs can line up '
+                         'with an arm.')
     ap.add_argument('--scale-sweep', default=None,
                     help='comma-separated curve multipliers, ROTATED PER '
                          'MAGAZINE off one fit — the amplitude twin of '
@@ -551,18 +552,25 @@ def main():
                          'sweep moves s by six times eps itself, so nothing '
                          'here is collinear with anything. --scale does the '
                          'same thing ONE RUN AT A TIME and that is exactly the '
-                         'mistake the offset sweep already paid for: 30 counts '
-                         'of between-session drift on the same gun twenty '
-                         'minutes apart (see config.RECOIL_FIRE_DELAY_MS).')
+                         'mistake the offset sweep already paid for: two '
+                         'readings 30 counts apart on the same gun twenty '
+                         'minutes apart, so at least one of them is wrong and '
+                         'nothing says which (see config.RECOIL_FIRE_DELAY_MS; '
+                         'MODEL.md 2.3 forbids calling that "drift").')
     ap.add_argument('--countdown', type=int, default=6)
     a = ap.parse_args()
 
     # ⚠ NOT refuse_on_reentry, ON PURPOSE, but it is SAID. An unattended run is
     # allowed to walk back into the match -- that is what it is for. What is not
-    # allowed is doing it silently: everything that drifts per session drifted,
-    # so magazines collected after a walk-back cannot be paired with a constant
-    # measured before it. 2026-08-08 lost a K reading to exactly that and only
-    # noticed because the next command refused for an unrelated reason.
+    # allowed is doing it silently: NOTHING ESTABLISHED BEFORE THE WALK-BACK HAS
+    # BEEN RE-ESTABLISHED AFTER IT -- gun, kit, sight, posture, aim, and every
+    # setting the reading assumed -- so magazines collected after it cannot be
+    # paired with a constant measured before it. 2026-08-08 lost a K reading to
+    # exactly that and only noticed because the next command refused for an
+    # unrelated reason. ⚠ This is NOT "the constants drift per session", which
+    # is what these three comments said until 2026-08-09: MODEL.md 2.3 makes
+    # that phrase a placeholder for an unlocated fault, and the real reason to
+    # refuse is simply that the second session was never verified.
     _ready = ensure_ready(label='timed collection', countdown_s=a.countdown)
     if not _ready['ok']:
         return 1

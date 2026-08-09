@@ -2,7 +2,15 @@
 
     pixi run python tools/probe_additivity.py --trials 8
 
-The last place eta can be. Both mechanisms that were obvious are dead:
+⚠ ETA IS CLOSED AS NOISE (2026-08-09, MODEL.md's ruled-out table), and this
+file was written when it was still open -- it opened "the last place eta can
+be". Three readings 0.971 / 1.004 / 0.980 put the mean 1.52 sigma from 1, with
+a scatter an arm difference carries by construction. THE MEASUREMENT BELOW IS
+STILL GOOD; only its motive is retired. Read it as "do compensation counts and
+recoil add", which is a question worth an answer on its own, and note that a
+null result here is now the EXPECTED one rather than a puzzle.
+
+Both mechanisms that were obvious were already dead when this was written:
 
     SIZE  240 one-count moves give full K (1.5357 vs 1.5128)
     PATH  the firmware's player loses 0.90% [0.08, 1.72], not 4.11%
@@ -31,9 +39,10 @@ between the comp-ON and comp-OFF arms, and it can be read in BOTH windows:
                     shortfall is eta
 
 ⚠ ARMS ALTERNATE PER TRIAL. Every cross-arm comparison this project made
-across sessions turned out to be a comparison of sessions -- 30 counts of
-drift twenty minutes apart, which on 950 is 3.2% and was most of a 6.4%
-"finding".
+across sessions turned out to be a comparison of sessions -- two readings 30
+counts apart twenty minutes apart, which on 950 is 3.2% and was most of a 6.4%
+"finding". (One of those two is wrong and nothing says which; MODEL.md 2.3
+forbids writing that down as "drift", and interleaving removes it either way.)
 
 ⚠ THE CURVE IS FLAT ON PURPOSE. A front-loaded curve puts most of its counts
 inside the firing window, so the two windows would differ in RATE as well as in

@@ -120,12 +120,14 @@ def run_trial(grabber, tracker, mouse, counts, dry_run=False, ads=False,
     """Inject `counts` vertically over `inject_s` and capture throughout.
 
     ⚠ THE RATE IS A PARAMETER BECAUSE THE DEFAULT ALIASES. The view tracker's
-    correlation is unambiguous only up to RECOIL_PATCH_H = 256 px between
-    frames; past that it wraps by EXACTLY one patch height, every patch wraps
-    the same way so they still agree, and the trial comes back with a
-    plausible-looking K that is short by 256 px. 8 of the 22 usable rows in
-    the stored red_dot runs are aliased -- see tools/audit_k.py, which found
-    it in two rows of one run differing by 256.01.
+    correlation is unambiguous only up to HALF a patch, RECOIL_PATCH_H/2 =
+    128 px between frames; past that it wraps by EXACTLY one patch height
+    (256 px -- the limit and the step are different numbers and this docstring
+    used to print the step as the limit), every patch wraps the same way so
+    they still agree, and the trial comes back with a plausible-looking K that
+    is short by 256 px. 8 of the 22 usable rows in the stored red_dot runs are
+    aliased -- see tools/audit_k.py, which found it in two rows of one run
+    differing by 256.01. MODEL.md sec.3.1 carries the same warning.
 
     ⚠ `max_abs_frame` CANNOT CATCH IT. An aliased pair reports a SMALL
     displacement, so the statistic that would flag a too-fast frame is the one
@@ -146,9 +148,15 @@ def run_trial(grabber, tracker, mouse, counts, dry_run=False, ads=False,
     # duplicates NORMALISES the per-frame displacement -- a rate sweep from
     # 0.3 s to 3.0 s moved px/frame only from 10.2 to 6.4, because the frames
     # where the view barely moved were being discarded. So K has only ever been
-    # measured in a regime the recoil measurement never occupies, and eta is a
-    # multiplicative deficit that lands on exactly the arm where y_obs is the
-    # whole measurement. That is a hypothesis this flag can now test.
+    # measured in a regime the recoil measurement never occupies.
+    #
+    # ⚠ THE HYPOTHESIS THIS FLAG WAS ADDED FOR IS RETIRED: it was "eta is a
+    # multiplicative deficit landing on exactly the arm where y_obs is the whole
+    # measurement", and eta closed as noise on 2026-08-09 (MODEL.md's ruled-out
+    # table). The flag keeps its job anyway, because the REGIME GAP above is not
+    # eta and did not close with it -- MODEL.md 6.1 item 2 is still hunting a
+    # 1-2% multiplicative measurement fault, and "K measured at 8 px/frame, used
+    # at 3" is one of the places it can live.
     rec = MagazineRecorder(tracker, drop_duplicates=not keep_duplicates)
     log = []
     inject_s = INJECT_S if inject_s is None else float(inject_s)
@@ -257,8 +265,11 @@ def main():
                          'at ~3. If the correlator has a magnitude-dependent '
                          'bias, K differs between those regimes -- and since '
                          'y_obs = px/K, that lands entirely on the '
-                         'compensation-OFF arm and not at all on the ON arm, '
-                         "which is exactly eta's signature. Rotated rather "
+                         'compensation-OFF arm and not at all on the ON arm. '
+                         '(That asymmetry was eta\'s signature; eta is closed '
+                         'as noise, but MODEL.md 6.1 item 2 still wants a 1-2%% '
+                         'multiplicative fault and this is one of its homes.) '
+                         'Rotated rather '
                          'than one run per duration, because every cross-arm '
                          'comparison this project made across sessions turned '
                          'out to be a comparison of sessions.')

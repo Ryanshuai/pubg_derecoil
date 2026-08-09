@@ -232,9 +232,10 @@ def ensure_ready(label='this script', countdown_s=6, running=True, focus=True,
             out['entered'] = bool(rec.get('entered'))
             if out['entered']:
                 if refuse_on_reentry:
-                    # A MEASUREMENT CANNOT CROSS THIS LINE. Everything that
-                    # drifts per session drifted, so a reading taken before the
-                    # walk-back does not pair with one taken after -- and a
+                    # A MEASUREMENT CANNOT CROSS THIS LINE. Nothing established
+                    # before the walk-back has been re-established after it, so
+                    # a reading taken before does not pair with one taken after
+                    # (not "the constants drifted" -- MODEL.md 2.3) -- and a
                     # probe that quietly carries on turns a dead session into
                     # a number nobody can tell from a live one. It also stops
                     # the failure mode the operator named on 2026-08-08:

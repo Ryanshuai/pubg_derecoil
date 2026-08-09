@@ -453,7 +453,14 @@ def _dist_to(M, i, keep):
 
 def _synth(n_frames=300, span=3.4, total=3300.0, K=1.5474, scale=1.0,
            bump=0.0, noise=0.5, seed=0, curve=None):
-    """A magazine whose true answer is known: y_true(t) = total * (t/span)**1.3."""
+    """A magazine whose true answer is known: y_true(t) = total * (t/span)**1.3.
+
+    ⚠ THAT K IS ARBITRARY, NOT THE STORED CONSTANT. It is the number config
+    held when this was written (since superseded), and it was deliberately NOT
+    chased, because the point of a synthetic magazine is that the fit recovers
+    `total` at WHATEVER K generated it. Pinning it to config would make the
+    gate agree with the constant instead of testing the fit.
+    """
     rng = np.random.default_rng(seed)
     t = np.linspace(0.0, span, n_frames)
     y_true = total * scale * (t / span) ** 1.3
