@@ -1423,10 +1423,46 @@ COUNTS_PER_PIXEL = 0.5
 # explained anything -- eps is the collinear direction and its per-arm
 # estimates swing 0.55%..2.93% with no relation to the arm.
 #
-# THE GAP IS THEREFORE STILL OPEN. What settles it is --scale-sweep: residual
-# is linear in the commanded scale with a zero crossing at 1/(1-eps), a +-10%
-# sweep moves the regressor by six times eps, and under the amplitude reading
-# a 5% scale change must move the optimum by ~59 ms. Nothing subtle to see.
+# FIRED 2026-08-08, --scale-sweep 0.90,1.00,1.10 rotated per magazine at a
+# fixed -36, 15 magazines, mp5k bare red_dot standing, curve 968.6 counts:
+#
+#     scale    F coef     end y_obs     F' coef
+#     x0.90   +0.0907    +78.4 counts   -12.6 ms
+#     x1.00   -0.0024     -5.5 counts   -17.1 ms
+#     x1.10   -0.0990    -89.7 counts   -18.5 ms
+#
+#     F coef vs scale: slope -0.948 (theory -1.000), zero at s0 = 0.9962
+#     ->  eps = -0.38%.  NOT 4.7%, NOT 1.62%. ZERO.
+#
+# The offline decomposition's own 95% interval was [+0.60%, +3.01%] and does
+# not contain the answer. That is the collinear direction failing exactly where
+# the tool said it would, and it is the third time this residual has been
+# decomposed offline and refuted by firing it.
+#
+# ⚠ SO THE AMPLITUDE DEFICIT IS GONE, AND THAT MAKES -36 WRONG. It was tuned
+# against a 943-count curve when y_true measured ~950 -- a real ~0.8% shortfall
+# then, which genuinely pulls the drift-minimising offset negative. The fit has
+# since grown to 968.6 and the shortfall closed. What is left at -36 is a clean
+# -17.1 ms of F', which is (M + D) exactly:
+#
+#     M = F' coef - D = -17.1 - (-36) = +18.9 ms
+#
+# A THIRD independent reading of the lag, and the FIRST one in the regime the
+# compensation actually uses -- about 1 count per millisecond, where the probe
+# throws a single 250-count impulse. It agrees with both of the others:
+#
+#     impulse probe, n=40         18.3 .. 21.7 ms
+#     offset sweep, 5 arms        24.3 ms   bootstrap [18.0, 28.4]
+#     scale sweep, in-regime      18.9 ms
+#
+# ⚠ THE "small-delta L may differ from large-impulse L" BACKLOG ITEM IS
+# THEREFORE CLOSED. It could never have been closed by more impulse trials.
+#
+# With eps = 0 the drift-minimising offset and -L COINCIDE, because the only
+# thing that separated them was the shortfall. -36 now over-leads by 17 ms and
+# the constant should be about -19. NOT CHANGED HERE YET: that prediction gets
+# fired as an offset sweep before it is believed, on the rule that put every
+# number above where it is.
 #
 # ⚠ AND THE INTERLEAVING EARNED ITS KEEP. A -46 arm fired in its own earlier
 # run reads +31.4 counts at t=2.0 s where the interleaved -50 and -30 either

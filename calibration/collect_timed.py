@@ -332,7 +332,7 @@ def aim_and_scope(rig, posture):
 
 
 def one_magazine(rig, grabber, weapon, mag_size, interval_s, curve,
-                 config, posture, note=''):
+                 config, posture, note='', fire_delay_ms=None):
     """Fire one, measure it, and return the record. Does not write.
 
     ⚠ ADS IS BRACKETED, NOT SAMPLED, AND THE DIFFERENCE IS STATED BECAUSE THIS
@@ -385,6 +385,11 @@ def one_magazine(rig, grabber, weapon, mag_size, interval_s, curve,
         # L*F' without it -- which the fit then amplifies, because it consumes
         # its own output. See samples.Magazine.comp_lag_s.
         comp_lag_s=RECOIL_COMP_LAG_MS / 1000.0,
+        # ⚠ ALSO STAMPED, because it is NOT recoverable from the curve. The
+        # fold in upload_pattern collapses every negative offset to
+        # curve[0]['t_ms'] == 0; see samples.Magazine.fire_delay_ms for the 50
+        # magazines this already cost.
+        fire_delay_ms=fire_delay_ms,
         fps=(len(t) - 1) / span if span > 0 else float('nan'),
         ads_end=ads_end,
         ts=datetime.now().strftime('%m%d_%H%M%S'),
@@ -488,9 +493,11 @@ def main():
                     help='override RECOIL_FIRE_DELAY_MS for THIS RUN ONLY. '
                          'upload_pattern adds it to every knot time, so it '
                          'decides WHEN the compensation plays relative to the '
-                         'click. Nothing needs recording: read_pattern returns '
-                         'the shifted times, so curve[0]["t_ms"] IS the offset '
-                         'that played, on every magazine already stored.')
+                         'click. RECORDED on the magazine. This used to say '
+                         '"nothing needs recording, curve[0][\'t_ms\'] IS the '
+                         'offset that played" and it was checked against the '
+                         'one batch with a POSITIVE offset; the fold collapses '
+                         'every negative one to 0. See Magazine.fire_delay_ms.')
     ap.add_argument('--fire-delay-sweep', default=None,
                     help='comma-separated offsets in ms, ROTATED PER MAGAZINE '
                          'off one fit. This is how the offset gets measured '
@@ -503,7 +510,7 @@ def main():
                          '--fire-delay-sweep, and the only well-posed way to '
                          'measure how much of the curve actually arrives. '
                          'residual(s) = y_true - s*(1-eps)*F is LINEAR in s '
-                         'with a zero crossing at s = 1/(1-eps), and a +-10% '
+                         'with a zero crossing at s = 1/(1-eps), and a +-10%% '
                          'sweep moves s by six times eps itself, so nothing '
                          'here is collinear with anything. --scale does the '
                          'same thing ONE RUN AT A TIME and that is exactly the '
@@ -982,7 +989,8 @@ def main():
             mag, out = one_magazine(
                 rig, grabber, a.weapon, mag_size, interval_s,
                 [] if a.no_comp else curve, config, a.posture,
-                note='no-comp' if a.no_comp else f'scale={mag_scale:g}')
+                note='no-comp' if a.no_comp else f'scale={mag_scale:g}',
+                fire_delay_ms=float(rig.mouse.RECOIL_FIRE_DELAY_MS))
             # ⚠ THE MAGAZINE IS STILL WRITTEN. `ads_end` False means the
             # burst ended out of the scope, so K is wrong by ~3x -- but
             # MODEL.md's store never deletes, and a magazine dropped at

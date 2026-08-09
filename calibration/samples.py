@@ -209,6 +209,26 @@ class Magazine:
     # through a different display chain. None means "not recorded" -- the
     # magazines from before this existed -- and is treated as 0.
     comp_lag_s: object = None
+    # ⚠ IT DOES HAVE TO BE RECORDED, AND THE ARGUMENT THAT IT DID NOT WAS
+    # VERIFIED ON THE ONE CASE WHERE IT HOLDS. `--fire-delay-ms` carried
+    # "Nothing needs recording: read_pattern returns the shifted times, so
+    # curve[0]['t_ms'] IS the offset that played", checked against the batch
+    # that reads +13.
+    #
+    # A POSITIVE offset is the only kind that survives the round trip.
+    # upload_pattern FOLDS everything before t=0 into a step at t=0, because a
+    # knot at a negative time is an instruction the firmware cannot obey -- so
+    # every negative offset comes back reading exactly 0:
+    #
+    #     curve[0]['t_ms'] over the mp5k store:  {13: 10, 0: 50, 80: 5}
+    #
+    # Those 50 were fired at -90, -70, -50, -36, -30 and -10 and the record
+    # cannot tell them apart. The offset sweep had to be re-armed from the KNOT
+    # COUNT (the fold eats one knot per ~17 ms of lead), which is a signature,
+    # not a reading -- and -36 and -50 produce the same 174.
+    #
+    # None means "not recorded", which is the honest state of those 50.
+    fire_delay_ms: object = None
     fps: float = float('nan')
     ts: str = ''
     note: str = ''

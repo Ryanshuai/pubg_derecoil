@@ -60,6 +60,19 @@ ARMS = {171: -90, 172: -70, 174: -50, 175: -30, 176: -10}
 GRID = np.arange(0.05, 2.60, 0.01)      # inside every burst's hold
 
 
+def scale_arm_of(m):
+    """Which SCALE this magazine was fired at, from the total the firmware
+    actually held. Not from the note: the note is the request, the read-back
+    total is the object that fired, and int16-with-carry sits between them."""
+    if not m.curve or not m.comp_enabled:
+        return None
+    tot = sum(k.get('dy', 0.0) for k in m.curve)
+    for s, want in ((0.9, 871.0), (1.0, 968.0), (1.1, 1065.0)):
+        if abs(tot - want) < 2.0:
+            return s
+    return None
+
+
 def arm_of(m):
     """Which offset this magazine was fired at, from its own curve. None if it
     is not one of the sweep's arms."""
@@ -80,6 +93,94 @@ def resample(m, grid):
     return out
 
 
+def scale_mode(mags, D):
+    """The amplitude sweep: three scales at ONE fixed offset.
+
+    This is the well-posed twin of the offset sweep and it settles what the
+    offset sweep could not. With the offset held,
+
+        y_obs(t) = y_true(t) - s*(1-eps)*F(t) - u*F'(t)
+
+    and s is COMMANDED over +-10%, six times eps itself, so the F coefficient
+    is driven by a regressor that is not collinear with anything. Two things
+    have to hold together or the amplitude reading is wrong:
+
+      - the F coefficient moves LINEARLY in s with slope -1 (the firmware
+        delivers what it is told, proportionally), and its zero crossing is
+        1/(1-eps)
+      - the F' coefficient does NOT move, because the offset never did
+    """
+    by = {}
+    for m in mags:
+        by.setdefault(scale_arm_of(m), []).append(m)
+    ss = sorted(by)
+    print(f'{sum(len(v) for v in by.values())} magazine(s) over {len(ss)} '
+          'scale(s): ' + ', '.join(f'x{s:g} n={len(by[s])}' for s in ss))
+
+    # F is the fitted curve as commanded at s=1, in its own time. Take it from
+    # the x1 arm and undo nothing: the offset is the same on every arm here.
+    ref = by[1.0][0] if 1.0 in by else by[ss[0]][0]
+    F = comp_counts_at(ref.curve, GRID) / (scale_arm_of(ref) or 1.0)
+    Fp = np.gradient(F, GRID)
+
+    print()
+    print('per-scale least squares on [F, F\']:')
+    rows = []
+    for s in ss:
+        ys = [resample(m, GRID) for m in by[s]]
+        # ⚠ MEDIAN, NOT MEAN. mag 1 came back with y_true 1081 against a batch
+        # of ~940, and MODEL.md's outlier unit is a whole magazine -- one bad
+        # burst moves a five-magazine mean by 28 counts and moves nothing else.
+        y = np.nanmedian(ys, axis=0)
+        ok = np.isfinite(y)
+        A = np.column_stack([F[ok], Fp[ok]])
+        coef, *_ = np.linalg.lstsq(A, y[ok], rcond=None)
+        rows.append((s, coef[0], 1000.0 * coef[1]))
+        print(f'   x{s:g}:  F coef {coef[0]:+7.4f}   F\' coef {1000*coef[1]:+7.1f} ms'
+              f'   (end y_obs median {np.nanmedian([v[-1] for v in ys]):+7.1f} counts)')
+
+    S_ = np.array([r[0] for r in rows])
+    fc = np.array([r[1] for r in rows])
+    fpc = np.array([r[2] for r in rows])
+    sl, ic = np.polyfit(S_, fc, 1)
+    print()
+    print(f'F coef vs commanded scale:  slope {sl:+.3f}  intercept {ic:+.3f}')
+    print(f'   slope should be -1.000 if the firmware delivers proportionally'
+          f'   -> off by {100*(abs(sl)-1):+.1f}%')
+    if abs(sl) > 1e-6:
+        s0 = -ic / sl
+        print(f'   zero crossing s0 = {s0:.4f}  ->  eps = 1 - 1/s0 = '
+              f'{100*(1 - 1/s0):+.2f}%')
+    print(f"F' coef across scales: " + '  '.join(f'{v:+.1f}' for v in fpc)
+          + f'   spread {np.std(fpc):.1f} ms')
+    print(f'   it must NOT move: the offset was fixed at {D:+g} on every arm')
+
+    # ⚠ A THIRD, INDEPENDENT READ OF THE LAG, AND THE FIRST ONE IN THE REGIME
+    # THE COMPENSATION ACTUALLY USES. The emitted schedule is F shifted by D,
+    # so what is visible at t is F(t - M - D) and the leftover is
+    #
+    #     y_obs(t) ~ (M + D) * F'(t)      =>   M = (F' coefficient) - D
+    #
+    # tools/probe_input_latency.py measures L by throwing ONE 250-count
+    # impulse; the compensation dribbles about 1 count per millisecond, and no
+    # number of extra impulse trials can tell you whether the two travel at the
+    # same speed. This can, because it IS the compensation.
+    print()
+    print(f"LAG, third reading: M = F' coef - D = {np.median(fpc):+.1f} - "
+          f'({D:+g}) = {np.median(fpc) - D:+.1f} ms')
+
+    print()
+    print('verdict:')
+    if abs(abs(sl) - 1.0) < 0.15:
+        print(f'   the curve ARRIVES: |slope| {abs(sl):.3f} within 15% of 1.')
+        print(f'   eps is then a real amplitude number, {100*(1 - 1/(-ic/sl)):+.2f}%.')
+    else:
+        print(f'   THE CURVE DOES NOT ARRIVE PROPORTIONALLY: |slope| {abs(sl):.3f}.')
+        print('   "amplitude" is the wrong frame for the residual; commanding')
+        print('   more does not put proportionally more on screen.')
+    return 0
+
+
 def main():
     try:
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -89,7 +190,38 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--weapon', default='mp5k')
     ap.add_argument('--cell', default='bare')
+    ap.add_argument('--mode', default='offset', choices=('offset', 'scale'))
+    ap.add_argument('--offset', type=float, default=None,
+                    help='scale mode: the fixed offset those magazines were '
+                         'fired at. Taken from Magazine.fire_delay_ms when the '
+                         'magazines carry it, and it is NOT derivable from the '
+                         'curve -- the fold puts every negative offset at '
+                         't_ms=0. Defaults to config for the batch fired '
+                         'before that field existed.')
     a = ap.parse_args()
+
+    if a.mode == 'scale':
+        cfg = {} if a.cell == 'bare' else a.cell
+        mags = [m for m in S.load(a.weapon, cfg) if scale_arm_of(m) is not None]
+        if len(mags) < 6:
+            print(f'[!] only {len(mags)} scale-sweep magazine(s)')
+            return 1
+        stored = {m.fire_delay_ms for m in mags if m.fire_delay_ms is not None}
+        if a.offset is not None:
+            D = a.offset
+        elif len(stored) == 1:
+            D = float(stored.pop())
+            print(f'offset {D:+g} ms, read off the magazines')
+        elif len(stored) > 1:
+            print(f'[!] REFUSING: these magazines were fired at {sorted(stored)} '
+                  f'ms, not one offset. A scale sweep needs the offset held.')
+            return 1
+        else:
+            from config import RECOIL_FIRE_DELAY_MS
+            D = float(RECOIL_FIRE_DELAY_MS)
+            print(f'⚠ offset {D:+g} ms ASSUMED from config — these magazines '
+                  f'predate Magazine.fire_delay_ms and do not carry it.')
+        return scale_mode(mags, D)
 
     cfg = {} if a.cell == 'bare' else a.cell
     mags = [m for m in S.load(a.weapon, cfg) if arm_of(m) is not None]
