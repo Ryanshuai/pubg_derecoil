@@ -22,7 +22,7 @@ try:
 except (AttributeError, OSError):
     pass
 
-from control.inventory import (ANY_ITEM, MOVES, PLATE_INK_MIN,
+from control.inventory import (ANY_ITEM, MOVES, PLATE_INK_MAX, PLATE_INK_MIN,
                             InventoryControl, at_ground, at_gun, at_inv,
                             at_slot, batch, is_gun, is_slot, kind_of, loc_str,
                             move_info, parse_loc, step)
@@ -254,6 +254,116 @@ check('HUD_REGIONS gun_name_1 is row-major',
 check('...and its corner view agrees',
       (_C.HUD_REGIONS['gun_name_1'].x0, _C.HUD_REGIONS['gun_name_1'].x1),
       (2275, 2525))
+
+print('\n=== the plate crop is classified in ONE place, and it gates the gesture ===')
+# 2026-08-07 19:10 and 19:11: the spawner panel was drawn over the rack, the
+# right click at gun_tag_point went into the panel, `auto` then paid a 1621 px
+# drag into the same panel, and the run reported `rack not empty`. clear_rack
+# had the bound; drop_weapon did not, and drop_weapon is the public L2.
+#
+# THE READINGS ARE MEASUREMENTS off calibration/artifacts/drag/journal.jsonl --
+# 253 landed drops carried plate ink 597-1665, the 4 failing rows carried
+# 10941/11250, and an empty row reads exactly 0.
+_plate_probe = InventoryControl.__new__(InventoryControl)
+_plate_probe.plate_ink = lambda gun, frame=None: _plate_probe._ink
+for _ink, _want in ((0, 'empty'), (PLATE_INK_MIN - 1, 'empty'),
+                    (PLATE_INK_MIN, 'gun'), (901, 'gun'), (1665, 'gun'),
+                    (PLATE_INK_MAX, 'gun'), (PLATE_INK_MAX + 1, 'panel'),
+                    (10941, 'panel'), (11250, 'panel')):
+    _plate_probe._ink = _ink
+    check(f'plate_state({_ink})', _plate_probe.plate_state(1), _want)
+
+
+class _Sentinel(Exception):
+    """Raised by the stub pointer: the gate let the gesture through."""
+
+
+_drop = InventoryControl.__new__(InventoryControl)
+_drop._frame_for = lambda *a, **k: None
+_drop._read_guns = lambda f: {1: 'akm', 2: None}
+_drop._log = lambda *a, **k: None
+_drop._journal_refusal = lambda *a, **k: _refused.append(a[3])
+_drop.plate_ink = lambda gun, frame=None: _drop._ink
+_drop._plate = lambda gun, frame=None: _drop._ink
+
+
+class _NoPointer:
+    def right_click_at(self, x, y, **kw):
+        raise _Sentinel()
+
+
+# `_pointer`, not `pointer`: the latter is Driver's lazy property and it has no
+# setter ON PURPOSE — touching it opens the serial port another agent may hold.
+# Pre-filling the backing field is the supported way past it, and the fact that
+# the assignment raised is that guard working.
+_drop._pointer = _NoPointer()
+
+# BOTH SIDES, because a gate that only ever refuses is indistinguishable from
+# a method that no longer works. The panel reading must stop the gesture; a
+# real plate must NOT -- and the only honest way to say "it went through" is
+# to let it reach the mouse and blow up there.
+_refused = []
+_drop._ink = 11250
+# try/except, not a bare call: with the gate removed this reaches the stub
+# pointer and raises, and an uncaught raise here takes the six checks below it
+# down with it. Same rule as _await above -- a gate may fail, it may not stop
+# the other gates from reporting.
+try:
+    _rec = _drop.drop_weapon(1)
+except _Sentinel:
+    _rec = {'ok': True, 'gesture': 'REACHED THE MOUSE', 'error': None,
+            'was': None, 'now': None}
+check('panel ink refuses drop_weapon', _rec['ok'], False)
+check('...before the mouse moves', _rec['gesture'], None)
+check('...and says which screen it is looking at',
+      'spawner panel' in (_rec['error'] or ''), True)
+check('...and the refusal reaches the journal', len(_refused), 1)
+# `_refused[0] if _refused else ''` and not a bare index: with the gate gone
+# the list is empty, and IndexError here is the same abort the try/except
+# above exists to prevent. Every assertion in this block has to survive the
+# mutation it is testing for, or it only reports when it is not needed.
+check('...naming the ink, not just "failed"',
+      '11250' in (_refused[0] if _refused else ''), True)
+# `now` must equal `was`: nothing was dropped, so reporting the rack as
+# emptied would be the false success PLATE_INK_MAX exists to prevent.
+check('...and reports the gun still racked', (_rec['was'], _rec['now']),
+      ('akm', 'akm'))
+
+_drop._ink = 803                       # a real name plate, mid-range
+_got = None
+try:
+    _drop.drop_weapon(1)
+except _Sentinel:
+    _got = 'reached the mouse'
+except Exception as e:                                        # noqa: BLE001
+    _got = f'{type(e).__name__}: {e}'
+check('a real plate is NOT refused', _got, 'reached the mouse')
+
+# THE ONE DECISION THAT IS NOT SHARED, and therefore the one worth pinning
+# separately. drop_weapon refuses ONE gun; clear_rack aborts the WHOLE batch,
+# because a panel over gun1 is over gun2 and the second refusal would buy a
+# second frame to learn nothing. Merging these two would be the plausible
+# simplification -- the check reads identical -- so the test says what breaks.
+_rack = InventoryControl.__new__(InventoryControl)
+_rack._frame_for = lambda *a, **k: None
+_rack._log = lambda *a, **k: None
+_rack.plate_ink = lambda gun, frame=None: _rack._ink
+_rack.drop_weapon = lambda g, **k: (_dropped.append(g) or step(ok=True))
+
+_dropped, _rack._ink = [], 11250
+_b = _rack.clear_rack()
+check('clear_rack aborts on the panel', _b['ok'], False)
+check('...as a batch error, not per gun',
+      'spawner panel' in (_b['error'] or ''), True)
+check('...without dropping anything', _dropped, [])
+
+_dropped, _rack._ink = [], 0
+_b = _rack.clear_rack()
+check('an empty rack is skipped, not failed', (_b['ok'], _dropped), (True, []))
+
+_dropped, _rack._ink = [], 803
+_b = _rack.clear_rack()
+check('a racked gun is still dropped', (_b['ok'], _dropped), (True, [1, 2]))
 
 print()
 if FAILS:

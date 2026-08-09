@@ -853,6 +853,38 @@ class InventoryControl(Driver):
         y, x, h, w = HUD_REGIONS[f'gun_name_{gun}']
         return self.name_template.ink(frame[y:y + h, x:x + w])
 
+    def plate_state(self, gun, frame=None):
+        """What this crop is SHOWING. -> 'panel' | 'gun' | 'empty'
+
+        THE ONE HOLDER OF BOTH THRESHOLDS. clear_rack and drop_weapon each
+        used to compare `plate_ink` against constants themselves, and they did
+        not compare it against the same ones: clear_rack tested both bounds,
+        drop_weapon tested neither and decided by the name template instead.
+        The gap is what 2026-08-07 19:10 and 19:11 cost — see PLATE_INK_MAX.
+
+        ⚠ THIS DOES NOT MERGE THE TWO CALLERS' DECISIONS, only the reading
+        they both make, and the difference is worth stating because it is why
+        `plate_ink` is still called directly nowhere else:
+
+            'panel'   the same question for both — "am I even looking at the
+                      rack?" — and the same answer, refuse. Mergeable, merged.
+            'gun'/'empty'
+                      NOT the same question. clear_rack asks "is there a gun
+                      to drop" (presence, and ink is the right ruler because
+                      the OCR is what fails). drop_weapon asks "is THIS gun
+                      still there afterwards" (identity, which ink cannot
+                      answer — 800 ink says a gun, not which one).
+
+        So one reading, one classification, two decisions. Collapsing the
+        second pair as well would make an unnamed gun that DID leave read as
+        a clean drop, which is the failure this layer's plate rules exist to
+        keep apart.
+        """
+        ink = self.plate_ink(gun, frame)
+        if ink > PLATE_INK_MAX:
+            return 'panel'
+        return 'gun' if ink >= PLATE_INK_MIN else 'empty'
+
     def slot_states(self, gun, frame=None):
         """{slot: absent|empty|filled|unknown} for `gun`. IS THERE A PART HERE.
 
@@ -2077,7 +2109,23 @@ class InventoryControl(Driver):
         ⚠ THE VERDICT IS THE NAME PLATE, and it reads None both for an empty
         rack and for a gun the templates cannot name — so an unnamed gun that
         DID leave reports failure, and 'auto' then drags at an empty rack row.
-        clear_rack gates on plate_ink; this does not. Two rulers, one fact.
+        That asymmetry against clear_rack, which reads presence off the ink,
+        is deliberate and stated in plate_state: ink cannot say WHICH gun, and
+        this method's question is about identity.
+
+        ⚠ WHAT WAS NOT DELIBERATE was that the asymmetry also covered "is the
+        rack even on screen". Refusing on plate_state 'panel' is the same
+        decision clear_rack makes off the same reading, and this method used
+        to skip it: on 2026-08-07 the spawner panel was over the rack twice,
+        the right click went into the panel, `auto` then paid a 1621 px drag
+        into the same panel, and the run reported `rack not empty` — a true
+        sentence pointing at the wrong screen. The gun never moved and nothing
+        said why. See PLATE_INK_MAX for the numbers (10941/11250 against a
+        real plate's 597-901).
+
+        It could not report a false success — `was` is None under the panel,
+        so `ok` was unreachable — which is exactly why it survived: the cost
+        was a misdiagnosis, not a lost gun, and misdiagnoses do not raise.
 
         -> {'ok', 'was', 'now', 'gesture', 'error'} — `was` is what the plate
         read before.
@@ -2105,6 +2153,22 @@ class InventoryControl(Driver):
         frame = self._frame_for('guns', 'plate')
         was = self._read_guns(frame).get(gun)
         plate0 = self._plate(gun, frame)
+
+        # BEFORE THE MOUSE MOVES, and off the frame already in hand — see the
+        # ⚠ above. Only 'panel' is refused here: 'empty' is left alone because
+        # this method's caller may be dropping a gun the templates cannot
+        # name, and that is the case the ink cannot be asked about.
+        if self.plate_state(gun, frame) == 'panel':
+            why = (f'plate reads {plate0} ink, far above any real plate '
+                   f'({PLATE_INK_MIN}..~900) — the spawner panel is over the '
+                   f'rack, so every gesture at gun{gun} goes into the panel. '
+                   f'Close it first.')
+            self._log(f'gun{gun}: {why}')
+            self._journal_refusal('refused', at_gun(gun), at_ground(), why,
+                                  plate=[plate0, None], was=was, now=was,
+                                  by='plate_state')
+            return step(at_gun(gun), at_ground(), ok=False, verified=True,
+                        error=why, was=was, now=was, gesture=None, drag=None)
 
         def settled():
             time.sleep(DROP_SETTLE)
@@ -2190,18 +2254,22 @@ class InventoryControl(Driver):
         """
         out, did = [], []
         for g in guns:
-            ink = self.plate_ink(g)
-            if ink > PLATE_INK_MAX:
+            frame = self._frame_for('plate')
+            state = self.plate_state(g, frame)
+            if state == 'panel':
                 # Not a name plate — the spawner panel is over this crop. See
-                # PLATE_INK_MAX. Refusing beats dropping: every click here goes
-                # into the panel, and the batch would report success having
-                # moved nothing.
+                # PLATE_INK_MAX. drop_weapon refuses this too now, and this
+                # check is NOT the same one made twice: it aborts the WHOLE
+                # batch. A panel over gun1 is over gun2, so continuing would
+                # buy a second refusal and a second frame to learn nothing.
+                # The number is re-read only here, on the path that reports.
+                ink = self.plate_ink(g, frame)
                 self._log(f'gun {g} plate reads {ink} ink, far above any real '
                           f'plate ({PLATE_INK_MIN}..~900) — the spawner panel '
                           f'is over the rack. Close it before clearing.')
                 return batch(out, dropped=did, ok=False,
                              error=f'spawner panel over the rack (ink {ink})')
-            if ink < PLATE_INK_MIN:
+            if state == 'empty':
                 continue
             out.append(self.drop_weapon(g))
             did.append(g)
@@ -2977,6 +3045,16 @@ class InventoryControl(Driver):
         # with ZERO failures, 28 over 1.8 s with zero successes. The step was
         # the poll, not the game. A field used to predict an outcome must not
         # be measured after that outcome is known.
+        #
+        # ⚠ `t` BELOW IS STILL STAMPED AT THE END, so the gap between two
+        # RECORDS reproduces that artefact exactly — and did, on 2026-08-09,
+        # when `t[n] - t[n-1]` gave 616 drags under 1.5 s at 100% and none
+        # above 1.9 s. Same step, same cause, and it took a second night to
+        # recognise because the warning above is attached to the field that
+        # was FIXED rather than to the one that still has the property.
+        # `t` stays wall-clock because it is what lines up this journal with
+        # another agent's; the rule is that `gap_s` is the only spacing this
+        # file is allowed to reason from.
         now = time.perf_counter() if started is None else started
         prev = _LAST_GESTURE_END[0]
         rec = {'kind': kind, 't': round(time.time(), 3), 'pid': PID,
