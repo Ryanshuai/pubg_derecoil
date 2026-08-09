@@ -5,7 +5,7 @@
 Two claims, both about control flow, both testable without pixels:
 
   tab_open moves ONLY because the anchor was looked at
-  the guns are read ONCE, when the anchor says the panel shut
+  the guns are read ONCE, on the keypress that closes the panel
 
 ⚠ THE SECOND ONE IS ENFORCED AS A PROHIBITION, NOT AS A PROPERTY. The fake
 grabber below counts every look at the weapon panel, and several cases assert
@@ -22,8 +22,9 @@ panel at the wrong time and reading it at the right time produce the same
 assertion.
 
 The cases that matter are the ones that have gone wrong: a keypress the game
-swallowed, a screen that changes with no keypress at all, and a panel read
-when its tiles are not painted.
+swallowed, a screen that changes with no keypress at all, a panel read when
+its tiles are not painted, and -- the reason the trigger moved to the keypress
+-- a panel read when the anchor said shut, which saved six frames of grass.
 """
 import glob
 import os
@@ -93,9 +94,9 @@ class FakeScreen:
     """What the screen currently shows, and how often it was looked at.
 
     `painted` is whether the twenty attachment tiles are drawn. It is NOT the
-    same question as `open`: the anchor text stops being legible before the
-    tiles stop being drawn, which is the fact the whole design rests on, and
-    the two are scripted separately here so a case can put them out of step.
+    same question as `open` -- the tiles land some milliseconds after the panel
+    becomes legible -- so the two are scripted separately and a case can put
+    them out of step.
     """
 
     def __init__(self):
@@ -252,14 +253,16 @@ budget = int(2.0 / TAB_DRIFT_S) + 1
 check(f'anchor checks in 2 seconds open (<= {budget})',
       screen.anchor_reads - before_anchor <= budget, True)
 
-print('\n=== the read happens when the ANCHOR says shut ===')
-# The anchor stops being legible before the tiles stop being drawn, so `open`
-# goes False while `painted` is still True. That gap is the design.
-screen.open = False
-w.on_key(t)
+print('\n=== the read happens on the KEYPRESS, while the panel is up ===')
+# ⚠ NOT when the anchor says shut. Six frames saved at that moment on
+# 2026-08-09 were all pure game world: by then the panel is GONE, not fading.
+# The press leads the close by 77-128 ms, and that margin is the design.
+w.on_key(t)                      # the closing press: panel still on screen
+check('the panel was grabbed on the KEY', screen.grabs, 1)
+screen.open = False              # ...and the game takes it down afterwards
 t = run(w, 0.05, t0=t)
 check('closed', w.open, False)
-check('the panel was grabbed exactly once', screen.grabs, 1)
+check('the close itself grabbed nothing more', screen.grabs, 1)
 check('classified exactly once', screen.att_reads, 1)
 check('weapon_gt published', state.weapon_gt, ('aug', 'm416'))
 check('attachments published', state.attachments[1], {'muzzle': 'comp'})
@@ -296,8 +299,13 @@ w3.on_key(t)                     # key sent... but the game ignores it
 t = run(w3, TAB_SETTLE_S + 0.05, t0=t)
 check('still open after the key was eaten', w3.open, True)
 check('state agrees with the screen', state3.tab_open, screen3.open)
-check('nothing was published', state3.weapon_gt, ('', ''))
-check('and nothing was read', screen3.grabs, 0)
+# ⚠ IT DID READ, and that is correct rather than a leak: the press is a
+# TRIGGER, not an answer. The panel was up, so the reading describes it -- and
+# when the game eats the key the panel is still up and the reading is still
+# true. What must not move is the FLAG.
+check('the panel was read, because it was up', screen3.grabs, 1)
+check('names published from a panel that really was there',
+      state3.weapon_gt, ('aug', 'm416'))
 
 print('\n=== the screen can change with NO keypress (alt-tab, dialog) ===')
 w4, state4, screen4 = build()
@@ -308,17 +316,16 @@ check('drift check noticed it opened', w4.open, True)
 screen4.open = False
 t = run(w4, TAB_DRIFT_S + 0.05, t0=t)
 check('drift check noticed it closed', w4.open, False)
-check('and it still read the panel once', screen4.grabs, 1)
+# ⚠ And read nothing on the way, in EITHER direction. Neither transition had a
+# keypress, so neither had a moment at which the panel was known to be up.
+check('and looked at the panel neither time', screen4.grabs, 0)
 
-print('\n=== a close nobody announced finds the panel already gone ===')
-# ⚠ THE HONEST FAILURE, AND IT IS THE COST OF THE DESIGN. With no key to
-# watch, the close is found by the drift check up to TAB_DRIFT_S later, by
-# which time the tiles are not drawn. `any_drawn` catches it: the kit is NOT
-# published, because an unpainted tile reads '' out of classify() and that is
-# the same '' an empty slot gives. A missed reading, not a wrong one.
-#
-# The NAMES still publish: the plates outlive the tiles, and it is only the
-# tiles this can be wrong about.
+print('\n=== a close NOBODY announced reads nothing at all ===')
+# ⚠ THE HONEST FAILURE, AND IT IS THE COST OF THE DESIGN. Alt-tab, a
+# disconnect dialog, another agent: there is no keypress, so there is no
+# moment at which the panel was known to be up, and by the time the drift
+# check notices it is gone. Reading THEN is what produced six frames of grass.
+# tab_open still follows the screen; the loadout keeps what it last knew.
 w5, state5, screen5 = build()
 screen5.open = True
 screen5.show(1, ('vss', 'p90'))
@@ -326,10 +333,27 @@ w5._set_open(True)
 screen5.open = False
 screen5.painted = False          # by the time drift notices, it is gone
 t = run(w5, TAB_DRIFT_S + 0.05, t0=time.perf_counter())
-check('it did look', screen5.grabs, 1)
-check('attachments NOT published', 1 in state5.attachments, False)
-check('attachment read never even attempted', screen5.att_reads, 0)
-check('but the weapon names still are', state5.weapon_gt, ('vss', 'p90'))
+check('the drift check noticed', w5.open, False)
+check('and looked at nothing', screen5.grabs, 0)
+check('nothing published', state5.weapon_gt, ('', ''))
+
+print('\n=== an unpainted panel still refuses to publish a kit ===')
+# The guard stays even though the read now happens while the panel is up:
+# `any_drawn` is what separates "this gun wears nothing" from "the tiles are
+# not drawn yet", and classify() gives both the same ''. ⚠ It cannot do more
+# than that -- it asks whether there is DETAIL in the tile rings, and bare
+# grass and timber score far above its 46. It is a within-panel guard, never
+# evidence that a panel is there.
+w5b, state5b, screen5b = build()
+screen5b.open = True
+screen5b.show(1, ('vss', 'p90'))
+screen5b.painted = False
+w5b._set_open(True)
+w5b.on_key(time.perf_counter())
+check('the panel WAS read', screen5b.grabs, 1)
+check('attachments NOT published', 1 in state5b.attachments, False)
+check('attachment read never even attempted', screen5b.att_reads, 0)
+check('but the weapon names still are', state5b.weapon_gt, ('vss', 'p90'))
 
 print('\n=== a gun nothing can NAME gets no kit ===')
 # ⚠ MEASURED IN A PLAY LOG, 2026-08-09. Both name plates came back blank for a
@@ -360,6 +384,7 @@ state8.weapon_pred = ('m416', '')
 screen8.open = True
 screen8.show(1, ('', ''), kit={1: {'muzzle': 'comp_ar'}, 2: {'stock': 'x'}})
 w8._set_open(True)
+w8.on_key(time.perf_counter())   # the closing press is what reads
 screen8.open = False
 t = run(w8, 0.05, t0=time.perf_counter())
 check('gun 1 is named by the HUD, so its kit publishes',
@@ -376,6 +401,7 @@ before = set(glob.glob(os.path.join(SHOT_DIR, '*.png')))
 w9, state9, screen9 = build()
 screen9.open = True
 w9._set_open(True)
+w9.on_key(time.perf_counter())
 screen9.open = False
 run(w9, 0.05, t0=time.perf_counter())
 after = set(glob.glob(os.path.join(SHOT_DIR, '*.png')))

@@ -6,38 +6,45 @@ HUD at the bottom, so having both in one DXGI bounding box cost 5.46 ms of
 every frame — 87% of the capture budget — for a panel that is usually not on
 screen. See config.FRAME_REGIONS.
 
-⚠ ONE READ PER TAB SESSION, TAKEN THE MOMENT THE ANCHOR SAYS CLOSED. NOTHING
-IS READ WHILE THE PANEL IS UP, AND NOTHING IS REMEMBERED BETWEEN TICKS.
+⚠ ONE READ PER TAB SESSION, TAKEN ON THE KEYPRESS THAT CLOSES IT — WHILE THE
+PANEL IS STILL ON SCREEN. NOTHING IS READ AT ANY OTHER TIME.
 
-    panel opens        nothing
-    panel is up        nothing
-    anchor reads shut  ONE grab, ONE classify, publish
+    panel opens          nothing
+    panel is up          nothing
+    Tab pressed, up      ONE grab, ONE classify, publish
+    anchor reads shut    nothing — the reading was taken 100 ms ago
 
-The whole file is that sentence. Two things make it work and both are
-measurements rather than hopes:
+THE KEY LEADS THE CLOSE BY 77-128 ms, measured. The poller can hold an event
+for a tick or two, so the read lands 10-20 ms after the press — still 57 ms or
+more before the game takes the panel down. That margin is the whole design.
 
-THE ANCHOR GOES FIRST. `open` is decided by the 41x18 「类型」 header, and that
-text stops being legible EARLY in the close — while the weapon panel, its name
-plates and its slot tiles are all still drawn. So the instant this says shut is
-an instant at which the panel can still be read. There is nothing to race and
-nothing to remember.
+⚠ THE OBVIOUS ALTERNATIVE — READ WHEN THE ANCHOR SAYS SHUT — WAS BUILT, RUN
+AND REFUTED BY ITS OWN SAVED FRAMES, 2026-08-09. The idea was that the 41x18
+「类型」 header stops being legible early in the close, leaving the panel
+readable for a moment afterwards. It does not:
 
-THE WATCH IS ALREADY PER-TICK WHERE IT MATTERS. A Tab keypress arms
-TAB_SETTLE_S of tick-rate anchor checks, and the game honours a close in
-77-128 ms — comfortably inside it. So the transition is caught within one
-10 ms tick of it happening, for free, on the path every real close takes.
+    six closes, six saved frames, every one pure game world — no panel at all
+    ink 0 / 9 / 6 / 0 / 0        (a real name plate reads in the hundreds)
+
+By the time the anchor reads shut the panel is GONE, not fading. Every read
+came back with two blank plates.
+
+⚠ AND THE GUARD THAT SHOULD HAVE CAUGHT IT SAID `tiles painted` ON ALL SIX.
+`any_drawn` asks whether there is DETAIL in the tile rings, and its separation
+(absent 5-26, empty 46-173) was measured with a panel on screen. Bare grass and
+timber score far above 46. It answers "is something drawn here", which is only
+the question you meant while a panel is up — it cannot tell you that one is.
+The thing that CAN is the anchor, which is what `open` already is.
+
+⚠ WHAT IS GIVEN UP, PLAINLY: a close that no key announced — alt-tab, a
+disconnect dialog, another agent — reads nothing at all. The drift check still
+notices the state change, so `tab_open` stays honest; the loadout simply keeps
+whatever it last knew. A missed reading, not a wrong one.
 
 ⚠ AND THE COST IS WHY IT CANNOT SIMPLY POLL. A GDI grab is ~5 ms almost
 regardless of size (41x18 measures 5.2 ms), so at the 10 ms dispatcher tick a
-single unconditional anchor check would be 52% of a core. That is the number
-that shapes this file: checks are event-driven, with a slow drift check to
-catch what no key announced.
-
-⚠ WHAT IS GIVEN UP, PLAINLY: a close that NO KEY announced — alt-tab, a
-disconnect dialog, another agent — is found by the drift check up to
-TAB_DRIFT_S later, and by then the panel really is gone. The grab comes back
-with no tiles painted, `any_drawn` catches it, and the kit is not published.
-That is a missed reading, not a wrong one.
+single unconditional anchor check would be 52% of a core. Checks are
+event-driven, with a slow drift check to catch what no key announced.
 
 ⚠ NOTHING MAY BE ADDED THAT RUNS WHILE THE PANEL IS UP. Not a periodic
 re-read, not a cached last-good reading, not a buffer of past frames, not a
@@ -316,13 +323,28 @@ class TabWatch:
         was swallowed. So this only arms a watch; `open` moves when the screen
         does.
 
-        ⚠ IT READS NOTHING, IN EITHER DIRECTION, and must not be made to. A
-        grab here is timed off the KEY rather than off the SCREEN, and the key
-        can arrive a tick or two late — by which point it is a picture of a
-        fading panel. The watch it arms is what catches the close, within one
-        tick of the screen actually changing.
+        ⚠ AND IF THE PANEL IS UP, THIS IS WHERE IT IS READ. Not on the close
+        the watch below detects — by then it is gone. See the module docstring
+        for the six saved frames that settled it. The press leads the close by
+        77-128 ms and the poller holds an event for at most a tick or two, so
+        the grab lands with 57 ms or more of panel left.
+
+        The keypress is used as a TRIGGER here, never as an answer: `open` is
+        still whatever the screen last said, and if the game eats this key the
+        panel stays up and this reading simply describes it correctly.
         """
         now = time.perf_counter() if now is None else now
+        # ⚠ LOGGED IN BOTH DIRECTIONS, because the close press was invisible.
+        # `stop_recoil` was already True while the panel was up, so the state
+        # line printed nothing and the log held no timestamp for the press that
+        # closed it -- which is exactly the number needed to work out how much
+        # panel was left by the time anything looked. It had to be inferred
+        # from the game's 77-128 ms instead of read off.
+        self._log(f'Tab key seen while {"open" if self.open else "closed"}')
+        if self.open:
+            got = self.read_loadout()
+            if got is not None:
+                self._publish(got)
         self._watch_until = now + TAB_SETTLE_S
         self._want = not self.open
 
@@ -364,15 +386,13 @@ class TabWatch:
         self.open = value
         self.state.tab_open = value
         self._log('open' if value else 'closed')
-        if value:
-            return
-        # The one place the panel is read. Publishing before returning matters:
-        # control/match.py's _follow_tab re-arms the firmware on this same tick,
-        # right after this, and it must upload the curve for what the gun is
-        # wearing now rather than what it wore before you opened the panel.
-        got = self.read_loadout()
-        if got is not None:
-            self._publish(got)
+        # ⚠ NOTHING IS READ HERE, AND THAT IS THE CORRECTION OF 2026-08-09.
+        # This is where the read used to be, on the reasoning that the anchor
+        # goes dark before the panel does. Six saved frames say otherwise: by
+        # the time this runs there is no panel, only the game world. The
+        # reading was taken on the keypress, ~100 ms ago, and control/match.py's
+        # _follow_tab re-arms the firmware right after this — with the loadout
+        # that reading published.
 
     def _publish(self, got):
         """Write a reading through to GameState, as the detections used to.
