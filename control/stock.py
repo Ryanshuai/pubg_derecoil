@@ -745,7 +745,15 @@ def restock(ac, sc, want, backpack=BACKPACK, leave='shut',
     # collapsed, and an attachment spawned with no backpack worn does not fail
     # cleanly: it lands somewhere else and every later drag is aimed at a row
     # that has moved.
-    need = stock.missing(want, loose_only=loose_only, per=per)
+    # ⚠ `loose_only` IS ABOUT EVICTION, NOT ABOUT TIDINESS, so it only applies
+    # when this call is going to spawn a gun. The rule it encodes: a gun pushed
+    # out of the rack leaves WEARING everything it had on, so a part counted as
+    # owned because something wore it can be gone by the time the kitter looks.
+    # With no gun in the batch nothing gets evicted, and a part on the gun in
+    # front of us is a part we have -- so counting it is right, and spawning a
+    # second copy of it is the waste this exists to avoid.
+    evicts = any(k in ROSTER for k in also if k)
+    need = stock.missing(want, loose_only=loose_only and evicts, per=per)
     if not stock.backpack and verbose:
         print(f"      [stock] no backpack worn — spawning {backpack}")
     if need and verbose:
@@ -808,7 +816,40 @@ def restock(ac, sc, want, backpack=BACKPACK, leave='shut',
             if not spawn_missing(sc, guns, backpack=bp, verbose=verbose):
                 return False
             strip_factory_magazine(ac, sc, verbose=verbose)
-            if not spawn_missing(sc, parts, backpack=None, verbose=verbose):
+            # LOOK AT THE GUN BEFORE BUYING PARTS FOR IT. The shortfall above
+            # was computed while the rack was EMPTY, so it could not know what
+            # this gun would arrive wearing -- and a freshly spawned gun is not
+            # bare (docs/game_quirks.md). The mg3 comes with a red dot on it;
+            # the run then spawned a second one, fitted neither, and the tidy
+            # pass threw one away. Asked for directly: 「spawner 需要的配件前，
+            # 要先检查已经有什么了，包括背包里和枪上的」.
+            #
+            # `have` rather than `in_pack`, and that IS the loose_only rule
+            # being set aside on purpose. The rule exists because a gun that
+            # gets EVICTED leaves wearing everything it had on, so parts
+            # counted as owned can vanish between the read and the fitting. At
+            # this exact point nothing more will be spawned into the rack in
+            # this call, so the gun in front of us is the gun that stays.
+            #
+            # ⚠ AN UNREADABLE PACK LEAVES THE LIST ALONE. Spawning a duplicate
+            # costs a tidy pass; skipping a part that was never there costs the
+            # cell. The fail-safe direction is to buy it.
+            seen = read_stock(ac, close=False)
+            if seen is not None:
+                already = [k for k in parts if seen.have(k)]
+                if already and verbose:
+                    print(f"      [stock] already on the gun or in the pack: "
+                          f"{', '.join(sorted(already))} — not spawning "
+                          f"{'them' if len(already) > 1 else 'it'} again")
+                parts = [k for k in parts if k not in set(already)]
+            elif verbose:
+                print("      [stock] could not read the pack after the gun "
+                      "landed — spawning the whole parts list rather than "
+                      "guessing what is already there")
+            # comma does nothing while Tab is up, and read_stock left it up.
+            ac.ensure_tab(False)
+            if parts and not spawn_missing(sc, parts, backpack=None,
+                                           verbose=verbose):
                 return False
         elif not spawn_missing(sc, batch, backpack=bp, verbose=verbose):
             return False
