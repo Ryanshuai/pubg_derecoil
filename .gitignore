@@ -83,3 +83,10 @@ press/firmware/.vscode
 
 # agent-refactor skill 的状态与产物（队列、可达图、扫描结果、差分 spec）
 .agent-refactor/
+
+# ── 模型的错误史:可丢弃,故意不跟踪 ──
+# MODEL.md 2026-08-09 从 809 行砍到 175:规格留下,而「这条曾经是错的、被什么
+# 推翻」那部分整段移到这里。它对查案有用,对规格没用,而且**模型确认之后就删**。
+# 单列一条而不是忽略整个 docs/ —— docs/ 里那十个跟踪着的文件是有人会读的散文,
+# 而这一个不是。
+docs/model_error_history.md
