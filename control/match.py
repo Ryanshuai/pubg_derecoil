@@ -92,14 +92,25 @@ class Dispatcher(DaemonLoop):
             self._running = False
             return
 
-        # Tab: take the final reading NOW, while the panel is still drawn, and
-        # start watching for the screen to actually change. This is what the
-        # 'delay': -50 entries used to do by reaching back into the ring
-        # buffer -- which is what forced the Tab regions into every captured
-        # frame. Deliberately before the tables: it does not touch tab_open,
-        # so every cond below still sees the screen as it is right now.
-        if ev.key == 'tab' and ev.event == 'press':
-            self.tab.on_key(ev.ts)
+        # Tab: grab NOW, while the panel is still drawn, and start watching for
+        # the screen to actually change. Deliberately before the tables: it
+        # does not touch tab_open, so every cond below still sees the screen as
+        # it is right now.
+        #
+        # ⚠ BOTH EDGES, BECAUSE WHICH EDGE CLOSES THE PANEL IS THE GAME'S
+        # BINDING TO DECIDE, NOT THIS FILE'S. Press-only was written on the
+        # assumption that Tab toggles, and the log says otherwise: five
+        # sessions open-to-closed in 950 / 690 / 960 / 330 / 142 ms. Nobody
+        # taps a toggle twice in 142 ms -- that is Tab being HELD, and the
+        # RELEASE is what closes it. Under press-only the closing edge was
+        # never seen at all, so the panel was only ever looked at once the
+        # screen had already changed, which is a picture of the world.
+        #
+        # Handling both costs one extra ~10 ms grab per Tab and needs no belief
+        # about the keybind. TabWatch decides what to do with each edge from
+        # what the SCREEN says, which is the only thing here that knows.
+        if ev.key == 'tab':
+            self.tab.on_key(ev.ts, ev.event)
 
         # DETECT_TABLE: schedule detections using CURRENT state
         for entry in DETECT_TABLE:

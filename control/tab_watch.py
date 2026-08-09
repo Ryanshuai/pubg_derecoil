@@ -9,22 +9,34 @@ screen. See config.FRAME_REGIONS.
 ⚠ THE TAB KEY GRABS AND SAVES, IMMEDIATELY, BEFORE ANYTHING IS DECIDED. Both
 presses. Then, and only if the panel was up, that same frame is classified.
 
-    Tab pressed, shut    ONE grab, saved `<stamp>_opening.png`
-    panel is up          nothing
-    Tab pressed, up      ONE grab, saved `<stamp>_closing.png`, classify, publish
-    anchor reads shut    nothing — the reading was taken ~100 ms ago
+    Tab edge, panel shut   ONE grab, saved `<stamp>_press-shut.png`
+    panel is up            nothing
+    Tab edge, panel up     ONE grab, saved `<stamp>_release-open.png`,
+                           classify, publish
+    anchor reads shut      nothing — the reading was taken ~100 ms ago
 
-Nothing is checked, asked or measured before the grab. A grab is ~10 ms;
-deciding first is what put a permission in front of it that only arrives once
-the panel is already down.
+BOTH EDGES, press and release, and the filename records which edge saw what.
+Which one closes the panel is the keybind's business: press-only was written
+on the assumption that Tab toggles, and the log refutes it — five sessions
+open-to-closed in 950 / 690 / 960 / 330 / 142 ms. Nobody taps a toggle twice
+in 142 ms. That is Tab being HELD, and the RELEASE is what closes it.
 
-Both presses are saved even though only one has a panel to read. The opening
+Nothing is checked, asked or measured before the grab. Measured, warm, four
+runs:
+
+    panel grab              8-12 ms   <- the only part that must beat the fade
+    anchor grab + compose   3-9 ms    | after the panel pixels are already
+    png write               ~4 ms     | captured, so they cost nothing that matters
+
+Add the input path — poller 5 ms, dispatcher tick 10 ms — and the panel is on
+disk-bound pixels within ~27 ms of the physical edge, against 77-128 ms before
+the game takes the panel down. 50-100 ms of margin, and it is margin only
+because the grab is FIRST. Deciding first is what put a permission in front of
+it that by measurement only arrives once the panel is already gone.
+
+Both edges are saved even though only one has a panel to read. The opening
 frame costs one grab and answers a question the closing one cannot: an opening
 frame with a panel still in it means the previous close never registered.
-
-THE KEY LEADS THE CLOSE BY 77-128 ms, measured. The poller can hold an event
-for a tick or two, so the read lands 10-20 ms after the press — still 57 ms or
-more before the game takes the panel down. That margin is the whole design.
 
 ⚠ THE OBVIOUS ALTERNATIVE — READ WHEN THE ANCHOR SAYS SHUT — WAS BUILT, RUN
 AND REFUTED BY ITS OWN SAVED FRAMES, 2026-08-09. The idea was that the 41x18
@@ -72,12 +84,14 @@ swallowed keypress (docs/game_quirks.md: one issued right after a previous
 toggle simply does not arrive) left it inverted with nothing to notice. Here
 the flag only ever changes because the screen was looked at.
 
-Nothing here blocks: tick() does at most one 5 ms anchor check, except on the
-tick where the panel closes, which also grabs and classifies.
+Nothing here blocks: tick() does at most one 5 ms anchor check. The ~25 ms of
+grab-and-save happens on a Tab edge, where nothing is being fired.
 """
 import datetime
 import os
 import time
+
+import numpy as np
 
 from config import HUD_REGIONS, TAB_DRIFT_S, TAB_SETTLE_S
 
@@ -192,6 +206,46 @@ class TabWatch:
         except Exception as e:
             self._log(f'open-check failed: {e}')
             return None
+
+    def _compose(self, frame):
+        """The panel block with the ANCHOR STRIP laid above it. -> array.
+
+        ⚠ THE ANCHOR IS IN THE PICTURE BECAUSE IT IS THE OTHER HALF OF THE
+        EVIDENCE. `open` is decided by that 41x18 「类型」 header and by nothing
+        else, so a frame showing only the weapon panel can say "there was no
+        panel" but never "and here is what the thing that decides was showing
+        at the same moment". They sit 1282 px apart on screen and would never
+        appear in one crop by accident.
+
+        It is a SECOND grab, 3-9 ms, taken AFTER the panel one -- so the strip
+        is a few milliseconds newer than the block below it. That is worth
+        knowing when reading a frame caught mid-transition, and it is the right
+        way round: the panel is the thing that has to be caught in time.
+
+        ⚠ TWO GRABS BEAT ONE, MEASURED, which is not the obvious answer. The
+        two rectangles overlap in y (panel 123..680, anchor 129..147) and
+        RegionGrabber bands by y, so asking one grabber for both merges them
+        into a single 1911x557 box -- three times the pixels:
+
+            panel alone 11.45 + anchor alone 6.02  =  17.47 ms
+            both in one grabber                       18.60 ms
+
+        A GDI grab is ~5 ms of fixed cost almost regardless of size, so a
+        second small grab is cheaper than one much larger one.
+        """
+        y, x, h, w = _BLOCK()
+        block = frame[y:y + h, x:x + w]
+        try:
+            crop = self._type_crop()
+            anchor = crop['type'] if isinstance(crop, dict) else crop
+            ah, aw = anchor.shape[:2]
+        except Exception:
+            return block
+        pad = 4
+        out = np.zeros((h + ah + 3 * pad, max(w, aw + 2 * pad), 3), np.uint8)
+        out[pad:pad + ah, pad:pad + aw] = anchor
+        out[ah + 3 * pad:ah + 3 * pad + h, :w] = block
+        return out
 
     def snap(self, tag):
         """Grab the weapon panel and put it on disk. -> the frame, or None.
@@ -329,10 +383,9 @@ class TabWatch:
         try:
             import cv2
             os.makedirs(self._shot_dir, exist_ok=True)
-            y, x, h, w = _BLOCK()
             stamp = datetime.datetime.now().strftime('%m%d_%H%M%S_%f')[:-3]
             path = os.path.join(self._shot_dir, f'{stamp}_{tag}.png')
-            if not cv2.imwrite(path, frame[y:y + h, x:x + w]):
+            if not cv2.imwrite(path, self._compose(frame)):
                 return '   (frame not saved: imwrite refused)'
             return f'   shot {path}'
         except Exception as e:
@@ -340,8 +393,8 @@ class TabWatch:
 
     # ── Driving ──
 
-    def on_key(self, now=None):
-        """A Tab keypress was seen. Watch for the screen to actually change.
+    def on_key(self, now=None, event='press'):
+        """A Tab key EDGE was seen. Watch for the screen to actually change.
 
         `now` should be the KeyEvent's own timestamp: the event may have sat in
         the poller's queue for a tick or two, and the settle window should be
@@ -356,13 +409,25 @@ class TabWatch:
 
         ⚠ AND IF THE PANEL IS UP, THIS IS WHERE IT IS READ. Not on the close
         the watch below detects — by then it is gone. See the module docstring
-        for the six saved frames that settled it. The press leads the close by
+        for the six saved frames that settled it. The edge leads the close by
         77-128 ms and the poller holds an event for at most a tick or two, so
         the grab lands with 57 ms or more of panel left.
 
-        The keypress is used as a TRIGGER here, never as an answer: `open` is
-        still whatever the screen last said, and if the game eats this key the
-        panel stays up and this reading simply describes it correctly.
+        ⚠ BOTH EDGES ARRIVE HERE, AND THIS FILE DOES NOT CARE WHICH ONE CLOSES
+        THE PANEL. `press` only was written on the assumption that Tab toggles.
+        The log says otherwise: five sessions open-to-closed in 950 / 690 / 960
+        / 330 / 142 ms. Nobody taps a toggle twice in 142 ms — that is Tab
+        being HELD, and the RELEASE is what closes it. Under press-only the
+        closing edge was never seen, so the panel was only ever looked at once
+        the screen had already changed, which is a picture of the world.
+
+        Which edge does what is the keybind's business. What decides here is
+        `self.open`, which is the SCREEN's answer: an edge seen while the panel
+        is up reads it, an edge seen while it is down does not.
+
+        The edge is a TRIGGER, never an answer: `open` is still whatever the
+        screen last said, and if the game eats this key the panel stays up and
+        the reading simply describes it correctly.
         """
         now = time.perf_counter() if now is None else now
         # ⚠ LOGGED IN BOTH DIRECTIONS, because the close press was invisible.
@@ -372,9 +437,10 @@ class TabWatch:
         # panel was left by the time anything looked. It had to be inferred
         # from the game's 77-128 ms instead of read off.
         was_open = self.open
-        self._log(f'Tab key seen while {"open" if was_open else "closed"}')
-        # ⚠ GRAB AND SAVE FIRST, DECIDE AFTER, ON BOTH PRESSES.
-        frame = self.snap('closing' if was_open else 'opening')
+        self._log(f'Tab {event} seen while '
+                  f'{"open" if was_open else "closed"}')
+        # ⚠ GRAB AND SAVE FIRST, DECIDE AFTER. Every edge, both directions.
+        frame = self.snap(f'{event}-{"open" if was_open else "shut"}')
         if was_open and frame is not None:
             got = self.read_loadout(frame)
             if got is not None:

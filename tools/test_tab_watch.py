@@ -61,6 +61,7 @@ SHOT_DIR = os.path.join(ROOT, 'calibration', 'artifacts', 'robot',
 # detector, which only ever sees cut crops, can read the same stamp the
 # attachment detector reads off the whole frame.
 MY, MX = HUD_REGIONS['gun_name_1'][0], HUD_REGIONS['gun_name_1'][1]
+ay, ax, ah, aw = HUD_REGIONS['type']
 
 
 class FakeState:
@@ -179,7 +180,14 @@ class FakeScreen:
                 if counts:
                     s.grabs += 1
                 _self._buf[MY, MX] = (1 if s.painted else 0, s.gen, 0)
-                return _self._buf
+                # ⚠ The anchor grabber returns a DICT, like the real
+                # RegionGrabber, because the saved frame now carries the
+                # anchor strip beside the panel and _compose has to cut it out
+                # of whatever comes back. A bare array here would have made
+                # _compose's dict branch untested and the real one the only
+                # one that runs.
+                return _self._buf if counts else {'type': _self._buf[
+                    ay:ay + ah, ax:ax + aw]}
 
             def close(_self):
                 pass
@@ -406,18 +414,21 @@ print('\n=== the close leaves its frame on disk, in ITS OWN directory ===')
 # the one real play writes to.
 before = set(glob.glob(os.path.join(SHOT_DIR, '*.png')))
 w9, state9, screen9 = build()
+# Tab HELD: press opens it, release closes it. Both edges arrive, and the
+# names have to say which edge saw what — that pairing is the only thing a
+# frame on disk can be matched against a line in the log by.
 screen9.open = False
-w9.on_key(time.perf_counter())            # the press that opens it
+w9.on_key(time.perf_counter(), 'press')
 screen9.open = True
 run(w9, 0.05, t0=time.perf_counter())
-w9.on_key(time.perf_counter())            # the press that closes it
+w9.on_key(time.perf_counter(), 'release')
 screen9.open = False
 run(w9, 0.05, t0=time.perf_counter())
 after = set(glob.glob(os.path.join(SHOT_DIR, '*.png')))
 new = sorted(os.path.basename(f) for f in after - before)
-check('one frame per press, both presses', len(new), 2)
-check('and the file says which press it was',
-      [n.split('_')[-1] for n in new], ['opening.png', 'closing.png'])
+check('one frame per edge, both edges', len(new), 2)
+check('and the name says which edge, and what it found',
+      [n.split('_')[-1] for n in new], ['press-shut.png', 'release-open.png'])
 check('and NOT into the directory real play writes to',
       os.path.abspath(SHOT_DIR) != os.path.abspath(REAL_SHOT_DIR), True)
 
