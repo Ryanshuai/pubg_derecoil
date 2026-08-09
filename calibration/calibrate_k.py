@@ -113,8 +113,22 @@ def _ensure_scoped(mouse, tries=3):
     return _scoped_now()
 
 
-def run_trial(grabber, tracker, mouse, counts, dry_run=False, ads=False):
-    """Inject `counts` vertically over INJECT_S and capture throughout.
+def run_trial(grabber, tracker, mouse, counts, dry_run=False, ads=False,
+              inject_s=None):
+    """Inject `counts` vertically over `inject_s` and capture throughout.
+
+    ⚠ THE RATE IS A PARAMETER BECAUSE THE DEFAULT ALIASES. The view tracker's
+    correlation is unambiguous only up to RECOIL_PATCH_H = 256 px between
+    frames; past that it wraps by EXACTLY one patch height, every patch wraps
+    the same way so they still agree, and the trial comes back with a
+    plausible-looking K that is short by 256 px. 8 of the 22 usable rows in
+    the stored red_dot runs are aliased -- see tools/audit_k.py, which found
+    it in two rows of one run differing by 256.01.
+
+    ⚠ `max_abs_frame` CANNOT CATCH IT. An aliased pair reports a SMALL
+    displacement, so the statistic that would flag a too-fast frame is the one
+    the aliasing hides in: agreeing and disagreeing rows have the same median
+    max_abs_frame (91 vs 92 px). The defence is the rate, not a filter.
 
     With ads=True the Pico holds right-click for the whole trial *including*
     the reset move, so that the reset is undone at the same K it was applied
@@ -125,7 +139,13 @@ def run_trial(grabber, tracker, mouse, counts, dry_run=False, ads=False):
     """
     rec = MagazineRecorder(tracker)
     log = []
-    total = WARMUP_S + INJECT_S + COOLDOWN_S
+    inject_s = INJECT_S if inject_s is None else float(inject_s)
+    # ⚠ STEPS SCALE WITH THE DURATION. Spreading the SAME 20 sub-steps over a
+    # longer window leaves each individual step exactly as large -- the peak
+    # per-frame displacement, which is the thing that aliases, would not move
+    # at all. One step every 5 ms.
+    n_steps = max(INJECT_STEPS, int(inject_s * 200))
+    total = WARMUP_S + inject_s + COOLDOWN_S
 
     scoped_before = scoped_after = None
     if ads:
@@ -152,7 +172,7 @@ def run_trial(grabber, tracker, mouse, counts, dry_run=False, ads=False):
     th = None
     if not dry_run:
         th = threading.Thread(target=_inject, daemon=True,
-                              args=(mouse, counts, INJECT_STEPS, INJECT_S,
+                              args=(mouse, counts, n_steps, inject_s,
                                     t0 + WARMUP_S, log))
         th.start()
 
@@ -208,6 +228,12 @@ def main():
     ap.add_argument('--amounts', default='50,100,200,300',
                     help='comma-separated count magnitudes to test')
     ap.add_argument('--repeats', type=int, default=3)
+    ap.add_argument('--inject-s', type=float, default=INJECT_S,
+                    help='seconds to spread the injection over. The default '
+                         f'{INJECT_S} puts 480 counts at ~50 px/frame NOMINAL '
+                         'and observed peaks of 124, against a correlator that '
+                         'aliases by RECOIL_PATCH_H = 256 px and hides it. '
+                         'One second per injection puts it under 2 px/frame.')
     ap.add_argument('--countdown', type=int, default=6)
     ap.add_argument('--label', default='', help='tag for the output files '
                     '(e.g. hipfire, reddot, 4x)')
@@ -289,7 +315,7 @@ def main():
                 for r in range(args.repeats):
                     rec, log, ads_state = run_trial(
                         grabber, tracker, mouse, counts,
-                        args.dry_run, args.ads)
+                        args.dry_run, args.ads, inject_s=args.inject_s)
                     if args.ads and not all(ads_state):
                         print(f"    [!] {counts:+d} #{r}: ADS "
                               f"{ads_state[0]} -> {ads_state[1]} — kept, but "
