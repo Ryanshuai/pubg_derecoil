@@ -32,8 +32,8 @@ The NEED for a check the fit could not arrange did not go away, and `measure()`
 now produces one per cell: it fires the magazines under MORE THAN ONE
 compensation curve, and `_agreement()` asks whether adding each one's own
 y_comp back makes them the same measurement. That is the assumption pooling
-rests on, the fitter never sees which arm a magazine came from, and MODEL.md
-§5之二 is a record of it failing at one end.
+rests on, the fitter never sees which arm a magazine came from, and
+docs/model_error_history.md records it failing at one end.
 """
 import os
 import sys
