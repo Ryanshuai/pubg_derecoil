@@ -240,7 +240,7 @@ def plan_cells(weapons, postures, sight, configs=('bare',)):
     what a weapon can wear is a second opinion about the game sitting beside
     the one it is supposed to be judging.
     """
-    from control.kitting import supported_configs
+    from control.kitting import SIGHT_FOR, supported_configs
 
     # ⚠ ORDERED PER WEAPON, AFTER supported_configs, and both halves matter.
     # Degradation is many-to-one -- on a gun with no lower rail 'grip' and
@@ -250,7 +250,16 @@ def plan_cells(weapons, postures, sight, configs=('bare',)):
     #
     # `postures` stays innermost: it changes no attachment, so a posture sweep
     # inside one config costs nothing to set up.
-    return [(w, p, sight, c)
+    # ⚠ AND THE SIGHT IS PER WEAPON FOR THE SAME REASON THE CONFIG IS. `--sight`
+    # is one word for the whole night, but a gun whose optic is part of the
+    # weapon cannot wear it -- and adapter.measure already overrides it at
+    # set_sight() time via the same table. Leaving the plan on the typed value
+    # meant the cell, the fail directory and the manifest all said `red_dot`
+    # while the rig fired and analysed `p90_integral`: the label naming a
+    # different object than the one measured, which is this repository's second
+    # cross-layer law. (The SAMPLES were never wrong -- Magazine.sight is the
+    # readback -- so this was invisible in exactly the place people look last.)
+    return [(w, p, SIGHT_FOR.get(w, sight), c)
             for w in weapons
             for c in order_configs(supported_configs(w, configs))
             for p in postures]

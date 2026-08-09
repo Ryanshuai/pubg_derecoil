@@ -560,6 +560,7 @@ def _reach(rec, rigging, weapon, cfg):
     # read_config/read_sight are pure functions of it, so the config and the
     # optic describe the same observation by construction rather than by a
     # check somebody has to remember (calibration/CLAUDE.md, rule 14).
+    import config
     from calibration.collect_timed import (read_config, read_loadout,
                                            read_sight)
     lo = read_loadout()
@@ -569,13 +570,22 @@ def _reach(rec, rigging, weapon, cfg):
         # gun, a second gun on the rack, or unreadable slots.
         rec['reached_why'] = 'could not read the attachment slots back'
         return False
-    worn_sight, scope_asset = read_sight(lo)
+    worn_sight, scope_asset = read_sight(lo, weapon)
     if worn_sight is None or worn_sight != rigging.rig.sight:
         # K comes from the optic. The magazine records the FLAG, so a
         # disagreement here is invisible to everything downstream -- and it is
         # worth about 3x between iron sights and a red dot.
         rec['reached_why'] = (f'the cell says sight {rigging.rig.sight!r} and '
                               f'the gun wears {worn_sight!r}')
+        return False
+    if worn_sight not in config.RECOIL_SIGHT_PROFILES:
+        # Agreeing on a sight nobody measured is not agreement: Rig defaults an
+        # unknown profile to RECOIL_K_DEFAULT_SCOPED, which is the MAGNIFIED
+        # group's constant. Same refusal as collect_timed's, and it matters
+        # more here because this is the path with nobody watching.
+        rec['reached_why'] = (f'no K has ever been measured for {worn_sight!r}'
+                              f' — every count would be scaled by the '
+                              f'magnified default')
         return False
     rec['config_read'] = config_read
     rec['sight_read'] = worn_sight

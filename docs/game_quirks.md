@@ -631,9 +631,25 @@ p90   同一块坐标  完全空白
 
 代价是实的：夜跑照着这条目给 p90 要红点 → 拖向不存在的槽 → 红点进 `VICINITY / Ground` → 报 `scope reads ''` → 整格失败 → 重进训练场 → 又一格。
 
-### 更贵的那个后果：这把枪现在**测不了**
+### ✅ 更贵的那个后果曾经是「这把枪测不了」 —— 2026-08-09 解决
 
-它的瞄具既不是 `red_dot` 也不是 `iron`，是一个在 `config.RECOIL_SIGHT_PROFILES` 里**没有 K** 的集成镜。要测 p90，第一步是给那个镜子量一个 K（`calibration/calibrate_k.py`），不是再试一次装配。已从 `tools/run_queue*.sh` 拿掉。
+它的瞄具既不是 `red_dot` 也不是 `iron`，是第三样东西。这条原来写着「要测 p90，第一步是给那个镜子量一个 K」，**那句话是对的，而且照做了**：
+
+```
+detector.weapon.INTEGRAL_SIGHT   p90 -> 'p90_integral'      枪自带的镜子有了名字
+config.RECOIL_SIGHT_PROFILES     'p90_integral' 有 K 了      calibrate_k --weapon p90 --sight ...
+```
+
+⚠ **而量出来之前先发现了一件更基本的事：这把枪的曲线从来没播过。** 种子存在 `integral` 这个键下，而 `_sight_of('')` 答 `iron`——两个词，查不到，于是运行时**不压枪**，唯一的症状是 `no fitted curve ... NOT compensating`，而那行字 m416 也会印、在那儿是真的。**vss 同一个病**（存 `vss_pso1`，查 `iron`）。
+
+**空镜位在两种枪上不是一个意思，这是这条 quirk 的一般形式：**
+
+| | 镜位 | 空读回的意思 |
+|---|---|---|
+| m416 不装东西 | **有**，空着 | 机械瞄具 `iron` |
+| p90 / vss | **没有** | 枪自带的那个镜子 |
+
+`pixi run one-gun` 三条钉着这个，m416 那条是阳性对照。
 
 ---
 

@@ -252,9 +252,30 @@ because a stock is worth 2x; a part worth 5% merges into its neighbour and
 moves the mean with nothing to show for it.
 
 ⚠ **A freshly spawned gun is NOT bare** — PUBG bolts on whatever the backpack
-holds, so strip explicitly: `--kit "muzzle=,grip="`. ⚠ **`iron` has no K**: an
-empty scope slot maps to a key `RECOIL_SIGHT_PROFILES` does not hold, and such
-a gun is now refused rather than analysed with the red dot's.
+holds, so strip explicitly: `--kit "muzzle=,grip="`.
+
+⚠ **AN EMPTY SCOPE SLOT MEANS TWO DIFFERENT THINGS AND THIS SAID ONE.** It used
+to read "`iron` has no K: an empty scope slot maps to a key
+`RECOIL_SIGHT_PROFILES` does not hold, and such a gun is now refused". Both
+halves were wrong by 2026-08-09:
+
+    m416, nothing fitted   the slot EXISTS and is empty   -> iron, still no K
+    p90 / vss              there is NO slot at all        -> the gun's own optic
+
+`_sight_of(asset, weapon)` now takes the weapon and `detector.weapon.
+INTEGRAL_SIGHT` names the second kind (`p90_integral`, `vss_pso1`), each with
+its own K. Before that both guns' curves were filed under a name the lookup
+could never produce, so **neither had ever played one** — and the only symptom
+was `no fitted curve ... NOT compensating`, which is the same line the m416
+prints where it is true.
+
+⚠ **And "is now refused" described a gate that did not exist.** Only a
+`--sight` flag disagreeing with the readback was refused; agreeing on a
+profile-less name sailed through, and `Rig.__init__` silently substituted
+`RECOIL_K_DEFAULT_SCOPED` — the magnified group's constant, ~19% high on a 1x
+optic. The refusal is real now (`collect_timed` and `harness/adapter`, one
+each). **Prose describing a gate that does not exist is worse than no prose: it
+is why nobody wrote the gate.**
 
 **`[!] REFUSING` is the feature.** Fix the game state, not the check.
 

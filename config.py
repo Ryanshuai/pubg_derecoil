@@ -474,6 +474,51 @@ RECOIL_SIGHT_PROFILES = {
     # fire-rate disagreement — vector is second worst on both.
     'vss_pso1': {'K': 1.875, 'mag': 4, 'keepout': 200,
                  'patch_xs': (1265, 1330, 2010)},
+    # The p90's optic is part of the gun -- no scope slot, so nothing on screen
+    # names it and detector.weapon.INTEGRAL_SIGHT does (2026-08-09). Before that
+    # entry existed the curve was filed under `integral` while the lookup asked
+    # for `iron`, so the p90 had NEVER PLAYED ITS CURVE and the only symptom was
+    # `no fitted curve ... NOT compensating` -- a line the m416 prints for the
+    # same slot, where it is true. The vss had the same fault.
+    #
+    # ⚠ MEASURED AS A RATIO, NOT AS A LEVEL, and that is the whole point.
+    # calibrate_k drops duplicate frames, so it ACCUMULATES the correlator's
+    # per-pair bias b(delta) -- which is why red_dot's stored 1.5413 comes from
+    # the one-pair probe and NOT from calibrate_k. A number straight out of
+    # calibrate_k is therefore not comparable with the entries above it. What IS
+    # comparable is two calibrate_k runs divided by each other: the bias is
+    # multiplicative and largely cancels, the same reason kit factors are
+    # measured as ratios inside one run.
+    #
+    #     same command both sides: --ads --inject-s 1.0, 24 trials, 7 patches
+    #     counts  px/frame   K p90   K red_dot   ratio   sem
+    #         50      1.71  1.6197      1.5927  1.0170  0.24%
+    #        100      3.05  1.6161      1.5929  1.0145  0.16%
+    #        200      5.54  1.6070      1.5789  1.0178  0.56%
+    #        300      8.37  1.6125      1.5548  1.0371  0.68%   <- see below
+    #
+    #     1.5413 x 1.0157 = 1.5656
+    #
+    # ⚠ THE 300 ROW IS EXCLUDED ON A STATED RULE, NOT BECAUSE IT DISAGREES.
+    # b(delta) is a curve that changes sign near 3 px/pair, so a ratio only
+    # cancels where both sides sit at the same delta -- and K is USED on a real
+    # magazine, whose pairs run p25 0.90 / median 2.00 / p75 3.78 px. The 50 and
+    # 100 rows bracket that median; 300 is at 8.4 px/frame, off the end of the
+    # regime this constant is ever applied in. 200 is outside p75 and agrees
+    # anyway, which is the check that the rule is not just fitting the answer.
+    #
+    # ⚠ ONE RUN PER SIDE. NOT REPLICATED. The red_dot block above spells out why
+    # that matters (K_true moved 0.55% between two runs, nine times the
+    # within-run sem), so treat 1.5656 as good enough to FIRE with, not as an
+    # established constant. It survives on the compensated arm regardless: there
+    # |y_obs| is ~36 counts against ~830, so a K error is divided by ~23.
+    #
+    # ⚠ patch_xs IS THE DEFAULT ON PURPOSE. Both runs flagged unstable patches
+    # -- p90 at index 3,4 and red_dot at index 6 -- and DIFFERENT patches on the
+    # two runs means world content, not the sight. Baking one run's bad patches
+    # into the profile would record a transient as a permanent property.
+    'p90_integral': {'K': 1.5656, 'mag': 1, 'keepout': RECOIL_KEEPOUT,
+                     'patch_xs': RECOIL_PATCH_XS},
 }
 
 # Untested sights fall back to the magnified-scope group.

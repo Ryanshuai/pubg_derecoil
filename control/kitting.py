@@ -44,6 +44,7 @@ import numpy as np
 from detector.attachment_catalog import fits, has_slot
 import detector.weapon as weapon_mod
 from detector.weapon import Weapon, WEAPON_RPM, can_full_guns
+from detector.weapon import INTEGRAL_SIGHT as _INTEGRAL_SIGHT
 
 from control.session import ensure_ready
 from control import spawner as spawner_mod
@@ -251,8 +252,6 @@ SIGHT_SCOPE = {
     '2x': 'scope_2x',
     '3x': 'scope_3x',
     '4x': 'scope_4x',
-    # Carried by the weapon, not fitted. VSS has no sight slot at all.
-    'vss_pso1': None,
     'hipfire': None,
 }
 SCOPE_PART = 'red_dot'
@@ -262,7 +261,16 @@ SCOPE_PART = 'red_dot'
 # with the red dot's K reported a recoil of MINUS 482 counts over a magazine.
 # config.RECOIL_SIGHT_PROFILES already had the right profile; nothing was
 # choosing it.
-SIGHT_FOR = {'vss': 'vss_pso1'}
+#
+# ⚠ ONE SOURCE, DERIVED IN BOTH DIRECTIONS. This used to be its own literal
+# {'vss': 'vss_pso1'} sitting next to detector.weapon's answer for the same
+# question, and a second gun with an integral optic (the p90) needed BOTH
+# updated to work -- while updating only one produced a run that kits and
+# measures under two different sight names and says so nowhere. The curve
+# lookup is the one that cannot be wrong, so it is the source.
+SIGHT_FOR = dict(_INTEGRAL_SIGHT)
+# ...and an integral optic is never a part to fit: there is no slot for it.
+SIGHT_SCOPE.update({name: None for name in _INTEGRAL_SIGHT.values()})
 
 # The magazine is pinned the other way: always fitted, never stripped. It
 # changes capacity, not recoil, and capacity is free measurement — 39 rounds

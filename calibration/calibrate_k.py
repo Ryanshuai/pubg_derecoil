@@ -285,6 +285,17 @@ def main():
     ap.add_argument('--dry-run', action='store_true',
                     help='capture without injecting — measures the noise '
                          'floor of a stationary view')
+    ap.add_argument('--sight', default='',
+                    help='the RECOIL_SIGHT_PROFILES name this K is for. Fits '
+                         'the matching optic when there is one, then reads it '
+                         'back off the gun and refuses on disagreement. '
+                         'Requires --weapon.')
+    ap.add_argument('--weapon', default='',
+                    help='spawn/hold this gun and PROVE it is in hand before '
+                         'measuring. Required for a gun whose optic is part '
+                         'of the weapon (p90, vss) -- see the note at the '
+                         'call site. Empty = measure whatever is in hand, '
+                         'which records nothing about what that was.')
     ap.add_argument('--ads', action='store_true',
                     help='have the Pico hold right-click for each trial, so '
                          'the whole run happens scoped in. Assumes '
@@ -353,6 +364,64 @@ def main():
                   f"game is unfocused, so every trial would read zero.")
             grabber.close()
             return 1
+        # ⚠ K IS MEASURED THROUGH A SIGHT, AND A SIGHT IS ON A GUN. This file
+        # took whatever happened to be in hand and never said which -- the same
+        # hole that let two mp5k cells come out 2.07x apart with nothing on
+        # screen able to name the difference (calibration/collect_timed.
+        # read_sight). It matters most for exactly the gun this was added for:
+        # the p90's optic is part of the weapon, so an empty-handed run
+        # measures hip fire and files it under the p90's name.
+        #
+        # ⚠ AND EMPTY HANDS DEFEAT THE ADS CHECK SPECIFICALLY. AdsDetector
+        # answers "scoped" by the ABSENCE of the crosshair, and a character
+        # holding nothing draws no crosshair -- so --ads reads True on every
+        # trial while nothing is scoped at all (tools/probe_posture_trace hit
+        # this first). ensure_weapon_in_hand proves the gun by its AMMO
+        # COUNTER, which is presence evidence rather than another absence.
+        if args.weapon:
+            from calibration.collect_timed import read_sight
+            from control.inventory import InventoryControl
+            from control.kitting import SIGHT_SCOPE
+            from control.spawner import SpawnerControl
+            from control.stock import ensure_weapon_in_hand, restock
+            with InventoryControl() as ac, SpawnerControl() as sc:
+                slot = ensure_weapon_in_hand(ac, sc, weapon=args.weapon)
+                if not slot:
+                    print(f"\n[!] ABORT: could not get a {args.weapon} in "
+                          f"hand. K measured with the wrong gun -- or none --"
+                          f" is a number for another sight.")
+                    grabber.close()
+                    return 1
+                # ⚠ AND THE OPTIC IS THE THING BEING MEASURED, so it is fitted
+                # and then READ BACK OFF THE GUN. A freshly spawned gun wears
+                # whatever the backpack held, so "I asked for a red dot" and
+                # "it is wearing a red dot" are two different statements --
+                # and the gap between them is what made two mp5k cells come
+                # out 2.07x apart with every printed number looking fine.
+                # SIGHT_SCOPE answers None for an integral optic: nothing to
+                # fit, and the readback still has to agree.
+                part = SIGHT_SCOPE.get(args.sight, SIGHT_SCOPE.get('red_dot'))
+                if args.sight and part:
+                    restock(ac, sc, {part}, leave='shut')
+                    ac.ensure_kit(slot, {'scope': part}, weapon=args.weapon)
+                if args.sight:
+                    # `ac` is already open, so the reading is taken through it
+                    # rather than through read_loadout(), which builds its own
+                    # InventoryControl -- that would be a second Tab open/close
+                    # inside one that is already held, the exact churn
+                    # tab_up()'s docstring names.
+                    with ac.tab_up():
+                        lo = ac.loadout()
+                    worn, _asset = read_sight(lo, args.weapon)
+                    if worn != args.sight:
+                        print(f"\n[!] ABORT: asked for {args.sight!r} and the "
+                              f"gun reads {worn!r}. Every count below would be "
+                              f"filed under a sight it was not measured "
+                              f"through -- worth about 3x between iron sights "
+                              f"and a red dot, and invisible downstream.")
+                        grabber.close()
+                        return 1
+                    print(f"  sight: {worn} (read back off the gun)")
 
     rows = []
     raw = []

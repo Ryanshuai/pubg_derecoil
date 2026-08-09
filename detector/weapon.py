@@ -178,15 +178,40 @@ def config_key(config):
     return '_'.join(f'{k}-{v}' for k, v in items) or 'bare'
 
 
+# Guns whose optic is part of the WEAPON, not of the scope slot. An empty
+# readback means something different on these: not "no optic", but "the only
+# optic this gun will ever have".
+#
+# ⚠ ONE NAME PER GUN, NEVER A SHARED 'integral'. Two guns' built-in optics are
+# two different optics with two different Ks, and the day one of them is
+# measured a shared name would hand that K to the other -- which is the
+# borrow-across-guns error that `laser` and `comp_smg` already cost this repo
+# (detector/CLAUDE.md's factor table: 0.5907 on the mp5k, 0.7197 on the vector,
+# one wiki number for both).
+#
+# What the missing entry cost, found 2026-08-09: the p90's curve was filed
+# under `integral` and the vss's under `vss_pso1`, while the lookup below
+# answered `iron` for both -- so NEITHER GUN HAD EVER PLAYED ITS CURVE, and the
+# only symptom was `no fitted curve ... NOT compensating`, which reads exactly
+# like a cell nobody has measured yet. The m416 prints the same line for the
+# same slot and there it is TRUE.
+INTEGRAL_SIGHT = {'vss': 'vss_pso1', 'p90': 'p90_integral'}
+
+
 # One line per unmeasured configuration, not one per keypress: set_seq runs
 # on every weapon, attachment and posture change.
-def _sight_of(scope_asset):
+def _sight_of(scope_asset, weapon=None):
     """Which RECOIL_SIGHT_PROFILES entry an equipped optic corresponds to.
 
     The curve store keys on the profile name because that is what carries K,
     and K is what a count is worth. `''` is not "no sight, so red dot" -- an
     empty scope slot means the player is looking down iron sights or hip
     firing, where a count rotates the view about a third as far.
+
+    ⚠ `weapon` IS NOT OPTIONAL IN MEANING, only in signature: an empty readback
+    is ambiguous without it (iron sights, or an integral optic?) and the two
+    answers are about 3x apart. It defaults to None so a caller that genuinely
+    has no gun in hand can still ask, and every caller that has one passes it.
     """
     if not scope_asset:
         # ⚠ AN EMPTY SCOPE SLOT IS NOT A RED DOT. _SCOPE_TO_MAG maps '' to
@@ -194,7 +219,9 @@ def _sight_of(scope_asset):
         # but they are not the red dot's sensitivity, and this function keys
         # the CURVE, not the zoom. Returning 'red_dot' here handed the red
         # dot's 895-count curve to a gun with no optic at all.
-        return 'iron'
+        #
+        # Nor is it iron sights on a gun that has no scope slot to be empty.
+        return INTEGRAL_SIGHT.get(weapon, 'iron')
     mag = _SCOPE_TO_MAG.get(scope_asset, 1)
     return {1: 'red_dot', 2: '2x', 3: '3x', 4: '4x',
             6: '6x', 8: '8x', 15: '15x'}.get(mag, 'red_dot')
@@ -546,7 +573,7 @@ class Weapon():
             # baked into the counts it was fitted from.
             cfg = {'muzzle': self.muzzle, 'grip': self.grip,
                    'stock': self.butt}
-            sight = _sight_of(self.scope)
+            sight = _sight_of(self.scope, self.name)
             shots = self._final.get((self.name, config_key(cfg),
                                      self.posture, sight))
             if shots:

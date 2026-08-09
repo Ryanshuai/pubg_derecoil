@@ -31,6 +31,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from control import stock as stock_mod
+from detector import weapon as weapon_mod
 
 FAILS = []
 
@@ -190,6 +191,33 @@ def main():
           {'grip': 'vert_grip'})
     check('config and sight, one reading — sight', ct.read_sight(one)[1],
           'Sight_RedDot_01_C')
+
+    # ⚠ AN EMPTY SCOPE SLOT DOES NOT MEAN THE SAME THING ON EVERY GUN, and the
+    # profile name is what the curve is filed under. A gun with a scope slot
+    # and nothing in it is on iron sights; a gun with NO scope slot is looking
+    # through the optic bolted to it, and calling that `iron` filed the p90's
+    # and the vss's curves under a name the lookup never produced -- so neither
+    # gun ever played one (detector/weapon.INTEGRAL_SIGHT).
+    #
+    # The m416 line is the positive control: same empty readback, and there
+    # `iron` is the right answer.
+    empty = {1: dict(bare, scope='')}
+    check('empty scope, gun that has the slot -> iron',
+          ct.read_sight(lo({1: 'm416', 2: None}, empty), 'm416')[0], 'iron')
+    check('empty scope, integral optic -> its own name, not iron',
+          ct.read_sight(lo({1: 'p90', 2: None}, empty), 'p90')[0],
+          'p90_integral')
+    check('empty scope, vss -> its own name',
+          ct.read_sight(lo({1: 'vss', 2: None}, empty), 'vss')[0], 'vss_pso1')
+    # And the name must survive the round trip the runtime actually takes:
+    # what read_sight answers has to equal what set_seq looks the curve up by.
+    for gun in ('m416', 'p90', 'vss'):
+        w = weapon_mod.Weapon()
+        w.set('name', gun)
+        w.set('scope', '')
+        check(f'{gun}: read_sight agrees with the curve lookup',
+              weapon_mod._sight_of(w.scope, w.name),
+              ct.read_sight(lo({1: gun, 2: None}, empty), gun)[0])
 
     print()
     if FAILS:

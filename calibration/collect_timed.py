@@ -246,7 +246,7 @@ def read_config(lo, weapon=None):
     return out
 
 
-def read_sight(lo):
+def read_sight(lo, weapon=None):
     """The gun's optic, twice: -> (profile_name, asset). (None, None) if unread.
 
     `lo` is the SAME loadout dict read_config was given — not a second reading.
@@ -276,12 +276,18 @@ def read_sight(lo):
     need two different spellings of one reading, and taking it twice would be
     two readings: `Weapon.set('scope', ...)` keys `_SCOPE_TO_MAG` on the raw
     asset, while everything downstream of K wants the profile name.
+
+    ⚠ `weapon` MUST be passed by anyone who then compares this answer with what
+    set_seq looked the curve up by. An empty scope slot reads `iron` on a gun
+    that has one and its own integral name on a gun that has none, and this
+    function and detector/weapon.set_seq disagreeing about which is the same
+    split-brain that fired a bare-gun curve at a kitted gun.
     """
     from detector.weapon import _sight_of
     if not lo or not lo.get('slots'):
         return None, None
     asset = (lo['slots'].get(1) or {}).get('scope') or ''
-    return _sight_of(asset), asset
+    return _sight_of(asset, weapon), asset
 
 
 # The key `travel()` and calibration/artifacts/pitch/pitch_travel.json use for "not looking
@@ -1102,7 +1108,7 @@ def main():
         # magazines under a sight the caller did not ask for, and a cell that
         # silently changes its own measurement conditions is the thing this
         # whole file exists to stop.
-        worn, scope_asset = read_sight(lo)
+        worn, scope_asset = read_sight(lo, a.weapon)
         if worn is None:
             print('  [!] REFUSING: could not read the scope slot. K comes from '
                   'the optic, so an unread one is an unknown scale on every '
@@ -1116,6 +1122,26 @@ def main():
                   f'records the FLAG, so nothing downstream could see it.\n'
                   f'      Either fit a {rig.sight} or pass --sight {worn}.')
             return 7
+        # ⚠ AND AGREEING ON A SIGHT NOBODY MEASURED IS NOT AGREEMENT. Rig
+        # falls back to RECOIL_K_DEFAULT_SCOPED for an unknown profile --
+        # silently, and it is the MAGNIFIED group's constant, so an iron-sight
+        # or integral-optic gun would be analysed at roughly 3x. The check
+        # above cannot see it: both sides say the same word, and the word has
+        # no K behind it.
+        #
+        # This is the refusal I made by hand on the p90 on 2026-08-09 and then
+        # had no gate for. Firing such a gun is fine -- the curve plays in
+        # counts the device already speaks (tools/probe_compensation.py).
+        # MEASURING it is what needs K, and that is what stops here.
+        if worn not in cfg.RECOIL_SIGHT_PROFILES:
+            print(f'  [!] REFUSING: the gun wears {worn!r} and no K has ever '
+                  f'been measured for it, so every count in this run would be '
+                  f'scaled by RECOIL_K_DEFAULT_SCOPED — the MAGNIFIED group\'s '
+                  f'constant, wrong by about 3x on an unmagnified sight, and '
+                  f'invisible in every number printed.\n'
+                  f'      Measure a K for {worn!r} first '
+                  f'(tools/audit_k.py), or fit an optic that has one.')
+            return 8
         print(f'  sight : {worn} (K={rig.K}, read back off the gun)')
 
         # ---------------------------------------------------------------
