@@ -1455,6 +1455,86 @@ def fire_mode_for(weapon):
     """The fire mode this weapon's untagged curve and samples describe."""
     return FIRE_MODE_FOR.get(weapon, 'full')
 
+
+# ════════════════════════════════════════════════════════════
+# Cell names — ONE author, because three layers spell this string
+# ════════════════════════════════════════════════════════════
+#
+# A cell is (weapon, attachments) and its name is the filename fragment both
+# the sample store and the curve store use. THE GRAMMAR:
+#
+#     key   := 'bare' | pair ('_' pair)*        pairs sorted by slot
+#     pair  := slot '-' part
+#     slot  := an attachment slot: muzzle, grip, stock
+#     part  := a catalogue key, WHICH MAY CONTAIN '_' AND NEVER '-'
+#
+#     {}                                              -> 'bare'
+#     {'grip': 'vert_grip'}                           -> 'grip-vert_grip'
+#     {'muzzle': 'comp_ar', 'grip': 'vert_grip'}      -> 'grip-vert_grip_muzzle-comp_ar'
+#
+# ⚠ IT LIVES HERE BECAUSE THE ALTERNATIVE WAS TWO AUTHORS, AND IT HAD TWO.
+# calibration/samples.py and detector/weapon.py each defined config_key, byte
+# for byte the same, and detector's carried the reason: "expressed here so
+# detector/ does not import calibration/. If the two ever disagree, the curve a
+# magazine was fitted from stops being findable by the runtime that has to fire
+# it -- which is silent, because the lookup just misses." config is the module
+# both layers already import, so the constraint that forced the copy is gone.
+#
+# ⚠ AND THE PART NAMES CONTAIN THE SEPARATOR, which is why parse_config_key
+# exists rather than a str.split('_'). `grip-vert_grip` split on '_' reads back
+# as {'grip': 'vert'} — a key that names a part nobody has, pointing at a file
+# nobody wrote. Eleven measured cells could not be written from the CLI for
+# exactly that reason (2026-08-09) and the naive parser was refusing them by
+# round-trip, correctly, without anyone noticing the parser was the fault.
+
+
+def config_key(config):
+    """A (weapon, attachments) cell's name. -> str
+
+    Sorted, so {'muzzle':'comp_ar','grip':'vert'} and the same dict built in
+    the other order land in the same file rather than two.
+    """
+    if not config:
+        return 'bare'
+    items = sorted((str(k), str(v)) for k, v in config.items() if v)
+    return '_'.join(f'{k}-{v}' for k, v in items) or 'bare'
+
+
+def parse_config_key(key):
+    """The inverse of config_key. -> {slot: part} | None if it is not a key.
+
+    ⚠ IT DOES NOT NEED THE SLOT NAMES, and that is what makes it safe. A pair
+    always starts with `<slot>-`, and NO PART NAME CONTAINS '-', so a token
+    holding a hyphen opens a new pair and every token after it belongs to that
+    pair's part until the next hyphen appears. `grip-vert` + `grip` is
+    {'grip': 'vert_grip'} without a table of legal slots to consult, so this
+    cannot go stale when a slot is added.
+
+    Returns None rather than guessing when the string is not a key at all, and
+    every caller should still check `config_key(parse_config_key(k)) == k` --
+    the round trip is the proof, and it costs one comparison.
+    """
+    if key in (None, '', 'bare'):
+        return {}
+    out, slot, parts = {}, None, []
+    for tok in str(key).split('_'):
+        if '-' in tok:
+            if slot is not None:
+                out[slot] = '_'.join(parts)
+            slot, first = tok.split('-', 1)
+            parts = [first]
+            if not slot or not first:
+                return None
+        elif slot is None:
+            return None                       # a part before any slot
+        else:
+            parts.append(tok)
+    if slot is None:
+        return None
+    out[slot] = '_'.join(parts)
+    return out
+
+
 # ════════════════════════════════════════════════════════════
 # Mouse / Pico
 # ════════════════════════════════════════════════════════════

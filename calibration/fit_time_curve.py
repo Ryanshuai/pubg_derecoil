@@ -55,6 +55,7 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+import config as cfg                                              # noqa: E402
 from calibration import samples as S                              # noqa: E402
 
 # The firmware plays knots at 1 ms resolution and holds 300 of them
@@ -420,7 +421,15 @@ def fit(mags, grid_ms=GRID_MS, window=RECENT_MAGS, centre=None):
                            f'maximum while the trigger is still down — none of '
                            f'them is a burst'}
     n_all = len(mags)
+    # ⚠ THE WINDOW DROP HAS TO BE REPORTED. It is justified (see RECENT_MAGS:
+    # early magazines were fired under badly wrong curves and are biased in a
+    # known direction), but the caller printed `n_kept/n_total` where n_total
+    # is what SURVIVED the window -- so a pool of 139 read `50/50 magazines`
+    # and the 89 that never entered were invisible. A bound that silently
+    # truncates reads as "everything was used".
+    n_windowed = 0
     if window and len(mags) > window:
+        n_windowed = len(mags) - window
         mags = mags[-window:]
 
     span = max(float(np.max(m.t)) for m in mags if len(m.t))
@@ -476,7 +485,7 @@ def fit(mags, grid_ms=GRID_MS, window=RECENT_MAGS, centre=None):
         # reads exactly like one that had nothing to drop, and tools/CLAUDE.md's
         # rule is that a bound on coverage has to say what it bounded.
         'not_bursts': [dict(_label(m), hold_drawdown=d) for m, d in not_bursts],
-        'n_kept': len(keep), 'n_total': len(mags),
+        'n_kept': len(keep), 'n_total': len(mags), 'n_windowed': n_windowed,
         'n_stored': n_all, 'window': window, 'centre': centre or CENTRE,
         'eps': eps, 'cluster_why': why,
         'minority': frac < MIN_CLUSTER_FRAC,
@@ -1029,15 +1038,18 @@ def _write_curve(r, weapon, config, sight, posture, n_total, fire_mode=None):
     if isinstance(config, dict):
         cfg_dict = dict(config)
     else:
-        # CLI only. ⚠ Lossy whenever a part name holds an underscore -- see the
-        # docstring. It is kept because `--config` is a string and there is
-        # nothing better to parse, and it SAYS SO when it cannot round-trip.
-        cfg_dict = {}
-        if config and config != 'bare':
-            for part in str(config).split('_'):
-                slot, _, val = part.partition('-')
-                if slot and val:
-                    cfg_dict[slot] = val
+        # CLI only. ⚠ THIS USED TO BE str.split('_') AND THAT IS LOSSY, because
+        # part names hold underscores: `grip-vert_grip` read back as
+        # {'grip': 'vert'}. The round-trip check below caught it every time and
+        # refused -- correctly -- so eleven measured cells simply could not be
+        # written from the command line, and the refusal read like the KEY was
+        # ambiguous when the PARSER was the fault. config.parse_config_key
+        # splits on the pair boundary instead; the check stays, as the proof.
+        cfg_dict = cfg.parse_config_key(config)
+        if cfg_dict is None:
+            print(f'  [!] REFUSING: --config {config!r} is not a cell name. '
+                  f'The grammar is in config.parse_config_key.')
+            return None
         if config and config != 'bare' and _ck(cfg_dict) != config:
             print(f'  [!] REFUSING: --config {config!r} does not round-trip '
                   f'through the key parser (it reads back as '
@@ -1127,7 +1139,15 @@ def main():
         return selftest()
     if not a.weapon:
         ap.error('--weapon or --selftest')
-    p = os.path.join(S.SAMPLE_DIR, f'{a.weapon}__{a.config or "bare"}.jsonl')
+    # ⚠ ASK THE STORE FOR ITS PATH. This spelled `{weapon}__{config}.jsonl` by
+    # hand, a fourth copy of a name samples.path_for already owns, and a hand
+    # copy is exactly how the fire-mode tag would have gone missing here.
+    cfg_dict = cfg.parse_config_key(a.config)
+    if cfg_dict is None:
+        print(f'  [!] --config {a.config!r} is not a cell name. The grammar is '
+              f'in config.parse_config_key.')
+        return 2
+    p = S.path_for(a.weapon, cfg_dict, a.fire_mode)
     mags = S.load(a.weapon, path=p)
     if not mags:
         print(f'no samples at {p}')
@@ -1163,6 +1183,11 @@ def main():
         return 3
     print(f'{a.weapon} {a.config or "bare"}: {r["n_kept"]}/{r["n_total"]} '
           f'magazines, {len(r["knots"])} knots @ {r["grid_ms"]:.1f} ms')
+    if r.get('n_windowed'):
+        print(f'  [!] {r["n_windowed"]} OLDER magazine(s) never entered this '
+              f'fit — RECENT_MAGS={RECENT_MAGS} keeps the newest, because early '
+              f'iterations fired badly wrong curves and are biased in a known '
+              f'direction. They are on disk and a wider window would use them.')
     print(f'  total {r["total_counts"]:.1f} counts over {r["span_s"]:.2f} s')
     # Before the clustering line, because it happened before the clustering and
     # because `n_total` already excludes these -- printed after, "12/12" reads

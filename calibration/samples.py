@@ -70,16 +70,12 @@ SAMPLE_DIR = os.path.join(ROOT, 'calibration', 'artifacts', 'recoil', 'samples')
 VERSION = 1
 
 
-def config_key(config):
-    """A stable filename fragment for an attachment set.
-
-    Sorted, so {'muzzle':'comp_ar','grip':'vert'} and the same dict built in
-    the other order land in the same file rather than two.
-    """
-    if not config:
-        return 'bare'
-    items = sorted((str(k), str(v)) for k, v in config.items() if v)
-    return '_'.join(f'{k}-{v}' for k, v in items) or 'bare'
+# ⚠ RE-EXPORTED FROM config, NOT DEFINED HERE (2026-08-09). detector/weapon.py
+# held a byte-identical second copy; the format now has one author and both
+# layers import it. Re-exported rather than requiring callers to change import
+# site: `samples.config_key` is what the store's own path_for uses and what a
+# dozen files already say.
+from config import config_key, parse_config_key            # noqa: E402,F401
 
 
 def comp_counts_at(curve, t_s):

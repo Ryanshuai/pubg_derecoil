@@ -164,18 +164,12 @@ def load_curves():
     return out
 
 
-def config_key(config):
-    """The filename fragment a (weapon, attachments) pair is stored under.
-
-    Deliberately the SAME function as calibration.samples.config_key, expressed
-    here so detector/ does not import calibration/. If the two ever disagree,
-    the curve a magazine was fitted from stops being findable by the runtime
-    that has to fire it -- which is silent, because the lookup just misses.
-    """
-    if not config:
-        return 'bare'
-    items = sorted((str(k), str(v)) for k, v in config.items() if v)
-    return '_'.join(f'{k}-{v}' for k, v in items) or 'bare'
+# ⚠ RE-EXPORTED, NOT REDEFINED (2026-08-09). This file used to carry its own
+# byte-identical copy, with the reason written in its docstring: "expressed
+# here so detector/ does not import calibration/". config is imported by both
+# layers already, so the copy bought nothing and risked the failure that
+# docstring described -- two authors drifting, and a lookup that just misses.
+from config import config_key                              # noqa: E402,F401
 
 
 # Guns whose optic is part of the WEAPON, not of the scope slot. An empty
