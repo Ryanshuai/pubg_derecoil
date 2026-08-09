@@ -8,12 +8,18 @@ Two claims, both about control flow, both testable without pixels:
   the guns are read ONCE, on the keypress that closes the panel
 
 ⚠ THE SECOND ONE IS ENFORCED AS A PROHIBITION, NOT AS A PROPERTY. The fake
-grabber below counts every look at the weapon panel, and several cases assert
-that count is ZERO while the panel is up. That is deliberate: "it reads the
-right thing at the close" is also satisfied by schemes that read continuously
-and keep the last answer, and those have been built here more than once. A
-gate that only checks the published result cannot tell them apart. This one
-fails the moment anything grabs the panel early, whatever it does with it.
+detectors below count every CLASSIFY, and several cases assert that count is
+ZERO while the panel is up. That is deliberate: "it reads the right thing at
+the close" is also satisfied by schemes that read continuously and keep the
+last answer, and those have been built here more than once. A gate that only
+checks the published result cannot tell them apart.
+
+⚠ IT COUNTS CLASSIFIES, NOT GRABS, AND THAT LINE MOVED ON PURPOSE. Since the
+openness signal became the boxed slot number, the poll GRABS the panel -- it
+has to, that is where the tag is. What must not happen while the panel is up
+is a loadout being READ and published, and reading is what classifying is. A
+grab scored for one bit and dropped changes nothing downstream; the grab COUNT
+is a cost claim, and it is bounded separately below.
 
 ⚠ THE FAKE SCREEN STAMPS EVERY FRAME so this can say WHICH moment was read
 rather than merely that something was: each grab carries a generation counter
@@ -109,6 +115,11 @@ class FakeScreen:
         self.att_reads = 0
         self.att_told = 'never called'   # what the attachment read was given
         self.gen = 0
+        # Which rack slots hold a gun. The tag detector reads this OUT OF THE
+        # FRAME, not off the object, so a frame grabbed while the panel was
+        # shut answers "no gun" however this is set -- which is the property
+        # the live path depends on.
+        self.slots = (True, True)
         self.guns = {0: ('aug', 'm416')}
         self.kit = {0: {1: {'muzzle': 'comp'}, 2: {'muzzle': ''}}}
 
@@ -155,6 +166,20 @@ class FakeScreen:
                 return bool(frame[MY, MX, 0])
         return D()
 
+    def tag_det(self):
+        s = self
+
+        class D:
+            # The boxed slot number: drawn only when the panel is up AND that
+            # slot holds a gun. Decoded from the frame's stamp, so it answers
+            # about the moment the frame was grabbed.
+            def drawn(_self, frame, slot):
+                return bool(int(frame[MY, MX, 2]) & (1 << (slot - 1)))
+
+            def any_drawn(_self, frame):
+                return any(_self.drawn(frame, s_) for s_ in (1, 2))
+        return D()
+
     def grabber(self, counts=True):
         """counts=False for the anchor grabber, which is a different question.
 
@@ -179,7 +204,9 @@ class FakeScreen:
             def grab(_self):
                 if counts:
                     s.grabs += 1
-                _self._buf[MY, MX] = (1 if s.painted else 0, s.gen, 0)
+                bits = 0 if not s.open else (
+                    (1 if s.slots[0] else 0) | (2 if s.slots[1] else 0))
+                _self._buf[MY, MX] = (1 if s.painted else 0, s.gen, bits)
                 # ⚠ The anchor grabber returns a DICT, like the real
                 # RegionGrabber, because the saved frame now carries the
                 # anchor strip beside the panel and _compose has to cut it out
@@ -199,7 +226,8 @@ def build():
     state = FakeState()
     w = TabWatch(state, {'tab_type': screen.type_det(),
                          'tab_weapon': screen.weapon_det(),
-                         'tab_attachment': screen.att_det()},
+                         'tab_attachment': screen.att_det(),
+                         'gun_tag': screen.tag_det()},
                  verbose=False, shot_dir=SHOT_DIR)
     w._type_grab = screen.grabber(counts=False)
     w._panel_grab = screen.grabber()
@@ -238,7 +266,7 @@ check('open while the screen stays closed', w.open, False)
 # What it does not do is CLASSIFY: there is no panel to read yet, and the
 # picture is kept because "an opening frame with a panel still in it" is how a
 # close that never registered would show itself.
-check('the key snapped one frame', screen.grabs, 1)
+check('the key snapped a frame', screen.grabs >= 1, True)
 check('and classified nothing', screen.att_reads + screen.name_reads, 0)
 
 print('\n=== it opens when the SCREEN opens, and reads nothing ===')
@@ -252,32 +280,33 @@ print('\n=== and NOTHING is read for as long as it stays up ===')
 # ⚠ THE PROHIBITION. Two seconds of ticks, a whole rummage through the
 # inventory, and the weapon panel must not be looked at once. Anything that
 # reads here is describing a moment the player is still changing.
-before_anchor, before_grabs = screen.anchor_reads, screen.grabs
+before_grabs = screen.grabs
 t = run(w, 2.0, t0=t)
-check('two seconds open, panel grabs', screen.grabs - before_grabs, 0)
 check('nothing classified', screen.att_reads + screen.name_reads, 0)
 check('weapon_gt untouched', state.weapon_gt, ('', ''))
-# ⚠ AND THE ANCHOR IS NOT POLLED EITHER, which is a COST claim rather than a
-# correctness one and is pinned because it is invisible in behaviour. A GDI
-# grab is ~5 ms whatever its size, so checking the anchor on every 10 ms tick
-# for as long as somebody leaves their inventory open is 52% of a core. An
-# open panel costs the drift check and nothing else.
+# ⚠ AND THE GRABS ARE BOUNDED, which is a COST claim rather than a correctness
+# one and is pinned because it is invisible in behaviour. A GDI grab is ~9 ms,
+# so grabbing on every 10 ms tick for as long as somebody leaves their
+# inventory open is most of a core. Once the watch window after a key has
+# expired, an open panel costs the drift check and nothing else.
 budget = int(2.0 / TAB_DRIFT_S) + 1
-check(f'anchor checks in 2 seconds open (<= {budget})',
-      screen.anchor_reads - before_anchor <= budget, True)
+check(f'panel grabs in 2 idle seconds open (<= {budget})',
+      screen.grabs - before_grabs <= budget, True)
 
 print('\n=== the read happens on the KEYPRESS, while the panel is up ===')
 # ⚠ NOT when the anchor says shut. Six frames saved at that moment on
 # 2026-08-09 were all pure game world: by then the panel is GONE, not fading.
 # The press leads the close by 77-128 ms, and that margin is the design.
-at_key = screen.grabs
+at_key, at_key_cls = screen.grabs, screen.att_reads
 w.on_key(t)                      # the closing press: panel still on screen
-check('the panel was grabbed on the KEY', screen.grabs - at_key, 1)
-after_key = screen.grabs
+check('ONE grab on the key, and it is the one classified',
+      (screen.grabs - at_key, screen.att_reads - at_key_cls), (1, 1))
+after_cls = screen.att_reads
 screen.open = False              # ...and the game takes it down afterwards
 t = run(w, 0.05, t0=t)
 check('closed', w.open, False)
-check('the close itself grabbed nothing more', screen.grabs - after_key, 0)
+check('the close itself classified nothing more',
+      screen.att_reads - after_cls, 0)
 check('classified exactly once', screen.att_reads, 1)
 check('weapon_gt published', state.weapon_gt, ('aug', 'm416'))
 check('attachments published', state.attachments[1], {'muzzle': 'comp'})
@@ -298,12 +327,13 @@ t = run(w2, 0.5, t0=time.perf_counter())
 screen2.show(2, ('m416', 'sks'), kit={1: {'muzzle': 'comp_ar'},
                                      2: {'muzzle': ''}})   # you fitted it
 t = run(w2, 0.5, t0=t)
-screen2.open = False
-w2.on_key(t)
+at = screen2.att_reads
+w2.on_key(t)                     # pressed while it is still up -- as it is
+screen2.open = False             # ...and the game takes it down after
 t = run(w2, 0.05, t0=t)
 check('published what the gun wears NOW',
       state2.attachments[1], {'muzzle': 'comp_ar'})
-check('and read the panel once, not twice', screen2.grabs, 1)
+check('and classified once, not twice', screen2.att_reads - at, 1)
 
 print('\n=== a SWALLOWED keypress must not move the flag ===')
 w3, state3, screen3 = build()
@@ -318,7 +348,7 @@ check('state agrees with the screen', state3.tab_open, screen3.open)
 # TRIGGER, not an answer. The panel was up, so the reading describes it -- and
 # when the game eats the key the panel is still up and the reading is still
 # true. What must not move is the FLAG.
-check('the panel was read, because it was up', screen3.grabs, 1)
+check('the panel was read, because it was up', screen3.att_reads, 1)
 check('names published from a panel that really was there',
       state3.weapon_gt, ('aug', 'm416'))
 
@@ -333,7 +363,7 @@ t = run(w4, TAB_DRIFT_S + 0.05, t0=t)
 check('drift check noticed it closed', w4.open, False)
 # ⚠ And read nothing on the way, in EITHER direction. Neither transition had a
 # keypress, so neither had a moment at which the panel was known to be up.
-check('and looked at the panel neither time', screen4.grabs, 0)
+check('and classified neither time', screen4.att_reads, 0)
 
 print('\n=== a close NOBODY announced reads nothing at all ===')
 # ⚠ THE HONEST FAILURE, AND IT IS THE COST OF THE DESIGN. Alt-tab, a
@@ -349,7 +379,7 @@ screen5.open = False
 screen5.painted = False          # by the time drift notices, it is gone
 t = run(w5, TAB_DRIFT_S + 0.05, t0=time.perf_counter())
 check('the drift check noticed', w5.open, False)
-check('and looked at nothing', screen5.grabs, 0)   # no press, no snap
+check('and classified nothing', screen5.att_reads, 0)   # no press, no read
 check('nothing published', state5.weapon_gt, ('', ''))
 
 print('\n=== an unpainted panel still refuses to publish a kit ===')
@@ -364,11 +394,55 @@ screen5b.open = True
 screen5b.show(1, ('vss', 'p90'))
 screen5b.painted = False
 w5b._set_open(True)
-w5b.on_key(time.perf_counter())
+w5b.on_key(time.perf_counter())   # pressed while up
 check('the panel WAS snapped and read', screen5b.grabs, 1)
 check('attachments NOT published', 1 in state5b.attachments, False)
 check('attachment read never even attempted', screen5b.att_reads, 0)
 check('but the weapon names still are', state5b.weapon_gt, ('vss', 'p90'))
+
+print('\n=== an EMPTY rack slot is not read at all ===')
+# ⚠ THE PER-SLOT HALF, AND IT IS WHERE THE REAL CORPUS BIT. Every panel frame
+# saved on 2026-08-09 had a gun in slot 1 and nothing in slot 2, and the read
+# went ahead on both — so slot 2 got a name scored off blank pixels and a kit
+# scored blind against all 55 templates. The boxed number answers this per
+# slot, before a single template is touched.
+wS, stateS, screenS = build()
+screenS.open = True
+screenS.slots = (True, False)          # one gun, like the corpus
+screenS.show(1, ('sks', 'ghost'), kit={1: {'muzzle': 'supp_ar'},
+                                       2: {'muzzle': 'invented'}})
+wS._set_open(True)
+wS.on_key(time.perf_counter())
+t = run(wS, 0.05, t0=time.perf_counter())
+check('slot 1 published', stateS.attachments.get(1), {'muzzle': 'supp_ar'})
+check('slot 2 not published at all', 2 in stateS.attachments, False)
+check('and its name never reached GameState', stateS.weapon_gt, ('sks', ''))
+
+print('\n=== a STALE open flag is corrected by the key\'s own frame ===')
+# ⚠ THE 8-OF-38 BUG, WRITTEN AS A CASE. TabWatch believed the panel was up,
+# the screen showed bare grass, and the frames were saved as closes and read
+# as loadouts. The key's frame is a MEASUREMENT, so it settles `open` instead
+# of being filtered through it — believing the flag is what produced eight
+# pictures of a road.
+wT, stateT, screenT = build()
+
+wT._set_open(True)               # the flag says up...
+screenT.open = False             # ...and the screen says otherwise
+wT.on_key(time.perf_counter())
+check('the key corrected the flag', wT.open, False)
+check('and read nothing off a frame with no panel', screenT.att_reads, 0)
+check('nothing published', stateT.weapon_gt, ('', ''))
+
+print('\n=== both slots empty: the panel is not even open ===')
+# `open` now means "a panel with a gun in it". An inventory over an empty rack
+# reads False — stated in measure_open, because a dozen `cond: !tab_open`
+# entries hang off this and nothing downstream would say so.
+wE, stateE, screenE = build()
+screenE.open = True
+screenE.slots = (False, False)
+t = run(wE, TAB_DRIFT_S + 0.05, t0=time.perf_counter())
+check('an empty rack does not read as open', wE.open, False)
+check('and nothing was classified', screenE.att_reads, 0)
 
 print('\n=== a gun nothing can NAME gets no kit ===')
 # ⚠ MEASURED IN A PLAY LOG, 2026-08-09. Both name plates came back blank for a
@@ -384,8 +458,8 @@ screen7.open = True
 screen7.show(1, ('', ''), kit={1: {'muzzle': 'choke'},
                                2: {'stock': 'cheek_pad'}})
 w7._set_open(True)
+w7.on_key(time.perf_counter())   # pressed while up
 screen7.open = False
-w7.on_key(time.perf_counter())
 t = run(w7, 0.05, t0=time.perf_counter())
 check('the slots WERE read', screen7.att_reads, 1)
 check('but no kit was published for gun 1', 1 in state7.attachments, False)
@@ -399,7 +473,7 @@ state8.weapon_pred = ('m416', '')
 screen8.open = True
 screen8.show(1, ('', ''), kit={1: {'muzzle': 'comp_ar'}, 2: {'stock': 'x'}})
 w8._set_open(True)
-w8.on_key(time.perf_counter())   # the closing press is what reads
+w8.on_key(time.perf_counter())   # the closing press, panel still up
 screen8.open = False
 t = run(w8, 0.05, t0=time.perf_counter())
 check('gun 1 is named by the HUD, so its kit publishes',
@@ -427,8 +501,14 @@ run(w9, 0.05, t0=time.perf_counter())
 after = set(glob.glob(os.path.join(SHOT_DIR, '*.png')))
 new = sorted(os.path.basename(f) for f in after - before)
 check('one frame per edge, both edges', len(new), 2)
-check('and the name says which edge, and what it found',
-      [n.split('_')[-1] for n in new], ['press-shut.png', 'release-open.png'])
+# ⚠ THE NAME CARRIES THE EDGE AND NOTHING ELSE. It used to carry a verdict
+# (`opening`/`closing`) and on 8 of 38 real saves that verdict was wrong --
+# bare grass filed as a close, off a stale flag. A filename that carries a
+# belief makes every later reader a victim of it; press/release is a fact
+# about the keyboard, and what the panel turned out to be is in the log line
+# beside it.
+check('and the name carries the edge, and only the edge',
+      [n.split('_')[-1] for n in new], ['press.png', 'release.png'])
 check('and NOT into the directory real play writes to',
       os.path.abspath(SHOT_DIR) != os.path.abspath(REAL_SHOT_DIR), True)
 
@@ -438,7 +518,14 @@ t = run(w6, 1.0, t0=time.perf_counter())
 expected = int(1.0 / TAB_DRIFT_S) + 1
 check(f'anchor reads in 1 idle second (<= {expected})',
       screen6.anchor_reads <= expected, True)
-check('no panel grabs while closed', screen6.grabs, 0)
+# ⚠ A CLOSED PANEL IS STILL POLLED, and the poll now grabs the weapon block
+# rather than the 41x18 anchor -- 8.7 ms against 6.0. That is the price of the
+# openness signal living inside the block, and it is bounded by the drift
+# period, not by the tick.
+idle_budget = int(1.0 / TAB_DRIFT_S) + 1
+check(f'panel grabs in 1 idle second (<= {idle_budget})',
+      screen6.grabs <= idle_budget, True)
+check('and nothing classified', screen6.att_reads + screen6.name_reads, 0)
 
 print()
 if FAILS:

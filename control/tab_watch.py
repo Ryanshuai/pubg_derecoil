@@ -196,15 +196,57 @@ class TabWatch:
 
     # ── Reads ──
 
-    def measure_open(self):
-        """Look at the anchor. -> bool, or None if it could not be read."""
+    def measure_open(self, frame=None):
+        """Is there a panel with a gun in it? -> bool, or None if unreadable.
+
+        ⚠ THE SIGNAL MOVED OFF THE 「类型」 ANCHOR ON 2026-08-09 and onto the
+        boxed slot numbers inside the weapon panel itself. Three reasons, in
+        the order they matter:
+
+        SAME PIXELS, SAME INSTANT. The tag box is inside the rectangle this
+        file already grabs, so the openness judgement and the loadout now come
+        off ONE frame. The anchor is 1282 px away and was a separate grab taken
+        ~4 ms later -- two rectangles describing two moments, which is the
+        distinction this whole file exists around.
+
+        IT IS THE ACTUAL PRECONDITION, not a proxy. The tag is drawn only when
+        the panel is up AND a gun occupies that slot, and an open panel over an
+        empty rack has nothing worth reading.
+
+        SEPARATION, on 38 real frames labelled by eye: white 110-112 against
+        0-3, box darkness 29-51 against 112-205. The anchor's own margin, on
+        brightness, is TWO counts.
+
+        ⚠ AND `open` NOW MEANS SOMETHING SLIGHTLY NARROWER, which is a real
+        change and not a refinement: an inventory opened over an EMPTY RACK
+        reads False. A dozen `cond: '!tab_open'` entries hang off this,
+        including whether compensation runs -- so with no gun in the rack the
+        tool now stays armed while the panel is up. It has no curve to play
+        there (no gun, no cell), so the cost is a state that cannot act rather
+        than a wrong action. Stated because nothing downstream would say it.
+
+        `tab_type` is kept and still registered: it is the second, independent
+        source, and _compose logs the two whenever they disagree.
+        """
+        det = self._detectors.get('gun_tag')
+        if det is None:
+            return None
+        try:
+            if frame is None:
+                frame = self._panel_frame()
+            return bool(det.any_drawn(frame))
+        except Exception as e:
+            self._log(f'open-check failed: {e}')
+            return None
+
+    def _anchor_says(self):
+        """What the retired 「类型」 anchor thinks. -> bool or None. Diagnostic."""
         det = self._detectors.get('tab_type')
         if det is None:
             return None
         try:
             return bool(det.classify(self._type_crop()))
-        except Exception as e:
-            self._log(f'open-check failed: {e}')
+        except Exception:
             return None
 
     def _compose(self, frame):
@@ -364,57 +406,66 @@ class TabWatch:
             frame = self.snap('read')
             if frame is None:
                 return None
-        out = {'ts': time.perf_counter(), 'weapons': None, 'attachments': None}
+        out = {'ts': time.perf_counter(), 'weapons': None,
+               'attachments': None, 'present': {}}
         try:
+            # ⚠ SLOT PRESENCE IS READ FIRST AND EVERYTHING ELSE HANGS OFF IT.
+            # The boxed number is drawn only when that rack slot holds a gun,
+            # so it answers "is there anything here to read" before a single
+            # template is scored -- and answers it PER SLOT, which is the part
+            # that was missing. In the 2026-08-09 corpus slot 2 was empty in
+            # every frame, and reading it anyway produced a kit for a gun that
+            # was not there.
+            tag = self._detectors.get('gun_tag')
+            for slot in (1, 2):
+                out['present'][slot] = (bool(tag.drawn(frame, slot))
+                                        if tag is not None else True)
+            if not any(out['present'].values()):
+                self._log('neither rack slot has a gun in it — nothing to read')
+                return out
+
             if weap is not None:
-                out['weapons'] = weap.classify(
-                    {k: _crop(frame, k) for k in NAME_REGIONS})
-                # ⚠ INK IS THE SECOND, INDEPENDENT SOURCE, and without it a
-                # blank name has two causes that print identically: the plate
-                # was not there, or it was there and the OCR could not read it.
-                # `ink` counts white-text pixels THROUGH THE SAME MASK classify
-                # matches with, so "there is text here" and "the OCR read it"
-                # are claims about the same pixels rather than two opinions.
-                # One says the panel had gone before this ran; the other says
-                # this file's premise holds and the templates are the problem.
-                # Nothing downstream can tell them apart, so the log must.
+                got = weap.classify({k: _crop(frame, k) for k in NAME_REGIONS})
+                # A slot with no gun cannot have a name, whatever the plate
+                # region happens to score. Dropping it here means the name
+                # never reaches the template narrowing or GameState.
+                out['weapons'] = tuple(n if out['present'][i + 1] else ''
+                                       for i, n in enumerate(got))
+                # ⚠ INK IS THE SECOND, INDEPENDENT SOURCE. A blank name has two
+                # causes that print identically: the plate was not there, or it
+                # was and the OCR could not read it. `ink` counts white-text
+                # pixels THROUGH THE SAME MASK classify matches with, so the two
+                # are claims about one set of pixels rather than two opinions.
                 out['ink'] = [_ink(weap, frame, k) for k in NAME_REGIONS]
             if att is not None:
-                # ⚠ AN UNPAINTED PANEL IS NOT A BARE GUN, AND IT IS ALSO THE
-                # EVIDENCE FOR THE PREMISE ABOVE. classify() reports an
+                # ⚠ AN UNPAINTED PANEL IS NOT A BARE GUN. classify() reports an
                 # unpainted tile as '', the same '' an empty slot gives, and
-                # _publish writes those onto both weapons: a fully kitted gun
-                # becomes `bare` and the compensation is cleared.
-                #
-                # Both outcomes print, because a log where this always says
-                # "still painted" is what says the anchor really does go first,
-                # and a log where it always says "already gone" says it does
-                # not and this file is built on a false premise. A guard that
-                # only ever refuses silently cannot tell those apart.
-                #
-                # A tile that is merely EMPTY is still DRAWN (detector/
-                # CLAUDE.md: border-ring Sobel p90 46-173 empty against 5-26 for
-                # no tile at all), so this does not refuse a bare gun. It
-                # refuses a panel with no tiles anywhere.
+                # _publish writes those onto the weapon: a fully kitted gun
+                # becomes `bare` and the compensation is cleared. A tile that is
+                # merely EMPTY is still DRAWN (detector/CLAUDE.md: border-ring
+                # Sobel p90 46-173 empty against 5-26 for no tile at all), so
+                # this does not refuse a bare gun.
                 out['painted'] = bool(att.any_drawn(frame))
                 if out['painted']:
                     # ⚠ THE EFFECTIVE NAME, NOT THIS FRAME'S READ. The names
                     # narrow each slot's template bank to what the gun can
                     # physically hold, and building them from the plate read
-                    # alone means a blank plate narrows to NOTHING -- every
-                    # tile then scored against all 55 templates, which does not
-                    # fail, it answers.
+                    # alone means a blank plate narrows to NOTHING -- every tile
+                    # then scored against all 55 templates, which does not fail,
+                    # it answers.
                     #
-                    # Measured, play log 2026-08-09 15:10:20: GameState knew
-                    # the gun was an m416 (the HUD detector had named it seven
-                    # seconds earlier, off a completely different set of
-                    # pixels), the Tab plate came back blank, and the stock
-                    # slot was published as `Stock_SniperRifle_CheekPad_C` --
-                    # a part the m416 cannot mount. `compatible('m416')` would
-                    # have refused it outright; it was never asked.
+                    # Measured, play log 2026-08-09 15:10:20: GameState knew the
+                    # gun was an m416 (the HUD detector had named it seven
+                    # seconds earlier, off completely different pixels), the Tab
+                    # plate came back blank, and the stock slot was published as
+                    # `Stock_SniperRifle_CheekPad_C` -- a part the m416 cannot
+                    # mount. `compatible('m416')` would have refused it
+                    # outright; it was never asked.
                     named = {i + 1: nm
                              for i, nm in enumerate(self._names(out)) if nm}
-                    out['attachments'] = att.classify(frame, named)
+                    kit = att.classify(frame, named)
+                    out['attachments'] = {g: v for g, v in kit.items()
+                                          if out['present'].get(g)}
         except Exception as e:
             self._log(f'panel read failed: {e}')
             return None
@@ -435,7 +486,9 @@ class TabWatch:
             known = self.state.weapon_name
         except AttributeError:
             known = ('', '')
-        return tuple(m or k for m, k in zip(mine, known))
+        pres = out.get('present') or {}
+        return tuple('' if pres.get(i + 1) is False else (m or k)
+                     for i, (m, k) in enumerate(zip(mine, known)))
 
     def _save(self, frame, tag):
         """Write a frame beside the run's log. -> '   shot <path>' or ''.
@@ -507,17 +560,27 @@ class TabWatch:
         # closed it -- which is exactly the number needed to work out how much
         # panel was left by the time anything looked. It had to be inferred
         # from the game's 77-128 ms instead of read off.
-        was_open = self.open
-        self._log(f'Tab {event} seen while '
-                  f'{"open" if was_open else "closed"}')
         # ⚠ GRAB AND SAVE FIRST, DECIDE AFTER. Every edge, both directions.
-        frame = self.snap(f'{event}-{"open" if was_open else "shut"}')
-        if was_open and frame is not None:
+        # ⚠ AND THE TAG IN THE FILENAME IS THE EVENT, NEVER A VERDICT. It used
+        # to be `opening`/`closing`, i.e. what this object BELIEVED -- and on 8
+        # of 38 saved frames that belief was wrong, bare grass filed as a
+        # close. A name that carries a belief turns every later reader into a
+        # victim of it; `press`/`release` is a fact about the keyboard.
+        frame = self.snap(event)
+        up = None if frame is None else self.measure_open(frame)
+        self._log(f'Tab {event}: panel {"UP" if up else "not up"}'
+                  + ('' if up is not None else ' (unreadable)'))
+        if up:
             got = self.read_loadout(frame)
             if got is not None:
                 self._publish(got)
+        # ⚠ THIS FRAME IS A MEASUREMENT, so it settles `open` rather than being
+        # filtered through it. The old shape read `self.open`, which could be
+        # stale -- and was, on those same 8 frames.
+        if up is not None and up != self.open:
+            self._set_open(up)
         self._watch_until = now + TAB_SETTLE_S
-        self._want = not was_open
+        self._want = not self.open
 
     def tick(self, now=None):
         """One unit of work, at most one anchor check. From the dispatch loop."""
@@ -638,8 +701,12 @@ def _describe(out):
     names = out.get('weapons') or ('', '')
     ink = out.get('ink') or [None, None]
     kit = out.get('attachments') or {}
+    pres = out.get('present') or {}
     bits = []
     for i in (0, 1):
+        if pres.get(i + 1) is False:
+            bits.append(f'gun{i + 1} (no gun in the rack slot)')
+            continue
         got = names[i] or '?'
         pen = '' if ink[i] is None else f' ink {ink[i]}'
         slots = kit.get(i + 1)

@@ -134,6 +134,15 @@ kit-persist = "python tools/test_kit_persist.py"
 # still beats the table, AND the three axes that change the curve's SHAPE
 # (weapon, kit, fire mode) never substitute.
 sight-scale = "python tools/test_sight_scale.py"
+# Is the boxed slot number 「1」「2」 drawn -- i.e. is the panel up AND is there a
+# gun in that slot. Sharper than "is the inventory open", and it sits INSIDE the
+# rectangle tab_watch already grabs, so it costs no second grab and puts the
+# openness judgement and the loadout on the same pixels at the same instant.
+# 38 real frames labelled BY EYE, both sides: panel white 110-112 / dark 29-51,
+# world white 0-3 / dark 112-205. ⚠ 8 of the 38 were saved under a filename
+# that said `closing` and show bare grass -- a stale `open` flag, which is what
+# this replaces. Nothing consumes it yet.
+gun-tag = "python detector/gun_tag_detector.py --selftest"
 # What a magnified optic does to the counts a gun needs. `scope` reads the
 # store and stops (no game, no hardware); the live run wants --weapon and fires.
 # ⚠ The scope factor is DERIVABLE from config.RECOIL_SIGHT_PROFILES, so this

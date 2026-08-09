@@ -159,6 +159,25 @@ def gun_tag_point(weapon_slot):
     return (GUN_TAG_X, GUN_TAG_Y[weapon_slot - 1])
 
 
+# The box itself, as (y, x, h, w) -- the shape every grabber and crop here
+# takes. The numbers are the ones measured above; they were a sentence in a
+# comment and a caller that wanted the RECTANGLE had to re-derive it from the
+# point, which is one transcription away from being a different rectangle.
+GUN_TAG_BOX_W = 2259 - 2216
+GUN_TAG_BOX_H = 158 - 123
+
+
+def gun_tag_box(weapon_slot):
+    """The boxed slot number as (y, x, h, w). Slot 1 or 2.
+
+    ⚠ IT IS DRAWN ONLY WHEN THE PANEL IS UP *AND* A GUN OCCUPIES THAT SLOT,
+    which makes it the one thing on this screen that answers the question a
+    reader actually has. "Is the inventory open" is a proxy; an open inventory
+    with an empty rack has nothing to read. See detector/gun_tag_detector.py.
+    """
+    return (123 + 302 * (weapon_slot - 1), 2216, GUN_TAG_BOX_H, GUN_TAG_BOX_W)
+
+
 # ════════════════════════════════════════════════════════════
 # Character equipment slots (middle)
 #
