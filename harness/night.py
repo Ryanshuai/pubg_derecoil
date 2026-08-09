@@ -64,6 +64,82 @@ HALT_STREAK = 4
 ATTEMPTS = 2
 
 
+def order_configs(configs):
+    """Reorder configs so consecutive cells differ by as FEW slots as possible.
+
+    -> the same configs, permuted. Never adds, drops or renames one.
+
+    ⚠ THIS IS PURE SCHEDULING AND IT IS FREE. Every cell pins every controlled
+    slot -- want_for forces the ones it does not fill EMPTY -- so a cell's
+    result cannot depend on which cell ran before it. The order is therefore
+    unconstrained by correctness, and it was costing measurable work:
+
+        typed order   bare muzzle grip stock muzzle+grip muzzle+stock
+                      grip+stock muzzle+grip+stock          13 slot changes
+        this order    bare muzzle muzzle+grip grip grip+stock
+                      muzzle+grip+stock muzzle+stock stock   7 slot changes
+
+    A full 2^3 factorial is 13 attachment actions in the order a human types
+    it and 7 in Gray-code order -- 46% fewer. Brute force over all 8! orders
+    says 7 is the floor, so this is optimal and not merely better.
+
+    The saving is not only seconds. Measured over the shared gesture journal:
+    1115 gestures aimed at a gun slot produced 789 landed fits (1.41 gestures
+    per fit) and 21% of fits needed a retry. Fitting is this project's largest
+    single source of wasted runs, so 46% fewer fits is 46% fewer chances for
+    the failure mode that eats a cell.
+
+    Greedy nearest-neighbour from the emptiest config, then brute-forced when
+    the list is short enough for it to be cheap. It starts at the emptiest
+    because a cell arriving on a freshly spawned gun starts nearest to bare,
+    and because `pending()` may hand back any tail of the plan on --resume.
+
+    ⚠ IT WORKS ON INDICES, NOT ON NAMES, and its own gate is why. Filtering
+    the candidates by VALUE (`[c for c in configs if c != start]`) silently
+    collapsed a repeated config -- ['bare','muzzle','bare'] came back with one
+    bare -- which is a planner turning two cells into one without saying so.
+    De-duplication is supported_configs' job and it has already run; anything
+    dropped here would be dropped invisibly.
+
+    ⚠ AN UNPARSEABLE NAME DISABLES THE REORDER, and the first draft could not
+    detect one: `parse_config(c) or frozenset()` turns None into the empty set,
+    so the guard that followed could never fire and a junk name got scheduled
+    as though it were `bare`. plan_cells drops such names itself, and this
+    hands the list back untouched rather than sorting around a fiction.
+    """
+    from itertools import permutations
+    from control.kitting import parse_config
+
+    names = list(configs)
+    if len(names) < 3:
+        return names
+    parsed = [parse_config(c) for c in names]
+    if any(p is None for p in parsed):
+        return names
+
+    def cost(order):
+        return sum(len(parsed[a] ^ parsed[b]) for a, b in zip(order, order[1:]))
+
+    idx = list(range(len(names)))
+    start = min(idx, key=lambda i: (len(parsed[i]), names[i]))
+    greedy, rest = [start], [i for i in idx if i != start]
+    while rest:
+        nxt = min(rest, key=lambda i: (len(parsed[i] ^ parsed[greedy[-1]]),
+                                       names[i]))
+        greedy.append(nxt)
+        rest.remove(nxt)
+    # ⚠ 8! is 40320 and each score is 7 set-diffs, so the exact answer costs
+    # milliseconds at the size this actually runs at (2^3 = 8 configs). Above
+    # that the greedy chain stands on its own -- it is what seeds the search
+    # anyway, and it already returns the optimum on the full factorial.
+    order = greedy
+    if len(names) <= 8:
+        best = min(permutations(idx), key=cost)
+        if cost(best) < cost(greedy):
+            order = list(best)
+    return [names[i] for i in order]
+
+
 def plan_cells(weapons, postures, sight, configs=('bare',)):
     """Every (weapon, posture, sight, config) the night will attempt.
 
@@ -81,9 +157,17 @@ def plan_cells(weapons, postures, sight, configs=('bare',)):
     """
     from control.kitting import supported_configs
 
+    # ⚠ ORDERED PER WEAPON, AFTER supported_configs, and both halves matter.
+    # Degradation is many-to-one -- on a gun with no lower rail 'grip' and
+    # 'muzzle+grip' collapse onto configs it already has -- so the list this
+    # weapon will actually wear is not the list that was typed, and ordering
+    # the typed one would be scheduling cells that do not exist.
+    #
+    # `postures` stays innermost: it changes no attachment, so a posture sweep
+    # inside one config costs nothing to set up.
     return [(w, p, sight, c)
             for w in weapons
-            for c in supported_configs(w, configs)
+            for c in order_configs(supported_configs(w, configs))
             for p in postures]
 
 

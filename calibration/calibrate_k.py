@@ -116,7 +116,7 @@ def _ensure_scoped(mouse, tries=3):
 
 
 def run_trial(grabber, tracker, mouse, counts, dry_run=False, ads=False,
-              inject_s=None):
+              inject_s=None, keep_duplicates=False):
     """Inject `counts` vertically over `inject_s` and capture throughout.
 
     ⚠ THE RATE IS A PARAMETER BECAUSE THE DEFAULT ALIASES. The view tracker's
@@ -139,7 +139,17 @@ def run_trial(grabber, tracker, mouse, counts, dry_run=False, ads=False,
 
     Returns (MagazineRecorder, injection_log).
     """
-    rec = MagazineRecorder(tracker)
+    # ⚠ THIS FLAG IS THE DIFFERENCE BETWEEN THE TWO PATHS, and until 2026-08-08
+    # it was not a flag. K is calibrated here with duplicates DROPPED, while
+    # collect_timed measures every presented frame (drop_duplicates=False, and
+    # its comment says that is the point of the synchronous grabber). Dropping
+    # duplicates NORMALISES the per-frame displacement -- a rate sweep from
+    # 0.3 s to 3.0 s moved px/frame only from 10.2 to 6.4, because the frames
+    # where the view barely moved were being discarded. So K has only ever been
+    # measured in a regime the recoil measurement never occupies, and eta is a
+    # multiplicative deficit that lands on exactly the arm where y_obs is the
+    # whole measurement. That is a hypothesis this flag can now test.
+    rec = MagazineRecorder(tracker, drop_duplicates=not keep_duplicates)
     log = []
     inject_s = INJECT_S if inject_s is None else float(inject_s)
     # ⚠ STEPS SCALE WITH THE DURATION. Spreading the SAME 20 sub-steps over a
@@ -230,6 +240,28 @@ def main():
     ap.add_argument('--amounts', default='50,100,200,300',
                     help='comma-separated count magnitudes to test')
     ap.add_argument('--repeats', type=int, default=3)
+    ap.add_argument('--keep-duplicates', action='store_true',
+                    help='measure every presented frame, the way collect_timed '
+                         'does, instead of dropping frames where the view did '
+                         'not change. K has only ever been calibrated with '
+                         'them DROPPED, which normalises the per-frame '
+                         'displacement to 6-10 px -- a regime a recoil burst '
+                         '(~3 px/frame, with many near-zero frames) never '
+                         'occupies.')
+    ap.add_argument('--inject-sweep', default=None,
+                    help='comma-separated injection durations, ROTATED PER '
+                         'TRIAL. Fixing the counts and varying the duration '
+                         'varies the PER-FRAME displacement, which is the one '
+                         'thing K is silently assumed not to depend on: it is '
+                         'calibrated around 8 px/frame and a recoil burst runs '
+                         'at ~3. If the correlator has a magnitude-dependent '
+                         'bias, K differs between those regimes -- and since '
+                         'y_obs = px/K, that lands entirely on the '
+                         'compensation-OFF arm and not at all on the ON arm, '
+                         "which is exactly eta's signature. Rotated rather "
+                         'than one run per duration, because every cross-arm '
+                         'comparison this project made across sessions turned '
+                         'out to be a comparison of sessions.')
     ap.add_argument('--inject-s', type=float, default=INJECT_S,
                     help='seconds to spread the injection over. The default '
                          f'{INJECT_S} puts 480 counts at ~50 px/frame NOMINAL '
@@ -255,6 +287,10 @@ def main():
     args = ap.parse_args()
 
     amounts = [int(a) for a in args.amounts.split(',') if a.strip()]
+    inject_sweep = ([float(x) for x in args.inject_sweep.split(',')]
+                    if args.inject_sweep else None)
+    if inject_sweep:
+        print(f'injection durations rotated per trial: {inject_sweep} s')
     xs = ([int(x) for x in args.patch_xs.split(',') if x.strip()]
           if args.patch_xs else None)
     tracker = ViewTracker(patch_xs=xs)
@@ -316,9 +352,12 @@ def main():
             for sign in (+1, -1):
                 counts = amount * sign
                 for r in range(args.repeats):
+                    inj = (inject_sweep[r % len(inject_sweep)]
+                           if inject_sweep else args.inject_s)
                     rec, log, ads_state = run_trial(
                         grabber, tracker, mouse, counts,
-                        args.dry_run, args.ads, inject_s=args.inject_s)
+                        args.dry_run, args.ads, inject_s=inj,
+                        keep_duplicates=args.keep_duplicates)
                     if args.ads and not all(ads_state):
                         print(f"    [!] {counts:+d} #{r}: ADS "
                               f"{ads_state[0]} -> {ads_state[1]} — kept, but "
@@ -368,6 +407,10 @@ def main():
                     s = summarise(rec, res, log,
                                   counts if not args.dry_run else 1)
                     s['repeat'] = r
+                    s['inject_s'] = inj
+                    # ⚠ px PER FRAME IS THE INDEPENDENT VARIABLE, so it is
+                    # recorded rather than re-derived later from a nominal fps.
+                    s['px_per_frame'] = (abs(s['cum_px']) / max(1, s['n_frames'] - 1))
                     s['focused'] = focused
                     rows.append(s)
                     raw.append({'counts': counts, 'repeat': r,

@@ -100,6 +100,7 @@ kit-factors = "python calibration/build_kit_factors.py --selftest"
 kit-grid = "python calibration/build_kit_grid.py"
 kit-grid-check = "python calibration/build_kit_grid.py --selftest"
 placement = "python tools/test_range_placement.py"
+plan-order = "python tools/test_plan_order.py"
 # Every path named in a skill, an agent or a CLAUDE.md must point INTO a tree
 # that exists. Added 2026-08-08 after a refactor moved the artifacts and left
 # 20 pointers on the old layout while layering/surface/params stayed green —

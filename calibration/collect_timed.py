@@ -134,8 +134,41 @@ def measure(tracker, ts, patches, human_fn=None):
 RECOIL_SLOTS = ('muzzle', 'grip', 'stock')
 
 
-def read_config(weapon=None):
+def read_loadout():
+    """ONE trip into the backpack. -> the raw loadout dict, or None.
+
+    ⚠ THE POINT IS THAT THERE IS EXACTLY ONE, AND IT IS SHARED. `read_config`
+    and `read_sight` below both used to open the backpack, call loadout(), and
+    shut it again — two round trips, back to back, with nothing between them
+    but dict comparisons and prints (measured: 12 calls, all of them `print` /
+    `sorted` / `dict.get`). InventoryControl.tab_up's own docstring has said
+    「Hold ONE across the whole flow; do not wrap each read in its own」 since
+    the churn was first counted, and these two were the counterexample.
+
+    ⚠ AND THE COST WAS NEVER JUST TIME. Two loadout() calls are TWO
+    OBSERVATIONS. The config and the optic were read a Tab-toggle apart and
+    then stored as one description of one gun — which is the repository's
+    second cross-layer law (「记录描述的对象，必须是被测量的那个对象」) with the
+    two readings a second apart instead of a day. Sharing the dict makes them
+    the same observation by construction, so no check is needed and none can
+    be forgotten.
+
+    Asked for 2026-08-08:「我开一次背包就能做到所有检测，没必要做一下，再出一下
+    背包，再进一下背包，再接着做下件事。」
+    """
+    from control.inventory import InventoryControl
+    with InventoryControl() as ac:
+        with ac.tab_up():
+            return ac.loadout()
+
+
+def read_config(lo, weapon=None):
     """What is ACTUALLY on the gun, as catalog keys. None if it cannot be read.
+
+    `lo` is ONE InventoryControl.loadout(), taken by the caller — see
+    read_loadout() for why this does not take its own. Passing the reading in
+    rather than fetching it also makes this a pure function of a dict, which is
+    what tools/test_one_gun.py drives it as.
 
     ⚠ `weapon` IS NOT OPTIONAL IN PRACTICE. Without it, a rack with NO GUN
     reads as `{}` -- every slot is empty, the loop below skips empty slots,
@@ -163,13 +196,9 @@ def read_config(weapon=None):
     folding it into "empty" is how a gun with an attachment gets filed next to
     one without.
     """
-    from control.inventory import InventoryControl
     from detector.attachment_catalog import ATTACHMENTS
     by_asset = {v['asset']: k for k, v in ATTACHMENTS.items()
                 if isinstance(v, dict) and v.get('asset')}
-    with InventoryControl() as ac:
-        with ac.tab_up():
-            lo = ac.loadout()
     if not lo or not lo.get('slots'):
         return None
     held = (lo.get('guns') or {}).get(1)
@@ -216,8 +245,13 @@ def read_config(weapon=None):
     return out
 
 
-def read_sight():
+def read_sight(lo):
     """The gun's optic, twice: -> (profile_name, asset). (None, None) if unread.
+
+    `lo` is the SAME loadout dict read_config was given — not a second reading.
+    See read_loadout(): taking its own was one wasted round trip through the
+    backpack and, worse, made the optic and the config two observations of a
+    gun that is recorded as one.
 
     ⚠ THIS WAS READ AND THEN THROWN AWAY, and it is the one quantity in this
     file that nothing could check after the fact. `scope` is deliberately not
@@ -242,11 +276,7 @@ def read_sight():
     two readings: `Weapon.set('scope', ...)` keys `_SCOPE_TO_MAG` on the raw
     asset, while everything downstream of K wants the profile name.
     """
-    from control.inventory import InventoryControl
     from detector.weapon import _sight_of
-    with InventoryControl() as ac:
-        with ac.tab_up():
-            lo = ac.loadout()
     if not lo or not lo.get('slots'):
         return None, None
     asset = (lo['slots'].get(1) or {}).get('scope') or ''
@@ -567,6 +597,9 @@ def main():
         # turned out to be wearing — and that does not exist until the kitting
         # is done. So the kitting comes first, and everything downstream reads
         # ONE established configuration instead of a request and a hope.
+        # The one loadout reading this run takes. The --kit branch fills it in
+        # without a second trip; without --kit it stays None and is taken below.
+        lo = None
         if a.kit:
             # Declarative: say what the gun should WEAR, not which drags to
             # make. ensure_kit reads back and retries on its own.
@@ -607,6 +640,13 @@ def main():
                 # and that part lands on the floor.
                 with ac.tab_up():
                     r = ac.ensure_kit(1, want, weapon=a.weapon, restock=_fill)
+                    # ⚠ READ IT BACK WITHOUT LEAVING. The backpack is open, the
+                    # kitting just finished in it, and both readbacks below want
+                    # exactly this dict. The previous version shut the screen
+                    # here and had read_config reopen it two lines later, then
+                    # read_sight reopen it again -- three round trips where the
+                    # gun only had to be looked at once.
+                    lo = ac.loadout()
             print(f'  kit {want} -> ok={r.get("ok") if isinstance(r, dict) else r}')
             # ⚠ NOT checked here on purpose. ensure_kit's ok=False can mean
             # UNREADABLE rather than unfitted, and eleven cells of the
@@ -618,7 +658,16 @@ def main():
         # BEFORE ensure_ads: opening Tab drops the character out of ADS
         # (docs/game_quirks.md), so reading the loadout after scoping would
         # silently un-scope the whole run.
-        config = read_config(a.weapon)
+        #
+        # ⚠ ONE READING, TWO CHECKS. `lo` is already in hand on the --kit path
+        # (read inside the kitting's own tab_up, above); without --kit nothing
+        # has opened the backpack yet, so this is the one trip. Every check
+        # below — the config, the rack, the optic — is a pure function of this
+        # dict, which is what makes them descriptions of ONE observed gun
+        # rather than of two guns observed a Tab-toggle apart.
+        if lo is None:
+            lo = read_loadout()
+        config = read_config(lo, a.weapon)
         if config is None:
             print('  [!] REFUSING: could not read the attachment slots. The '
                   'config is the key every magazine gets pooled under, and a '
@@ -729,7 +778,7 @@ def main():
         # magazines under a sight the caller did not ask for, and a cell that
         # silently changes its own measurement conditions is the thing this
         # whole file exists to stop.
-        worn, scope_asset = read_sight()
+        worn, scope_asset = read_sight(lo)
         if worn is None:
             print('  [!] REFUSING: could not read the scope slot. K comes from '
                   'the optic, so an unread one is an unknown scale on every '

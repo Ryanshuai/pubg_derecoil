@@ -117,22 +117,47 @@ class ManualSession(RangeSession):
               "the comma menu, not a thing to stand next to.")
         print(f"    Waiting up to {timeout_s:.0f}s, checking every "
               f"{self._poll_s:.0f}s ...", flush=True)
-        # ⚠ THE ONLY CALLER OF THIS FUNCTION IN THE REPOSITORY, and it should
-        # stay that way. A human re-entering is the one mover no transition in
-        # control/lobby.py can observe: AutoSession below goes through
-        # ensure_in_match, which sees the game outside a match and re-places
-        # the character itself. This class stands and WAITS for someone else to
-        # do it, so it is the one place that has to say so.
-        from control.lobby import forget_placement
-        forget_placement()
         t0 = time.time()
         while time.time() - t0 < timeout_s:
             time.sleep(self._poll_s)
             if self.in_range():
                 print("    back in the range — continuing")
-                return True
+                return self._place_on_lane()
         print("    timed out waiting to get back in")
         return False
+
+    def _place_on_lane(self, name='200m'):
+        """Teleport to the lane, because a human just walked into the range.
+
+        ⚠ THIS IS THE ONE ENTRY control/lobby.py CANNOT SEE, and that is the
+        entire reason this method exists. `ensure_in_match` binds the teleport
+        to the entry event -- it drives the map when, and only when, IT walked
+        into the match. A human alt-tabbing over and re-entering is an entry it
+        never observes: the next ensure_in_match finds a match already running
+        and correctly leaves it alone. So the observer of the entry does the
+        teleport, which is the same rule at the same event, applied by whoever
+        saw it happen.
+
+        It replaces a `forget_placement()` call that used to sit at the TOP of
+        enter(), clearing a module-level flag so that a later ensure_ready
+        would teleport. That flag is gone (see control/lobby.py), and a
+        declaration made before the human has moved was always describing the
+        future anyway. This runs after in_range() agrees, so it is describing
+        something that happened.
+
+        A failed teleport fails enter(), for the reason the whole feature
+        exists: a session that carries on believing it is on the lane fires its
+        magazines in the spawn compound, and every gate downstream stays green
+        while the trace quietly picks up somebody else's physics.
+        """
+        from control.map import MapControl
+        with MapControl() as mc:
+            got = mc.goto_range(name)
+        if not got['ok']:
+            print(f"    back in the range, but the {name} teleport did not "
+                  f"land: {got['error']}")
+            return False
+        return True
 
 
 class AutoSession(RangeSession):

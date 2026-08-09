@@ -648,23 +648,18 @@ INTENTS = {
         L1: ['control/evidence.py:dump_state',
              'control/match.py:Dispatcher.shutdown'],
         R: ['control/evidence.py:full_frame',
-            # The two halves of one belief, moved out of control/session.py on
-            # 2026-08-08 (they were at_range / forget_range) and shrunk by the
-            # move. placed_at() reports what THIS PROCESS thinks; nothing in
-            # the repository acts on it, because ensure_in_match now decides
-            # for itself.
+            # ⚠ TWO ENTRIES STOOD HERE AND ARE GONE (2026-08-08):
+            # control/lobby.py's placed_at / forget_placement, the two halves
+            # of "which range has THIS PROCESS put the character on".
             #
-            # ⚠ forget_placement() IS THE RESIDUE, AND THE POINT IS THAT IT
-            # HAS ONE CALLER. Its predecessor had to be called by in-repo
-            # callers too, and that is how it failed: AutoSession.enter()
-            # walked back in through LobbyControl without it, and a harvest
-            # evicted at 17 minutes fired its back half in the spawn compound
-            # with the module still believing it was on the lane. Every
-            # transition that moves the character now clears the belief
-            # itself; the one mover this process cannot observe is a HUMAN,
-            # which is ManualSession.enter() and nothing else.
-            'control/lobby.py:placed_at',
-            'control/lobby.py:forget_placement',
+            # They were filed here after being moved out of control/session.py
+            # (as at_range / forget_range), and the filing recorded that the
+            # belief kept shrinking: first every in-repo caller had to clear
+            # it, then only one did. It reached zero when the teleport was
+            # bound to the entry event alone — nothing decides anything from a
+            # stored position any more, so there is no belief to report or to
+            # forget. The rule now lives in one line of ensure_in_match and is
+            # pinned by `pixi run placement`.
             'control/match.py:Dispatcher.register'],
     },
     'launch': {

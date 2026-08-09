@@ -246,6 +246,15 @@ MODE_TRIES = 3
 # Here, the module that MOVES the character is the module that knows it moved.
 # There is nothing to remember and no second door: `ensure_in_match` is the
 # only way into a match in this repository.
+#
+# ⚠ AND SINCE 2026-08-08 THERE IS NO FLAG AT ALL, not even a private one. The
+# teleport fires on the entry event and never otherwise -- "already in a match"
+# now MEANS "already placed", by the operator's rule. That drops the case the
+# flag was there for (this process inherits a match somebody else entered), and
+# the trade is deliberate: the check cost a map open/read/close on every fresh
+# process, while the mover it guarded against is one this process never sees.
+# Whoever DOES see such an entry teleports at that moment -- the same rule at
+# the same event (calibration/range_session.py:ManualSession._place_on_lane).
 RANGE_SETTLE_S = 3.0    # after a lobby->match transition, before RE-trying a
                         # teleport that just failed. Not on the happy path.
                         #
@@ -280,38 +289,15 @@ RANGE_SETTLE_S = 3.0    # after a lobby->match transition, before RE-trying a
                         # that run, in the same match with the map shut: 4
                         # loose yellow px against PANEL_YELLOW_MIN = 60.
 
-# Which range THIS PROCESS has placed the character on, or None. Written only
-# by a teleport that landed, and cleared by every transition here that moves
-# the character (see forget_placement's call sites).
-_PLACED = [None]
-
-
-def placed_at():
-    """Which range this PROCESS believes the character is standing on, or
-    None. For a caller that wants to LOG the belief; acting on it is
-    ensure_in_match's job and it does not need help."""
-    return _PLACED[0]
-
-
-def forget_placement():
-    """Declare that something OUTSIDE this process moved the character.
-
-    ⚠ ONE LEGITIMATE CALLER, and the narrowness is the whole repair. Every
-    transition inside this repository already clears the belief itself —
-    ensure_in_match when its pump found the game outside a match, exit_to_lobby
-    and quit_game when they take it out of one. What none of them can see is a
-    HUMAN alt-tabbing over and re-entering, which is exactly what
-    calibration.range_session.ManualSession.enter() stands and waits for.
-
-    The predecessor of this function (control.session.forget_range) was needed
-    by in-repo callers too, and that is how it failed: AutoSession.enter()
-    walked back in through LobbyControl without calling it, so a later
-    ensure_ready skipped a teleport that had never happened and a 45-minute
-    harvest fired its back half in the spawn compound. A declaration nobody
-    can forget to make is one that nobody has to make; this is the residue,
-    for the one mover this process genuinely cannot observe.
-    """
-    _PLACED[0] = None
+# ⚠ THERE IS NO MODULE-LEVEL "WHERE IS THE CHARACTER" BELIEF HERE ANY MORE,
+# and its absence is the design. `_PLACED` / `placed_at` / `forget_placement`
+# were removed 2026-08-08 when the teleport was bound to the ENTRY EVENT alone
+# (see _place_on_range). A flag exists to answer a question that is no longer
+# asked: nothing decides anything from "has this process placed anyone yet".
+#
+# The two functions that read and cleared it are gone rather than left unread —
+# a belief nobody acts on still gets read as authoritative by the next person
+# to find it, and this one had already cost a 45-minute harvest once.
 
 
 class LobbyControl(Driver):
@@ -582,7 +568,6 @@ class LobbyControl(Driver):
         there after `grace`, kill(). PUBG's anti-cheat can sit on a clean
         shutdown, and the caller asked for the game to be gone.
         """
-        forget_placement()      # there will be no character to have a position
         t0 = time.perf_counter()
         pids = game_pids()
         if not pids:
@@ -883,10 +868,6 @@ class LobbyControl(Driver):
                 return self.press_esc()
             return None                      # loading: nothing safe to click
 
-        # Before the pump, not after: it can fail HALFWAY (the LEAVE click
-        # landed, the confirm did not), and a character that left the round is
-        # off the lane whether or not this call reached the lobby.
-        forget_placement()
         return self._pump(LobbyState.LOBBY, timeout, act, 'exit_to_lobby',
                           fatal=NOT_RUNNING_IS_FATAL)
 
@@ -934,59 +915,69 @@ class LobbyControl(Driver):
                           fatal=NOT_RUNNING_IS_FATAL)
 
     def _place_on_range(self, name, entered):
-        """Teleport to a practice range if this entry left the character at the
-        spawn. -> rec, with 'skipped' set when nothing was driven.
+        """Teleport to a practice range, IF AND ONLY IF this call is what
+        walked into it. -> rec, with 'skipped' set when nothing was driven.
 
-        `entered` is whether THIS call walked into the match. It decides the
-        two halves of the question:
+        **THE TELEPORT IS BOUND TO THE ENTRY EVENT, AND TO NOTHING ELSE.**
+        Entering resets the world and puts the character at the spawn, so the
+        one moment the position is known to be wrong is the moment we arrive.
+        Every other call finds a match already running and leaves it alone:
+        being in the training range IS being placed, as far as this module is
+        concerned.
 
-          entered      the world reset; the character IS at the spawn, no
-                       matter what any belief says. Teleport.
-          already in   nobody moved anyone. Teleport only if this process has
-                       not placed the character yet -- a fresh process
-                       inherits a game whose character is standing wherever
-                       the last one left it, and "wherever" is not a fact.
+        That is the operator's rule, stated 2026-08-08: 「每次进训练场的时候做
+        一次那个地图的那个切换就行了，其他过程中不需要切换」. It is a rule about
+        WHEN to drive, not a belief about where anyone is standing, which is
+        why there is no flag behind it any more -- see the note where `_PLACED`
+        used to be.
+
+        ⚠ WHAT IT GIVES UP, PLAINLY: a process that attaches to a match
+        somebody else entered does not teleport, so if the character is
+        standing in the spawn compound it stays there. The previous version
+        spent one map open/read/close per fresh process to rule that out. The
+        cost of the check was paid on every run; the case it caught happens
+        when a mover outside this process walked in -- and the one such mover
+        this repository knows about (a human, via
+        calibration.range_session.ManualSession) now teleports at the point it
+        observes the entry, which is the same rule applied at the same event.
 
         ⚠ M IS A KEYPRESS, AND Tab AND THE SPAWNER PANEL BOTH SWALLOW
         KEYPRESSES (docs/game_quirks.md). That is the hazard control/map.py's
         docstring is about, and the reason the teleport once lived in
         session.ensure_ready() -- BEHIND the two legs that put those screens
-        down. It is safe here on the `entered` path for a reason that is a
-        fact about the game rather than an ordering promise: a match that just
-        finished LOADING has no modal screen up. Not "we closed them" --
-        THEY CANNOT BE OPEN.
-
-        On the `already in` path they can be, and this does not check. The
-        failure is loud rather than silent (goto_range reports "N attempts had
-        no effect"), the caller gets it in rec['range'], and the alternative is
-        importing InventoryControl and SpawnerControl here to re-ask two
-        questions the caller is about to ask anyway.
+        down. It is safe on this path for a reason that is a fact about the
+        game rather than an ordering promise: a match that just finished
+        LOADING has no modal screen up. Not "we closed them" -- THEY CANNOT BE
+        OPEN. Binding the teleport to the entry event is what makes that the
+        ONLY path, so the caveat the old `already in` branch carried (modals
+        can be up there, and this does not check) no longer applies to
+        anything.
         """
-        if not entered and _PLACED[0] == name:
-            return {'ok': True, 'skipped': f'already placed on {name}',
+        if not entered:
+            return {'ok': True, 'skipped': f'already in the match — the {name} '
+                                           f'teleport goes with walking in',
                     'player': None, 'elapsed': 0.0, 'error': None}
 
         from control.map import MapControl
         with MapControl(verbose=self.verbose) as mc:
             got = mc.goto_range(name)
             if not got['ok']:
-                # ⚠ THIS USED TO BE `and entered`, and the condition was
-                # reasoning about the CAUSE instead of the SYMPTOM. The stated
-                # reason -- a match in its first seconds is not taking input
-                # yet -- is real, but it is not the only way the map fails to
-                # come up, and the retry is cheap on every path.
+                # ⚠ UNCONDITIONAL, and it was made so on 2026-08-08 after a
+                # version that only retried when the map had just been entered
+                # -- reasoning about the CAUSE (a match too fresh to take
+                # input) instead of the SYMPTOM. Measured the same day: two
+                # runs hit the map_open false positive, got no retry, and
+                # failed hard, while the run after each succeeded first try.
                 #
-                # Measured 2026-08-08: a process that found the game ALREADY in
-                # a match hit the same map_open false positive, took the
-                # `entered=False` branch, got no retry, and failed hard. Twice
-                # in a row, and the run after it succeeded first try -- which
-                # is exactly the transient this retry exists for.
+                # Now that the teleport only ever runs on the entry path, the
+                # branch it was gated on is gone -- but the retry stays
+                # unconditional, because a first-seconds transient is exactly
+                # what this path is made of.
                 self._log(f'the {name} teleport did not land — letting the '
                           f'match settle and trying once more')
                 time.sleep(RANGE_SETTLE_S)
                 got = mc.goto_range(name)
 
-        _PLACED[0] = name if got['ok'] else None
         return got
 
     def ensure_in_match(self, timeout=ENTER_TIMEOUT, launch=False,
@@ -1055,9 +1046,12 @@ class LobbyControl(Driver):
         # is precisely "the character is at the spawn". `actions > 0` is a
         # weaker spelling of the same thing that answers wrong on the path
         # where a modal was cleared over a match that was already running.
+        #
+        # ⚠ IT IS NOW THE WHOLE DECISION, not one half of it. _place_on_range
+        # used to consult a process-level flag as well; since 2026-08-08 this
+        # line IS the teleport rule, so getting it wrong no longer costs one
+        # extra map toggle — it costs the teleport.
         entered = not rec['states'] or rec['states'][0] != LobbyState.IN_GAME.value
-        if entered:
-            forget_placement()
         if not rec['ok'] or not range_name:
             return rec
 

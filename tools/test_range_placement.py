@@ -7,18 +7,27 @@ which of four branches it takes is the whole correctness of that feature. This
 drives nothing — `_pump` and `MapControl` are replaced — so it asks only
 whether the branch is the one claimed.
 
-⚠ THREE OF THE NINE CASES MUST NOT TELEPORT, and they are the reason this file
+⚠ FOUR OF THE NINE CASES MUST NOT TELEPORT, and they are the reason this file
 exists. A gate that only checks "it teleported when it should" passes just as
 well when the answer is always yes, and always-yes costs a map open, a read
 and a map close on every ensure_ready — which is once per weapon, and is
 exactly what the operator asked to stop paying on 2026-08-06 ("不用每次都进那个
 M 点那个 Range 二百，只有第一次进游戏的时候需要").
 
-The other half is why the belief is not simply "have I placed anyone yet":
-case 3. A call that WALKED IN re-places unconditionally, because entering
-resets the world and the character is at the spawn no matter what any flag
-says. That is the case the predecessor of this code got wrong, and it cost the
-back half of a 45-minute harvest — see control/CLAUDE.md.
+⚠ THE RULE GOT SIMPLER ON 2026-08-08, AND THIS FILE IS WHERE THE CHANGE IS
+VISIBLE. It used to be two clauses — walked in, OR this process has not placed
+anyone yet — with a module-level flag behind the second. It is now one clause:
+
+    teleport  ⟺  THIS CALL walked into the match
+
+Stated by the operator as「每次进训练场的时候做一次那个地图的那个切换就行了，
+其他过程中不需要切换」. So the case that flipped is 4 (already in, fresh
+process): it used to teleport and must now SKIP, and it is checked below in
+that direction. Case 3 is unchanged and is the one that must never regress —
+a call that WALKED IN re-places unconditionally, because entering resets the
+world and the character is at the spawn no matter what anyone believes. That
+is the case the predecessor of this code got wrong, and it cost the back half
+of a 45-minute harvest (see control/CLAUDE.md).
 """
 import os
 import sys
@@ -89,24 +98,35 @@ def main():
         if not cond:
             fails.append(label)
 
-    # ── it teleports ──
-    L.forget_placement()
+    # ── it teleports: ONLY on the entry event, and always on it ──
     r = run(['lobby', 'fullbleed', 'in_game'])
-    check('1  walked in, nothing believed        -> teleport',
-          len(CALLS) == 1 and L.placed_at() == '200m', f'{CALLS} {r}')
+    check('1  walked in via loading              -> teleport',
+          len(CALLS) == 1, f'{CALLS} {r}')
 
     r = run(['lobby', 'in_game'])
-    check('3  walked in, ALREADY believed        -> teleport anyway',
+    check('3  walked in, right after another     -> teleport anyway',
           len(CALLS) == 1, f'{CALLS}')
 
-    L.forget_placement()
-    r = run(['in_game'])
-    check('4  already in, fresh process          -> teleport',
-          len(CALLS) == 1, f'{CALLS}')
+    # ⚠ 3b IS CASE 3 WITH THE ONLY STATE THAT COULD BLUR IT. A modal cleared
+    # over a running match must NOT read as an entry: states[0] is in_game
+    # there, which is why the code reads states[0] and not `actions > 0`.
+    r = run(['in_game', 'menu', 'in_game'])
+    check('3b modal cleared over a live match    -> SKIP',
+          not CALLS and r.get('range', {}).get('skipped'), f'{CALLS} {r}')
 
     # ── it does NOT teleport: the half a one-sided gate would miss ──
-    r = run(['in_game'])           # placed by case 4 above, and nobody moved
-    check('2  already in, believed               -> SKIP',
+    #
+    # ⚠ CASE 4 IS THE ONE THAT FLIPPED (2026-08-08). It teleported until the
+    # rule became "bound to the entry event and nothing else". A fresh process
+    # attaching to a running match now leaves the character where it is —
+    # being in the training range IS being placed. Reverting the rule to the
+    # old two-clause form turns this red, which is the point of keeping it.
+    r = run(['in_game'])
+    check('4  already in, fresh process          -> SKIP',
+          not CALLS and r.get('range', {}).get('skipped'), f'{CALLS} {r}')
+
+    r = run(['in_game'])           # ...and again: no state accumulates
+    check('2  already in, second call            -> SKIP',
           not CALLS and r.get('range', {}).get('skipped'), f'{CALLS} {r}')
 
     r = run(['lobby'], ok=False)
@@ -122,31 +142,26 @@ def main():
     # ⚠ THE SEVERITY IS THE POINT. Being in a match with the character in the
     # compound is WORSE than not being in a match: every gate downstream
     # passes and the magazines are fired in traffic, which does not announce
-    # itself in the trace. So ok=False, and the belief is cleared rather than
-    # left naming a lane nobody reached.
+    # itself in the trace. So ok=False rather than a warning.
     r = run(['lobby', 'in_game'], teleport_ok=False)
     check('5  teleport failed                    -> the call fails',
-          r['ok'] is False and bool(r['error']) and L.placed_at() is None, r)
+          r['ok'] is False and bool(r['error']), r)
     check('5b the match-settle retry fired',
           len(CALLS) == 2, f'{CALLS}')
 
-    # ⚠ AND ON THE `already in` PATH TOO, which is what this used to skip. The
-    # retry was gated on `entered`, reasoning from the CAUSE it was written for
-    # (a match too fresh to take input) rather than from the symptom. A process
-    # that found the game already in a match hit the same map_open false
-    # positive on 2026-08-08, got no retry, and failed hard twice in a row --
-    # while the run after it succeeded on its first try.
-    L.forget_placement()
-    r = run(['in_game'], teleport_ok=False)
-    check('5c already in, teleport failed        -> retry fires ANYWAY',
-          len(CALLS) == 2, f'{CALLS}')
-
-    # ── leaving forgets ──
-    run(['lobby', 'in_game'])
-    L.LobbyControl._pump = fake_pump(['in_game', 'lobby'])
-    L.LobbyControl.exit_to_lobby(lc)
-    check('8  exit_to_lobby                      -> belief dropped',
-          L.placed_at() is None, str(L.placed_at()))
+    # ⚠ TWO CASES WERE REMOVED HERE ON 2026-08-08, and neither was deleted for
+    # going green. They lost their referent:
+    #
+    #   5c  "already in, teleport failed -> retry fires ANYWAY" asked whether
+    #       the retry was gated on `entered`. The `already in` path does not
+    #       teleport at all now, so there is no attempt to retry. The retry
+    #       being unconditional is still checked, by 5b, on the path that has
+    #       one.
+    #   8   "exit_to_lobby -> belief dropped" checked that leaving a match
+    #       cleared the module-level placement flag. THERE IS NO FLAG. Nothing
+    #       carries across calls for a transition to invalidate, which is the
+    #       property that replaced it rather than a check that was dropped —
+    #       case 4 above is what proves it.
 
     # ── and MapControl itself: WHEN MAY IT CLICK? ──
     #
@@ -167,7 +182,7 @@ def main():
     if fails:
         print(f'{len(fails)} branch(es) are not what the code claims')
         return 1
-    print('12 branches, 5 of them negative — the placement table holds')
+    print('11 branches, 6 of them negative — the placement table holds')
     return 0
 
 

@@ -152,46 +152,44 @@ def main():
     print('read_config — does a second gun stop the measurement?')
     from calibration import collect_timed as ct
 
-    class LoadoutAC:
-        def __init__(self, guns, slots):
-            self.guns, self.slots = guns, slots
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-        def tab_up(self):
-            return FakeTab()
-
-        def loadout(self):
-            return {'guns': self.guns, 'slots': self.slots}
-
-    import control.inventory as inv_mod
-    real = inv_mod.InventoryControl
+    # ⚠ NO InventoryControl FAKE ANY MORE, and that is the change under test as
+    # much as the refusals are. read_config took its own trip into the backpack
+    # until 2026-08-08 -- so did read_sight, back to back, with nothing between
+    # them but prints. Both now take ONE loadout dict the caller already has,
+    # which is why this drives them with a literal instead of a fake driver.
     bare = {'scope': '', 'muzzle': '', 'grip': '', 'magazine': '', 'stock': ''}
     grip = dict(bare, grip='Lower_Foregrip_C')
-    try:
-        # The 2026-08-08 state, reproduced: slot 1 clean, slot 2 kitted.
-        inv_mod.InventoryControl = lambda *a, **k: LoadoutAC(
-            {1: 'mp5k', 2: 'mp5k'}, {1: grip, 2: dict(grip,
-                                     muzzle='Muzzle_Compensator_Medium_C')})
-        check('two guns -> None', ct.read_config('mp5k'), None)
 
-        # One gun, same slot 1 contents: the reading it would have given.
-        inv_mod.InventoryControl = lambda *a, **k: LoadoutAC(
-            {1: 'mp5k', 2: None}, {1: grip, 2: bare})
-        check('one gun -> the config', ct.read_config('mp5k'),
-              {'grip': 'vert_grip'})
+    def lo(guns, slots):
+        return {'guns': guns, 'slots': slots}
 
-        # A second gun of a DIFFERENT weapon is just as unanswerable: the
-        # refusal is about which one is in hand, not about which model it is.
-        inv_mod.InventoryControl = lambda *a, **k: LoadoutAC(
-            {1: 'mp5k', 2: 'm416'}, {1: grip, 2: bare})
-        check('second gun, other weapon -> None', ct.read_config('mp5k'), None)
-    finally:
-        inv_mod.InventoryControl = real
+    # The 2026-08-08 state, reproduced: slot 1 clean, slot 2 kitted.
+    check('two guns -> None',
+          ct.read_config(lo({1: 'mp5k', 2: 'mp5k'},
+                            {1: grip,
+                             2: dict(grip, muzzle='Muzzle_Compensator_Medium_C')}),
+                         'mp5k'), None)
+
+    # One gun, same slot 1 contents: the reading it would have given.
+    check('one gun -> the config',
+          ct.read_config(lo({1: 'mp5k', 2: None}, {1: grip, 2: bare}), 'mp5k'),
+          {'grip': 'vert_grip'})
+
+    # A second gun of a DIFFERENT weapon is just as unanswerable: the
+    # refusal is about which one is in hand, not about which model it is.
+    check('second gun, other weapon -> None',
+          ct.read_config(lo({1: 'mp5k', 2: 'm416'}, {1: grip, 2: bare}), 'mp5k'),
+          None)
+
+    # ⚠ AND THE OPTIC COMES OUT OF THE SAME DICT. This is the property the
+    # merge bought: read_sight can no longer disagree with read_config about
+    # which gun it described, because there is only one reading to describe.
+    one = lo({1: 'mp5k', 2: None},
+             {1: dict(grip, scope='Sight_RedDot_01_C'), 2: bare})
+    check('config and sight, one reading — config', ct.read_config(one, 'mp5k'),
+          {'grip': 'vert_grip'})
+    check('config and sight, one reading — sight', ct.read_sight(one)[1],
+          'Sight_RedDot_01_C')
 
     print()
     if FAILS:

@@ -502,6 +502,319 @@ def check_eager_pointer(path, rel):
     return out
 
 
+# ── Rule 14: one trip into the backpack ──────────────────────────────────
+#
+# ⚠ THE RULE WAS ALREADY WRITTEN DOWN, IN InventoryControl.tab_up's OWN
+# DOCSTRING, and it was broken anyway:
+#
+#     Hold ONE across the whole flow; do not wrap each read in its own.
+#
+# calibration/collect_timed.py's read_config() and read_sight() each wrapped
+# their own. Between the two entries: TWELVE calls, every one of them print /
+# sorted / dict.get. The character walked out of the backpack and straight back
+# in to compare two dicts.
+#
+# And the cost was never just time. Two loadout() calls are TWO OBSERVATIONS,
+# so the config and the optic were read a Tab-toggle apart and then stored as
+# one description of one gun -- the repository's second cross-layer law with
+# the two readings a second apart instead of a day.
+#
+# Same shape, same file family, once before: ensure_kit's post-restock hold()
+# produced blocks of `False -> True -> True -> False -> True`, 49 of them, five
+# Tab presses to accomplish one keypress. Measured over the shared journal at
+# the time: 975 of 1836 real presses (58%) sat inside blocks that ended in the
+# state they began in. TWO counterexamples to one sentence of prose is the
+# ratio that says prose is not the container.
+
+# Calls that cannot drive anything: builtins and container methods. The
+# predicate is deliberately INVERTED -- anything not on this list makes the
+# rule shut up, so a second trip is only reported when NOTHING happened in
+# between. A list of "things that need the backpack shut" would have to be
+# maintained and would rot; this one is closed by the language.
+_PURE = set('''print len sorted list dict set tuple str int float bool round
+abs min max sum any all enumerate zip range reversed isinstance getattr setattr
+hasattr format repr type id join get items keys values append extend pop split
+rsplit strip lstrip rstrip partition replace startswith endswith lower upper
+add update copy index count remove insert sort clear discard setdefault
+fromkeys ljust rjust zfill title capitalize splitlines encode decode Counter
+defaultdict deepcopy dumps loads'''.split())
+
+
+def _call_name(c):
+    f = c.func
+    return f.attr if isinstance(f, ast.Attribute) else getattr(f, 'id', None)
+
+
+def _own_calls(st):
+    """(lineno, name, node) for calls in THIS statement's own expressions.
+
+    Stops at any nested STATEMENT, which is what makes the whole rule work
+    with no line arithmetic: a `with ac.tab_up():` yields its own tab_up()
+    call (the context expression) and NOT the body, because the body is
+    statements. Same for `if`, `for`, `try` -- the test is this statement's,
+    the block is somebody else's.
+
+    ⚠ THE LINE-RANGE VERSION OF THIS WAS WRONG IN BOTH DIRECTIONS and its own
+    self-test caught the first: reading the inside of a held-open block as
+    "between the trips" hid two back-to-back `with tab_up():`. The second it
+    could not catch, and the repository did: the rule fired on a `tab_up()`
+    inside `if a.kit:` and a `read_loadout()` inside `if lo is None:` --
+    MUTUALLY EXCLUSIVE branches that can never both run. Comparing within one
+    block list is the fix for both, and it needs no control-flow analysis:
+    different branches are different block lists by construction.
+    """
+    out = []
+
+    def walk(n):
+        for c in ast.iter_child_nodes(n):
+            if isinstance(c, ast.stmt):
+                continue                       # another block, scanned on its own
+            if isinstance(c, ast.Call):
+                nm = _call_name(c)
+                if nm:
+                    out.append((c.lineno, nm, c))
+            walk(c)
+    walk(st)
+    out.sort(key=lambda t: (t[0], t[1]))
+    return out
+
+
+def _blocks_of(st):
+    """The nested statement blocks of one statement, each scanned fresh."""
+    if isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return []                              # its own function, its own scan
+    out = []
+    for field in ('body', 'orelse', 'finalbody'):
+        blk = getattr(st, field, None)
+        if blk and all(isinstance(x, ast.stmt) for x in blk):
+            out.append(blk)
+    for h in getattr(st, 'handlers', []) or []:
+        out.append(h.body)
+    return out
+
+
+def _tab_event(nm, call):
+    """'open' | 'close' | None for one direct Tab operation.
+
+    ⚠ `ensure_tab(False)` IS NOT AN ENTRY, and conflating the two was the first
+    draft's false positive: control/stock.py's restock() reads the shelf and
+    then SHUTS Tab to reach the spawner, which is the opposite of churn.
+    A non-literal argument (`ensure_tab(want)`) is unreadable, so it answers
+    None and the rule falls silent rather than guessing.
+    """
+    if nm == 'tab_up':
+        return 'open'
+    if nm != 'ensure_tab' or not call.args:
+        return None
+    a = call.args[0]
+    return ('open' if a.value else 'close') if isinstance(a, ast.Constant) \
+        else None
+
+
+def _first_tab_event(fn):
+    """'open' | 'close' | None — what this function needs the backpack to be.
+
+    Walks everything, blocks included: the question is what the function does
+    at all, not where in it.
+    """
+    best = None
+    for n in ast.walk(fn):
+        if not isinstance(n, ast.Call):
+            continue
+        e = _tab_event(_call_name(n), n)
+        if e and (best is None or n.lineno < best[0]):
+            best = (n.lineno, e)
+    return best[1] if best else None
+
+
+def check_tab_churn(path, rel):
+    """Two backpack ENTRIES in one body with only pure computation between.
+
+    -> [(fn, line_a, name_a, line_b, name_b)]
+
+    ⚠ WHAT SEPARATES AN ENTRY FROM A TRIP OUTSIDE IS THE FIRST TAB EVENT IN
+    THE CALLEE, and getting that wrong was the other false positive. hold()
+    presses 1/2, which are SWALLOWED while the inventory is up, so it opens
+    with `ensure_tab(False)` -- it needs the backpack SHUT. ensure_kit calling
+    hold() and then reopening is the correct shape, not churn. read_config()
+    opened with tab_up(): it needs the backpack UP. So the callee's own first
+    event classifies it, and no hand-maintained list of "outside" work exists
+    to go stale.
+
+    Resolution is WITHIN ONE FILE and one hop, on purpose. A transitive
+    closure over function NAMES was tried first and collapsed: `__exit__` ->
+    `close` -> `ensure_tab` painted 711 names, `main` and `read` and `get`
+    among them, because names are not identities across modules. One file, one
+    hop, is where a name IS an identity -- and it is exactly the reach the
+    failure had (read_config and read_sight are siblings, called from main()).
+    """
+    try:
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+    except (SyntaxError, UnicodeDecodeError):
+        return []
+    needs_open, needs_shut = set(), set()
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        e = _first_tab_event(fn)
+        if e == 'open':
+            needs_open.add(fn.name)
+        elif e == 'close':
+            needs_shut.add(fn.name)
+    out = []
+
+    def scan(stmts, fname):
+        """One block list, left to right. Nested blocks start over."""
+        prev = None
+        for st in stmts:
+            for ln, nm, c in _own_calls(st):
+                e = _tab_event(nm, c)
+                kind = e or ('open' if nm in needs_open else
+                             'pure' if (nm in _PURE and nm not in needs_shut)
+                             else 'other')
+                if kind == 'open':
+                    if prev is not None:
+                        out.append((fname, prev[0], prev[1], ln, nm))
+                    prev = (ln, nm)
+                elif kind != 'pure':
+                    prev = None      # real work happened; a new trip is earned
+            for blk in _blocks_of(st):
+                scan(blk, fname)
+
+    for fn in [n for n in ast.walk(tree)
+               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+        scan(fn.body, fn.name)
+    return out
+
+
+TAB_CHURN_WHY = (
+    'enters the Tab screen twice with nothing but pure computation in '
+    'between — the character walks out of the backpack and straight back in. '
+    'InventoryControl.tab_up() is as-found and nests for free, so hold ONE '
+    'across the whole flow and pass the reading down. Beyond the keypresses, '
+    'two reads a Tab-toggle apart are TWO OBSERVATIONS being recorded as one '
+    'description of one object, which is what calibration/collect_timed.py '
+    'read_config/read_sight cost before they were merged.')
+
+# ⚠ EIGHT CASES, FOUR OF WHICH MUST BITE. A rule that only checks "it fired
+# when it should" passes just as well when the answer is always yes, and
+# always-yes here would flag every legitimate second trip in the repository.
+# Case 5 is the shape that was actually shipped (read_config / read_sight);
+# cases 6-8 are the two false positives the first two drafts produced, kept as
+# cases so the discrimination cannot be lost again.
+_CHURN_CASES = [
+    ('one trip, two reads inside', False, '''
+def main(ac):
+    with ac.tab_up():
+        lo = ac.loadout()
+    print(lo)
+'''),
+    ('a trip per loop iteration', False, '''
+def main(ac, xs):
+    for x in xs:
+        with ac.tab_up():
+            ac.loadout()
+'''),
+    ('two entries, real work between', False, '''
+def main(ac, sc):
+    with ac.tab_up():
+        ac.loadout()
+    sc.give_many(['m416'])
+    with ac.tab_up():
+        ac.loadout()
+'''),
+    ('entry, explicit close, entry', False, '''
+def main(ac):
+    with ac.tab_up():
+        ac.loadout()
+    ac.ensure_tab(False)
+    ac.ensure_tab(True)
+'''),
+    ('read_config/read_sight, as shipped', True, '''
+def read_config(ac):
+    with ac.tab_up():
+        return ac.loadout()
+def read_sight(ac):
+    with ac.tab_up():
+        return ac.loadout()
+def main(ac):
+    config = read_config(ac)
+    print(f'fitted: {config}')
+    worn = read_sight(ac)
+'''),
+    ('two tab_up back to back', True, '''
+def main(ac):
+    with ac.tab_up():
+        ac.loadout()
+    with ac.tab_up():
+        ac.loadout()
+'''),
+    ('hold() needs Tab SHUT, so reopening is earned', False, '''
+def hold(self, gun):
+    self.ensure_tab(False)
+    self.press_key()
+    self.ensure_tab(True)
+def ensure_kit(self):
+    with self.tab_up():
+        self.hold(1)
+        self.ensure_tab(True)
+'''),
+    ('ensure_tab(False) is not an entry', False, '''
+def restock(ac):
+    with ac.tab_up():
+        ac.read_stock()
+    ac.ensure_tab(False)
+'''),
+    # ⚠ THE REPOSITORY TAUGHT THIS ONE, not the author. The line-ordered draft
+    # fired on collect_timed's `if a.kit:` / `if lo is None:` pair -- two
+    # entries that can never both run. Blocks, not lines.
+    ('mutually exclusive branches', False, '''
+def main(a, ac):
+    lo = None
+    if a.kit:
+        with ac.tab_up():
+            lo = ac.loadout()
+    if lo is None:
+        lo = read_loadout()
+'''),
+    # ...and the negative of THAT: same two entries, no guard, one after the
+    # other. If the block rule silenced this too it would be silencing
+    # everything.
+    ('same two entries, unguarded', True, '''
+def main(ac):
+    with ac.tab_up():
+        lo = ac.loadout()
+    lo2 = read_loadout()
+def read_loadout():
+    with InventoryControl() as ac:
+        with ac.tab_up():
+            return ac.loadout()
+'''),
+]
+
+
+def selftest_tab_churn():
+    """-> (passed, total, bitten). Rule 14 proving it can be both."""
+    import tempfile
+    passed = bitten = 0
+    for label, must_bite, src in _CHURN_CASES:
+        with tempfile.NamedTemporaryFile('w', suffix='.py', delete=False,
+                                         encoding='utf-8') as fh:
+            fh.write(src)
+            tmp = pathlib.Path(fh.name)
+        try:
+            got = bool(check_tab_churn(tmp, tmp))
+        finally:
+            tmp.unlink(missing_ok=True)
+        ok = got == must_bite
+        passed += ok
+        bitten += must_bite
+        if not ok:
+            print(f'  SELFTEST FAIL  {label}: expected '
+                  f'{"a bite" if must_bite else "silence"}, got the other')
+    return passed, len(_CHURN_CASES), bitten
+
+
 def main():
     violations = []
     offenders = set()
@@ -533,6 +846,17 @@ def main():
                     'sc.plan() is documented 纯离线 and did exactly that. '
                     'Subclass control.driver.Driver and use its lazy '
                     '`pointer` property.'))
+        # ⚠ EVERY LAYER, not just calibration/. The shipped instance was in
+        # calibration/, the near-miss before it was in control/, and a rule
+        # scoped to where the last one happened is the shape check_ready spent
+        # a year being (tools/ only, while three other layers offended).
+        for fn, la, na, lb, nb in check_tab_churn(f, rel):
+            violations.append((
+                'one trip into the backpack, not one per read',
+                rel.as_posix(), lb,
+                f'{na}() at line {la}, then {nb}() in {fn}()',
+                TAB_CHURN_WHY))
+
         why = check_ready(f, rel, imps)
         if why:
             not_ready.add(rel.as_posix())
@@ -541,7 +865,19 @@ def main():
 
     stale = check_ledger(offenders) + check_ready_ledger(not_ready)
 
-    print(f'checked {checked} files against {len(RULES) + 2} rules')
+    print(f'checked {checked} files against {len(RULES) + 3} rules')
+    # ⚠ PRINTED EVEN WHEN GREEN, because rule 14 has no ledger and therefore
+    # no other evidence that it is still able to fire. tools/CLAUDE.md's line:
+    # a gate nobody can say what would turn red has not been verified.
+    cp, ct, cb = selftest_tab_churn()
+    print(f'  {"✓" if cp == ct else "✗"} rule 14 self-test {cp}/{ct} '
+          f'({cb} of them must BITE, so "never report" does not pass)')
+    if cp != ct:
+        violations.append(('rule 14 self-test', 'tools/check_layering.py', 0,
+                           'the churn rule itself',
+                           f'{ct - cp} of {ct} cases answered wrong — the rule '
+                           f'cannot be trusted about the repository until its '
+                           f'own cases pass.'))
     if DEBT:
         # Printed on every green run ON PURPOSE. This list IS the remaining
         # work in docs/refactor_plan.md section 5, derived from the code
