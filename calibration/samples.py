@@ -76,16 +76,30 @@ def config_key(config):
 def comp_counts_at(curve, t_s):
     """Compensation DELIVERED by time t, in mouse counts. Vectorised over t.
 
-    ⚠ IT DOES NOT REPRODUCE THE FIRMWARE, AND THAT IS MEASURED. This
-    docstring used to open with "This reproduces the firmware, not an
-    idealisation of it". Two runs of tools/probe_delivery_path.py --hold-sweep
-    say otherwise: curve/move RISES with how long the button was held,
-    +0.0148/s (2.8 sigma) and +0.0242/s (5.7 sigma). Pixels per count cannot
-    know the hold duration, so that trend can only be the integration below.
-    It peaks exactly when the curve finishes playing and is flat after, so it
-    is the LATE, SMALL knots -- where the firmware's int(accum)-with-carry
-    lives -- and not the freeze at release. 3-4% at burst-length holds, on a
-    C of ~900 counts inside a y_true of ~940. MODEL.md's open item 1.
+    ⚠ IT DOES REPRODUCE THE FIRMWARE, TO WITHIN ONE CARRIED COUNT, AND THAT IS
+    NOW MEASURED -- `pixi run comp-counts` runs this against a tick-exact
+    transcription of main.c's get_recoil_delta across a hold sweep. They differ
+    by at most one count and the difference does NOT grow with hold duration.
+
+    ⚠ THIS DOCSTRING SAID THE OPPOSITE FOR A DAY, and the retraction is worth
+    more than the correction. It read "IT DOES NOT REPRODUCE THE FIRMWARE, AND
+    THAT IS MEASURED", blaming the trend that tools/probe_delivery_path.py
+    --hold-sweep found -- curve/move rising with how long the button was held,
+    +0.0148/s and +0.0242/s -- on "the LATE, SMALL knots, where the firmware's
+    int(accum)-with-carry lives".
+
+    The TREND IS REAL AND STILL UNEXPLAINED. What was wrong is the attribution,
+    and it was reached by elimination: pixels-per-count cannot know the hold
+    duration, therefore the integration. That eliminates correctly and then
+    names a mechanism the elimination never pointed at. Truncate-and-carry is
+    EXACT in total -- whatever is truncated stays in the accumulator and comes
+    out on a later tick -- so it could not have been the cause, and reading
+    main.c would have said so before any measurement. MODEL.md 6.1 item 1 now
+    carries it as an unlocated measurement difference instead of a broken
+    function.
+
+    ⚠ SO DO NOT "FIX" THIS FUNCTION AGAINST THE FIRMWARE. That work was
+    proposed, scoped, and refuted by the gate before a line of it was written.
 
     What it MODELS (pico_firmware/src/main.c, get_recoil_delta +
     bullet_duration):

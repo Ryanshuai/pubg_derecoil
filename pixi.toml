@@ -112,6 +112,14 @@ fit-time = "python calibration/fit_time_curve.py --selftest"
 # peak-locking. Its first version read delta^-0.23 off data built dead flat.
 # Reversing the chi2 comparison makes it exit 1 — verified 2026-08-08.
 bias-judge = "python tools/probe_correlator_bias.py --selftest"
+# `C` in y_true = y_obs + C(t-M), against a tick-exact transcription of main.c.
+# It matters more than it looks: the collection arm that carries the answer is
+# the COMPENSATED one, where |y_obs| is ~36 counts against a C of ~900, so C is
+# not a correction on that arm -- it is the measurement. Two integrations, one
+# continuous and one per-millisecond, agreeing to within a single carried count
+# is what licenses using the cheap one everywhere. It also holds the ruling-out
+# of two mechanisms (int-with-carry, a slow main loop) so they stay ruled out.
+comp-counts = "python tools/test_comp_counts.py"
 # "Replicate it" has no meaning on pooled data -- a fit eats the whole store at
 # once. This is the shape that rule takes there: cut by (session x curve arm)
 # and ask whether the slices agree, with the baseline computed from the

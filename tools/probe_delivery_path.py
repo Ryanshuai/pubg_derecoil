@@ -15,9 +15,18 @@ separately. The identity has no eta and never gained one:
 WHAT THIS FILE IS STILL FOR is the other thing it found, which did NOT close:
 --hold-sweep's curve/move ratio RISES with hold duration (+0.0148/s and
 +0.0242/s in two runs), and px-per-count cannot know how long a button was
-held. That is MODEL.md 6.1 item 1 -- comp_counts_at not reproducing the
-firmware -- and it is the last open model problem. The eta framing below is
-kept because the arms and the refutations are still the measurement.
+held. That is MODEL.md 6.1 item 1, and it is the last open model problem. The
+eta framing below is kept because the arms and the refutations are still the
+measurement.
+
+⚠ AND THE OBVIOUS SUSPECT IS ALREADY DEAD, so do not start there. The trend was
+attributed to comp_counts_at mis-integrating the curve -- specifically to the
+firmware's int(accum)-with-carry on the late, small knots. `pixi run
+comp-counts` put that function next to a tick-exact transcription of main.c
+across a hold sweep: they agree to within ONE carried count, with no trend.
+Truncate-and-carry is exact in total by construction. A slow main loop, the
+other candidate, is ruled out too and by sign rather than by size -- it makes
+the firmware deliver LESS, and this trend needs MORE.
 
 Two mechanisms fit every number, and the recoil data cannot separate them
 because a burst only ever delivers compensation one way:
