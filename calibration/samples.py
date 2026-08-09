@@ -280,6 +280,34 @@ class Magazine:
 
             y_true(t) = y_obs(t) + C(t - L)
 
+        ⚠ AND THAT IDENTITY IS STILL MISSING A TERM. Measured 2026-08-08 with
+        --scale-sweep=0,1 -- comp-OFF and comp-ON alternating INSIDE one
+        session, 15 s apart, so session drift cannot align with an arm:
+
+            commanding 948 counts of curve moves y_obs by -0.9589 x F
+            bootstrap 95% [-0.9766, -0.9470], which EXCLUDES -1
+
+        So counts delivered as a firmware curve (~1 count/ms) push the screen
+        4.1% less than the same counts delivered as mouse.move(), which is how
+        K was measured (11 sigma, tools/audit_k.py). The honest identity is
+
+            y_true(t) = y_obs(t) + eta * C(t - L),   eta = 0.959 +- 0.008
+
+        ⚠ THE MISSING eta DOES NOT BREAK THE COMPENSATION, WHICH IS WHY IT
+        SURVIVED. The fit consumes its own output, so with eta omitted the loop
+        has a fixed point at C* = y_true/(1-d), and what reaches the screen
+        there is (1-d)*C* = y_true EXACTLY. The compensation converges to
+        correct. What is wrong is the CURVE, by +4.3% -- and MODEL.md's claim
+        is that the curve IS y_true(t), so it is the measurement that breaks,
+        not the aim.
+        ⚠ NOT APPLIED HERE. A correction factor that makes the numbers agree,
+        installed before anyone knows why it exists, is how this repository got
+        1.025^255. The mechanism (firmware per-ms rounding, HID report
+        coalescing, or the game sampling many 1-count moves differently from
+        one 250-count move) is separable by delivering the SAME total both ways
+        and measuring the screen. Until then eta is a measurement without a
+        cause, and it is recorded as one.
+
         and this used to write C(t). The error is +L * F'(t) -- about 7.5
         counts at t=2 s with L=20 ms -- and it is not merely a bias, because
         the fit consumes its own output:
