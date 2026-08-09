@@ -322,17 +322,9 @@ ultralytics 会把 `cv2.imread` 换成自己默认 `IMREAD_COLOR` 的包装，�
 
 ## 开镜检测：用 `ads_detector`，别再自己造
 
-> ### ⚠ 先读这条：本节里所有关于 `ads_frac` 和 `ADS_FRAC_MIN` 的话，描述的是**已退场的旧分析路径**（2026-08-08 更正）
+> ⚠ **`ads_frac` 和 `ADS_FRAC_MIN` 在这一节里出现的地方，说的都是一条不再运行的回路。** 时间坐标那条采集路从来没接过 `ads_frac`，全库都是 `nan`。活着的是 `Magazine.ads_end`（两个端点：开跑前 `ensure_ads()`，松扳机时一次 `in_ads()`），细节归 `calibration/CLAUDE.md`。
 >
-> 那个闸**现在没有在拦任何东西**。时间坐标那条采集路（`calibration/collect_timed.py` → `fire_magazine_timed`）**从来没接过 `ads_frac`**，样本库里 **167 梭全是 `nan`**（143 梭 m416，含整个 2×2×2 立方体；24 梭 mp5k）。所以「1044 梭里拒了 55 梭」「989 梭的分布最小值 0.80」这些数字仍然是真的历史，**但它们说的是一条不再运行的回路**。
->
-> 现在活着的是 `Magazine.ads_end`：**两个端点，不是一个比率**——开跑前 `aim_and_scope` 的 `ensure_ads()`，加上扳机松开那一刻的一次 `in_ads()`。时间路的 grabber 只抓 tracker 的 patch，而这个检测器读的是**屏幕中心**，不在里面，所以拿不到逐帧比例。
->
-> **`ads_frac` 没有被填成 1.0，是故意的**：填一个没测过的比率，正是这个字段当初变得不可信的原因。
->
-> 它看不见「中途掉出去又回来」；抓得住「掉出去就没回来」——那正是真会发生的那种，而且值 ~3 倍的 K。
->
-> ⚠ **而 `iron` 根本没有 K。** `config.RECOIL_SIGHT_PROFILES` 只有 `hipfire / red_dot / 2x / 3x / 4x / vss_pso1`，而空镜位经 `_sight_of` 映射成 `'iron'`——一个**表里不存在的键**。以前这种枪会拿红点的 1.5474 硬算；现在 `collect_timed` 直接拒绝。要测铁瞄，得先给它量一个 K。
+> ⚠ **`iron` 没有 K。** `RECOIL_SIGHT_PROFILES` 里没有这个键（空镜位经 `_sight_of` 映射过来），`collect_timed` 因此直接拒绝这种枪。要测铁瞄或任何集成镜，先给那个镜子量一个 K。
 
 `detector/ads_detector.py` 回答「现在开镜了没有」，**单帧、0.32 ms、可以每帧跑**：
 
@@ -377,7 +369,7 @@ slots.classify(frame, 2)     # {'grip': 'absent', 'muzzle': 'empty', ...}
 slots.present(frame, 2)      # 有槽位的集合（不含 unknown）
 ```
 
-**为什么要它**：往枪没有的槽上拖配件，东西会掉地上，而「这枪没这个槽」和「这个槽不收这个配件」看鼠标是一模一样的。`attachment_catalog.SLOTS` 本该防住，但它 22 条抄 wiki、6 条纯猜、2 条读截图，**实测 0 条**。有了这个检测器，「哪些槽存在」是一次刷枪加一张截图，不是一整个拖拽矩阵。
+**为什么要它**：往枪没有的槽上拖配件，东西会掉地上，而「这枪没这个槽」和「这个槽不收这个配件」看鼠标是一模一样的。`attachment_catalog.SLOTS` 本该防住，而写这句话时它 22 条抄 wiki、6 条纯猜、2 条读截图、**实测 0 条**；`scan_compat` 之后 40 把枪的四个非 scope 槽全部实测（表头记着它推翻的两条）。有了这个检测器，「哪些槽存在」是一次刷枪加一张截图，不是一整个拖拽矩阵。
 
 **三态两判据，看的是不同像素：**
 
@@ -623,13 +615,26 @@ det.scores(crop)    # {枪: 余弦}，问「是不是某把枪」时用这个
   **验收是对着天空刷东西**：`give_many(['m416','red_dot','comp_ar'])` 8 次点击 3/3 落地，枪架从空变 m416。这正是原来必死的姿势。
 
   `read()` / `expansions()` 还在，但只做诊断和恢复，不在驱动路径上。离线 `pixi run panel-state` 永远看不见这类问题，因为它喂的是存图。
-- **背包清不空的时候，往后每一轮都会连带废掉。** 同一轮日志里 `库存 still holds 12 row(s) — the drops are not landing`，然后三轮 `no bare host gun`。往 附近 栏扔东西的释放点是固定 y（`DROP_XY`，落在第 4、5 行之间），列表一长就落在已有物品上。`control/inventory.py` 的注释里记着这件事的来龙去脉，那个文件 2026-08-03 深夜正在被改。
+- **背包清不空的时候，往后每一轮都会连带废掉。** 同一轮日志里 `库存 still holds 12 row(s) — the drops are not landing`，然后三轮 `no bare host gun`。
+
+  ⚠ **这里原来给的原因是「释放点是固定 y（`DROP_XY`），列表一长就落在已有物品上」——那条 2026-08-09 从日志证伪了，两头都不成立。** 落点早就不是固定的（`want.release` 的 y **等于抓取那一行的 y**，947 次里出现过 11 个不同的 y）；而「压在已有物品上」也不伤落地率：
+
+  | 释放点 | n | 落地 |
+  |---|---|---|
+  | 压在地面栏已有的那一行上 | 35 | **89%** |
+  | 落在空白处 | 169 | **94%** |
+
+  （现役路径 08-08/09。全部历史 291 vs 455，82% / 86%，同样是平的。）`docs/game_quirks.md` 那句「y 用抓取行的 y 即可，不需要找空行——往已有物品的行上放实测 5/5」才是对的。
+
+  **现在的落地率是 93%（204 次验证过，14 次真没动）。** 剩下那些为什么不落，见 `control/CLAUDE.md` 的「手势干净但游戏不接」——**日志里所有能切的维度都是平的**，别再从这条记录出发去猜。
 - ✅ **~~库存行（`rows`）的真值集是坏的，930 条没一条能用~~ —— 已重采（2026-08-05），现在 930/1040 = 0.894。**
   坏的那两个原因都已修在采集端：文件名不含轮次导致互相覆盖（`CaptureRun.add()` 现在遇到重名直接抛，不再静默覆盖）、行号错位（游戏把新件插进自己的排序，采集器假设最新的在最后）。旧图没删，`labelled()` 不再把它们当真值发出去。
   **行采集现在不需要枪也不需要模板**：`collect_templates.py --targets rows` 走 `rows_only`——清空架子和库存 → 刷**一个**件 → `inv_rows`（纯 Laplacian）确认库存正好一行 → 那一行就是它。身份来自「只刷了一样东西」。
   ⚠ 这条路以前是**寄生在装配流程里**的（装上→拆下→拍行），所以要过 `SlotDetector`，而缺模板的件正好卡死在那里——**要采模板的件恰好是采不了的件**。`--targets rows` 单独跑因此永远返回 0 crops（`rows` 列表是空的，喂给 `sweep` 什么都拍不到）。
   还缺 `uzi_stock` / `variable` / `scope_8x`，命令见上面「两种渲染」那一节。
-- `attachment_catalog.SLOTS` 的 **`scope` 那一项仍是推断**。2026-08-02 全量扫过 30 把枪（`calibration/scan_compat.py`，run 在 `calibration/artifacts/compat/runs/20260802_155222/`），另外四个槽全部实测，`unverified()` 已清空；但 scope 槽**不画 tile**，存在性读不出来，`SlotDetector` 在那里返回 `unknown`。要确认得靠装一个瞄具。
+- **不画 tile 的槽，`SlotDetector` 答 `empty`，不是 `unknown`** —— 这一行原来写反了，而反的方向正好是危险的那个：`empty` 是「来拖我」，`absent` 是「别拖」。2026-08-09 在 p90 上实测，两张独立帧：整条槽带**一个 tile 都不画**（枪自带集成镜），而它对 scope / grip / magazine 全答 `empty`。存在性判据是 tile **边框环**的梯度，没有 tile 时它读到的是背后的枪身渲染。
+  **代价是记录在案的**：`scan_compat` 据此记下 `p90: ('magazine',)`，夜跑照着给它刷红点，红点被拖向不存在的槽、掉在地上。⚠ 而那次扫描更基本的错在别处——它读的是**一号位，一号位放的是 AUG**（`compat/runs/20260802_155222/p90.png`，标签 `AUG`、40 发、5.56mm、四个 tile），P90 在二号位。**文件名叫 `p90.png`，被测量的是一把 AUG。**
+  scope 槽的存在性仍然只能靠**装一个瞄具**确认。判据要带阳性对照：空白只有在「已知 tile 会画在这里」时才说明没有槽（`docs/p90_has_no_slots.png` 的 mg3 那一半就是那个对照）。
 - `EXCLUDE` / `ONLY` / `GRIP_ONLY` **一条都没实测**。「某个槽只收部分配件」（汤姆逊枪口只收消音）读不出来——收与不收留下的是同一个空 tile，只能逐个拖。
 
 后两类都能自动闭环解决：`control/spawner.py` 的 `give_*` 能刷出任意物品，`control/inventory.py` 能装，`tab_items.detect` 能读回——**给什么就该读出什么，ground truth 是自己指定的**。

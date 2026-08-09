@@ -227,17 +227,26 @@ It kits, fires both arms per cell, fits the pool and judges each cell against
 `harness/verdict.py`. `--rejudge <run>` re-runs the verdict offline, which is
 how a wrong threshold gets corrected without re-firing anything.
 
-## It refuses to guess four things, and each was paid for
+## It refuses to guess, and each refusal was paid for
 
 | it checks | what fooled it | what that cost |
 |---|---|---|
 | the weapon | two mp5ks in the rack | read one gun's attachments, fired the other |
 | the config | `--kit` asked for a stock, the gun wore the last cell's grip | 5 magazines filed under `bare` |
 | the optic | `--sight` recorded the FLAG, not the readback | K wrong by ~3x, invisible downstream |
-| ADS | `ads_frac` was `nan` on all 167 stored magazines | nothing verified a burst stayed scoped; same ~3x |
+| the fire mode | `ensure_fire_mode` existed and no collection path called it | the mg3's two cyclic rates are 1.50x apart and no magazine says which |
 
-**All four look identical to success in the printed numbers**, and each was
-caught only by asking a SECOND, INDEPENDENT source about the same object. ⚠ The
+**All of them look identical to success in the printed numbers**, and each was
+caught only by asking a SECOND, INDEPENDENT source about the same object.
+
+⚠ **ADS IS RECORDED, NOT REFUSED, and that is the correction to a row that
+stood here.** `ads_frac` is `nan` on every magazine the timed path has ever
+written — the grabber carries the tracker's patches and the detector reads the
+screen centre, which is not among them — so a gate on it could never pass.
+What exists is `Magazine.ads_end`: the two endpoints, `ensure_ads()` before and
+one read at the release. It cannot see a dropout that recovers; it catches
+dropping out and staying out. A magazine that ends out of ADS is stored and
+flagged, never dropped. ⚠ The
 clustering is NOT the backstop — it cut the mislabelled cell that day only
 because a stock is worth 2x; a part worth 5% merges into its neighbour and
 moves the mean with nothing to show for it.
