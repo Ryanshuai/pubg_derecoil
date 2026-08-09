@@ -56,7 +56,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from detector.attachment_catalog import ATTACHMENTS, ROSTER
 from capture.cropper import win32_cap
 from detector.geometry import detail
-from detector.tab_layout import equip_region
+from detector.tab_layout import equip_region, INV_ROWS
 from control.focus import ensure_focus, game_focused
 # ⚠ THE ONLY LOCATION THIS MODULE NAMES, and it names it so the factory
 # magazine goes to the FLOOR rather than into the pack it is being kept
@@ -367,8 +367,32 @@ def tidy(ac, want, drop_unwanted=True, verbose=True, keep=1,
                 print(f"      [stock] dropping {len(targets)}: "
                       + ', '.join(f'{k}x{n}' if n > 1 else k
                                   for k, n in sorted(names.items())))
+            # ⚠ ONE DRAG, ONE READBACK, and the return value is no longer
+            # thrown away. discard() drags and confirms by the row counts, and
+            # this loop ignored that entirely -- `dropped` counted gestures,
+            # not departures. The operator's rule is exactly this shape:
+            # 「拖拽一次一验，连续拖完统一读回会把时序问题伪装成几何问题」.
+            #
+            # And the cost is on record. On 2026-08-09 the aug's brake_ar cell
+            # read a pack of 9 named rows + 1 unnamed -- TWO free slots in a
+            # twelve-row window, nowhere near full -- dropped two items, and
+            # came back without `half_grip`, which had been there and was
+            # never named in either `dropping` line. Then STILL SHORT fired and
+            # blamed a full backpack. Every number in that chain was reported;
+            # the one nobody looked at was whether each drag did what it said.
+            #
+            # A drag that did not land makes every row index below it stale, so
+            # the pass STOPS rather than continuing to drag against a list that
+            # has moved. The next pass re-reads, which is what passes are for.
             for item in sorted(targets, key=_row_of, reverse=True):
-                ac.discard(item)
+                rec = ac.discard(item)
+                ok = rec.get('ok') if isinstance(rec, dict) else bool(rec)
+                if not ok:
+                    if verbose:
+                        print(f"      [stock] the drag for {item.key} did not "
+                              f"land — stopping this pass rather than dragging "
+                              f"against row numbers that may have moved")
+                    break
                 dropped += 1
             stock = read_stock(ac, close=False)
             if stock is None:
@@ -803,9 +827,21 @@ def restock(ac, sc, want, backpack=BACKPACK, leave='shut',
     # `stock` is the reading tidy already took, so this costs no screen time.
     short = [k for k in want if not stock.have(k)]
     if short:
+        # ⚠ FACTS, NOT A GUESS AT THE CAUSE. This used to end with "(a full
+        # 库存, or no backpack)" -- a parenthesis nothing here had measured,
+        # and it was believed: it sent a whole day's diagnosis after backpack
+        # CAPACITY when the pack in the failing case held 9 named rows plus one
+        # unnamed against a twelve-row window. Print what was seen and let the
+        # reader decide; a message that names a cause it cannot see is worse
+        # than one that names none.
+        rows = getattr(stock, 'rows', None)
+        n_rows = len(rows) if rows is not None else '?'
         print(f"      [stock] STILL SHORT of {', '.join(sorted(short))} "
-              f"after restocking — the spawner clicked but nothing arrived "
-              f"(a full 库存, or no backpack)")
+              f"after restocking. The pack reads {n_rows} of "
+              f"{INV_ROWS} visible rows; nothing here scrolls it, so a "
+              f"part below the window is invisible and reads as missing. "
+              f"Either the spawn did not land, the tidy pass took it, or it "
+              f"is out of sight.")
         return False
     return True
 
