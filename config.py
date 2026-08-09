@@ -638,9 +638,23 @@ KEY_ACTION_TABLE = [
      'hw': ['recoil_on', 'upload_pattern']},
 
     # ── Pickup ──
-    # Clear GT + attachments (weapon name falls back to pred/existing, so it persists).
+    # Drop the GROUND TRUTH so the +500 ms weapon_hud read wins; the name
+    # itself falls back to pred/existing, so it persists across the gap.
+    #
+    # ⚠ `('clear_attachments',)` STOOD HERE AND WAS THE SINGLE BIGGEST REASON
+    # THE TOOL STOPPED COMPENSATING MID-FIGHT. Every F wiped both guns' scope,
+    # muzzle, grip and stock; nothing re-read them (attachments live on the
+    # Tab panel and F does not open it); so one pickup dropped the curve key
+    # to `bare` and the compensation stayed off until the player opened Tab by
+    # hand. F is the most-pressed key in a match and almost none of those
+    # presses change your gun.
+    #
+    # Measured, play log 2026-08-09: 30 bursts, `[armed]` printed ONCE, four
+    # m416 bursts recorded as `bare`. The clear now hangs off
+    # GameState.sync_weapons -- an OBSERVED name change -- which is the same
+    # intent measured instead of guessed. Full reasoning there.
     {'key': 'f', 'event': 'press', 'cond': '!tab_open',
-     'state': [('weapon_gt', ('', '')), ('highlight_gt', 0), ('clear_attachments',)],
+     'state': [('weapon_gt', ('', '')), ('highlight_gt', 0)],
      'hw': ['upload_pattern']},
 
     # ── Fire mode ──

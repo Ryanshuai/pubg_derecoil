@@ -120,6 +120,12 @@ coverage = "python tools/coverage.py"
 # estimates the cells that ARE measured and reports the error, which is the
 # only number that says whether the thing is worth shipping.
 estimate = "python tools/estimate_cell.py"
+# A pickup must not disarm the tool. `('clear_attachments',)` hung off the F
+# key, so one loot dropped the curve key to `bare` and the compensation stayed
+# off until the player opened Tab by hand — 30 bursts in a play log with
+# `[armed]` printed once. Checks BOTH directions: the kit survives a pickup,
+# and a real weapon swap still clears it.
+kit-persist = "python tools/test_kit_persist.py"
 # What a magnified optic does to the counts a gun needs. `scope` reads the
 # store and stops (no game, no hardware); the live run wants --weapon and fires.
 # ⚠ The scope factor is DERIVABLE from config.RECOIL_SIGHT_PROFILES, so this

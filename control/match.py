@@ -68,6 +68,7 @@ class Dispatcher(DaemonLoop):
                 #    and keeps the loadout fresh while the panel is up so that
                 #    closing it needs no race and no buffered past frame.
                 self.tab.tick()
+                self._follow_tab()
 
                 # 4. Periodic mismatch collection — DISABLED for debugging
                 # self.mismatch.poll(time.perf_counter())
@@ -83,6 +84,9 @@ class Dispatcher(DaemonLoop):
 
     def _handle_key(self, ev):
         """Process a single KeyEvent: actions + schedule detections."""
+        # Name the cause BEFORE anything acts on it, so every [armed] line
+        # printed downstream of this key carries the key. See _said_pattern.
+        self._cause = f'key {ev.key!r} {ev.event}'
         # Shutdown
         if ev.key == 'f13' and ev.event == 'press':
             self.shutdown()
@@ -175,11 +179,21 @@ class Dispatcher(DaemonLoop):
     # ════════════════════════════════════════════════════════════
 
     def _apply_state(self, state_list):
-        """Apply state changes from KEY_ACTION_TABLE entry."""
+        """Apply state changes from KEY_ACTION_TABLE entry.
+
+        ⚠ `stop_recoil` IS ANNOUNCED, because it is the one flag that turns
+        the whole tool off and nothing said when it moved. Reading the play
+        log meant reconstructing it from KEY_ACTION_TABLE by hand -- and what
+        that reconstruction found was that `tab` sets it True with no `cond`,
+        so the same key disarms on the way IN and again on the way OUT.
+        """
         s = self.state
         for item in state_list:
             if isinstance(item, tuple) and len(item) == 2:
                 attr, val = item
+                if attr == 'stop_recoil' and bool(val) != bool(s.stop_recoil):
+                    print(f'[state] stop_recoil {bool(s.stop_recoil)} -> '
+                          f'{bool(val)}   (after {self._cause})', flush=True)
                 # Method call: ('set_active_by_key', 1)
                 method = getattr(s, attr, None)
                 if callable(method):
@@ -225,17 +239,56 @@ class Dispatcher(DaemonLoop):
                 self._armed_curve = ()
         return list(self._armed_curve)
 
+    # What most recently drove the loop, so a change can name its own cause.
+    _cause = 'startup'
+
+    _tab_was = False
+
+    def _follow_tab(self):
+        """Re-arm when the panel is SEEN to close, not when a key was pressed.
+
+        ⚠ `stop_recoil` IS SET BY THE TAB KEY AND CLEARED BY NOTHING THAT
+        FOLLOWS IT. The table entry has no `cond`, so the same key sets it True
+        on the way in AND on the way out; the only things that clear it are
+        `1`, `2`, and the RELEASE of shift or right-click. So after closing the
+        inventory the tool is disarmed until the player happens to switch
+        weapons or scope in -- and hip-firing straight out of the panel gets no
+        compensation at all, with nothing anywhere saying so.
+
+        That is the same shape as the F key wiping the kit: a KEYPRESS standing
+        in for a state nobody looked at. TabWatch now measures the panel, so
+        the close is an observation and this hangs off it.
+
+        ⚠ IT ONLY EVER CLEARS ON A CLOSE, never sets on an open. The key entry
+        already disarms on the way in, and re-deriving that here would be a
+        second author of it -- while missing the clear costs a whole fight.
+        """
+        now = bool(self.state.tab_open)
+        if self._tab_was and not now and self.state.stop_recoil:
+            self.state.stop_recoil = False
+            self._cause = 'tab seen to close'
+            self._apply_hw(['recoil_on', 'upload_pattern'])
+        self._tab_was = now
+
     def _said_pattern(self, msg):
-        """Print what is armed, once per distinct answer.
+        """Print what is armed, once per distinct answer, WITH ITS CAUSE.
 
         upload_pattern fires on every weapon, attachment, posture and fire-mode
         change, which is many times a second while a Tab read settles. Printing
         each one would bury the log it exists to make readable; printing only
         changes makes the log a list of what actually changed.
+
+        ⚠ THE CAUSE IS THE HALF THAT WAS MISSING, and its absence cost a whole
+        play session. The 2026-08-09 log recorded `[armed] CLEARED — no curve
+        for m416` and nothing anywhere said WHY the key had changed. Finding
+        out meant reading config.KEY_ACTION_TABLE by hand and discovering that
+        the F key wiped every attachment. A log that states an effect and not
+        its cause sends the reader to the source, which is exactly the trip the
+        log exists to save.
         """
         if msg != self._pattern_said:
             self._pattern_said = msg
-            print(f'[armed] {msg}', flush=True)
+            print(f'[armed] {msg}   (after {self._cause})', flush=True)
 
     def _apply_hw(self, hw_list):
         """Apply hardware actions."""
@@ -373,6 +426,10 @@ class Dispatcher(DaemonLoop):
         detector = self._detectors.get(detect_name)
         if detector is None:
             return None
+        # A detection is the OTHER thing that moves the curve key, and without
+        # this every [armed] line during a Tab settle would be blamed on
+        # whatever key was pressed minutes ago.
+        self._cause = f'{detect_name} on {entry["key"]!r}'
 
         result = detector.classify(crops)
         if result is None:

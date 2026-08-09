@@ -67,11 +67,42 @@ class GameState:
         return (w1, w2)
 
     def sync_weapons(self):
-        """Apply effective weapon names to Weapon objects. Call after gt/pred change."""
+        """Apply effective weapon names to Weapon objects. Call after gt/pred change.
+
+        ⚠ AND THIS IS WHERE A KIT DIES, because it is where a gun is OBSERVED
+        to have become a different gun. Clearing the attachments used to hang
+        off the F key instead -- every pickup wiped both guns' scope, muzzle,
+        grip and stock, on the reasoning that picking a weapon up replaces
+        what it wears.
+
+        F is the most-pressed key in a real match (ammo, meds, attachments,
+        armour) and almost none of those presses change your gun. Nothing
+        re-read the kit afterwards either, because attachments are only
+        visible on the Tab panel -- so ONE pickup dropped the curve key to
+        `bare` and the compensation stayed off until the player happened to
+        open Tab. Measured in a play log 2026-08-09: 30 bursts, `[armed]`
+        printed ONCE, and four m416 bursts went down recorded as `bare`.
+
+        Clearing on a KEYPRESS is a guess about what the world did. Clearing
+        on an observed NAME CHANGE is a measurement of it, and the name is
+        already read 500 ms after every F.
+
+        ⚠ WHAT THIS GIVES UP, and it is real: picking an ATTACHMENT up with F
+        auto-fits it without changing the weapon name, so that burst fires the
+        previous kit's curve. The error is that one part's factor -- a
+        compensator is ~0.72, so ~39% over-compensated -- against 100% and no
+        compensation at all before. Better, and in the other direction: the
+        crosshair is pushed down rather than left to climb.
+        """
         w1, w2 = self.weapon_name
         for slot, name, w in [(1, w1, self.weapon_1), (2, w2, self.weapon_2)]:
             if name and name != w.name:
+                was = w.name
                 w.set('name', name)
+                self.clear_attachments(slot)
+                print(f'[state] gun {slot}: {was or "(empty)"} -> {name}, '
+                      f'kit cleared (a different weapon wears different '
+                      f'parts; Tab will read the new one)', flush=True)
                 w.set_seq()
 
     # ════════════════════════════════════════════════════════════
@@ -109,10 +140,18 @@ class GameState:
                 w.set(attr, val)
         w.set_seq()
 
-    def clear_attachments(self):
-        """Clear attachments on both weapons (keep weapon name). Used on pickup (F)."""
+    def clear_attachments(self, slot=None):
+        """Forget what a gun wears. `slot` 1 or 2, or None for both.
+
+        ⚠ PER GUN BY DEFAULT NOW. It cleared BOTH unconditionally and hung off
+        the F key; sync_weapons explains why that is wrong and what replaced
+        it. Wiping the gun you are not holding is a second thing the caller
+        did not ask for -- the slot you swapped is the slot whose kit changed.
+        """
         self.attachments = {}
-        for w in (self.weapon_1, self.weapon_2):
+        guns = ((self.weapon_1, self.weapon_2) if slot is None
+                else (self.weapon_1 if slot == 1 else self.weapon_2,))
+        for w in guns:
             for attr in ('scope', 'muzzle', 'grip', 'butt'):
                 w.set(attr, '')
             w.set_seq()
