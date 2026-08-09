@@ -112,6 +112,12 @@ fit-time = "python calibration/fit_time_curve.py --selftest"
 # function of the sample store and moves with every magazine, so unlike the
 # probes this directory deleted, it cannot be written down once and retired.
 coverage = "python tools/coverage.py"
+# A PRIOR for a cell nobody has fired, built from cells somebody has: borrow
+# the nearest measured shape, price the kit and the optic from measured
+# ratios, ship it marked `seed`. `estimate --check` is the hold-out — it
+# estimates the cells that ARE measured and reports the error, which is the
+# only number that says whether the thing is worth shipping.
+estimate = "python tools/estimate_cell.py"
 # What a magnified optic does to the counts a gun needs. `scope` reads the
 # store and stops (no game, no hardware); the live run wants --weapon and fires.
 # ⚠ The scope factor is DERIVABLE from config.RECOIL_SIGHT_PROFILES, so this

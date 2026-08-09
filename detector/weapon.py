@@ -354,11 +354,21 @@ def load_final_curves():
         # exactly. Say it once per curve, not per magazine.
         if data.get('seed') and not _SEED_SAID.get(key):
             _SEED_SAID[key] = True
+            # ⚠ WHERE IT CAME FROM IS READ OFF THE FILE, NOT ASSUMED. This
+            # said "imported from a community script" for every seed, and
+            # since 2026-08-09 that is false for some of them:
+            # tools/estimate_cell.py writes seeds DERIVED FROM THIS STORE'S
+            # OWN measured cells, which is a different kind of guess with a
+            # different error bar (8.7% median against a community pattern's
+            # unknown). A line that names the wrong origin is the second
+            # cross-layer law with the warning itself as the offender.
+            origin = ('derived from ' + data['estimated_from']
+                      if data.get('estimated_from') else
+                      'imported from a community script')
             print(f'[curves] {key[0]} {key[1]} {key[2]} {key[3]} is a SEED, '
                   f'not a measurement -- {data.get("total_counts", 0):.0f} '
-                  f'counts imported from a community script to keep the view '
-                  f'on screen. Fire it, fit it, and the fit replaces it.',
-                  flush=True)
+                  f'counts {origin}, to keep the view on screen. Fire it, fit '
+                  f'it, and the fit replaces it.', flush=True)
         out[key] = data['shots']
     return out
 
