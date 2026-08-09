@@ -32,7 +32,7 @@ for _s in (sys.stdout, sys.stderr):
         pass
 
 from harness.verdict import (judge, PROBE_FOR, OK,            # noqa: E402
-                             ADS_FRAC_MIN, TRACK_ALIVE_MIN, MAGS_MIN,
+                             TRACK_ALIVE_MIN, MAGS_MIN,
                              AGREE_ARMS_MIN, AGREE_SPREAD_MAX)
 
 # A record that passes everything. Every case below is this, one field moved.
@@ -44,7 +44,7 @@ from harness.verdict import (judge, PROBE_FOR, OK,            # noqa: E402
 # was false for a year. Every BEHAVIOUR asserted below is unchanged,
 # including the one that mattered: MODEL.md's out-of-loop check, which
 # verdict.py had meanwhile replaced with a rejected round-alignment check.
-GOOD = dict(reached=True, n_kept=6, fired=3, ads_frac=0.95,
+GOOD = dict(reached=True, n_kept=6, fired=3,
             track_alive_frac=0.99, agree_arms=2, agree_spread=0.03,
             span_s=3.8, total_counts=900.0, spread_counts=25.0)
 
@@ -236,43 +236,22 @@ def main():
     # longer exists — a green suite standing over a check that cannot run, which
     # is exactly how this file came to assert the wrong field names for a year.
 
-    print('\n=== 3. was the burst aimed ===')
-    bad += case(f'{ADS_FRAC_MIN:.0%} passes',
-                dict(GOOD, ads_frac=ADS_FRAC_MIN), True, OK)
-    bad += case('just under does not',
-                dict(GOOD, ads_frac=ADS_FRAC_MIN - 0.01), False, 'ads')
-
-    # ⚠ AND `ads_frac` DOES NOT EXIST ON THE PATH THAT ACTUALLY COLLECTS. All
-    # 167 stored magazines carry nan, because the timed grabber captures the
-    # tracker's patches and AdsDetector reads the screen centre. So the check
-    # above passed the test suite and refused every real cell, which is the same
-    # shape as the impulse gate. `ads_end_ok` is the reading that exists.
-    noads = {k: v for k, v in GOOD.items() if k != 'ads_frac'}
-    bad += case('...and with no fraction, the ENDPOINTS answer',
-                dict(noads, ads_end_ok=1.0), True, OK)
-    # ⚠ ONE MAGAZINE READING OUT OF THE SCOPE MUST NOT FAIL THE CELL, and this
-    # case asserted the opposite for one night. AdsDetector reads low while the
-    # view is SHAKING, so on an AR the flag false-alarms about half the time --
-    # measured: aug comp_ar, 5 flagged magazines whose y_true sits inside the
-    # unflagged range, against the ~3x a real hip-fired burst produces.
-    bad += case('...and a half-flagged pool is NOT a failure',
-                dict(noads, ads_end_ok=0.5), True, OK)
-    # What survives is the contradiction: ensure_ads verified the scope before
-    # every trigger and NOT ONE burst agrees.
-    bad += case('a pool where nothing ended scoped IS',
-                dict(noads, ads_end_ok=0.0), False, 'ads')
-    # ⚠ AND NEITHER READING IS A PASS, WHICH IS THE ONE ABSENCE THIS FILE LETS
-    # THROUGH. It asserted the opposite for one night, and the cost was 17
-    # existing cells: `ads_end` is NEW, every magazine stored before 2026-08-09
-    # carries None, and counting None as "did not end scoped" refused all of
-    # them forever. ensure_ads reads itself back before every trigger and firing
-    # cannot change ADS, so the check is not missing — only its corroboration.
-    bad += case('neither reading passes on the precondition', noads, True, OK)
-    # ⚠ The fraction still WINS when both are present, so a path that grows a
-    # real per-frame reading is not silently overridden by the weaker one.
-    bad += case('the fraction outranks the endpoints when both exist',
-                dict(GOOD, ads_frac=ADS_FRAC_MIN - 0.01, ads_end_ok=1.0),
-                False, 'ads')
+    # ⚠ 3 WAS THE ADS CHECK AND IT IS GONE (2026-08-09). `ads_frac` cannot be
+    # computed on this path at all -- the timed grabber has no screen-centre
+    # crop, so all 167 stored magazines carry nan -- and `ads_end` false-alarms
+    # at a rate that scales with recoil: a whole aug cell came back 5/5 flagged
+    # with magazines whose y_true sat inside the unflagged range, while a burst
+    # genuinely fired from the hip reads ~3x off.
+    #
+    # What checks it instead is stronger and was always there: GunDriver
+    # .ensure_ads enters the scope before every trigger, READS THE SCREEN BACK,
+    # retries, and firing cannot change ADS. Both fields are still recorded as
+    # evidence for whoever investigates a strange cell; neither is a threshold.
+    #
+    # ⚠ THE CASES ARE DELETED, NOT LEFT PASSING -- the same reason the rate ones
+    # were. A synthetic record would exercise a threshold whose quantity no
+    # longer decides anything, and a green suite standing over a check that
+    # cannot run is how this file came to assert the wrong field names.
 
     print('\n=== 4. THE OUT-OF-LOOP CHECK — the arms must agree ===')
     # The fitter never sees which arm a magazine came from, so agreement
@@ -321,7 +300,7 @@ def main():
     # A verdict nobody can act on is a verdict that gets ignored. The routing
     # lives beside the thresholds so it cannot fall out of step; this checks
     # that it did not.
-    whys = {'crash', 'state', 'mags', 'ads', 'agree', 'tracking'}
+    whys = {'crash', 'state', 'mags', 'agree', 'tracking'}
     missing = sorted(whys - set(PROBE_FOR))
     extra = sorted(set(PROBE_FOR) - whys)
     print(f'  {"ok  " if not missing and not extra else "FAIL"}  '

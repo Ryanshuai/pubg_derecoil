@@ -299,37 +299,41 @@ def judge(rec):
     # ⚠ FALLING BACK IS NOT LOOSENING. Both are required to be PRESENT; what
     # changed is which quantity answers. A record with neither still fails, so
     # "nobody measured it" and "it was fine" stay apart.
-    ads = rec.get('ads_frac')
-    if ads is not None:
-        if ads < ADS_FRAC_MIN:
-            return bad('ads', f'aiming for {ads:.0%} of polls, want '
-                              f'{ADS_FRAC_MIN:.0%}')
-    else:
-        # ⚠ ABSENCE PASSES HERE, AND THIS IS THE ONLY CHECK IN THIS FILE WHERE
-        # IT DOES. Everywhere else a missing field means "nobody measured it"
-        # and the cell fails closed. Here the measurement is somewhere else and
-        # it is STRONGER: GunDriver.ensure_ads enters the scope before every
-        # trigger, reads the screen back and retries, and firing cannot change
-        # ADS -- right click is a toggle and nothing touches it during a burst.
-        # `ads_end` is an afterthought on top of a verified precondition, so its
-        # absence removes a corroboration rather than the check.
-        #
-        # It matters because the field is NEW. Every magazine stored before
-        # 2026-08-09 carries None, and counting those as "did not end scoped"
-        # sent 17 existing cells to 0.0 and refused them permanently -- "the
-        # field did not exist yet" read as "the check failed", which is the same
-        # confusion in a sixth costume.
-        ends = rec.get('ads_end_ok')
-        # ⚠ THE CONTRADICTION, NOT A TOLERANCE. `<=` and not `<`: the refusal is
-        # "NOT ONE magazine that WAS read ended scoped", which contradicts the
-        # ensure_ads before every trigger. A reading that false-alarms at ~50%
-        # under AR recoil cannot produce 0 of N on a genuinely scoped pool; a
-        # cell that never scoped produces exactly that.
-        if ends is not None and ends <= ADS_END_MIN:
-            return bad('ads', f'{ends:.0%} of the read magazines ended in ADS '
-                              f'— ensure_ads verified the scope before every '
-                              f'trigger and not one burst agrees; one of them '
-                              f'is lying')
+    # ⚠ 5. THE ADS CHECK IS DELETED (2026-08-09), and this is the third gate to
+    #    go tonight for the same reason: there is no trustworthy observable for
+    #    it on this collection path.
+    #
+    #    `ads_frac` cannot be computed at all -- the timed grabber captures the
+    #    tracker's patches and AdsDetector reads the SCREEN CENTRE, which is not
+    #    among them, so all 167 stored magazines carry nan.
+    #
+    #    `ads_end` can be read, and it is a false alarm at a rate that scales
+    #    with recoil. AdsDetector answers by the ABSENCE of the hip crosshair
+    #    and reads low while the view is SHAKING -- 387/387 on a still VSS, 0.79
+    #    on the same VSS firing. Measured tonight on the aug:
+    #
+    #        ads_end True   n=5   y_true(3.5s) 1395.4 +- 16.6
+    #        ads_end False  n=5                1432.5 +- 68.3
+    #
+    #    A burst genuinely fired from the hip is analysed with the SCOPED K and
+    #    reads about three times off. Four of those five flagged magazines sit
+    #    inside the unflagged range. And a whole aug cell came back 5/5 flagged,
+    #    which is why the "0 of N is a contradiction" version did not survive
+    #    either: I set that threshold believing the false-alarm rate was ~50%
+    #    and it is far higher on a high-recoil gun, so a third of AR cells would
+    #    fail on a reading already shown to mean nothing.
+    #
+    #    ⚠ WHAT CHECKS IT INSTEAD, and it is STRONGER than what was here:
+    #    GunDriver.ensure_ads enters the scope before every trigger, READS THE
+    #    SCREEN BACK and retries, and firing cannot change ADS -- right click is
+    #    a toggle and nothing touches it during a burst. That is a verified
+    #    precondition. This item was an unverified afterthought sitting on top
+    #    of it, and detector/CLAUDE.md has said so in as many words the whole
+    #    time: "GunDriver.ensure_ads settles the question before the trigger and
+    #    this reading adds nothing about whether the magazine was aimed."
+    #
+    #    Both fields are still RECORDED. They are evidence for whoever
+    #    investigates a strange cell; they are not thresholds.
 
     # 6. How much of each magazine the tracker survived. Last because it is a
     #    known defect rather than a symptom of anything: a cell can be perfect
@@ -358,8 +362,6 @@ PROBE_FOR = {
                 "strength, INTERLEAVED (calibration/collect_timed.py "
                 "--scale-sweep). One arm is NOT CHECKED, not passed, and "
                 "nothing downstream is trustworthy until this passes.",
-    'ads':      'detector/ads_detector.py + calibration/capture_ads.py — the '
-                'crosshair gate',
     'tracking': 'the ViewTracker reference frame (the wrap after 3-4 '
                 'magazines). Expected until that is fixed.',
 }
