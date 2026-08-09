@@ -624,8 +624,13 @@ def selftest():
 # The compensated arm IS sampling noise -- so y_true has no session term, the
 # gun is the gun. The excess sits only on the arm whose answer is 100%
 # measurement (|y_obs| 830 counts against 36), which is where a MULTIPLICATIVE
-# error lands and an additive one could not. That multiplier is K, drifting
-# 1-2% per session.
+# error lands and an additive one could not.
+#
+# ⚠ AND IT IS NOT CALLED DRIFT. MODEL.md sec.0 is a premise: y_true is a fixed
+# curve, nothing drifts, and two readings that disagree mean at least one is
+# wrong. So that multiplier is an UNLOCATED MEASUREMENT FAULT, not a property
+# of the system -- naming it "K drifting per session" is what produced a
+# prediction that missed by 5.8 sigma (sec.4.2.2).
 #
 # ⚠ "IT DEPENDS ON THE SESSION" IS NOT A MODEL, IT IS A LABEL FOR IGNORANCE. If
 # y_true really were per-session there would be nothing to fit and nothing to
@@ -791,9 +796,9 @@ def by_session(mags, gap_min=SESSION_GAP_MIN, min_mags=SESSION_MIN_MAGS,
                   'session and it cannot produce the offset. What this line '
                   'supports is "multiplicative", not "K".')
             print('  -> collect on the COMPENSATED arm. The closer the curve, '
-                  'the smaller |y_obs|, the less of that drift reaches the '
+                  'the smaller |y_obs|, the less of that fault reaches the '
                   'answer. It is a nulling measurement, and this holds for any '
-                  'multiplicative error whatever it turns out to be.')
+                  'multiplicative fault whatever it turns out to be.')
 
     # ── shape, per arm, so pooling's cost is separated from the level's ──
     _shape_by_session(cells, arms, min_mags)

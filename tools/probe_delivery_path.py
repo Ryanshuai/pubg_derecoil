@@ -105,6 +105,9 @@ PATCH_WAIT_S = 4.0   # how long a trial may wait for a trackable patch
 # out and the trigger is firing it. Measured across two runs at every hold:
 # 0.0 to 0.3 px. Five is twenty times the largest honest reading.
 NONE_MAX_PX = 5.0
+# Per-trial cost beyond the hold itself: arming the pattern, flushing frames,
+# reading the click back. Only used for the up-front time estimate.
+TRIAL_OVERHEAD_S = 0.35
 
 # ── --hold-sweep: is comp_counts_at() the firmware, or an idealisation? ──────
 #
@@ -459,6 +462,16 @@ def one_hold_trial(rig, grabber, hold_s, sign, arm):
     return total_px, worst
 
 
+def _arms_at(t):
+    """Which arms run at this hold. `none` is the abort gate, so it goes FIRST
+    at the shortest hold -- an abort six minutes in helps nobody."""
+    if t == HOLD_SWEEP[0]:
+        return ('none', 'curve', 'move')
+    if t == HOLD_SWEEP[-1]:
+        return ('curve', 'move', 'none')
+    return ('curve', 'move')
+
+
 def hold_sweep(rig, grabber, trials):
     from calibration.samples import comp_counts_at
     # ⚠ THE PRE-FLIGHT HUD CHECK IS GONE, and what replaced it is the `none`
@@ -488,6 +501,20 @@ def hold_sweep(rig, grabber, trials):
         f'{t:.2f}s={min(t/SWEEP_SPAN_S,1)*abs(held):.0f}' for t in HOLD_SWEEP)
         + '   <- the gap is what makes the shape testable')
 
+    # ⚠ SAY HOW LONG THIS WILL TAKE, BEFORE IT STARTS. Without it a slow run
+    # and a hung one look identical from outside, and this probe has been both
+    # -- eight minutes wedged in a loop nobody could interrupt. Asked for in
+    # those terms: 「不给估计的话，我不知道你到底要跑多久，就容易中间我觉得你是
+    # 不是死循环了」. It is printed by the program rather than promised by
+    # whoever launches it, because a promise is the thing that got forgotten.
+    per_round = sum(len(_arms_at(t)) * 2 * (t + COOLDOWN_S + SETTLE_S + TRIAL_OVERHEAD_S)
+                    for t in HOLD_SWEEP)
+    n_trials = trials * sum(len(_arms_at(t)) * 2 for t in HOLD_SWEEP)
+    print(f'  {trials} round(s) x {n_trials // max(trials, 1)} trials = '
+          f'{n_trials} trials, about {trials * per_round / 60:.1f} MINUTES. '
+          f'Longer than ~{1.5 * trials * per_round / 60:.0f} min means it is '
+          f'stuck, not slow.')
+
     from control.focus import focus_keeper
     got = {t: {'curve': [], 'move': [], 'none': []} for t in HOLD_SWEEP}
     for r in range(trials):
@@ -506,12 +533,7 @@ def hold_sweep(rig, grabber, trials):
                 return 8
             # `none` FIRST at the shortest hold: it is the abort gate, and an
             # abort six minutes in is a refusal nobody benefits from.
-            arms = ('curve', 'move')
-            if t == HOLD_SWEEP[0]:
-                arms = ('none',) + arms
-            elif t == HOLD_SWEEP[-1]:
-                arms = arms + ('none',)
-            for arm in arms:
+            for arm in _arms_at(t):
                 # ⚠ THE TWO DIRECTIONS FIRE BACK TO BACK, so the view returns
                 # inside every pair. The sign used to sit in the OUTER loop,
                 # which meant twelve pushes the same way (6 holds x 2 arms)

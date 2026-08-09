@@ -371,10 +371,19 @@ RECOIL_SIGHT_PROFILES = {
     #     K_true  run A 1.5459     run B 1.5374     (one-pair extrapolation)
     #
     # Within a run the four step sizes (20/35/50/70) agree to +-0.1% and the
-    # sem is 0.06%; BETWEEN runs K_true moves 0.55%, nine times that. That is
-    # the same session-to-session step MODEL.md sec.4 measures at 2.7% sd, now
-    # seen in a completely different quantity. Re-setting K from either run
-    # alone would be exactly the mistake eta was.
+    # sem is 0.06%; BETWEEN runs K_true moves 0.55%, nine times that.
+    #
+    # ⚠ THAT IS NOT K DRIFTING. MODEL.md sec.0 is a premise, not a finding:
+    # y_true is a FIXED curve and nothing here drifts, because a curve fitted
+    # today and played tomorrow presupposes exactly that. So two readings that
+    # disagree mean AT LEAST ONE OF THEM IS WRONG, and the job is to find the
+    # fault -- not to name the disagreement and write it into the spec. That
+    # night alone produced four faults big enough to do it: the view driven
+    # into the pitch clamp (sky reads as "it did not move"), a frame-grab loop
+    # wedged for eight minutes, hip fire's non-flat count ruler with the arms
+    # travelling different distances, and arm-vs-time confounded in the older
+    # data. Until one of those is shown to produce 1%, changing K to either
+    # reading has no grounds.
     #
     # ⚠ WHAT DID REPLICATE, AND IS THEREFORE USABLE: a static scene does not
     # drift (+0.00018 and +0.00001 px per pair), and b depends on delta ALONE
