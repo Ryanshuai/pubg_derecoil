@@ -428,6 +428,73 @@ def one_magazine(rig, grabber, weapon, mag_size, interval_s, curve,
 
 
 
+def fire_one_into_store(rig, grabber, weapon, config, posture, curve,
+                        interval_s, prior=(), note='', label=''):
+    """Reload, re-aim, fire one magazine, store it. -> (Magazine, why|None).
+
+    ⚠ THE FOUR THINGS EVERY MAGAZINE NEEDS, IN ONE COPY. They were written once
+    in main()'s loop and NOT AT ALL in collect_into_store, which is the path
+    harness/night.py takes — so the unattended runner has never fired a
+    magazine in this coordinate. It died on `w.magazine_size`, an attribute
+    Weapon does not have, at magazine 1 of cell 1, every time.
+
+    That missing attribute is the cheap half. The expensive half is what was
+    missing NEXT TO it, silently:
+
+      top_up()      the capacity comes from the AMMO COUNTER after the reload,
+                    because the magazine icon cannot say (591.9 MSE against
+                    32-51 for every other slot). A guessed capacity fires a
+                    burst of the wrong LENGTH, and a short magazine looks
+                    exactly like a very effective attachment.
+      prior check   a cell whose burst length differs from its siblings is not
+                    a cell in the same study.
+      aim_and_scope ONE homing per magazine. Without it magazine 2 starts
+                    wherever magazine 1 finished — several hundred counts high
+                    — and every magazine after that is worse.
+      wait_reload   PUBG does not accept right click during the reload
+                    animation, so the next magazine's ADS press is eaten.
+
+    ⚠ IT IS ONE FUNCTION AND NOT TWO ON PURPOSE. calibration/CLAUDE.md opens
+    with what a parallel collection loop costs: `auto_calibrate` carried its own
+    `analyse` that counted the player's own mouse as recoil, and `harvest`
+    dropped `wait_reload()`'s return value — a stuck reload is a magazine that
+    never filled, and the log said nothing. A second copy of THIS loop would
+    have been the third instance.
+    """
+    mag_size, _ = rig.fire.top_up()
+    if not mag_size:
+        return None, 'no ammo counter — cannot say how long this burst is'
+    if prior and mag_size not in prior:
+        return None, (f'this magazine holds {mag_size} rounds and every stored '
+                      f'{weapon} magazine holds {sorted(prior)}; a cell whose '
+                      f'burst is a different LENGTH cannot be compared with '
+                      f'the others')
+    if not aim_and_scope(rig, posture):
+        return None, 'could not re-aim'
+    mag, out = one_magazine(rig, grabber, weapon, mag_size, interval_s,
+                            curve, config, posture, note=note,
+                            fire_delay_ms=float(rig.mouse.RECOIL_FIRE_DELAY_MS))
+    # ⚠ STORED AND SAID OUT LOUD, NOT DROPPED. `ads_end` False means the burst
+    # ended out of the scope, so K is wrong by ~3x — and MODEL.md's store never
+    # deletes, because a magazine dropped at collection time is one the fit's
+    # clustering can never show you beside its siblings.
+    if mag.ads_end is False:
+        print(f'      [!] {label} ENDED OUT OF ADS — K is the scoped {rig.K}, '
+              f'so this magazine is scaled by the wrong constant. Stored and '
+              f'flagged, not dropped.')
+    elif mag.ads_end is None:
+        print(f'      [!] {label}: ADS could not be read after the burst — '
+              f'unknown, not assumed good.')
+    S.append(mag)
+    t, y = mag.y_true_counts()
+    pre = sum(1 for x in mag.t if x < 0)
+    print(f'  {label}: {mag.n_frames():4d} frames ({mag.fps:5.1f} fps, '
+          f'{pre} prefire, {out["n_missed"]} missed), '
+          f'y_true {y[-1]:7.1f} counts over {t[-1]:.2f} s')
+    rig.fire.wait_reload(expect=mag_size)
+    return mag, None
+
+
 def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
                        note_prefix='', scope_asset=None):
     """Fire `mags` magazines into the sample store, alternating curve arms.
@@ -472,6 +539,9 @@ def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
     if w is None or not len(getattr(w, 't_s', ())):
         return 0, f'no pattern for {weapon} {S.config_key(config)}'
 
+    # Every magazine this weapon has ever fired, so a cell that suddenly holds
+    # a different number of rounds is refused rather than compared.
+    prior = {m.magazine_size for m in S.all_magazines(weapon) if m.magazine_size}
     grabber = DXGISyncGrabber(rig.tracker.regions())
     fired = 0
     try:
@@ -487,11 +557,17 @@ def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
                 rig.arm(w)
                 rig.fire.disarm()
                 curve = []
-            mag, _out = one_magazine(
-                rig, grabber, weapon, w.magazine_size, w.bullet_interval_s,
-                curve, config, posture,
-                note=f'{note_prefix}arm={"comp" if comp else "none"}')
-            S.append(mag)
+            mag, why = fire_one_into_store(
+                rig, grabber, weapon, config, posture, curve,
+                w.bullet_interval_s, prior=prior,
+                note=f'{note_prefix}arm={"comp" if comp else "none"}',
+                label=f'mag {i} ({"comp" if comp else "no-comp"})')
+            if mag is None:
+                # Whatever was fired before this stays on disk — samples.append
+                # writes one line at a time — so this reports how far it got
+                # rather than losing the cell.
+                return fired, f'magazine {i + 1}: {why}'
+            prior.add(mag.magazine_size)
             fired += 1
     except Exception as e:                      # noqa: BLE001 — reported
         return fired, f'{type(e).__name__} during magazine {fired + 1}: {e}'
@@ -997,21 +1073,13 @@ def main():
 
         grabber = DXGISyncGrabber(rig.tracker.regions())
         for i in range(a.mags):
-            mag_size, _ = rig.fire.top_up()
-            if not mag_size:
-                print(f'  mag {i}: no ammo counter — stopping')
-                break
-            if prior and mag_size not in prior:
-                print(f'  [!] REFUSING: this magazine holds {mag_size} rounds '
-                      f'and every {a.weapon} magazine already stored holds '
-                      f'{sorted(prior)}. The capacity IS the magazine (the icon '
-                      f'reads 591.9 MSE against 32-51 for every other slot, so '
-                      f'it cannot say), and a cell whose burst is a different '
-                      f'LENGTH cannot be compared with the others — a base '
-                      f'magazine looks like a very effective attachment.\n'
-                      f'      Fit the same magazine, or start a separate study '
-                      f'and say so.')
-                return 9
+            # ⚠ THE RELOAD, THE CAPACITY REFUSAL, THE HOMING AND THE WAIT ALL
+            # MOVED INTO fire_one_into_store, and the move is the point: they
+            # lived here and only here, so harness/night.py's collect_into_store
+            # had none of them and had never fired a magazine. The refusal text
+            # (the icon reads 591.9 MSE against 32-51, so the capacity IS the
+            # magazine, and a differently-sized burst looks exactly like a very
+            # effective attachment) travelled with the check.
             # ⚠ ONE HOMING PER MAGAZINE, NOT TWO. There used to be a
             # goto_midline right after ensure_posture as well, so the first
             # magazine dipped the view to the bottom clamp TWICE before firing
@@ -1074,36 +1142,19 @@ def main():
                       f'({len(curve)} knots, '
                       f'{sum(k["dy"] for k in curve):.1f} counts, '
                       f'starts at t={curve[0]["t_ms"]} ms)')
-            if not aim_and_scope(rig, a.posture):
-                print(f'  mag {i}: could not re-aim — stopping')
-                break
-            mag, out = one_magazine(
-                rig, grabber, a.weapon, mag_size, interval_s,
-                [] if a.no_comp else curve, config, a.posture,
+            # ⚠ THE SAME ONE COPY collect_into_store CALLS. The reload, the
+            # capacity check, the homing and the wait were written here and
+            # nowhere else, which is why the night path had none of them.
+            mag, why = fire_one_into_store(
+                rig, grabber, a.weapon, config, a.posture,
+                [] if a.no_comp else curve, interval_s, prior=prior,
                 note='no-comp' if a.no_comp else f'scale={mag_scale:g}',
-                fire_delay_ms=float(rig.mouse.RECOIL_FIRE_DELAY_MS))
-            # ⚠ THE MAGAZINE IS STILL WRITTEN. `ads_end` False means the
-            # burst ended out of the scope, so K is wrong by ~3x -- but
-            # MODEL.md's store never deletes, and a magazine dropped at
-            # collection time is one the fitter's clustering can never show
-            # you next to its siblings. It is RECORDED and SAID OUT LOUD; the
-            # fit is what decides.
-            if mag.ads_end is False:
-                print(f'      [!] mag {i} ENDED OUT OF ADS — K is the scoped '
-                      f'{rig.K}, so this magazine is scaled by the wrong '
-                      f'constant. Stored and flagged, not dropped.')
-            elif mag.ads_end is None:
-                print(f'      [!] mag {i}: ADS could not be read after the '
-                      f'burst — unknown, not assumed good.')
-            p = S.append(mag)
+                label=f'mag {i}')
+            if mag is None:
+                print(f'  mag {i}: {why} — stopping')
+                break
+            prior.add(mag.magazine_size)
             written += 1
-            t, y = mag.y_true_counts()
-            pre = sum(1 for x in mag.t if x < 0)
-            print(f'  mag {i}: {mag.n_frames():4d} frames '
-                  f'({mag.fps:5.1f} fps, {pre} prefire, '
-                  f'{out["n_missed"]} missed), '
-                  f'y_true {y[-1]:7.1f} counts over {t[-1]:.2f} s')
-            rig.fire.wait_reload(expect=mag_size)
         print(f'\n  {written} magazine(s) -> {S.path_for(a.weapon, config)}')
     finally:
         if grabber is not None:

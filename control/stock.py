@@ -614,9 +614,30 @@ def restock(ac, sc, want, backpack=BACKPACK, leave='shut',
         print(f"      [stock] short of {', '.join(sorted(need))}")
     batch = sorted(need) + [k for k in also if k]
     if batch or not stock.backpack:
-        # Tab and the spawner panel cannot share the screen.
-        if leave == 'shut':
-            ac.ensure_tab(False)
+        # ⚠ UNCONDITIONAL, AND `leave` HAS NO SAY HERE. Tab and the spawner
+        # panel cannot share the screen: comma does nothing while Tab is up, so
+        # ensure_panel(True) presses it three times, reads a shut panel and
+        # answers False. give_many then returns 'the item-spawner panel would
+        # not open', restock returns False, and the caller reports it as a
+        # SUPPLY failure -- `could not stock the parts or produce m416` -- four
+        # cells in a row, and the night halts.
+        #
+        # It was guarded with `if leave == 'shut'` on 2026-08-08 during the
+        # churn pass, which conflates two different questions:
+        #
+        #     leave      what the screen should look like when this RETURNS
+        #     this line  what the spawner needs to be true WHILE it runs
+        #
+        # and stock_parts -- the path every unattended cell takes -- passes
+        # 'as-found' while read_stock(close=False) above has left the screen UP.
+        # So the one caller that always needs this line was the one caller that
+        # never got it.
+        #
+        # It costs nothing to keep: ensure_tab reads before it presses, and
+        # tidy() below re-opens through read_stock on its first pass, so an
+        # 'as-found' caller still gets the screen back. Nothing here is a
+        # close/open pair that the churn pass was right to remove.
+        ac.ensure_tab(False)
         if not spawn_missing(sc, batch,
                              backpack=None if stock.backpack else backpack,
                              verbose=verbose):

@@ -200,7 +200,17 @@ def open_rig(sight, out_dir, home=True, countdown=6,
             'panel': 'the item spawner panel would not close',
         }.get(where, f'not ready: failed at {where!r}')
 
-    rig = Rig(sight)
+    # ⚠ GDI HERE, BECAUSE THE BURST PATH OWNS DXGI. There is one duplication
+    # interface per output per process -- DXGISyncGrabber's own docstring says
+    # "ONE CAMERA PER OUTPUT, PROCESS-WIDE ... The rig picks one" -- and
+    # collect_timed.main has always built its Rig with prefer_dxgi=False for
+    # exactly this. This one did not, so collect_into_store's grabber was
+    # handed the RIG'S camera, and the first cell's `finally: grabber.close()`
+    # released it out from under the rig. Measured 2026-08-09: one cell died of
+    # an unrelated fault and the next three all read `CaptureLost: bettercam
+    # capture thread is gone`, which is the night's halt streak spent on a
+    # resource conflict rather than on anything about the game.
+    rig = Rig(sight, prefer_dxgi=False)
     rig.view.use_homing = home
     sc = SpawnerControl()
     kit = Kitter(rig)
