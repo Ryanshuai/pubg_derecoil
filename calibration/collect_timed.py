@@ -691,6 +691,30 @@ def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
     from calibration.weapon_build import build_weapon
     from capture.cropper import DXGISyncGrabber
 
+    # ⚠ REFUSED HERE RATHER THAN LEFT TO EACH CALLER TO REMEMBER. There is ONE
+    # DXGI duplication interface per output per process, and the burst needs
+    # it: this function builds a DXGISyncGrabber a few lines down. A Rig
+    # constructed with the default prefer_dxgi=True has already taken it, so
+    # BetterCam hands back its existing instance ("You already created a
+    # BetterCam Instance for Device 0--Output 0!") and AcquireNextFrame raises
+    # COMError on the first frame of the first magazine.
+    #
+    # Rig's own docstring has said this since it was written -- "MODEL.md's
+    # collection path owns DXGI for the burst and leaves this one on GDI" --
+    # and four callers got it right by copying each other. The fifth did not,
+    # and cost a live run with zero magazines fired (2026-08-09). A constraint
+    # that is only in prose is a constraint that holds until someone writes a
+    # new caller without reading it.
+    #
+    # At the point of USE, not in a lint: this cannot be bypassed by a caller
+    # that never looks, and the message names the fix rather than the symptom.
+    if getattr(rig, 'prefer_dxgi', False):
+        return 0, ('the Rig holds the DXGI duplication interface, and this '
+                   'path needs it for the burst -- there is one per output '
+                   'per process. Construct it as Rig(sight, '
+                   'prefer_dxgi=False), as collect_timed.main and '
+                   'harness/adapter both do.')
+
     # ⚠ THE CURVE IS LOOKED UP BY THE CONFIG THAT IS ON THE GUN, and this line
     # read `build_weapon(weapon, posture=posture)` — a BARE gun with no optic.
     # main() above carries a long comment about exactly this fault ("every

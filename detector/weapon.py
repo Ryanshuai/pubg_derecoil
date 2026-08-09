@@ -216,9 +216,32 @@ def _sight_of(scope_asset, weapon=None):
         #
         # Nor is it iron sights on a gun that has no scope slot to be empty.
         return INTEGRAL_SIGHT.get(weapon, 'iron')
-    mag = _SCOPE_TO_MAG.get(scope_asset, 1)
+    # ⚠ AN UNREADABLE OPTIC IS NOT A RED DOT, AND THE DEFAULT USED TO SAY IT
+    # WAS. `_SCOPE_TO_MAG.get(asset, 1)` turned every asset this file does not
+    # know -- including AttachmentDetector's `'?'`, which means "something is
+    # in the tile and the templates cannot separate it" -- into magnification
+    # 1, and the table below then turned 1 into `red_dot`.
+    #
+    # Measured 2026-08-09 on an MP5K wearing a 4x: the tile reads `'?'` at
+    # margin 1.14, and this function answered `red_dot`. A count is worth about
+    # three times as much through a 4x, so the whole run would have been scaled
+    # by the wrong constant with every printed number looking normal -- root
+    # CLAUDE.md's second law, reached through a default argument.
+    #
+    # It only became reachable when MSE_EMPTY_TH was corrected (450 -> 1000):
+    # before that the same tile read `''` and fell into the branch above, which
+    # answers `iron` and is refused downstream. So fixing the detector's false
+    # NEGATIVE opened a silent false POSITIVE one line later.
+    #
+    # `unknown` is deliberately not a RECOIL_SIGHT_PROFILES key: collect_timed
+    # and calibrate_scope both refuse a sight with no profile, Rig has no K for
+    # it, and the curve lookup misses rather than firing another optic's curve.
+    # Every one of those is the honest outcome for "we cannot tell".
+    mag = _SCOPE_TO_MAG.get(scope_asset)
+    if mag is None:
+        return 'unknown'
     return {1: 'red_dot', 2: '2x', 3: '3x', 4: '4x',
-            6: '6x', 8: '8x', 15: '15x'}.get(mag, 'red_dot')
+            6: '6x', 8: '8x', 15: '15x'}.get(mag, 'unknown')
 
 
 _MISSING_SAID = {}

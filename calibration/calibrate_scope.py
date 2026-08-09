@@ -580,19 +580,57 @@ def analyse(weapon, sight, ref, config=None, at=None, verbose=True):
 # Live
 # ════════════════════════════════════════════════════════════════════
 
+def block_order(ref, sights, blocks):
+    """The firing order. -> list of sight names
+
+    ⚠ THE REFERENCE COMES BACK BETWEEN EVERY SCOPE, and that is the whole
+    design. calibration/CLAUDE.md records a multiplicative measurement error
+    that is constant WITHIN a run (empty-arm scatter 2.29x sampling noise
+    across groups, 1.07x within) and cancels exactly in a ratio taken inside
+    one -- which is why all the cells have to rotate in one run rather than
+    getting a run each. A reference fired once at the start and never again
+    puts the sight and the session drift on the same axis.
+
+    ⚠ AND ALL THE SIGHTS GO IN ONE RUN FOR THE SAME REASON. Three separate
+    invocations of this file would each carry their own copy of that error,
+    and the ratios would no longer be comparable with each other -- which is
+    exactly the question "is r a constant across magnifications".
+    """
+    out = []
+    for _ in range(blocks):
+        for s in sights:
+            out += [ref, s]
+    return out
+
+
 def run(a):
-    """Fire alternating blocks of `--sight` and `--ref`. -> exit code"""
+    """Fire the reference and each --sight in rotation. -> exit code"""
     from calibration.collect_timed import collect_into_store, ensure_sight
+    from calibration.range_session import get_session
     from calibration.sweep import Rig
     from control.inventory import InventoryControl
     from control.session import ensure_ready
     from control.spawner import SpawnerControl
     from control.stock import ensure_weapon_in_hand
 
+    sights = [s.strip() for s in a.sight.split(',') if s.strip()]
+    if not sights:
+        print('[!] ABORT: --sight is empty')
+        return 5
+    if a.ref in sights:
+        print(f'[!] ABORT: {a.ref!r} is both the reference and a sight under '
+              f'test. Its ratio against itself is 1 by construction and says '
+              f'nothing; drop it from --sight.')
+        return 5
+
     # Rule 9. Focus alone is one of five, and the other four each look like
     # success from outside.
-    if not ensure_ready(label=f'the {a.sight} scope calibration')['ok']:
+    if not ensure_ready(label=f'the {"+".join(sights)} scope calibration')['ok']:
         return 1
+    # Constructed AFTER ensure_ready has proved we are in the range, so the
+    # budget clock starts when the session really did -- see range_session,
+    # where a timestamp taken before the door is a timestamp for nothing.
+    session = get_session('auto')
 
     config = {}
     # ⚠ TWO ARMS, EQUAL SHARE, and that is not the night plan on purpose.
@@ -614,7 +652,14 @@ def run(a):
               f'conditions K better AND re-discovers MODEL.md 6.1\'s delivery '
               f'effect, which biases the very number it sharpens.')
 
-    rig = Rig(a.ref)
+    # ⚠ prefer_dxgi=False, AND EVERY OTHER CALLER OF collect_into_store PASSES
+    # IT TOO. There is one DXGI duplication interface per output per process;
+    # the collection path builds its own DXGISyncGrabber for the burst, so a
+    # Rig that has already taken it hands BetterCam's existing instance back
+    # ("You already created a BetterCam Instance...") and AcquireNextFrame
+    # fails on the first frame of the first magazine. Cost: one live run,
+    # 2026-08-09, zero magazines.
+    rig = Rig(a.ref, prefer_dxgi=False)
     try:
         with InventoryControl() as ac, SpawnerControl() as sc:
             slot = ensure_weapon_in_hand(ac, sc, weapon=a.weapon)
@@ -627,9 +672,33 @@ def run(a):
             # sights are exposed to the same stretch of it. AAAA BBBB puts the
             # sight and the session drift on the same axis and nothing can
             # separate them afterwards.
-            order = [a.ref, a.sight] * a.blocks
+            order = block_order(a.ref, sights, a.blocks)
+            print(f'  plan: {" -> ".join(order)}   '
+                  f'({len(order)} blocks x {a.mags} magazines)')
             for i, sight in enumerate(order):
-                print(f'\n--- block {i + 1}/{len(order)}: {sight} ---')
+                # ⚠ THE RANGE EVICTS AT 20 MINUTES AND NOTHING HERE WAS ASKING.
+                # calibration/range_session.py exists for exactly this and its
+                # budget is 17 minutes; four sights against a reference is
+                # comfortably longer than one session. Checked BETWEEN blocks,
+                # which is the only boundary where re-entry is cheap: the gun
+                # and the optic are re-fitted at the top of every block anyway,
+                # so a re-entry that empties the rack costs nothing extra.
+                #
+                # Being kicked mid-magazine is the thing this avoids -- that
+                # burst is fired somewhere unknown, at an unknown pitch, and it
+                # lands in the store looking exactly like the others.
+                ok, re_entered = session.ensure()
+                if not ok:
+                    print('[!] ABORT: could not get back into the range.')
+                    return 6
+                if re_entered:
+                    print('  (re-entered the range; the rack is empty again)')
+                    slot = ensure_weapon_in_hand(ac, sc, weapon=a.weapon)
+                    if not slot:
+                        print(f'[!] ABORT: no {a.weapon} after re-entry.')
+                        return 2
+                print(f'\n--- block {i + 1}/{len(order)}: {sight}  '
+                      f'({session.elapsed() / 60:.1f} min into the session) ---')
                 worn, asset = ensure_sight(ac, sc, slot, a.weapon, sight)
                 if worn is None:
                     print(f'[!] ABORT: {asset}')
@@ -638,7 +707,8 @@ def run(a):
                 rig.set_sight(worn)
                 fired, err = collect_into_store(
                     rig, a.weapon, config, a.posture, a.mags, arm_plan,
-                    note_prefix=f'scope {a.sight}v{a.ref} ', scope_asset=asset)
+                    note_prefix=f'scope {"+".join(sights)}v{a.ref} ',
+                    scope_asset=asset)
                 print(f'  fired {fired} magazine(s)'
                       + (f' -- {err}' if err else ''))
                 if err and not fired:
@@ -646,7 +716,8 @@ def run(a):
     finally:
         rig.close()
 
-    analyse(a.weapon, a.sight, a.ref, config, at=a.at)
+    for s in sights:
+        analyse(a.weapon, s, a.ref, config, at=a.at)
     return 0
 
 
@@ -927,12 +998,16 @@ def selftest():
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--weapon')
-    ap.add_argument('--sight', default='4x', help='the optic under test')
+    ap.add_argument('--sight', default='4x',
+                    help='the optic(s) under test, comma-separated. All of '
+                         'them fire in ONE run and rotate against --ref, '
+                         'because the run-level multiplicative error only '
+                         'cancels inside a run (see block_order).')
     ap.add_argument('--ref', default='red_dot', help='what to compare against')
     ap.add_argument('--posture', default='standing')
     ap.add_argument('--mags', type=int, default=4, help='magazines per block')
     ap.add_argument('--blocks', type=int, default=2,
-                    help='ref/sight pairs; the sights ALTERNATE')
+                    help='how many times the whole rotation repeats')
     ap.add_argument('--arm', type=float, default=0.8,
                     help='second arm scale (ARM_PLAN uses 0.8 -- see the '
                          'module docstring before widening it)')

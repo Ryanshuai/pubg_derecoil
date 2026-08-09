@@ -55,7 +55,42 @@ TMPL_SIZE = 48
 ALPHA_TH = 150
 OFFSET_Y = 8
 OFFSET_X = 8
-MSE_EMPTY_TH = 450
+# "This tile has something in it that I can name." NOT the empty test --
+# `drawn()` is, and it is the one with the evidence: of 1713 EMPTY tiles in the
+# paired corpus it rejects 1689 on its own, without consulting a single
+# template. This threshold only ever sees tiles drawn() has already called
+# occupied, which is why it needs its own measurement rather than a guess.
+#
+# ⚠ 450 -> 1000 on 2026-08-09, and the old value sat INSIDE the positive class.
+# Measured over every `__<slot>__<weapon>__<bg|fg>` crop in
+# calibration/artifacts/attachments/runs -- 1733 occupied tiles and 1713 empty
+# ones, scored through read_tile() itself:
+#
+#     occupied, named correctly     median  14.9   p99  521   MAX   718
+#     empty AND drawn()=True (24)   min   1605   p05 2212   median 3358
+#
+#     TH=450    25 occupied tiles called EMPTY     0 empties kept
+#     TH=800     0                                  0
+#     TH=1500    0                                  0
+#
+# The gap 718..1605 is unoccupied, so anything in it separates perfectly on
+# this corpus. 1000 is 1.4x above the worst true positive and 1.6x below the
+# best false one -- margin on both sides, rather than a value tuned until one
+# sample passed.
+#
+# ⚠ WHAT IT COST AT 450: an MP5K wearing a 4x read `scope: ''`. The bank has
+# `Upper_ACOG_01_C` and it WAS the top match at 556.4 -- the detector named it
+# correctly and this line threw the answer away, `ensure_sight` then refused
+# the block, and the run lost its 4x cell. The operator could see the scope on
+# the rail in the screenshot.
+#
+# ⚠ AND WHY IT BIT THE 4x FIRST: the tile is composited over the WEAPON
+# RENDER, and every `scope_4x` paired capture in the corpus was taken on an
+# `sks`. A template solved against one weapon's body scores worse against
+# another's -- so a threshold tight enough to be weapon-specific is a
+# threshold that fails whenever the gun changes. Rebuilding the template on a
+# second weapon is still worth doing; it is not what makes this line correct.
+MSE_EMPTY_TH = 1000
 
 # WHERE A TEMPLATE OF A GIVEN SIZE SITS IN THE CROP IT IS READ AGAINST, and
 # nothing is resized to make it fit. Resizing a template is not free and it is

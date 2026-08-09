@@ -612,7 +612,14 @@ COUNTED = ('slots', 'reference rows', 'rows')
 #
 # `prefer=` (rank on the context's own variant) moved nothing — the loss is in
 # the fine pass, not the ranking.
-BASELINE = {'slots': (1685, 1727), 'reference rows': (10, 12),
+# ⚠ slots 1685 -> 1710 on 2026-08-09, and the 25 it gained were not a model
+# change: MSE_EMPTY_TH went 450 -> 1000 after the paired corpus was scored as
+# two classes for the first time (1733 occupied tiles, 1713 empty). The old
+# value sat INSIDE the positive class -- occupied tiles score up to 718, empty
+# ones that survive drawn() start at 1605 -- so 25 tiles with a part plainly in
+# them were being reported empty. The numbers are in
+# detector/attachment_detector.MSE_EMPTY_TH.
+BASELINE = {'slots': (1710, 1727), 'reference rows': (10, 12),
             'rows': (930, 1050)}
 
 
