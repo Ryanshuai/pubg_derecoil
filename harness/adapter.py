@@ -113,7 +113,7 @@ class Rigging:
     measurement lives.
     """
 
-    def __init__(self, rig, kit, sc, session, log, facts, parts):
+    def __init__(self, rig, kit, sc, session, log, facts, parts, parts_for=None):
         self.rig = rig
         self.kit = kit
         self.sc = sc
@@ -121,6 +121,9 @@ class Rigging:
         self.log = log
         self.facts = facts
         self.parts = parts
+        # {weapon: every part this weapon's configs will ever ask for}. The
+        # unit a stocking trip works in -- see _reach.
+        self.parts_for = parts_for or {}
 
     def close(self):
         for name in ('rig', 'kit', 'session'):
@@ -167,13 +170,21 @@ def open_rig(sight, out_dir, home=True, countdown=6,
     # row, and the night halts on a stocking bug wearing a kitting bug's face.
     fills = [f for f in (parse_config(c) for c in (configs or ())) if f]
     parts = {SCOPE_PART}
+    # ⚠ ALSO KEPT PER WEAPON, because that is the unit the pack is stocked in.
+    # `parts` is every part every weapon's configs name -- useful for nothing
+    # but a sanity print -- while what a stocking trip should ask for is THIS
+    # GUN'S whole test set: 「要一次加上所有这个枪待测配件」.
+    parts_for = {}
     for w in weapons:
         cls = ROSTER.get(w, (None,))[0]
         table = PART_FOR_CLASS.get(cls, {})
+        mine = {SCOPE_PART}
         for fill in fills:
-            parts.update(x for x in (p or table.get(s)
-                                     for s, p in fill.items()) if x)
-        parts.update(x for x in [MAG_FOR_CLASS.get(cls)] if x)
+            mine.update(x for x in (p or table.get(s)
+                                    for s, p in fill.items()) if x)
+        mine.update(x for x in [MAG_FOR_CLASS.get(cls)] if x)
+        parts_for[w] = mine
+        parts.update(mine)
 
     # ⚠ THE FIVE LEGS BEFORE ANYTHING IS BUILT, and this door of all doors.
     # It used to open with a bare ensure_focus + sleep(0.6) and then lean on
@@ -305,7 +316,8 @@ def open_rig(sight, out_dir, home=True, countdown=6,
               % (sight, datetime.now().isoformat(timespec='seconds')))
     log.flush()
 
-    r = Rigging(rig, kit, sc, session, log, KitFacts(), parts)
+    r = Rigging(rig, kit, sc, session, log, KitFacts(), parts,
+                parts_for=parts_for)
     return r, None
 
 
@@ -437,7 +449,26 @@ def _reach(rec, rigging, weapon, cfg):
         rec['reached_why'] = f'unknown config {cfg!r}'
         return False
     want = want_for(weapon, ROSTER.get(weapon, (None,))[0], fill)
-    need = {v for v in want.values() if v}
+    # ⚠ THE WHOLE GUN'S TEST SET ON THE FIRST TRIP, THIS CELL'S ON THE REST.
+    # Asked for directly: 「要一次加上所有这个枪待测配件」. A fresh gun means a
+    # fresh weapon in the queue, and that is the one moment the pack is known
+    # empty of the last gun's parts -- so it is the cheapest place to buy every
+    # part at once, and every later cell is then a swap with nothing to spawn.
+    #
+    # ⚠ AND THE BACKPACK LIMIT THAT FORCED THE PER-CELL VERSION IS REAL, so it
+    # is reported rather than designed around: the inventory shows TWELVE rows
+    # before scrolling, nothing here scrolls it, and a spawn with nowhere to
+    # land reports `STILL SHORT of <part>`. Nine AR parts plus the sight plus
+    # the rows nothing can drop (ammo, meds, anything with no icon template --
+    # left alone ON PURPOSE) is close to that line. If it is crossed, the
+    # failure now lands on the FIRST cell of a weapon, loudly, instead of on
+    # whichever cell happened to need the tenth part.
+    #
+    # The per-cell fallback is kept for the resumed path, where the gun is
+    # already racked and the pack holds whatever the last cell left.
+    need = ({v for v in want.values() if v} if already
+            else set(rigging.parts_for.get(weapon) or ())
+            | {v for v in want.values() if v})
     if not stock_parts(sc, kit, need, also=() if already else (weapon,),
                        loose_only=True):
         rec['reached_why'] = f'could not stock the parts or produce {weapon}'

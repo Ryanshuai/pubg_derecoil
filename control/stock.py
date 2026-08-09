@@ -58,6 +58,10 @@ from capture.cropper import win32_cap
 from detector.geometry import detail
 from detector.tab_layout import equip_region
 from control.focus import ensure_focus, game_focused
+# ⚠ THE ONLY LOCATION THIS MODULE NAMES, and it names it so the factory
+# magazine goes to the FLOOR rather than into the pack it is being kept
+# out of. See strip_factory_magazine.
+from control.locations import at_ground
 
 # Worn vs not, off the character's backpack slot. Measured on the reference
 # captures (a scratch probe, no longer on disk — see tools/probe_backpack_depth.py, which is the surviving one): a backpack draws its artwork at
@@ -558,9 +562,20 @@ def strip_factory_magazine(ac, sc, verbose=True):
     magazine off while it is the only magazine in play, so afterwards there is
     exactly one and nothing to confuse.
 
-    It does not drop anything: unequip puts the part in the backpack, and
-    restock's tidy pass throws it because it is not in `want`. Two steps, and
-    the second one already existed.
+    ⚠ STRAIGHT TO THE FLOOR, NEVER VIA THE PACK. This used to unequip into the
+    backpack and leave the tidy pass to throw it, on the reading that "two
+    steps, and the second one already existed". That reading gave back the
+    ambiguity this function exists to remove: between the two steps the factory
+    quick-draw magazine sits in the pack, the REQUESTED extended magazine is
+    spawned into the same pack, and the slot templates call the two the same
+    name -- so tidy is choosing between two rows it cannot tell apart, and the
+    one it keeps decides how many rounds the cell fires. Asked for directly:
+    「快扩是要拖拽到地上不是右键放到背包里」.
+
+    `unequip(..., to=at_ground())` is the sanctioned move -- MOVES lists
+    ('weapon','nearby') as "a part straight from the slot to the floor,
+    skipping the pack" -- and going through unequip rather than discard keeps
+    the EMPTY-SLOT GUARD, which is worth 74 measured lost guns.
 
     ⚠ THE PANEL COMES DOWN FIRST. Tab and the spawner cannot share the screen
     -- comma does nothing while Tab is up -- and this runs immediately after a
@@ -581,13 +596,14 @@ def strip_factory_magazine(ac, sc, verbose=True):
             worn = ((lo.get('slots') or {}).get(slot) or {}).get('magazine')
             if not worn:
                 continue
-            rec = ac.unequip(slot, 'magazine')
+            rec = ac.unequip(slot, 'magazine', to=at_ground())
             ok = rec.get('ok') if isinstance(rec, dict) else bool(rec)
             took += bool(ok)
             if verbose:
                 print(f"      [stock] gun{slot} ({gun}) arrived wearing "
-                      f"{worn} — stripped it BEFORE the requested magazine "
-                      f"exists, so the two are never on screen together "
+                      f"{worn} — dropped it on the GROUND before the "
+                      f"requested magazine exists, so the two are never in the "
+                      f"pack together "
                       f"(ok={ok})")
     return took
 
