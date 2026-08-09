@@ -541,8 +541,26 @@ def analysis_k(mag):
     return live or mag.K
 
 
-def load(weapon, config=None, path=None, fire_mode=None):
-    """Every magazine ever stored for this weapon+config. [] when none."""
+def load(weapon, config=None, path=None, fire_mode=None, sight=None):
+    """Every magazine ever stored for this weapon+config. [] when none.
+
+    ⚠ `sight` SELECTS, IT DOES NOT OVERRIDE. One file holds every optic the
+    cell was ever fired through, because path_for keys on (weapon, config,
+    fire_mode) and NOT on the sight -- while the curve store keys on
+    (weapon, config, posture, SIGHT), which is a 22% difference between a red
+    dot and a 4x. So the two disagree about what one cell is, and the file is
+    the looser of the two.
+
+    Measured 2026-08-09: `mp5k__bare.jsonl` held 151 red_dot magazines and 8
+    scoped ones after a single scope run, and fit_time_curve then refused to
+    fit ANYTHING from it -- correctly, since the pool was not one cell, but
+    that also meant the red dot's own curve could no longer be rebuilt. The
+    refusal was right and it had no exit; this is the exit.
+
+    Passing a sight that no magazine carries returns [], which is the honest
+    answer and not an error: it is what "nothing has been fired through this
+    optic yet" looks like.
+    """
     p = path or path_for(weapon, config, fire_mode)
     if not os.path.exists(p):
         return []
@@ -565,6 +583,8 @@ def load(weapon, config=None, path=None, fire_mode=None):
                 print(f'[samples] {os.path.basename(p)}: skipping magazine(s) '
                       f'— {why}. NOT deleted; they are on disk and unpoolable.',
                       flush=True)
+            continue
+        if sight is not None and m.sight != sight:
             continue
         out.append(m)
     # ⚠ RESTATED, NOT REWRITTEN, AND NEVER SILENTLY. dy_px on disk is

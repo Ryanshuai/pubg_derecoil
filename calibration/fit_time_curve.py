@@ -1087,9 +1087,15 @@ def _write_curve(r, weapon, config, sight, posture, n_total, fire_mode=None):
     # untagged -- so the runtime's lookup is unchanged and the mg3's 'high'
     # curve stays where detector/weapon.py already reads it -- and the
     # deliberate other mode gets its own file rather than overwriting it.
+    # ⚠ THE SIGHT IS IN THE NAME (2026-08-09). It has always been in the KEY
+    # load_final_curves builds, and leaving it out of the path meant every
+    # optic for one cell wrote to the same file -- see detector.weapon.
+    # sight_tag for the run that proved it by losing two of three curves.
+    from detector.weapon import sight_tag as _sight_tag
     path = os.path.join(
         cfg.CURVES_DIR,
-        f'{weapon}__{_ck(cfg_dict)}{S.fire_tag(weapon, fire_mode)}.json')
+        f'{weapon}__{_ck(cfg_dict)}{S.fire_tag(weapon, fire_mode)}'
+        f'{_sight_tag(weapon, sight)}.json')
     was = None
     if os.path.exists(path):
         with open(path, encoding='utf-8') as f:
@@ -1148,9 +1154,25 @@ def main():
               f'in config.parse_config_key.')
         return 2
     p = S.path_for(a.weapon, cfg_dict, a.fire_mode)
-    mags = S.load(a.weapon, path=p)
+    # ⚠ --sight SELECTS THE POOL, and until 2026-08-09 it could only rename the
+    # output. One sample file holds every optic the cell was fired through
+    # (path_for has no sight in it) while the curve key does, so the refusal
+    # below -- correct, and still there for the no-flag case -- had no exit: a
+    # single scope run put 8 scoped magazines into mp5k__bare.jsonl and the red
+    # dot's own 151 could no longer be fitted either.
+    all_mags = S.load(a.weapon, path=p)
+    mags = S.load(a.weapon, path=p, sight=a.sight) if a.sight else all_mags
+    if a.sight and len(mags) != len(all_mags):
+        # Said out loud, every time. A fit that quietly used a fifth of the
+        # file is the shape this store exists to make impossible.
+        import collections as _c
+        other = _c.Counter(m.sight for m in all_mags if m.sight != a.sight)
+        print(f'  selecting {len(mags)}/{len(all_mags)} magazines fired '
+              f'through {a.sight!r}; the file also holds '
+              f'{dict(other)} and they are NOT in this fit')
     if not mags:
-        print(f'no samples at {p}')
+        print(f'no samples at {p}'
+              + (f' fired through {a.sight!r}' if a.sight else ''))
         return 2
     # ⚠ THE SIGHT COMES FROM THE MAGAZINES, NOT FROM A DEFAULT. It used to
     # default to 'red_dot', so writing a vss or p90 curve without remembering

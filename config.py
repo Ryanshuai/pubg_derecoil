@@ -401,6 +401,38 @@ RECOIL_SIGHT_PROFILES = {
     # cancels exactly. The SHAPE is established; the LEVEL is not.
     'red_dot': {'K': 1.5413, 'mag': 1, 'keepout': RECOIL_KEEPOUT,
                 'patch_xs': RECOIL_PATCH_XS},
+    # ⚠ THE THREE BELOW ARE CONFIRMED, NOT CHANGED, AND THE DIFFERENCE MATTERS.
+    # Until 2026-08-09 they carried no provenance at all while red_dot above
+    # carried pages of it, which is why they read like guesses. They are not:
+    # measured on an MP5K in the training range, one `calibrate_k --weapon mp5k
+    # --sight X --ads --amounts 50,100,200` per optic, and compared as RATIOS
+    # against a red-dot run of the same command taken minutes earlier.
+    #
+    #     sight   K measured   K/K_red_dot   the ratio stored here   diff
+    #     red_dot   1.5046       1.0000            1.0000           --
+    #     2x        1.7690       1.1757            1.1843          -0.73%
+    #     3x        1.8328       1.2181            1.2199          -0.14%
+    #     4x        1.8416       1.2240            1.2230          +0.08%
+    #
+    # ⚠ THE ABSOLUTE VALUES ARE NOT WRITTEN IN, DELIBERATELY. Every one of them
+    # came out ~2.4% under what is stored, uniformly -- that is the caliper
+    # offset calibration/CLAUDE.md names ("K 按比例测,不按绝对值"): the
+    # correlator's per-pair bias depends on how many frame pairs share a
+    # displacement, and the same optic reads 1.5171 with duplicate frames
+    # dropped and 1.5520 with them kept, 9.4 sigma apart. Four runs of ONE
+    # command divide that out; pasting 1.8416 into `4x` would paste it in.
+    #
+    # ⚠ 2x IS THE LOOSE ONE AND ITS RUN SAID SO: CV 3.4% across trials, which
+    # calibrate_k reports as "too noisy to learn from" (red_dot 2.6%, 3x 2.6%,
+    # 4x 2.2%, all OK). 0.73% is still the largest disagreement here, so if any
+    # of these is worth re-taking it is that one.
+    #
+    # ⚠ AND ONE OF THESE NUMBERS EXISTS BECAUSE A RUN WAS THROWN AWAY. The
+    # first 3x attempt gave 1.7811 at CV 5.8% with R^2 0.99875 -- flagged
+    # NOT LINEAR -- because the operator's hand was on the mouse at the start.
+    # Re-run untouched it gave 1.8328 at CV 2.6% and passed. The two differ by
+    # 2.8%, which is four times the largest disagreement in the table above:
+    # a contaminated run here does not look broken, it looks like a result.
     '2x':      {'K': 1.8254, 'mag': 2, 'keepout': 60,
                 'patch_xs': (1390, 1530, 1850),
                 'patch_h': 384},

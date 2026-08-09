@@ -330,10 +330,26 @@ def ensure_sight(ac, sc, slot, weapon, sight, require_profile=True):
                       f'which part to fit')
     # None is an INTEGRAL optic -- the VSS's PSO-1, the p90's -- and there is
     # no slot to fit it into. The readback below still has to agree.
+    # ⚠ ONE Tab SESSION ACROSS THE FIT AND THE READBACK, and the paragraph above
+    # claimed it for a day while the code did the opposite. Measured off the
+    # shared gesture journal: `collect_timed.py:335 ensure_sight` and `:336`
+    # were the top two churn sources in the whole file, seven leave-and-returns
+    # each, gaps of 0.17-0.25 s -- 24 Tab opens across six blocks of a scope run
+    # where four would do. Same shape as harness/adapter.measure the same night;
+    # rule 14 cannot see either, because it reads one file and one hop and these
+    # are three calls into three other modules.
+    #
+    # ⚠ `restock` STAYS OUTSIDE, and that is not an oversight. It has to close
+    # Tab to open the item spawner -- the panel swallows Tab -- so holding one
+    # across it would either fight it or leave the spawner unreachable. See
+    # control/CLAUDE.md's `leave` note: the judgement is not "how many toggles"
+    # but "what did this toggle buy". This one buys the spawner; the two below
+    # bought nothing.
     if part:
         restock(ac, sc, {part}, leave='shut')
-        ac.ensure_kit(slot, {'scope': part}, weapon=weapon)
     with ac.tab_up():
+        if part:
+            ac.ensure_kit(slot, {'scope': part}, weapon=weapon)
         lo = ac.loadout()
     worn, asset = read_sight(lo, weapon)
     if worn != sight:

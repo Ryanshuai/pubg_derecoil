@@ -192,6 +192,34 @@ from config import config_key, fire_tag                    # noqa: E402,F401
 INTEGRAL_SIGHT = {'vss': 'vss_pso1', 'p90': 'p90_integral'}
 
 
+def sight_tag(weapon, sight):
+    """The curve FILE fragment for an optic. '' for this weapon's ORDINARY one.
+
+    ⚠ THE CURVE KEY HAS ALWAYS INCLUDED THE SIGHT AND THE FILENAME NEVER DID,
+    so every optic for one (weapon, config) wrote to `weapon__config.json` and
+    the last fit won. Measured 2026-08-09 by doing it: fitting an MP5K's
+    red_dot, 2x and 3x in that order left ONE file on disk holding the 3x, and
+    its own log said so in passing -- "replacing a fit of 828 counts from 4
+    magazines" -- while looking like three successful writes.
+    Two of the three curves never existed.
+
+    Modelled on config.fire_tag, which is the same problem solved for fire
+    modes and sits ten lines from the code that builds this path. Same rule:
+    the baseline is PER WEAPON, not a literal. A VSS's ordinary optic is its
+    fixed PSO-1, so `vss__bare.json` keeps its name and a hypothetical second
+    optic would be the tagged one -- keying on the literal 'red_dot' would have
+    renamed all three integral-optic curves and orphaned them, since
+    load_final_curves reads the sight out of the CONTENT and would then see two
+    files claiming one key.
+
+    `''` and None both give '' for the same reason fire_tag does: that is where
+    the existing files already are.
+    """
+    if not sight or sight == INTEGRAL_SIGHT.get(weapon, 'red_dot'):
+        return ''
+    return f'__{sight}'
+
+
 # One line per unmeasured configuration, not one per keypress: set_seq runs
 # on every weapon, attachment and posture change.
 def _sight_of(scope_asset, weapon=None):
