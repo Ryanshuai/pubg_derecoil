@@ -409,7 +409,36 @@ def _reach(rec, rigging, weapon, cfg):
     already = kit.find_gun(weapon) is not None
     if not already:
         kit.clear_rack()
-    if not stock_parts(sc, kit, rigging.parts, also=() if already else (weapon,),
+    # ⚠ THIS CELL'S PARTS, NOT THE WHOLE NIGHT'S, AND THE BACKPACK IS WHY. It
+    # passed `rigging.parts` -- every part any config of any weapon names -- and
+    # `restock`'s want DOUBLES AS THE KEEP-LIST, so all nine AR parts were held
+    # on hand at once. The inventory shows TWELVE rows before scrolling and
+    # nothing here scrolls it (control/stock.py's own docstring), and the pack
+    # also accumulates rows nothing will ever remove: an item with no icon
+    # template reads `unknown` and is left strictly alone ON PURPOSE, because
+    # that rule is what keeps ammo, meds and the guns themselves out of the drop
+    # pass. Every gun spawn adds one.
+    #
+    # Measured across tonight's queue: `+1 unnamed` on the aug, `+3` by the
+    # scar, against nine named parts -- twelve rows, full, and then
+    #
+    #     [stock] STILL SHORT of half_grip after restocking — the spawner
+    #             clicked but nothing arrived (a full 库存, or no backpack)
+    #
+    # which is the honest report of a spawn with nowhere to land. It cost cells
+    # on three weapons in a row and was the most common failure of the night.
+    #
+    # The fix is not to relax the unnamed rule -- that rule is load-bearing --
+    # it is to stop holding nine parts to fit one. The cells are Gray-ordered so
+    # consecutive ones differ by a single slot, which makes this typically one
+    # drop and one spawn rather than nine kept.
+    fill = parse_config(cfg)
+    if fill is None:
+        rec['reached_why'] = f'unknown config {cfg!r}'
+        return False
+    want = want_for(weapon, ROSTER.get(weapon, (None,))[0], fill)
+    need = {v for v in want.values() if v}
+    if not stock_parts(sc, kit, need, also=() if already else (weapon,),
                        loose_only=True):
         rec['reached_why'] = f'could not stock the parts or produce {weapon}'
         return False
@@ -428,11 +457,6 @@ def _reach(rec, rigging, weapon, cfg):
     # arrives, so an unmentioned slot is not empty -- it is whatever the last
     # teardown left lying around, and a cell labelled `bare` then quietly ran
     # wearing a grip. want_for is the one copy of that rule.
-    fill = parse_config(cfg)
-    if fill is None:
-        rec['reached_why'] = f'unknown config {cfg!r}'
-        return False
-    want = want_for(weapon, ROSTER.get(weapon, (None,))[0], fill)
     if kit.apply(want, weapon=weapon) is None:
         # ⚠ FOUR FIELDS, AND THE FOURTH DECIDES WHETHER THIS IS EVIDENCE.
         # `verifiable` is False when the readback could not JUDGE the slot --
