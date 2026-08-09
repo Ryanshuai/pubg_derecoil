@@ -179,11 +179,87 @@ def main():
     fails += _map_click_cases()
 
     print()
+    print('ensure_ready(refuse_on_reentry) — a measurement may not cross a '
+          'session boundary')
+    fails += _reentry_cases()
+
+    print()
     if fails:
         print(f'{len(fails)} branch(es) are not what the code claims')
         return 1
-    print('11 branches, 6 of them negative — the placement table holds')
+    print('15 branches, 8 of them negative — the placement table holds')
     return 0
+
+
+def _reentry_cases():
+    """`entered` must be reported, and refusing on it must actually refuse.
+
+    ⚠ THE NEGATIVE CASES ARE THE POINT. A gate that only ever sees the
+    already-in-a-match path passes just as well when it does nothing at all --
+    and this one exists because a K reading was taken, the game fell back to
+    the lobby, and pairing the two would have gone unnoticed.
+    """
+    import control.session as S
+    out = []
+
+    def check(label, cond, detail=''):
+        print(f'  {"ok  " if cond else "FAIL"}  {label}'
+              + (f'   {detail}' if detail and not cond else ''))
+        if not cond:
+            out.append(label)
+
+    class FakeLobby:
+        entered = False
+
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def ensure_running(self, **k):
+            return {'ok': True}
+
+        def ensure_in_match(self, range_name=None, **k):
+            return {'ok': True, 'entered': FakeLobby.entered,
+                    'range': {'ok': True}}
+
+    real_lobby, real_focus, real_sleep = L.LobbyControl, S.ensure_focus, S.time.sleep
+    slept = []
+    try:
+        L.LobbyControl = FakeLobby
+        S.ensure_focus = lambda **k: True
+        S.time.sleep = lambda s: slept.append(s)
+
+        FakeLobby.entered = False
+        r = S.ensure_ready(tab=False, panel=False, verbose=False)
+        check('already in a match, refusing: PASSES', r['ok'], str(r))
+        check('already in a match: entered is False',
+              r.get('entered') is False, str(r.get('entered')))
+        check('already in a match: no settle', not slept, str(slept))
+
+        slept.clear()
+        FakeLobby.entered = True
+        r = S.ensure_ready(tab=False, panel=False, verbose=False,
+                           refuse_on_reentry=True)
+        check('walked back in + refuse_on_reentry: REFUSES', not r['ok'])
+        check('walked back in: says which leg',
+              r.get('failed') == 'reentry', str(r.get('failed')))
+
+        slept.clear()
+        r = S.ensure_ready(tab=False, panel=False, verbose=False)
+        check('walked back in, not refusing: PASSES', r['ok'])
+        check('walked back in: entered is True', r.get('entered') is True)
+        check('walked back in: settles before reading',
+              slept and slept[0] == S.REENTRY_SETTLE_S, str(slept))
+    finally:
+        L.LobbyControl = real_lobby
+        S.ensure_focus = real_focus
+        S.time.sleep = real_sleep
+    return out
 
 
 def _map_click_cases():

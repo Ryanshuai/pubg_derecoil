@@ -550,9 +550,19 @@ def main():
     ap.add_argument('--countdown', type=int, default=6)
     a = ap.parse_args()
 
-    if not ensure_ready(label='timed collection',
-                        countdown_s=a.countdown)['ok']:
+    # ⚠ NOT refuse_on_reentry, ON PURPOSE, but it is SAID. An unattended run is
+    # allowed to walk back into the match -- that is what it is for. What is not
+    # allowed is doing it silently: everything that drifts per session drifted,
+    # so magazines collected after a walk-back cannot be paired with a constant
+    # measured before it. 2026-08-08 lost a K reading to exactly that and only
+    # noticed because the next command refused for an unrelated reason.
+    _ready = ensure_ready(label='timed collection', countdown_s=a.countdown)
+    if not _ready['ok']:
         return 1
+    if _ready.get('entered'):
+        print('  [!] THIS RUN WALKED BACK INTO THE MATCH. It is a new session: '
+              'do not pair these magazines with anything measured before now, '
+              'and expect the rack to be empty (entering the range empties it).')
 
     # The rack empties on its own over a long run -- measured 2026-08-08: the
     # gun was simply gone after ~18 magazines, twice, with no error anywhere.

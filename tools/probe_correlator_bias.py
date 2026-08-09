@@ -300,9 +300,13 @@ def main():
         return rc
     cells = GRID_CELLS if a.grid else PAIR_CELLS
 
-    if not ensure_ready(label='the correlator-bias probe',
-                        countdown_s=a.countdown)['ok']:
-        print('[!] could not get the game ready')
+    # ⚠ refuse_on_reentry: this probe's number is PAIRED with something
+    # measured elsewhere (the arm difference, an earlier run), and a call that
+    # had to walk back into the match is not in the session those came from.
+    r = ensure_ready(label='the correlator-bias probe',
+                     countdown_s=a.countdown, refuse_on_reentry=True)
+    if not r['ok']:
+        print(f'[!] could not get the game ready ({r.get("failed")})')
         return 1
 
     from control.inventory import InventoryControl

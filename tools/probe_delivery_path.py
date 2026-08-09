@@ -101,6 +101,47 @@ DEAD_PX = 2.0        # a trial that moved less than this measured nothing
 TEXTURE_MIN = 40.0   # Laplacian variance the patches need to be trackable
 ALIAS_PX = 110.0     # per-frame ceiling; RECOIL_PATCH_H/2 is 128
 
+# ── --hold-sweep: is comp_counts_at() the firmware, or an idealisation? ──────
+#
+# MODEL.md sec.4.2.2 measured the two firing arms 2.16% apart with K pinned
+# independently, and TWO things produce exactly that, with the same sign and
+# the same size:
+#
+#   eta                the curve arrives short: 900 commanded, 882 delivered
+#   the integration    the curve arrives in full and comp_counts_at() -- the
+#                      PC's model of the firmware -- over-states it by 2%
+#
+# ⚠ AT ONE HOLD DURATION THEY ARE THE SAME NUMBER. A pure scale error and a
+# timing error are indistinguishable from a single measurement, which is why
+# sec.13 item 6 sat as "foundation never verified" until it became the thing
+# that decides whether eta is real.
+#
+# SWEEPING THE HOLD SEPARATES THEM:
+#
+#   measured(T) / comp_counts_at(T)   FLAT in T     -> a scale: eta (or K)
+#                                     VARIES with T -> the integration model,
+#                                                      and the shape says how
+#
+# ⚠ K DOES NOT NEED TO BE KNOWN, only to hold still across the sweep, because a
+# constant factor cancels out of "is the ratio flat". So this runs in whatever
+# aim state the character is in -- which also sidesteps the gun leaving ADS
+# when its magazine empties.
+#
+# ⚠ AND THE PUNCH IS SUBTRACTED, NOT AVOIDED. With no weapon in hand a held
+# left button is a punch and the animation moves the camera; holding longer may
+# punch more than once, so it is not a constant that a single T=0 arm could
+# remove. Every T therefore fires BOTH arms -- pattern on and pattern off --
+# and the difference is the compensation alone.
+#
+# ⚠ THE CURVE IS DELIBERATELY FRONT-LOADED. A uniform ramp makes
+# comp_counts_at() linear in T, and a linear model tested against a linear
+# truth passes whatever it does between the knots. The shape below puts most of
+# the travel in the first third, so the piecewise-linear reconstruction is
+# actually exercised.
+SWEEP_SPAN_S = 2.0
+SWEEP_TOTAL = 400
+HOLD_SWEEP = (0.25, 0.50, 1.00, 1.50, 2.00, 2.50)
+
 
 def _inject_moves(mouse, total, n_steps, span, t0):
     """`total` counts as n_steps mouse.move()s, evenly spaced over span.
@@ -239,6 +280,277 @@ def one_trial(rig, grabber, arm, sign):
     return abs(total_px), sent, max_frame
 
 
+# Fraction of the ammo readout that is bright. Measured on four states, and
+# the threshold sits in a 20x gap below and 2x above:
+#
+#     no weapon                     0.00%   0.09%
+#     weapon out, 40 rounds         3.45%
+#     weapon out, EMPTY (red 0)     3.63%   2.13%
+#
+# ⚠ THE RED 0 IS WHY THIS IS A PIXEL FRACTION AND NOT THE DIGIT READER. An
+# empty magazine draws its count in red, AmmoDetector's templates are white,
+# and control.stock.weapon_in_hand() therefore answers None for BOTH "no
+# weapon" and "empty magazine". Asking how much ink is on the HUD does not care
+# what colour it is.
+#
+# ⚠ AND NOT THE 99th PERCENTILE, which was the first thing tried: it read
+# 119 / 128 / 117 across those same states -- the region's bright edge pins it
+# whatever the digits do, so the check refused a weapon that was already away.
+HUD_INK_MAX = 0.01
+
+
+def _hud_ink():
+    """Fraction of the ammo readout that is bright. Weapon out -> digits."""
+    import cv2
+    from capture.cropper import capture_screen
+    from config import HUD_REGIONS
+    y, x, h, w = HUD_REGIONS['ammo']
+    crop = capture_screen()[y:y + h, x:x + w]
+    g = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    return float((g > 120).mean())
+
+
+def holster(rig):
+    """Put the weapon away and PROVE it went. -> True if the HUD went blank.
+
+    ⚠ THIS FILE ASSERTED "no weapon in hand" IN ITS DOCSTRING FOR A DAY AND
+    NEVER DID IT, nor checked it. Nothing failed loudly: with a gun out, both
+    arms hold the same button for the same time, so the recoil lands in both
+    and cancels out of the difference -- it only inflates the noise, which
+    reads as "this needs more trials".
+
+    ⚠ AND THE OBVIOUS CHECK IS THE ONE THAT DOES NOT WORK. control.stock's
+    weapon_in_hand() answers None for "no weapon" AND for "magazine empty",
+    because PUBG draws a 0 in red and the digit templates are white
+    (measured 2026-08-08; see that function's docstring). So an empty gun would
+    certify itself as no gun. This asks a DIFFERENTIAL question instead -- did
+    the readout go dark when X was pressed -- which needs no threshold and
+    cannot be satisfied by a reader that was blind to begin with.
+    """
+    from press.pico_mouse import HID_KEY_X
+    ink = _hud_ink()
+    print(f'  holster: weapon HUD ink {100*ink:.2f}% '
+          f'(away is < {100*HUD_INK_MAX:.0f}%)')
+    if ink < HUD_INK_MAX:
+        return True                       # already away
+    for i in range(3):
+        rig.mouse.key(HID_KEY_X, 60)
+        time.sleep(0.8)
+        ink = _hud_ink()
+        print(f'  holster: press {i+1} -> {100*ink:.2f}%')
+        if ink < HUD_INK_MAX:
+            return True
+    return False
+
+
+def _shaped_curve(total, span, sign):
+    """Front-loaded knots summing to `total`. -> (dy list, t list)."""
+    n = int(span * 1000 / KNOT_MS)
+    w = np.exp(-np.arange(n) / (n / 4.0)) + 0.15
+    w = w / w.sum() * abs(total)
+    return list(-sign * w), [i * KNOT_MS / 1000.0 for i in range(n)]
+
+
+def _arm_sweep_curve(mouse, sign):
+    """Upload the shaped pattern and return what the FIRMWARE says it holds."""
+    dy, ts = _shaped_curve(SWEEP_TOTAL, SWEEP_SPAN_S, sign)
+    mouse.upload_pattern([0.0] * len(dy), dy, ts)
+    mouse.set_recoil_enabled(True)
+    return mouse.read_pattern() or []
+
+
+def _inject_shaped(mouse, dy, ts, hold_s, t0):
+    """Replay the shaped knots through mouse.move(), truncated at hold_s.
+
+    ⚠ THE STRADDLING KNOT IS SENT IN PART, not dropped. The firmware spreads
+    each knot evenly over its own window, so a hold ending mid-knot delivers a
+    FRACTION of it -- and comp_counts_at models exactly that. Dropping it here
+    would make the two arms disagree by up to one knot at every hold, which at
+    the shortest hold is ~1% of the travel: the same size as the effect.
+    """
+    acc = 0.0
+    for i, (d, t) in enumerate(zip(dy, ts)):
+        if t >= hold_s:
+            break
+        dur = (ts[i + 1] - t) if i + 1 < len(ts) else (t - ts[i - 1])
+        frac = min(1.0, (hold_s - t) / dur) if dur > 0 else 1.0
+        w = t0 + t - time.perf_counter()
+        if w > 0:
+            time.sleep(w)
+        acc += d * frac
+        s = int(acc)
+        acc -= s
+        if s:
+            mouse.move(0, s)
+
+
+def one_hold_trial(rig, grabber, hold_s, sign, arm):
+    """Hold the button `hold_s`. -> (px, worst).
+
+    ⚠ THREE ARMS, AND `move` IS NOT OPTIONAL. With no weapon out this runs in
+    HIP FIRE, whose count ruler is NOT FLAT (0.636 +- 0.095, control/CLAUDE.md),
+    and a longer hold travels further -- so each hold duration samples a
+    different stretch of a curved ruler and that alone would fake a trend in
+    exactly the quantity under test. `move` sends the SAME shaped counts over
+    the SAME time through mouse.move(), so it walks the same stretch, and
+    curve/move divides the ruler out.
+    """
+    for _ in range(3):
+        grabber.grab_timed()
+    prev = None
+    while prev is None:
+        _t, f = grabber.grab_timed()
+        prev = rig.tracker.slice_frame(f) if f is not None else None
+
+    if arm == 'curve':
+        _arm_sweep_curve(rig.mouse, sign)
+    else:
+        rig.mouse.set_recoil_enabled(False)
+    t0 = rig.mouse.click(buttons=0x01, duration_ms=int(hold_s * 1000))
+    if t0 is None:
+        t0 = time.perf_counter()
+    if arm == 'move':
+        # click() returns when the bytes go out and the FIRMWARE holds the
+        # button, so starting here costs a millisecond and keeps t0 honest.
+        import threading
+        dy, ts = _shaped_curve(SWEEP_TOTAL, SWEEP_SPAN_S, sign)
+        threading.Thread(target=_inject_shaped,
+                         args=(rig.mouse, dy, ts, hold_s, t0),
+                         daemon=True).start()
+
+    total_px, worst = 0.0, 0.0
+    while time.perf_counter() < t0 + hold_s + COOLDOWN_S:
+        _t, f = grabber.grab_timed()
+        if f is None:
+            continue
+        cur = rig.tracker.slice_frame(f)
+        if cur is None:
+            continue
+        m = rig.tracker.measure_pair(prev, cur, 0.0)
+        prev = cur
+        if np.isfinite(m.dy):
+            total_px += m.dy
+            worst = max(worst, abs(m.dy))
+    rig.mouse.set_recoil_enabled(False)
+    time.sleep(SETTLE_S)
+    return total_px, worst
+
+
+def hold_sweep(rig, grabber, trials):
+    from calibration.samples import comp_counts_at
+    if not holster(rig):
+        print('[!] REFUSING: could not get the weapon out of hand, and holding '
+              'the trigger with one out fires it. The recoil would cancel '
+              'between the arms but its 2-4% per-magazine scatter would not, '
+              'and that is bigger than the 2% being measured.')
+        return 7
+    curve = _arm_sweep_curve(rig.mouse, +1)
+    rig.mouse.set_recoil_enabled(False)
+    held = sum(k.get('dy', 0.0) for k in curve)
+    print(f'  pattern: {len(curve)} knots, {abs(held):.1f} counts read back, '
+          f'spans {SWEEP_SPAN_S:.2f} s')
+    print('  comp_counts_at: ' + '  '.join(
+        f'{t:.2f}s={abs(float(comp_counts_at(curve, t)[0])):.0f}'
+        for t in HOLD_SWEEP))
+    print('  a uniform ramp:  ' + '  '.join(
+        f'{t:.2f}s={min(t/SWEEP_SPAN_S,1)*abs(held):.0f}' for t in HOLD_SWEEP)
+        + '   <- the gap is what makes the shape testable')
+
+    got = {t: {'curve': [], 'move': [], 'none': []} for t in HOLD_SWEEP}
+    for r in range(trials):
+        for sign in (+1, -1):
+            for t in HOLD_SWEEP:
+                # `none` only at the ends: it has measured 0.0-0.3 px every
+                # time, so it is a drift control, not a term.
+                arms = ('curve', 'move')
+                if t in (HOLD_SWEEP[0], HOLD_SWEEP[-1]):
+                    arms = arms + ('none',)
+                line = f'  r{r} {sign:+d} {t:.2f}s '
+                for arm in arms:
+                    px, worst = one_hold_trial(rig, grabber, t, sign, arm)
+                    if worst > ALIAS_PX:
+                        line += f' {arm}=ALIASED({worst:.0f})'
+                        continue
+                    got[t][arm].append(sign * px)
+                    line += f' {arm}={sign*px:7.1f}'
+                print(line)
+    return _report_sweep(got, curve)
+
+
+def _report_sweep(got, curve):
+    """⚠ THE VERDICT IS AGAINST THE SAMPLING NOISE, NOT AGAINST A CONSTANT.
+
+    The first version printed "NOT FLAT (3.91%)" and named a mechanism. Its own
+    trials scattered 15% and n was 8, so one ratio carried a sem of 2.78% --
+    the spread was 1.43x the noise and the weighted trend was 1.7 sigma. It
+    asserted a conclusion its data could not hold, which is the same shape as
+    every criterion this project has had to rewrite.
+    """
+    from calibration.samples import comp_counts_at
+    print()
+    print(f'{"hold":>6}  {"n":>3}  {"curve px":>10}  {"move px":>9}  '
+          f'{"curve/move":>11}  {"sem":>7}  {"model":>8}  {"punch":>7}')
+    ts, rs, ses = [], [], []
+    for t in HOLD_SWEEP:
+        c = np.array(got[t]['curve'], float)
+        m = np.array(got[t]['move'], float)
+        n = np.array(got[t]['none'], float)
+        if len(c) < 2 or len(m) < 2 or m.mean() == 0:
+            print(f'{t:6.2f}  {len(c):3d}  — too few')
+            continue
+        r = c.mean() / m.mean()
+        se = abs(r) * ((c.std(ddof=1) / len(c) ** 0.5 / c.mean()) ** 2
+                       + (m.std(ddof=1) / len(m) ** 0.5 / m.mean()) ** 2) ** 0.5
+        ts.append(t); rs.append(r); ses.append(se)
+        print(f'{t:6.2f}  {len(c):3d}  {c.mean():10.1f}  {m.mean():9.1f}  '
+              f'{r:11.4f}  {se:7.4f}  '
+              f'{abs(float(comp_counts_at(curve, t)[0])):8.1f}  '
+              f'{(n.mean() if len(n) else float("nan")):7.2f}')
+    if len(rs) < 4:
+        print('[!] fewer than 4 usable hold points. NOT A VERDICT.')
+        return 3
+    ts, rs, ses = np.array(ts), np.array(rs), np.array(ses)
+    spread = float(rs.std(ddof=1))
+    noise = float(np.sqrt(np.mean(ses ** 2)))
+    w = 1.0 / ses ** 2
+    slope, icept = np.polyfit(ts, rs, 1, w=np.sqrt(w))
+    res = rs - (icept + slope * ts)
+    dof = max(len(ts) - 2, 1)
+    se_slope = float((np.sum(w * res ** 2) / dof
+                      / np.sum(w * (ts - ts.mean()) ** 2)) ** 0.5)
+    print()
+    print(f'  curve/move    mean {rs.mean():.4f}   spread {100*spread/abs(rs.mean()):.2f}%'
+          f'   sampling {100*noise/abs(rs.mean()):.2f}%   '
+          f'ratio {spread/noise:.2f}x')
+    print(f'  trend vs hold {slope:+.5f} per second +- {se_slope:.5f}   '
+          f'{abs(slope)/max(se_slope,1e-12):.1f} sigma')
+    print()
+    flat = spread / noise < 2.0 and abs(slope) < 2 * se_slope
+    if flat:
+        print(f'  ✅ FLAT: curve/move does not depend on how long the button '
+              f'was held ({spread/noise:.2f}x the sampling noise, trend '
+              f'{abs(slope)/max(se_slope,1e-12):.1f} sigma). comp_counts_at '
+              f'reproduces the firmware across the whole hold, INCLUDING the '
+              f'freeze at release.')
+        print(f'  -> the 2.16% arm offset in MODEL.md sec.4.2.2 is NOT an '
+              f'accounting error. It is a scale, and eta is what is left.')
+        print(f'  -> and the level itself is a second reading of eta: '
+              f'{rs.mean():.4f}, i.e. the firmware path delivers '
+              f'{100*rs.mean():.1f}% of what mouse.move() does.')
+    else:
+        print(f'  ⚠ NOT FLAT: {spread/noise:.2f}x the sampling noise, trend '
+              f'{abs(slope)/max(se_slope,1e-12):.1f} sigma. The ratio depends '
+              f'on the hold, so comp_counts_at is not the firmware and the arm '
+              f'offset can be an accounting error rather than eta.')
+        print(f'     short holds {rs[0]:.4f}   long holds {rs[-1]:.4f}')
+        print('     rises with hold -> the FREEZE at release is over-counted')
+        print('     falls with hold -> the opening knots are, via the '
+              'fire-delay fold or the first knot duration')
+    print()
+    print('  ⚠ one run. Nothing moves until a second one agrees.')
+    return 0
+
+
 def main():
     try:
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -251,14 +563,22 @@ def main():
     ap.add_argument('--sight', default='red_dot')
     ap.add_argument('--weapon', default='mp5k')
     ap.add_argument('--countdown', type=int, default=8)
+    ap.add_argument('--hold-sweep', action='store_true',
+                    help='sweep the HOLD DURATION against one uploaded curve, '
+                         'to separate a scale error (eta) from an integration '
+                         'error in comp_counts_at. See the block comment.')
     a = ap.parse_args()
 
     ARMS = ['move-240', 'curve']
     out = {k: [] for k in ARMS}
 
-    if not ensure_ready(label='the delivery-path probe',
-                        countdown_s=a.countdown)['ok']:
-        print('[!] could not get the game ready')
+    # ⚠ refuse_on_reentry: a walk-back means the match being measured ended.
+    # It is also the stop condition for the failure named from the chair --
+    # a long unattended cycle re-entering, re-measuring and re-failing.
+    r = ensure_ready(label='the delivery-path probe',
+                     countdown_s=a.countdown, refuse_on_reentry=True)
+    if not r['ok']:
+        print(f'[!] could not get the game ready ({r.get("failed")})')
         return 1
 
     rig = Rig(a.sight, prefer_dxgi=False)
@@ -275,6 +595,8 @@ def main():
                   'with structure — open sky reads a confident zero, not an '
                   'error, and that is what a whole run measured.')
             return 6
+        if a.hold_sweep:
+            return hold_sweep(rig, grabber, a.trials)
         n_dead = 0
         for r in range(a.trials):
             if texture(rig, grabber) < TEXTURE_MIN:

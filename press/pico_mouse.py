@@ -53,6 +53,13 @@ HID_KEY_W   = 0x1A   # forward; the only thing here that MOVES the character
 HID_KEY_S   = 0x16   # back
 HID_KEY_C   = 0x06   # crouch toggle
 HID_KEY_Z   = 0x1D   # prone toggle
+# ⚠ HOLSTER, and it is the only safe way to hold the trigger. `firing` in the
+# firmware is the BUTTON, not the gun, so a compensation pattern plays whenever
+# left is down -- and with a weapon out that means live rounds and real recoil
+# in the measurement. Draining the magazine first does not work either: PUBG
+# auto-reloads from reserve (24 -> 40 measured across a 4 s hold), so "an empty
+# gun" is not a state the range will hold still.
+HID_KEY_X   = 0x1B
 HID_KEY_F   = 0x09   # pick up; also PLAY in the lobby
 HID_KEY_1   = 0x1E
 HID_KEY_2   = 0x1F

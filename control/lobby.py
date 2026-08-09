@@ -1052,6 +1052,14 @@ class LobbyControl(Driver):
         # line IS the teleport rule, so getting it wrong no longer costs one
         # extra map toggle — it costs the teleport.
         entered = not rec['states'] or rec['states'][0] != LobbyState.IN_GAME.value
+        # ⚠ REPORTED, because it is not only the teleport rule. A caller that
+        # is MEASURING needs to know the match it is in is not the match it
+        # started in: every constant that drifts per session drifted, and a
+        # reading taken before the walk-back cannot be paired with one taken
+        # after. 2026-08-08 paid for this once -- a K reading was taken, the
+        # game fell back to the lobby, and pairing the two would have been the
+        # exact confound MODEL.md sec.4 spends a section removing.
+        rec['entered'] = entered
         if not rec['ok'] or not range_name:
             return rec
 

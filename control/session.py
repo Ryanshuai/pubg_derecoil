@@ -70,6 +70,8 @@ Every step is skipped by argument (`match=False` and so on) for the scripts
 that genuinely mean it — reading the lobby, probing the panel itself. Skipping
 one to make a red run go green is how the failures above were built.
 """
+import time
+
 from control.focus import ensure_focus
 
 
@@ -111,9 +113,21 @@ def _say_what_is_actually_up(out, verbose):
         pass
 
 
+# How long the screen needs after a walk-back into the match before anything
+# may be read or measured. The map closes, the teleport lands, the spawn panel
+# finishes animating -- and NONE of that reads as an error: a probe that starts
+# here measures the panel it is standing in. 2026-08-08 did exactly that twice,
+# once on a K calibration (32 trials of ~0.01 px, all inside the SPAWN TOOL
+# panel) and once on the hold sweep, which was moving the mouse up and down
+# over a menu. Said from the chair: 「你进去后要等几秒，要等它那个 spawn 的那个
+# 东西关掉以后」.
+REENTRY_SETTLE_S = 3.0
+
+
 def ensure_ready(label='this script', countdown_s=6, running=True, focus=True,
                  match=True, tab=True, panel=True, range_name='200m',
-                 verbose=True, match_timeout=None, launch_timeout=None):
+                 verbose=True, match_timeout=None, launch_timeout=None,
+                 refuse_on_reentry=False):
     """L2 — Running, focused, in a match, Tab down, panel down. -> {'ok',
     'steps', ...}. The preconditions no script remembers; each leg is its own
     L1 (ensure_running / ensure_focus / ensure_in_match / ensure_tab /
@@ -214,6 +228,28 @@ def ensure_ready(label='this script', countdown_s=6, running=True, focus=True,
                 return out
             if 'range' in rec:
                 out['range'] = rec['range']
+            # ⚠ DID THIS CALL WALK BACK IN? Two different things hang on it.
+            out['entered'] = bool(rec.get('entered'))
+            if out['entered']:
+                if refuse_on_reentry:
+                    # A MEASUREMENT CANNOT CROSS THIS LINE. Everything that
+                    # drifts per session drifted, so a reading taken before the
+                    # walk-back does not pair with one taken after -- and a
+                    # probe that quietly carries on turns a dead session into
+                    # a number nobody can tell from a live one. It also stops
+                    # the failure mode the operator named on 2026-08-08:
+                    # 「你要停下来，不然你这个没完没了的在错误里瞎试」-- a long
+                    # cycle re-entering, re-measuring and re-failing unattended.
+                    out['failed'] = 'reentry'
+                    if verbose:
+                        print('[ready] REFUSING: this call had to walk back '
+                              'into the match, so it is not the session that '
+                              'was being measured. Re-run deliberately.')
+                    return out
+                if verbose:
+                    print(f'[ready] walked back into the match — settling '
+                          f'{REENTRY_SETTLE_S:.0f}s before reading anything')
+                time.sleep(REENTRY_SETTLE_S)
 
     if tab:
         from control.inventory import InventoryControl
