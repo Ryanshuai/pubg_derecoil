@@ -378,7 +378,21 @@ SLOTS = {
     # Suppressor-only muzzle, vertical-only grip.
     'tommy':    {'slots': ('scope', 'muzzle', 'grip', 'magazine'), 'conf': 'measured'},
     # Integral holo + laser + suppressor, none removable.
-    'p90':      {'slots': ('magazine',), 'conf': 'measured'},
+    # ⚠ `scope` ADDED 2026-08-09, AND `conf` DEMOTED, because 'measured' was
+    # never true of this slot for ANY weapon. scan_compat reads the tile border
+    # to decide a slot exists, and this file's own notes say the scope slot
+    # DRAWS NO TILE -- "存在性只能靠装一个瞄具确认". So every scope entry in this
+    # table is an inference wearing a measurement's label, and on the p90 the
+    # inference was wrong: the 2026-08-09 evidence frame shows the gun WEARING a
+    # sight, and read_sight came back `red_dot` off it.
+    #
+    # The cost of the omission is not a missing cell, it is a wrong constant.
+    # `fixed_kit` skips a slot the weapon "does not have", so nothing would ask
+    # for the red dot -- the p90 would fire under whatever optic PUBG auto-fitted
+    # while `--sight red_dot` supplied K, and K is worth about 3x between
+    # sights. That is the same shape as the optic before the readback check
+    # existed, arriving through the catalogue instead.
+    'p90':      {'slots': ('scope', 'magazine'), 'conf': 'inferred-scope'},
     # Non-replaceable laser sight and silencer as standard.
     'mp9':      {'slots': ('scope', 'magazine', 'stock'), 'conf': 'measured'},
     # No grip slot (ring 18.6) and no stock (14.2). The grip was a guess,
@@ -506,6 +520,30 @@ EXCLUDE = {
     # This is measurement-only; no wiki claim was consulted either way. One
     # hand-drag of a 4x onto an mp5k refutes it if it is wrong.
     'mp5k':  {'scope_4x'},
+    # MEASURED 2026-08-09, and the game says it in TEXT, which is the strongest
+    # kind of entry this table has (it is what the ONLY table is built from).
+    #
+    # Two night cells both recorded `magazine should be ext_smg, reads ''` --
+    # the part never landed, the same signature that put vector/tilted_grip
+    # here. What settles it rather than merely repeating it is the evidence
+    # frame: the weapon panel reads **P90, 50 rounds, 5.7mm**, and the item
+    # sitting unused in the inventory is labelled
+    #
+    #     Extended Mag (Handgun, SMG)
+    #
+    # The P90 is the only 5.7mm weapon in the game. The extended SMG magazine
+    # names the classes it serves and the P90 is not among them, so this is not
+    # an inference from two failures -- it is the game refusing a pairing it
+    # never claimed.
+    #
+    # ⚠ THE SLOT IS REAL AND THAT IS WHY THIS BELONGS HERE RATHER THAN IN
+    # SLOTS. scan_compat measured `p90: ('magazine',)` by reading the tile, and
+    # that reading stands: the P90 draws a magazine slot. What it does NOT take
+    # is the SMG magazine the class table hands it -- `compatible()` was
+    # inheriting the whole SMG magazine list without anything having measured
+    # it, which is the gap attachment_catalog's own docstring flags for
+    # EXCLUDE/ONLY/GRIP_ONLY.
+    'p90':   {'ext_smg', 'quickext_smg', 'quick_smg'},
 }
 
 # The other direction: an attachment whose class list is wider than the set of

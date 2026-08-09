@@ -50,6 +50,36 @@ TAIL_RECORD_S = 0.25      # keep recording past the counter reaching zero, so th
 MIN_FIRE_S = 0.8
 MAX_FIRE_S = 9.0
 RELOAD_TIMEOUT_S = 9.0
+
+# Per weapon, where 9 s is not enough. ⚠ THESE ARE GIVE-UP THRESHOLDS, NOT
+# EXPECTED DURATIONS -- the same distinction control/lobby.py draws for
+# EXIT_TIMEOUT ("放弃阈值,不是预期耗时"). Nothing here is a measurement of how
+# long a reload takes, and none of them needs to be: the loop returns the
+# instant the counter settles, so a generous bound costs nothing on a gun that
+# reloads quickly and rescues one that does not.
+#
+# ⚠ THE MG3 IS HERE BECAUSE IT TIMED OUT TWICE AND THE PUBLISHED NUMBERS DO NOT
+# EXPLAIN IT. Measured 2026-08-09: two cells, both `timed out after 9s (last
+# counter reading 25, wanted >= 75)`, on a belt that was firing cleanly (one
+# magazine of 739.9 counts over 4.87 s). Community sources put the MG3 reload at
+# 6.6 s post-buff or 7.5 s, both from older patches and both UNDER our 9 -- so
+# either they are stale or something other than duration is going on, and this
+# repository has seen the wiki be 25 sigma wrong about a weapon stat before
+# (tactical_stock: stated -20%, measures 1.00).
+#
+# So this does not claim to know the MG3's reload time. It stops a give-up
+# threshold from being the thing that decides, and leaves the real number to a
+# measurement: press R, poll the counter until it stops changing, write it down.
+RELOAD_TIMEOUT_FOR = {
+    'mg3':  25.0,
+    'm249': 25.0,   # the other belt-fed LMG, same reason, not yet observed
+}
+
+
+def reload_timeout_for(weapon):
+    """Seconds to wait for a reload before giving up on this weapon."""
+    return RELOAD_TIMEOUT_FOR.get(weapon, RELOAD_TIMEOUT_S)
+
 RELOAD_STATIC_S = 0.35    # counter must hold this long before the mag is ready
 RELOAD_MIN_S = 2.0        # ...and if it never visibly moved, wait at least this
 SETTLE_AFTER_RELOAD_S = 1.8   # counter refills mid-animation; gun is not ready
@@ -308,7 +338,7 @@ class FireDriver:
             time.sleep(0.05)
         return None
 
-    def top_up(self, settle_s=0.4, tries=3):
+    def top_up(self, settle_s=0.4, tries=3, weapon=None):
         """L2 — Reload by hand, wait it out, and read back what is in there,
         retrying until two reads agree. The only entry here that presses R;
         wait_reload() only watches for one to finish.
@@ -369,7 +399,7 @@ class FireDriver:
         for attempt in range(max(1, tries)):
             self.mouse.key(HID_KEY_R, 60)
             time.sleep(settle_s)
-            this_reload_s = self.wait_reload()
+            this_reload_s = self.wait_reload(weapon=weapon)
             reload_s = this_reload_s
             # Read AFTER the wait, not before: the counter refills partway
             # through the animation, so a count taken early is whatever the
@@ -544,7 +574,7 @@ class FireDriver:
         return (rec, time.perf_counter() - t0, steps, last_change,
                 first_shot, ads_frac)
 
-    def wait_reload(self, expect=None):
+    def wait_reload(self, expect=None, weapon=None):
         """R — PUBG reloads by itself; this only waits it out (and it exits ADS).
         IT PRESSES NOTHING — top_up() is what sends R.
 
@@ -582,6 +612,10 @@ class FireDriver:
         weaker evidence than "reads 30" and a run should not be able to take
         the weak one silently.
         """
+        # ⚠ PER WEAPON. 9 s is not enough for a belt-fed LMG and the
+        # published reload times do not explain why -- see
+        # RELOAD_TIMEOUT_FOR, which says what this number is and is not.
+        budget = reload_timeout_for(weapon)
         empty = self.ammo_sig(self.grab())
         t0 = time.perf_counter()
         prev, stable_since = None, None
@@ -589,7 +623,7 @@ class FireDriver:
         digits_seen = False
         while True:
             now = time.perf_counter()
-            if now - t0 >= RELOAD_TIMEOUT_S:
+            if now - t0 >= budget:
                 break
             frame = self.grab()
 
@@ -666,7 +700,7 @@ class FireDriver:
         # Which half failed is the whole diagnosis: digits that read and never
         # reached `expect` is a reload that did not happen, digits that never
         # read at all is the counter being unreadable on this weapon.
-        print(f"      [reload] timed out after {RELOAD_TIMEOUT_S:.0f}s "
+        print(f"      [reload] timed out after {budget:.0f}s "
               f"(last counter reading {last_n!r}"
               f"{'' if expect is None else f', wanted >= {expect}'})")
         return None

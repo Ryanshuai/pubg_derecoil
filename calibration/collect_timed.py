@@ -476,7 +476,7 @@ def fire_one_into_store(rig, grabber, weapon, config, posture, curve,
     never filled, and the log said nothing. A second copy of THIS loop would
     have been the third instance.
     """
-    mag_size, _ = rig.fire.top_up()
+    mag_size, _ = rig.fire.top_up(weapon=weapon)
     if not mag_size:
         return None, 'no ammo counter — cannot say how long this burst is'
     # ⚠ SAID OUT LOUD, NOT REFUSED (2026-08-09). This used to stop the cell, and
@@ -530,7 +530,7 @@ def fire_one_into_store(rig, grabber, weapon, config, posture, curve,
     print(f'  {label}: {mag.n_frames():4d} frames ({mag.fps:5.1f} fps, '
           f'{pre} prefire, {out["n_missed"]} missed), '
           f'y_true {y[-1]:7.1f} counts over {t[-1]:.2f} s')
-    rig.fire.wait_reload(expect=mag_size)
+    rig.fire.wait_reload(expect=mag_size, weapon=weapon)
     return mag, None
 
 
