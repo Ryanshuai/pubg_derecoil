@@ -1369,34 +1369,48 @@ COUNTS_PER_PIXEL = 0.5
 # the counts have to be EMITTED at t - L. The offset is therefore -L, and it
 # is a property of this machine and this display chain rather than of any gun.
 #
-# L MEASURED DIRECTLY, tools/probe_input_latency.py, 20 trials, no weapon
-# needed: mean 45.6 ms, median 45.6, sd 4.5. The probe declares its own bias --
-# about half a frame of quantisation, 3.3 ms at the 152 fps it ran at -- so the
-# honest value is ~42 ms and -46 is inside it.
+# THE VALUE IS THE MEASURED OPTIMUM, NOT L, and those turned out to be two
+# different numbers. Both were measured; here is each and why the second wins.
 #
-# CONFIRMED INDEPENDENTLY by firing it. mp5k bare, red dot, standing, the SAME
-# 917.9-count curve in every arm, only the offset moved (signed y_obs, counts):
+# L, tools/probe_input_latency.py, 40 trials, no weapon fired:
+#     command -> the PRESENT time of the first frame showing it
+#     mean 27.63 ms, sd 5.20, sem 0.82, observed frame interval T = 11.84 ms
+#     L = mean - T/2 = 21.7 ms      L = min over 40 = 18.3 ms
 #
-#     offset      @0.5 s   @1.5 s   @2.98 s
-#      +80         +35.4    +48.2     +44.3
-#      +13         +18.0    +31.8     +43.8      <- what this constant WAS
-#      -46          -0.4    +22.0      +9.0      <- outlier magazine excluded
-#      -60          -7.7     +1.1      +9.8
+# ⚠ AN EARLIER READING OF 45.6 ms WAS THE PROBE'S OWN BUG. It stamped
+# `time.perf_counter()` at the moment its polling loop noticed, not the frame's
+# present time -- so it carried the grab and the loop period (~18 ms of the
+# 45.6), and it was on a DIFFERENT CLOCK from the samples' t, which is
+# `present_s() - click_time`. Two numbers that cannot be subtracted from each
+# other looked like they agreed.
 #
-# 68-76 px of residual drift over a 40-round burst becomes 14-15 px. The two
-# methods -- a probe that never fires a shot, and 20 magazines that never
-# measure a latency -- agree on the same constant.
+# THE FIRED OPTIMUM, 25 magazines, ONE fitted curve of 943 counts, five offsets
+# ROTATED PER MAGAZINE so the arms interleave in time. RMS of y_obs over the
+# whole burst, which is the criterion the root CLAUDE.md law demands -- an
+# endpoint hides the path, and here it moves the answer by 11 ms:
 #
-# ⚠ THE STORED SAMPLES DO NOT NEED RE-FIRING. y_true is independent of the
-# offset by construction, and that is not an assumption here: 26 magazines
-# fired across three different offsets clustered as ONE population (separation
-# 4.70x against a gate of 8.0), and the fitter cannot see which arm a magazine
-# came from.
+#     offset    -90    -70    -50    -30    -10
+#     RMS      18.3   12.0    9.9    7.0   10.8   counts
 #
-# ⚠ AND IT DOES NOT EXPLAIN EVERYTHING. A residual of ~9 counts survives at the
-# optimum, and a two-arm decomposition puts ~4.7% of it in AMPLITUDE rather
-# than timing. That is a separate repair; see MODEL.md.
-RECOIL_FIRE_DELAY_MS = -46
+# A clean bowl; a quadratic puts the minimum at -35.6 ms with the same answer
+# when the -90 end point is dropped. At -30 the residual is 7.0 counts RMS =
+# 11 px of drift over a 40-round burst, against 68-76 px at the old +13.
+#
+# ⚠ WHY -36 AND NOT -21. The residual is not pure timing: a two-arm
+# decomposition puts ~4.7% of it in AMPLITUDE, and with an amplitude term the
+# offset that MINIMISES drift is not -L. What this constant is for is minimum
+# drift, so the fired optimum is the right thing to set and L is the
+# cross-check that it is the right ORDER. They differ by 14 ms, and that gap is
+# the amplitude repair showing through -- not an error in either measurement.
+#
+# ⚠ AND THE INTERLEAVING EARNED ITS KEEP. A -46 arm fired in its own earlier
+# run reads +31.4 counts at t=2.0 s where the interleaved -50 and -30 either
+# side of it read -4.7 and +1.0. Thirty counts of between-session drift, on the
+# same gun, the same lane, twenty minutes apart. Every offset comparison made
+# across runs before this was unreliable, including the first sweep that put
+# the optimum "near -60".
+#
+RECOIL_FIRE_DELAY_MS = -36
 
 
 # ════════════════════════════════════════════════════════════

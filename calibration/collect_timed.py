@@ -484,6 +484,12 @@ def main():
                          'click. Nothing needs recording: read_pattern returns '
                          'the shifted times, so curve[0]["t_ms"] IS the offset '
                          'that played, on every magazine already stored.')
+    ap.add_argument('--fire-delay-sweep', default=None,
+                    help='comma-separated offsets in ms, ROTATED PER MAGAZINE '
+                         'off one fit. This is how the offset gets measured '
+                         'rather than guessed: the curve is held fixed and '
+                         'only the offset moves, and the arms interleave in '
+                         'time so session drift cannot align with an arm.')
     ap.add_argument('--countdown', type=int, default=6)
     a = ap.parse_args()
 
@@ -845,6 +851,12 @@ def main():
             print(f'  magazine: every stored {a.weapon} magazine holds '
                   f'{sorted(prior)} rounds')
 
+        sweep = ([float(x) for x in a.fire_delay_sweep.split(',')]
+                 if a.fire_delay_sweep else None)
+        if sweep:
+            print(f'  sweeping the fire delay per magazine over {sweep} ms, '
+                  f'off ONE fitted curve')
+
         grabber = DXGISyncGrabber(rig.tracker.regions())
         for i in range(a.mags):
             mag_size, _ = rig.fire.top_up()
@@ -880,6 +892,31 @@ def main():
             # two mouse moves -- shove past the clamp by a known multiple, come
             # back up half. The dip is the shove, not a measurement. Measuring
             # is measure_travel(), which this path never calls.
+            # ⚠ THE SWEEP ROTATES PER MAGAZINE, AND THAT IS THE WHOLE DESIGN.
+            # The first offset sweep ran one offset per RUN, and `--from-fit`
+            # re-fitted at the top of each run off a store that had just grown
+            # by five magazines -- so the curve moved WITH the offset (917.9,
+            # 917.9, 917.9, then 943.3) and the arms stopped being comparable.
+            # The slope came out at 64% of the linear prediction and the four
+            # points would not lie on a line.
+            #
+            # Here the fit happened once, above, and only the offset changes.
+            # Rotating per magazine also interleaves the arms in TIME, so any
+            # drift over the session -- the range emptying, the light moving,
+            # the frame rate wandering 110..150 -- lands on every arm equally
+            # instead of on whichever ran last.
+            if sweep:
+                d = sweep[i % len(sweep)]
+                rig.mouse.RECOIL_FIRE_DELAY_MS = d
+                rig.arm(w)
+                curve = rig.mouse.read_pattern() or []
+                if not curve:
+                    print(f'  mag {i}: the firmware took no pattern — stopping')
+                    break
+                print(f'  mag {i}: fire delay {d:+g} ms '
+                      f'(curve starts at t={curve[0]["t_ms"]} ms, '
+                      f'{len(curve)} knots, {sum(k["dy"] for k in curve):.0f} '
+                      f'counts)')
             if not aim_and_scope(rig, a.posture):
                 print(f'  mag {i}: could not re-aim — stopping')
                 break

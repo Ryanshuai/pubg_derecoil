@@ -13,13 +13,24 @@ and only one of them was ever measured:
        running about 72 ms on the AUG. Same chain as L, PLUS the weapon's own
        delay between the trigger registering and the round leaving.
 
-So the weapon's fire delay is S - L, and that is exactly how late the
-compensation should be, not how early. press.pico_mouse.RECOIL_LEAD_FRAC
-currently shifts the pattern 30% of a bullet interval EARLIER, which on the
-AUG stacks with S to put every pulse more than a full bullet ahead of the round
-it was meant to cancel. The fit then hides it by suppressing the opening
-rounds of the curve -- the AUG's first entry is -0.6 counts, on a gun whose
-second is 5.1 and third 11.9.
+⚠ THE PARAGRAPH THAT STOOD HERE WAS THE BIN COORDINATE'S ANSWER, and under
+MODEL.md it is the wrong question. It reasoned that the weapon's fire delay is
+S - L and that the compensation should therefore be LATE by that much, because
+the curve was indexed by ROUND and each pulse had to be aligned to the round it
+cancelled. (It also argued against a RECOIL_LEAD_FRAC that no longer exists.)
+
+In the time coordinate the curve IS y_true(t), the screen's displacement at
+time t after the click, MEASURED ON THE SCREEN. The recoil's own path to the
+photons is therefore already inside the curve and cancels. What does not cancel
+is the compensation's own path, which the recoil never travels -- and that is
+exactly L. So:
+
+    the offset is  -L.  A LEAD, not a lag, and S does not enter at all.
+
+Confirmed 2026-08-08 by firing it: over 25 magazines swept per-magazine across
+five offsets off ONE fitted curve, the residual drift minimises near -L, and
+config.RECOIL_FIRE_DELAY_MS went from +13 to -46 on the strength of the two
+agreeing.
 
 Nothing here touches the game beyond moving the view a little, and it does not
 need a weapon in hand.
@@ -44,27 +55,53 @@ MOVED_PX = 2.0      # per-frame displacement that counts as "it started"
 SETTLE_S = 0.35     # let the view stop between trials
 
 
-def one_trial(rig):
-    """Milliseconds from issuing the move to the first frame that shows it."""
-    rig.flush(4)
-    prev = rig.tracker.slice_frame(rig.grab())
+def one_trial(rig, grabber):
+    """(ms from the command to the PRESENT time of the first frame showing it,
+    the frame interval around it). (None, None) if it never moved.
+
+    ⚠ THE PRESENT TIME, NOT `time.perf_counter()` AT THE GRAB. This used to
+    stamp `seen = now` the moment the polling loop noticed, which adds the grab
+    and the loop's own period to every reading and -- worse -- puts the answer
+    on a DIFFERENT clock from the thing it has to be subtracted from. The
+    samples' time axis is `dxgi_time.present_s() - click_time`, so a latency
+    measured against the poll instant is not the same quantity at all.
+
+    present_s() is documented as returning perf_counter seconds, so the
+    subtraction against `t_cmd` is exact, and what is left is ONE bias: the
+    frame that shows the move is presented at the first present-instant after
+    the true latency, so every reading carries U(0, T). That is why the frame
+    interval comes back with it -- see main(), which corrects with the T it
+    actually observed rather than with a nominal refresh rate.
+    """
+    for _ in range(4):
+        grabber.grab_timed()
+    prev = None
+    while prev is None:
+        _t, f = grabber.grab_timed()
+        prev = rig.tracker.slice_frame(f) if f is not None else None
     t_cmd = time.perf_counter()
     rig.mouse.move(0, -MOVE)
-    seen = None
+    seen, prev_present, gap = None, None, None
     while time.perf_counter() - t_cmd < WATCH_S:
-        now = time.perf_counter()
-        cur = rig.tracker.slice_frame(rig.grab())
+        t, f = grabber.grab_timed()
+        if f is None:
+            continue
+        cur = rig.tracker.slice_frame(f)
+        if cur is None:
+            continue
         m = rig.tracker.measure_pair(prev, cur, 0.0)
         prev = cur
         if np.isfinite(m.dy) and abs(m.dy) >= MOVED_PX:
-            seen = now
+            seen = t
+            if prev_present is not None:
+                gap = t - prev_present
             break
+        prev_present = t
     if seen is None:
-        return None
-    # Put it back, so a run of trials does not walk the view into a clamp.
+        return None, None
     rig.mouse.move(0, MOVE)
     time.sleep(SETTLE_S)
-    return 1000.0 * (seen - t_cmd)
+    return 1000.0 * (seen - t_cmd), (1000.0 * gap if gap else None)
 
 
 def main():
@@ -84,27 +121,56 @@ def main():
         print('[!] could not focus the game')
         return 1
 
-    rig = Rig(args.sight)
+    # ⚠ prefer_dxgi=False, same reason collect_timed passes it: DXGI allows
+    # ONE duplication interface per output per process, and the sync grabber
+    # below needs it. A Rig that took it first makes grab_timed() raise
+    # COMError E_INVALIDARG from inside AcquireNextFrame, four frames down.
+    rig = Rig(args.sight, prefer_dxgi=False)
+    from capture.cropper import DXGISyncGrabber
+    grabber = DXGISyncGrabber(rig.tracker.regions())
     try:
-        fps = None
-        out = []
+        out, gaps = [], []
         for i in range(args.trials):
-            ms = one_trial(rig)
+            ms, gap = one_trial(rig, grabber)
             if ms is None:
                 print(f'  trial {i}: never moved')
                 continue
             out.append(ms)
-            print(f'  trial {i:2d}: {ms:6.1f} ms')
+            if gap:
+                gaps.append(gap)
+            print(f'  trial {i:2d}: {ms:6.1f} ms'
+                  + (f'   (frame gap {gap:.2f} ms)' if gap else ''))
         if not out:
             print('[!] nothing measured')
             return 1
         a = np.array(out)
-        print(f'\ncommand -> visible:  mean {a.mean():.1f} ms   median '
-              f'{np.median(a):.1f}   sd {a.std(ddof=1):.1f}   n={len(a)}')
-        print('\nThe frame interval is part of this: the move can land just '
-              'after a\ngrab and wait a whole frame to be seen, so the mean '
-              'carries about half\na frame of quantisation on top of the real '
-              'latency.')
+        T = float(np.median(gaps)) if gaps else float('nan')
+        print()
+        print('command -> first frame SHOWING it (present time):')
+        print(f'   mean {a.mean():.2f} ms   median {np.median(a):.2f}   '
+              f'sd {a.std(ddof=1):.2f}   sem {a.std(ddof=1)/len(a)**0.5:.2f}   '
+              f'n={len(a)}')
+        print(f'   observed frame interval T = {T:.2f} ms '
+              f'({1000.0/T:.0f} fps) from the same frames')
+        print()
+        # ⚠ TWO ESTIMATORS OF THE SAME THING, and they have to agree or the
+        # quantisation model is wrong. The frame showing the move is presented
+        # at the first present-instant after the true latency, so each reading
+        # is L + U(0, T):
+        #
+        #   mean - T/2   uses every trial, and is unbiased IF U really is
+        #                uniform, which it is only when the command instants
+        #                are unsynchronised with the present grid.
+        #   min          converges to L from ABOVE with no distributional
+        #                assumption at all, but slowly, and it is the estimator
+        #                a single early frame can drag down.
+        #
+        # Reporting both is the point. One of them agreeing with the offset
+        # that 25 fired magazines picked out is a coincidence; both agreeing is
+        # a measurement.
+        print(f'   L, mean minus half a frame : {a.mean() - T/2:.2f} ms')
+        print(f'   L, minimum over {len(a)} trials  : {a.min():.2f} ms')
+        print(f'   -> the offset the compensation needs is the NEGATIVE of it')
     finally:
         rig.close()
     return 0
