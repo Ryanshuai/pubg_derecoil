@@ -83,6 +83,17 @@ import config as cfg                                            # noqa: E402
 
 SAMPLE_DIR = os.path.join(ROOT, 'calibration', 'artifacts', 'recoil', 'samples')
 
+# ⚠ 边玩边观测采的梭进这里，**不进 SAMPLE_DIR**。同一个格式，两个根。
+#
+# 不是因为它们更脏，是因为它们**说不清自己是什么**：台上每一格都读回配件、读回
+# 镜位、读回架子，因为闸门是「同一个东西两个独立说法」；打架中途开不了 Tab，所以
+# 实战梭的 weapon / config / posture 只有检测器一个说法（`meta.source ==
+# 'detected'`）。CaptureRun.labelled() 用同一个区分挡掉过一整批坏标签。
+#
+# 格式相同是刻意的：哪天它们够格进主库，那是**移动文件**，不是转换格式。而在那
+# 之前，`load()` 默认读不到它们，所以没有任何现存的拟合会意外吃到。
+PLAY_DIR = os.path.join(ROOT, 'calibration', 'artifacts', 'recoil', 'play')
+
 # Schema version. Bumped when a field changes meaning rather than when one is
 # added -- readers skip unknown fields, so additions are free, but a field whose
 # UNITS change silently reinterprets every stored magazine.
@@ -476,15 +487,22 @@ class Magazine:
 from config import fire_tag                                # noqa: E402,F401
 
 
-def path_for(weapon, config=None, fire_mode=None):
+def path_for(weapon, config=None, fire_mode=None, root=None):
     return os.path.join(
-        SAMPLE_DIR,
+        root or SAMPLE_DIR,
         f'{weapon}__{config_key(config)}{fire_tag(weapon, fire_mode)}.jsonl')
 
 
-def append(mag: Magazine):
-    """One line per magazine, append-only."""
-    p = path_for(mag.weapon, mag.config, mag.fire_mode)
+def append(mag: Magazine, root=None):
+    """One line per magazine, append-only.
+
+    `root` defaults to SAMPLE_DIR. The only other caller is the play store,
+    which passes PLAY_DIR — one writer, one format, two roots. A second copy
+    of this function is what the layering rules exist to prevent: every
+    parallel implementation in this repo drifted from the one it copied, and
+    the symptom was never an error, it was a batch of plausible wrong numbers.
+    """
+    p = path_for(mag.weapon, mag.config, mag.fire_mode, root=root)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     d = asdict(mag)
     # Round the arrays: 3 decimals on a pixel shift is a thousandth of a pixel,

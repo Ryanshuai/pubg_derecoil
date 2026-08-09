@@ -109,6 +109,41 @@ from detector.attachment_detector import AttachmentDetector
 from capture.screen_capture import ScreenCapture
 from capture.key_poller import KeyPoller
 from control.match import Dispatcher
+from control.play_observer import PlayObserver
+from calibration import play_store
+from config import PLAY_OBSERVE
+
+
+def _play_meta(state):
+    """扳机按下那一刻，这把枪是什么 —— **按检测器的说法**。
+
+    ⚠ 每一个字段都只有一个来源。台上每一格都读回配件、读回镜位、读回架子，因为
+    闸门是「同一个东西两个独立说法，对不上就拒绝」；打架中途开不了 Tab，所以这里
+    第二个说法根本不存在。`source='detected'` 由观测器盖上，这个函数不假装它有。
+
+    ⚠ `magazine_size` 留 0 而不是猜一个。它是弹匣的身份（`samples.Magazine` 那段
+    实测：magazine 槽的图标 MSE 591.9 对亚军 874.0，1.48x，读不出来），而实战里
+    没有「换完弹读一次计数器」这个动作。0 的意思是没人问过。
+    """
+    w = state.active
+    from detector.weapon import _sight_of
+    try:
+        sight = _sight_of(w.scope, w.name) or ''
+    except Exception:
+        sight = ''
+    return {
+        'weapon': w.name or '',
+        # RECOIL_SLOTS 的三个槽，且只有这三个。`scope` 不在里面 —— 光学件走
+        # `sight` 改 K，不改曲线（collect_timed.py 的 RECOIL_SLOTS 那段）。
+        # ⚠ Weapon 管枪托叫 `butt`，池化键叫 `stock`。翻译在这一行，只此一处。
+        'config': {k: v for k, v in (('muzzle', w.muzzle), ('grip', w.grip),
+                                     ('stock', w.butt)) if v},
+        'posture': w.posture or state.posture or 'standing',
+        'sight': sight,
+        'sight_asset': w.scope or '',
+        'fire_mode': w.fire_mode or state.fire_mode or None,
+        'magazine_size': 0,
+    }
 
 
 class Robot:
@@ -132,11 +167,49 @@ class Robot:
         self.dispatcher.register('tab_weapon', TabWeaponDetector())
         self.dispatcher.register('tab_attachment', AttachmentDetector())
 
+        # 边玩边观测。⚠ 它只**记**，一行压枪的行为都不改：没有它 robot 播的是
+        # 同一条曲线，有它也一样。这一点是刻意的 —— 一个既观测又影响被观测对象
+        # 的回路，出问题时分不出是哪一半。
+        #
+        # ⚠ 默认关。理由整段在 config.PLAY_OBSERVE，一句话是：实战梭的身份只有
+        # 检测器一个来源，而检测层还读不准 —— 于是每一梭都会诚实地记下自己是别的
+        # 东西。**说出来**，因为一个没在采的观测器和一个采不到东西的观测器，日志
+        # 里长得一模一样。
+        self.play = None
+        if PLAY_OBSERVE:
+            self.play = PlayObserver(
+                self.poller,
+                on_magazine=self._on_play_magazine,
+                meta_fn=lambda: _play_meta(self.state),
+                curve_fn=self.dispatcher.armed_curve)
+        else:
+            print('[play] observing OFF (config.PLAY_OBSERVE) — 实战梭不入库',
+                  flush=True)
+
         # Start threads
         self.capture.start()
         self.poller.start()
         self.dispatcher.start()
+        if self.play is not None:
+            self.play.start()
         print("init done", flush=True)
+
+    def _on_play_magazine(self, result, meta):
+        """一梭进影子库。**不进主库** —— 理由整段在 calibration/play_store.py。"""
+        try:
+            p = play_store.store(result, meta)
+        except Exception as e:
+            print(f'[play] store failed: {e!r}', flush=True)
+            return
+        if p is None:
+            # 没枪名就不写。说出来，否则「采到零梭」和「一梭都没打」在日志里
+            # 长得一模一样 —— 这个仓库为那种沉默付过账。
+            print(f'[play] {meta.get("n_frames")} frames with no weapon name '
+                  f'— not stored', flush=True)
+            return
+        print(f'[play] {meta.get("weapon")} hold={meta.get("hold_s")}s '
+              f'{meta.get("n_frames")} frames -> {os.path.basename(p)}',
+              flush=True)
 
     # How long the dispatcher gets to notice stop() before we disarm anyway.
     # A tick is 10 ms plus whatever one pass of detectors costs, so this is
@@ -160,6 +233,15 @@ class Robot:
         three agents share that port -- the next run would measure a gun
         nobody is holding.
         """
+        # 观测器先停：它持有第二个 grabber，而它读 poller 的左键状态。停在
+        # poller 之后就是在读一个已经不更新的标志。
+        if self.play is not None:
+            self.play.stop()
+            self.play.join(self.JOIN_TIMEOUT_S)
+            self.play.close()
+            print(f'[play] {self.play.n_bursts} bursts recorded, '
+                  f'{self.play.n_short} too short, '
+                  f'{self.play.n_unfocused} dropped to lost focus', flush=True)
         self.poller.stop()
         self.capture.stop()
         self.dispatcher.stop()

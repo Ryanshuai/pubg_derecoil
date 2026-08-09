@@ -75,6 +75,8 @@ spawner-plan = "python tools/test_spawner_plan.py"
 kit = "python tools/test_ensure_kit.py"
 frames = "python tools/test_frames.py"
 runs = "python tools/test_capture_run.py"
+# 边玩边观测那条路，离线。合成帧 + 合成手部计数器，不碰游戏也不碰 Pico。
+play-selftest = "python tools/test_play_observer.py"
 harness = "python tools/test_harness.py"
 night = "python harness/night.py"
 verify-pico = "python tools/verify_pico.py"

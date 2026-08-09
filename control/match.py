@@ -194,6 +194,37 @@ class Dispatcher(DaemonLoop):
 
     _pattern_said = None
 
+    # ── 固件里此刻装的那条曲线，读回来的 ──
+    #
+    # ⚠ 读回，不是上传值。`collect_timed.py:850` 那行原来是 `curve = rig.arm(w)`
+    # 而现在是 `rig.mouse.read_pattern()`，因为两者不是同一个东西：
+    # `upload_pattern` 的折叠把每一个负偏移都塌成 `curve[0]['t_ms'] == 0`。
+    # 没有它，`y_true = y_obs + C(t)` 里的 C 就是一个从没被证实过的假设。
+    #
+    # ⚠ 惰性，而且**故意不在 upload 时读**。upload 每秒会触发多次（Tab 读稳定
+    # 期间每一个配件都触发一次），而 read_pattern 是 40 行的串口往返。这里只翻
+    # 一个脏标志；真正的读发生在观测器空闲的时候，也就是没人在开火的时候。
+    _curve_dirty = True
+    _armed_curve = ()
+
+    def armed_curve(self, refresh=True):
+        """固件里那条曲线。`refresh=False` 只取缓存，不碰串口。
+
+        ⚠ **开火期间必须传 `refresh=False`。** 一次串口往返在观测循环里就是几帧,
+        而那几帧正好是第一发的踢腿 —— 曲线曾因此给自己的第一发写了 -0.6 counts。
+        """
+        if refresh and self._curve_dirty:
+            try:
+                self._armed_curve = tuple(get_mouse().read_pattern() or ())
+                self._curve_dirty = False
+            except Exception as e:
+                # 读不到就说读不到。空的 curve 会让这一梭以 comp_enabled=False
+                # 入库，也就是「没压枪」—— 而它其实压了。那是个安静的错记录。
+                print(f'[armed] could not read the pattern back: {e!r}',
+                      flush=True)
+                self._armed_curve = ()
+        return list(self._armed_curve)
+
     def _said_pattern(self, msg):
         """Print what is armed, once per distinct answer.
 
@@ -217,8 +248,14 @@ class Dispatcher(DaemonLoop):
                     m.set_recoil_enabled(True)
                 elif action == 'upload_pattern':
                     w = self.state.active
+                    # 装进去的东西变了，缓存里那条就描述另一个对象了。翻标志，
+                    # 不读 —— 读发生在观测器空闲时。
+                    self._curve_dirty = True
                     if len(w.dy_s) == 0 or self.state.stop_recoil:
                         m.clear_pattern()
+                        # 清空是确定的，不用再去读一次问它清没清。
+                        self._armed_curve = ()
+                        self._curve_dirty = False
                         self._said_pattern('CLEARED — ' + (
                             'stop_recoil is set (Tab, spawner panel, a menu)'
                             if self.state.stop_recoil else
