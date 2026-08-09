@@ -270,13 +270,32 @@ class TabWatch:
         drawn only when the panel is up AND a gun occupies that slot, and a
         panel with no gun in it has nothing worth reading.
 
-        ⚠ BUT NOT AS A PIXEL COUNT, AND THAT IS ALREADY SETTLED. The play log of
-        2026-08-09 15:24:10 has `ink 11248 / 6424` on a frame whose saved
-        picture is bare sky and a shed -- no panel anywhere -- while a real
-        plate reads in the hundreds. The false positive is BIGGER than the true
-        one, so no threshold on "how much bright stuff is here" can separate
-        them; overexposed sky is white, and white is what the mask counts. It
-        has to be the GLYPH -- the shape of a boxed digit -- not the amount.
+        ⚠ BUT NOT AS A PIXEL COUNT, AND NOT ON BRIGHTNESS EITHER. Both are
+        measured, and the anchor this would replace is the proof.
+
+        `type`, 41x18, over the same 12 paired backgrounds:
+
+            max        open 238..238    shut 178..236    gap TWO counts
+            mean       open 142..156    shut 167..215    gap 11
+            white px   open 220..249    shut   0..738    OVERLAPS
+            sat_min    open 0.000       shut 0.024..0.125   <- the real one
+
+        Brightness is worth nothing here: the header text clips at exactly 238
+        and a bright background reaches 236. What carries the anchor is that a
+        pure white glyph puts a FULLY DESATURATED pixel on screen and the world
+        never does -- 0.000 against a world minimum of 0.024. And note the
+        `white px` row: counting how much white is present OVERLAPS, on the
+        very region the criterion works on. Amount fails, kind succeeds.
+
+        The play log says the same thing about the plates from the other side:
+        15:24:10 recorded `ink 11248 / 6424` on a frame whose saved picture is
+        bare sky and a shed -- no panel at all -- while a real plate reads in
+        the hundreds. The false positive is BIGGER than the true one.
+
+        ⚠ AND OVEREXPOSED SKY IS ALSO SATURATION ZERO, which is the hole in the
+        12-background corpus: it has no sky in it. So even `sat_min` is not
+        enough on its own. It has to be the GLYPH -- the shape of a boxed digit
+        -- and the shape is what neither amount nor kind can stand in for.
 
         Which needs one frame of a panel that is actually drawn, and there is
         not one on disk: the only paired open/shut corpus
