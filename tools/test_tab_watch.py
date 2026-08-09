@@ -25,6 +25,7 @@ The cases that matter are the ones that have gone wrong: a keypress the game
 swallowed, a screen that changes with no keypress at all, and a panel read
 when its tiles are not painted.
 """
+import glob
 import os
 import sys
 import time
@@ -39,7 +40,21 @@ except (AttributeError, OSError):
 import numpy as np
 
 from config import HUD_REGIONS, SCREEN_H, SCREEN_W, TAB_DRIFT_S, TAB_SETTLE_S
-from control.tab_watch import TabWatch
+from control.tab_watch import SHOT_DIR as REAL_SHOT_DIR, TabWatch
+
+# ⚠ NOT control.tab_watch.SHOT_DIR. This suite drives TabWatch with a SYNTHETIC
+# screen -- a zeroed buffer with one stamped pixel -- so every frame it saves is
+# black and describes nothing. Seventeen of them landed in the real directory
+# within minutes of the feature existing, and from the outside they are
+# indistinguishable from a capture of the game: same name, same shape, same
+# folder. The operator opened it, found it full of black frames, and reasonably
+# concluded the capture was broken.
+#
+# A directory whose whole purpose is to answer "what did it actually see"
+# cannot hold anything that was never seen. The frames still get written --
+# here -- because a save path nobody exercises is one that breaks quietly.
+SHOT_DIR = os.path.join(ROOT, 'calibration', 'artifacts', 'robot',
+                        'tab_selftest')
 
 # Where a grab writes (painted, generation). Inside gun_name_1 so the weapon
 # detector, which only ever sees cut crops, can read the same stamp the
@@ -176,7 +191,7 @@ def build():
     w = TabWatch(state, {'tab_type': screen.type_det(),
                          'tab_weapon': screen.weapon_det(),
                          'tab_attachment': screen.att_det()},
-                 verbose=False)
+                 verbose=False, shot_dir=SHOT_DIR)
     w._type_grab = screen.grabber(counts=False)
     w._panel_grab = screen.grabber()
     return w, state, screen
@@ -351,6 +366,22 @@ check('gun 1 is named by the HUD, so its kit publishes',
       state8.attachments.get(1), {'muzzle': 'comp_ar'})
 check('gun 2 is still nameless, so its kit does not',
       2 in state8.attachments, False)
+
+print('\n=== the close leaves its frame on disk, in ITS OWN directory ===')
+# The save is the operator's only way to ask "what did it look like", so a
+# broken save path has to fail HERE rather than during a match. Looking at the
+# directory before and after is also what pins it to a directory that is not
+# the one real play writes to.
+before = set(glob.glob(os.path.join(SHOT_DIR, '*.png')))
+w9, state9, screen9 = build()
+screen9.open = True
+w9._set_open(True)
+screen9.open = False
+run(w9, 0.05, t0=time.perf_counter())
+after = set(glob.glob(os.path.join(SHOT_DIR, '*.png')))
+check('one frame written for one close', len(after - before), 1)
+check('and NOT into the directory real play writes to',
+      os.path.abspath(SHOT_DIR) != os.path.abspath(REAL_SHOT_DIR), True)
 
 print('\n=== idle costs nothing but the drift check ===')
 w6, state6, screen6 = build()

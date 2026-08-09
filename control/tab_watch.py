@@ -107,10 +107,27 @@ class TabWatch:
     'tab_attachment'; missing ones just disable their part.
     """
 
-    def __init__(self, state, detectors, verbose=True):
+    def __init__(self, state, detectors, verbose=True, shot_dir=SHOT_DIR):
+        """shot_dir: where the close's frame is kept. None to keep none.
+
+        ⚠ IT IS A PARAMETER BECAUSE THE OFFLINE GATE WROTE INTO THE EVIDENCE
+        DIRECTORY, and that is a worse failure than it sounds. `pixi run
+        tab-watch` drives this class with a synthetic screen -- a zeroed buffer
+        with one stamped pixel -- so every run of the suite dropped black PNGs
+        into the folder that is supposed to hold what the GAME looked like.
+        Seventeen of them landed there within minutes of the feature existing,
+        and from the outside they are indistinguishable from a real capture:
+        same name, same shape, same directory. The operator opened the folder,
+        found it full of black frames, and reasonably concluded the capture was
+        broken.
+
+        A directory whose whole purpose is to answer "what did it actually
+        see" cannot hold anything that was never seen.
+        """
         self.state = state
         self._detectors = detectors
         self.verbose = verbose
+        self._shot_dir = shot_dir
         self.open = False
         self.loadout = None          # {'weapons':..., 'attachments':..., 'ts':}
         self._type_grab = None
@@ -218,14 +235,44 @@ class TabWatch:
                 # refuses a panel with no tiles anywhere.
                 out['painted'] = bool(att.any_drawn(frame))
                 if out['painted']:
+                    # ⚠ THE EFFECTIVE NAME, NOT THIS FRAME'S READ. The names
+                    # narrow each slot's template bank to what the gun can
+                    # physically hold, and building them from the plate read
+                    # alone means a blank plate narrows to NOTHING -- every
+                    # tile then scored against all 55 templates, which does not
+                    # fail, it answers.
+                    #
+                    # Measured, play log 2026-08-09 15:10:20: GameState knew
+                    # the gun was an m416 (the HUD detector had named it seven
+                    # seconds earlier, off a completely different set of
+                    # pixels), the Tab plate came back blank, and the stock
+                    # slot was published as `Stock_SniperRifle_CheekPad_C` --
+                    # a part the m416 cannot mount. `compatible('m416')` would
+                    # have refused it outright; it was never asked.
                     named = {i + 1: nm
-                             for i, nm in enumerate(out['weapons'] or ()) if nm}
+                             for i, nm in enumerate(self._names(out)) if nm}
                     out['attachments'] = att.classify(frame, named)
         except Exception as e:
             self._log(f'panel read failed: {e}')
             return None
         self._log(_describe(out) + self._save(frame))
         return out
+
+    def _names(self, out):
+        """This frame's plate read, falling back to what GameState knows.
+
+        Two independent sources for one object, which is the shape every guard
+        in this repository ends up taking. The plate read is this frame's own
+        evidence; weapon_hud's reading comes off the bottom-right HUD, a
+        different set of pixels through a different bank, and it survives a
+        plate that has faded. Either alone answers less than both.
+        """
+        mine = out.get('weapons') or ('', '')
+        try:
+            known = self.state.weapon_name
+        except AttributeError:
+            known = ('', '')
+        return tuple(m or k for m, k in zip(mine, known))
 
     def _save(self, frame):
         """Write the frame this reading came from. -> ' shot <path>' or ''.
@@ -239,12 +286,14 @@ class TabWatch:
         Failure is one line and never fatal: a log that cannot save a picture
         is still a log, and this runs on the tick that re-arms the firmware.
         """
+        if not self._shot_dir:
+            return ''
         try:
             import cv2
-            os.makedirs(SHOT_DIR, exist_ok=True)
+            os.makedirs(self._shot_dir, exist_ok=True)
             y, x, h, w = _BLOCK()
             stamp = datetime.datetime.now().strftime('%m%d_%H%M%S_%f')[:-3]
-            path = os.path.join(SHOT_DIR, f'{stamp}.png')
+            path = os.path.join(self._shot_dir, f'{stamp}.png')
             if not cv2.imwrite(path, frame[y:y + h, x:x + w]):
                 return '   (frame not saved: imwrite refused)'
             return f'   shot {path}'
