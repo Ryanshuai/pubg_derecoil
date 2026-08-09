@@ -348,17 +348,39 @@ RECOIL_SIGHT_PROFILES = {
     # So both stored numbers were accumulation artefacts and the unbiased one
     # is the single correlation: 1.5413.
     #
-    # ⚠ AND THE BIAS IS IN EVERY STORED MAGAZINE. y_obs_counts() is a cumsum
-    # over ~450 frame pairs, so each trace carries ~450 doses of it. How much
-    # depends on whether the bias is a fixed 0.04 px per pair or a fraction of
-    # each pair's displacement, and one probe cannot tell those apart -- that
-    # is the next measurement, not a conclusion.
+    # ⚠ THAT LAST PARAGRAPH IS TRUE ONLY AT delta ~ 0.6 px, WHICH IS WHERE THAT
+    # PROBE'S SPREAD ARM HAPPENED TO SIT. --grid re-ran it as a (step size x
+    # spread) sweep, twice, and the per-pair over-read is a CURVE that CHANGES
+    # SIGN (MODEL.md sec.2.1):
     #
-    # ⚠ ONE RUN, ONE DISPLACEMENT MAGNITUDE. Tonight a 4.7 sigma interleaved
-    # result (eta) was overturned by a replication, so: this wants firing again
-    # at a different step size before it is leaned on. It is installed anyway
-    # because unlike eta the MECHANISM is identified and the effect is 24.4
-    # sigma, not because the number is pretty.
+    #     delta px      0     0.6     1.1    2.0-2.2    3.8-4.4     7-8
+    #     b px/pair  +0.000  +0.047  +0.076   +0.039     -0.098    -0.21
+    #                (still)                 (a burst's median is 2.0)
+    #
+    # Small motion over-reads, large motion under-reads, zero crossing at
+    # delta ~ 3 px -- and a real magazine's pairs (p25 0.90 / median 2.00 /
+    # p75 3.78) straddle it, so the doses largely cancel. Projected pair by
+    # pair over all 272 stored magazines: -0.28% (run A), -0.81% (run B).
+    # NOT +7.5%, not +1.2%, and NEGATIVE. Both candidate models -- fixed px
+    # per pair, fixed fraction of delta -- are rejected at chi2/dof > 390.
+    #
+    # ⚠ THE VALUE STAYS 1.5413 BECAUSE IT DID NOT REPLICATE, NOT BECAUSE IT
+    # DID. The two runs' burst-weighted effective K bracket it:
+    #
+    #     K_eff   run A 1.5416     run B 1.5250     stored 1.5413
+    #     K_true  run A 1.5459     run B 1.5374     (one-pair extrapolation)
+    #
+    # Within a run the four step sizes (20/35/50/70) agree to +-0.1% and the
+    # sem is 0.06%; BETWEEN runs K_true moves 0.55%, nine times that. That is
+    # the same session-to-session step MODEL.md sec.4 measures at 2.7% sd, now
+    # seen in a completely different quantity. Re-setting K from either run
+    # alone would be exactly the mistake eta was.
+    #
+    # ⚠ WHAT DID REPLICATE, AND IS THEREFORE USABLE: a static scene does not
+    # drift (+0.00018 and +0.00001 px per pair), and b depends on delta ALONE
+    # -- two cells sharing a delta at 2x the pair count and 2x the total agree
+    # to 0.2..0.8 sigma across four such comparisons, in a test where K_true
+    # cancels exactly. The SHAPE is established; the LEVEL is not.
     'red_dot': {'K': 1.5413, 'mag': 1, 'keepout': RECOIL_KEEPOUT,
                 'patch_xs': RECOIL_PATCH_XS},
     '2x':      {'K': 1.8254, 'mag': 2, 'keepout': 60,

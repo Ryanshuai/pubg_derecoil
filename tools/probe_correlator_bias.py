@@ -176,7 +176,13 @@ def many_pairs(rig, grabber, sign, counts, spread_s):
 
     if counts:
         threading.Thread(target=inject, daemon=True).start()
-    total, absd = 0.0, []
+    # ⚠ EVERY PAIR IS TIMESTAMPED, because the window runs spread + SETTLE and
+    # the settle tail is PURE STILL FRAMES. Run A charged each cell's excess to
+    # every pair in the window, and at spread 0.10 that is 44 still pairs
+    # against 13 moving ones -- it divided by 4.5x too many, and the per-pair
+    # displacement it reported was the average of a MIXTURE. The cells came back
+    # squeezed into 0.50..2.27 px when they were built to span 0.6..8.5.
+    total, absd, ts = 0.0, [], []
     while time.perf_counter() < t0 + spread_s + SETTLE_S:
         _t, f = grabber.grab_timed()
         if f is None:
@@ -189,13 +195,19 @@ def many_pairs(rig, grabber, sign, counts, spread_s):
         if np.isfinite(m.dy):
             total += m.dy
             absd.append(abs(m.dy))
+            ts.append(time.perf_counter() - t0)
     dur = time.perf_counter() - t0
     if not absd:
         return {'px': float('nan'), 'pairs': 0, 'mean_abs': float('nan'),
                 'max_abs': float('nan'), 'dur': dur}
+    a, t = np.asarray(absd), np.asarray(ts)
+    mv = t <= spread_s + 1.0 / 60.0     # one frame of grace for the last step
     return {'px': abs(total) if counts else total, 'signed': total,
-            'pairs': len(absd), 'mean_abs': float(np.mean(absd)),
-            'max_abs': float(np.max(absd)), 'sum_abs': float(np.sum(absd)),
+            'pairs': len(absd), 'mean_abs': float(a.mean()),
+            'max_abs': float(a.max()), 'sum_abs': float(a.sum()),
+            'moving': int(mv.sum()),
+            'delta_moving': float(a[mv].mean()) if mv.any() else float('nan'),
+            'tail_abs': float(a[~mv].sum()),
             'dur': dur}
 
 
@@ -270,9 +282,22 @@ def main():
     ap.add_argument('--replicate', default='',
                     help='an earlier --save file. Reports each run separately '
                          'and then whether they agree')
+    ap.add_argument('--reanalyse', default='',
+                    help='re-report a --save file. No game, no hardware — the '
+                         'analysis changed after run A and its rows have to be '
+                         'readable under the new one')
     a = ap.parse_args()
     if a.selftest:
         return selftest()
+    if a.reanalyse:
+        import json
+        with open(a.reanalyse, encoding='utf-8') as fh:
+            rows = json.load(fh)
+        print(f'reanalysing {len(rows)} rows from {a.reanalyse}')
+        rc = report(rows)
+        if a.replicate:
+            rc = replicate(a.replicate, rows) or rc
+        return rc
     cells = GRID_CELLS if a.grid else PAIR_CELLS
 
     if not ensure_ready(label='the correlator-bias probe',
@@ -372,22 +397,33 @@ def replicate(path, rows_b):
             report(rr)
         out[tag] = buf.getvalue()
 
-    def pick(text, needle, idx):
-        for l in text.splitlines():
-            if needle in l:
-                try:
-                    return float(l.split(needle)[1].split()[idx].strip('%+'))
-                except (IndexError, ValueError):
-                    return float('nan')
-        return float('nan')
+    # ⚠ ANCHORED REGEXES, NOT "split on a substring". The first version keyed
+    # `store bias %` on 'of every trajectory', which sits at the END of its
+    # line, so split(needle)[1] was empty and the whole column printed nan --
+    # in the one table whose entire job is to say whether two runs agree. A
+    # comparison that silently reports nan is worse than no comparison.
+    import re
+    pats = (
+        ('K_true', r'K_true = ([-\d.]+)', ''),
+        ('b (one-pair slope, px)', r'\bb = ([-+\d.]+) \+-', ''),
+        ('K_eff (real burst)', r'K_eff for a real burst = ([-\d.]+)', ''),
+        ('store bias %', r'= ([-+\d.]+)% of every trajectory', '%'),
+    )
+
+    def pick(text, pat):
+        m = re.search(pat, text)
+        return float(m.group(1)) if m else float('nan')
 
     print(f'{"quantity":>28}  {"run A":>10}  {"run B":>10}  {"delta":>10}')
-    for name, needle, idx, unit in (
-            ('K_true', 'K_true =', 0, ''),
-            ('b (one-pair slope, px)', 'b =', 0, ''),
-            ('store bias %', 'of every trajectory', -1, '%')):
-        va, vb = pick(out['A'], needle, idx), pick(out['B'], needle, idx)
+    bad = []
+    for name, pat, unit in pats:
+        va, vb = pick(out['A'], pat), pick(out['B'], pat)
+        if not (np.isfinite(va) and np.isfinite(vb)):
+            bad.append(name)
         print(f'{name:>28}  {va:10.4f}  {vb:10.4f}  {vb-va:+10.4f}{unit}')
+    if bad:
+        print(f'  [!] could not read {", ".join(bad)} out of both reports — '
+              f'that is a broken comparison, not an agreement')
     print()
     print('  ⚠ AGREEMENT IS THE VERDICT, not either run on its own. A quantity '
           'that moves between two runs of the same probe is a property of the '
@@ -398,20 +434,50 @@ def replicate(path, rows_b):
 
 
 def report(rows):
+    """⚠ EVERY PER-PAIR NUMBER HERE IS OVER THE MOVING PAIRS ONLY.
+
+    The measurement window is spread + SETTLE_S and the settle tail is still
+    frames. Run A's analysis divided each cell's excess by EVERY pair in the
+    window and averaged |dy| the same way, which at spread 0.10 means 44 still
+    pairs diluting 13 moving ones. It squeezed cells built to span 0.6..8.5 px
+    into 0.50..2.27 and reported the store as 0.86% LOW, when the moving-pair
+    accounting on the same rows says the opposite.
+
+    Rows without per-pair timing (anything saved before that was recorded) fall
+    back to the nominal moving fraction and are flagged INFERRED, because a
+    number derived from the schedule is not the same evidence as a number read
+    off the frames.
+    """
     print()
     keys = sorted({(r['counts'], r['spread']) for r in rows})
-    print(f'{"cell":>13}  {"n":>3}  {"pairs":>5}  {"delta_px":>9}  '
-          f'{"total_px":>9}  {"K":>8}')
+    inferred = False
+    print(f'{"cell":>13}  {"n":>3}  {"pairs":>5}  {"moving":>6}  '
+          f'{"delta_px":>9}  {"total_px":>9}  {"K":>8}')
     cell = {}
     for counts, spread in keys:
         sel = [r for r in rows if r['counts'] == counts and r['spread'] == spread]
         px = np.array([r['px'] for r in sel])
+        if 'moving' in sel[0]:
+            mv = np.array([r['moving'] for r in sel], float)
+            delta = np.array([r['delta_moving'] for r in sel])
+            tail = float(np.mean([r.get('tail_abs', 0.0) for r in sel]))
+        elif spread > 0:
+            # nominal fraction of the window that carried motion
+            inferred = True
+            frac = spread / (spread + SETTLE_S)
+            mv = np.array([r['pairs'] for r in sel], float) * frac
+            delta = np.array([abs(r['px']) for r in sel]) / np.maximum(mv, 1)
+            tail = float('nan')
+        else:
+            mv = np.ones(len(px))
+            delta = np.array([r['mean_abs'] for r in sel])
+            tail = 0.0
         pairs = np.array([r['pairs'] for r in sel], float)
-        delta = np.array([r['mean_abs'] for r in sel])
         sd = px.std(ddof=1) if len(px) > 1 else float('nan')
         k = px / counts if counts else None
         cell[(counts, spread)] = {
-            'n': len(px), 'pairs': pairs.mean(), 'delta': delta.mean(),
+            'n': len(px), 'pairs': pairs.mean(), 'moving': mv.mean(),
+            'delta': float(np.mean(delta)), 'tail': tail,
             'px': px.mean(), 'px_sem': sd / max(len(px), 1) ** 0.5,
             'K': float(k.mean()) if k is not None else float('nan'),
             'K_sem': float(k.std(ddof=1) / len(k) ** 0.5)
@@ -420,7 +486,11 @@ def report(rows):
         c = cell[(counts, spread)]
         kt = '      --' if not counts else f'{c["K"]:.4f}'
         print(f'{counts:6d}c/{spread:.2f}s  {c["n"]:3d}  {c["pairs"]:5.0f}  '
-              f'{c["delta"]:9.3f}  {c["px"]:9.2f}  {kt}')
+              f'{c["moving"]:6.0f}  {c["delta"]:9.3f}  {c["px"]:9.2f}  {kt}')
+    if inferred:
+        print('  ⚠ INFERRED moving-pair counts: these rows carry no per-pair '
+              'timing, so the split came from the nominal schedule, not the '
+              'frames. One inference hop, and it is stated rather than hidden.')
 
     still = [r for r in rows if r['counts'] == 0]
     still_b = still_se = float('nan')
@@ -485,11 +555,11 @@ def report(rows):
         if not counts:
             continue
         v = cell[c]
-        b = (v['px'] - counts * k_true) / v['pairs']
-        se = ((v['px_sem'] ** 2 + (counts * se_k) ** 2) ** 0.5) / v['pairs']
-        bs.append((v['delta'], b, se, counts, spread, v['pairs']))
+        b = (v['px'] - counts * k_true) / v['moving']
+        se = ((v['px_sem'] ** 2 + (counts * se_k) ** 2) ** 0.5) / v['moving']
+        bs.append((v['delta'], b, se, counts, spread, v['moving']))
         print(f'{counts:6d}c/{spread:.2f}s  {v["delta"]:9.3f}  '
-              f'{v["pairs"]:6.0f}  {b:+9.4f} +-{se:.4f}  '
+              f'{v["moving"]:6.0f}  {b:+9.4f} +-{se:.4f}  '
               f'{100*b/v["delta"]:7.2f}%')
 
     print()
@@ -502,15 +572,15 @@ def report(rows):
         if lo not in cell or hi not in cell:
             continue
         a_, b_ = cell[lo], cell[hi]
-        ba = (a_['px'] - lo[0] * k_true) / a_['pairs']
-        bb = (b_['px'] - hi[0] * k_true) / b_['pairs']
-        leak = abs(lo[0] / a_['pairs'] - hi[0] / b_['pairs']) * se_k
-        se_d = (( a_['px_sem'] / a_['pairs']) ** 2
-                + (b_['px_sem'] / b_['pairs']) ** 2 + leak ** 2) ** 0.5
+        ba = (a_['px'] - lo[0] * k_true) / a_['moving']
+        bb = (b_['px'] - hi[0] * k_true) / b_['moving']
+        leak = abs(lo[0] / a_['moving'] - hi[0] / b_['moving']) * se_k
+        se_d = ((a_['px_sem'] / a_['moving']) ** 2
+                + (b_['px_sem'] / b_['moving']) ** 2 + leak ** 2) ** 0.5
         sig = abs(ba - bb) / se_d if se_d > 0 else float('inf')
         print(f'  delta {a_["delta"]:5.2f} vs {b_["delta"]:5.2f} px   '
-              f'b {ba:+.4f} ({a_["pairs"]:.0f} pairs) vs '
-              f'{bb:+.4f} ({b_["pairs"]:.0f} pairs)   '
+              f'b {ba:+.4f} ({a_["moving"]:.0f} moving) vs '
+              f'{bb:+.4f} ({b_["moving"]:.0f} moving)   '
               f'{sig:.1f} sigma  {"AGREE" if sig < 3 else "DISAGREE"}')
 
     # ⚠ THE POWER-LAW FIT IS NOT THE VERDICT AND WAS WRONG ON A DRY RUN. Fed
@@ -577,17 +647,23 @@ def report(rows):
 
 def _synth(model, param, trials=10, k=1.5400, seed=0):
     """Rows built from a KNOWN b(delta), to see whether report() reads it back."""
+    # ⚠ THE SYNTHETIC WINDOW CARRIES THE SETTLE TAIL TOO, so the judge is tested
+    # on the same moving/still split the real cells have. Without it the
+    # selftest would pass on rows that never exercise the bug run A hit.
     rng = np.random.default_rng(seed)
     rows = []
     for r in range(trials):
         for counts, spread in GRID_CELLS:
-            n = 1 if spread == 0 else max(1, int(130 * spread))
-            delta = counts * k / n if counts else 0.0
+            n = 1 if spread == 0 else max(1, int(130 * (spread + SETTLE_S)))
+            mv = 1 if spread == 0 else max(1, int(130 * spread))
+            delta = counts * k / mv if counts else 0.0
             b = model(delta, param)
-            px = counts * k + n * b
+            px = counts * k + mv * b
             px += rng.normal(0, (0.10 ** 2 * n + (0.3 if n == 1 else 0) ** 2) ** 0.5)
-            rows.append(dict(px=abs(px), signed=px, pairs=n,
-                             mean_abs=delta if counts else 0.02,
+            rows.append(dict(px=abs(px), signed=px, pairs=n, moving=mv,
+                             delta_moving=delta if counts else 0.02,
+                             tail_abs=0.0,
+                             mean_abs=delta * mv / n if counts else 0.02,
                              max_abs=delta if counts else 0.05,
                              counts=counts, spread=spread, sign=1, trial=r))
     return rows
