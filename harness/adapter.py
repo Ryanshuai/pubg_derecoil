@@ -837,6 +837,26 @@ def reset(rigging, level=LIGHT):
         got, _ = rigging.session.ensure(force=True)
         if not got:
             return False
+        # ⚠ AND THE FIVE LEGS AFTER IT. `session.ensure` gets the character back
+        # into the range; it does not answer "is the game driveable right now",
+        # and that is the question a failed cell actually poses. Measured
+        # 2026-08-09: the character was evicted mid-night, the screen was the
+        # LOBBY with a daily-mission modal over it, and every remaining cell
+        # reported `inventory would not open for kitting: focused=True,
+        # tab_open=False` -- Tab and comma do nothing in the lobby. reset
+        # returned False, the loop called that systemic, and four cells died one
+        # attempt each before the halt.
+        #
+        # ensure_ready is the door that asks all five (process, focus, in a
+        # match on the lane, Tab shut, panel shut) and it is what open_rig runs
+        # ONCE at the start. Running it again here is the difference between a
+        # night that recovers from an eviction and one that spends four cells
+        # discovering it cannot.
+        from control.session import ensure_ready
+        rec = ensure_ready(label='a failed cell', countdown_s=0, verbose=True)
+        if not rec['ok']:
+            print(f"   [!] still not driveable after re-entry: {rec}")
+            return False
         # The measurable band is a property of where the character stands and
         # what they face, and re-entry moves both. Dropped rather than carried
         # over: a stale band puts the aim somewhere the tracker cannot see.

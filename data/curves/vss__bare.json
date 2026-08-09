@@ -1,0 +1,542 @@
+{
+ "weapon": "vss",
+ "sight": "vss_pso1",
+ "posture": "standing",
+ "config": {},
+ "shots": [
+  {
+   "delay_ms": 0,
+   "dx": 0.0,
+   "dy": 3.164
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 3.164
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 3.164
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 3.616
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 3.616
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 4.068
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 4.068
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 4.52
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 4.972
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 4.972
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 5.424
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 6.328
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 6.78
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.452,
+   "dy": 6.78
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 6.78
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.232
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.684
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.684
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.684
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.684
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.684
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.684
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.684
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.684
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.684
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.684
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.684
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.684
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.684
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.684
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.684
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.684
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.684
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.684
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 7.684
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.136
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  },
+  {
+   "delay_ms": 17,
+   "dx": 0.0,
+   "dy": 8.588
+  }
+ ],
+ "padded_knots": 0,
+ "kit_factor": 1.0,
+ "seed": true,
+ "borrowed_from": "mp5k",
+ "source": "SEED BORROWED FROM MP5K — this weapon has NO pattern of its own in the source script, so the shape belongs to that gun and only the SPAN was fitted to this one. It exists to keep the view on screen, not to describe this weapon. SEED, NOT A FIT — https://github.com/Kava4/PUBG-LOGITECH-NO-RECOIL (branch main, PUBG-Logitech-No-Recoil.lua), x0.452 counts/unit. Community guesses, close enough to keep the view on screen while this gun is measured. The first `collect-timed` + `fit_time_curve` for this configuration OVERWRITES this file, which is the intent.",
+ "grid_ms": 17,
+ "total_counts": 780.6039999999999,
+ "span_s": 1.768,
+ "scaled_by": "NOTHING further. These are final mouse counts; set_seq emits them with no factors."
+}

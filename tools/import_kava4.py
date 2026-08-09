@@ -274,7 +274,7 @@ def _magazine_span_s(weapon, rounds):
 
 
 def write_seeds(names, pats, posture, sight, config=None, span_s=None,
-                rounds=40):
+                rounds=40, borrow=None):
     """Write seed curves for `names`. -> exit code.
 
     `config` is a dict like {'muzzle': 'comp_ar', 'grip': 'vert_grip'}; the
@@ -293,9 +293,25 @@ def write_seeds(names, pats, posture, sight, config=None, span_s=None,
     os.makedirs(cfg.CURVES_DIR, exist_ok=True)
     rc = 0
     for ours in names:
-        lua = rev.get(ours)
+        # ⚠ BORROWING ANOTHER GUN'S PATTERN IS LEGITIMATE AND MUST BE SAID.
+        # The mk14 and the vss have no Kava4 pattern at all -- the community
+        # scripts cover ARs and SMGs -- and a gun with no curve fires with NO
+        # compensation, which for these is not "inaccurate" but unmeasurable:
+        # the view reaches open sky, and phase correlation there returns 0
+        # CONFIDENTLY.
+        #
+        # The seed doctrine already licenses this: C is read back off the
+        # device, so y_true = y_obs + C is exact whatever C was, and a borrowed
+        # baseline moves counts between the two terms and nowhere else. What it
+        # must NOT do is look like a measurement of this weapon, so the source
+        # line names the gun it came from and `borrowed_from` is a field.
+        #
+        # Asked for 2026-08-09:「mk14 / vss 用冲锋枪 mp5k 先顶一下 最初曲线」.
+        src_name = (borrow or ours)
+        lua = rev.get(src_name)
         if lua is None or lua not in pats:
-            print(f'  ✗ {ours}: no Kava4 pattern ({lua or "no name mapping"})')
+            print(f'  ✗ {ours}: no Kava4 pattern '
+                  f'({lua or "no name mapping"} for {src_name})')
             rc = 1
             continue
         # ⚠ THE STORE OUTRANKS THE SEED, not just the file. A seed exists to
@@ -367,7 +383,14 @@ def write_seeds(names, pats, posture, sight, config=None, span_s=None,
             # indistinguishable from the outside otherwise -- root CLAUDE.md's
             # second law, 记录描述的对象必须是被测量的那个对象.
             'seed': True,
-            'source': f'SEED, NOT A FIT — {UPSTREAM}, x{UNIT_COUNTS} '
+            'borrowed_from': (borrow if borrow and borrow != ours else None),
+            'source': (f'SEED BORROWED FROM {borrow.upper()} — this weapon has '
+                       f'NO pattern of its own in the source script, so the '
+                       f'shape belongs to that gun and only the SPAN was '
+                       f'fitted to this one. It exists to keep the view on '
+                       f'screen, not to describe this weapon. '
+                       if borrow and borrow != ours else '')
+                      + f'SEED, NOT A FIT — {UPSTREAM}, x{UNIT_COUNTS} '
                       f'counts/unit. Community guesses, close enough to keep '
                       f'the view on screen while this gun is measured. The '
                       f'first `collect-timed` + `fit_time_curve` for this '

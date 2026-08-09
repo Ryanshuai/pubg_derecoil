@@ -334,7 +334,22 @@ def run(manifest, rigging, mags, out_dir):
                 break
             print(f"   attempt {attempt}: {ver['why']} — {ver['detail']}")
             if attempt < ATTEMPTS:
-                level = adapter.LIGHT if attempt == 1 else adapter.HEAVY
+                # ⚠ BY WHAT FAILED, NOT BY HOW MANY TIMES. This read
+                # `LIGHT if attempt == 1 else HEAVY`, and with ATTEMPTS = 2 the
+                # branch is only reachable when attempt IS 1 -- so HEAVY was
+                # dead code, and HEAVY is the ONLY path that re-enters the
+                # range. Nothing could recover from an eviction, which is
+                # exactly what happened on 2026-08-09: the character ended up in
+                # the lobby, Tab and comma do nothing there, and four cells died
+                # one attempt each while the only remedy sat unreachable.
+                #
+                # `state` means the cell never reached its configuration -- the
+                # gun, the kit, the range -- which is precisely what a full
+                # re-entry fixes. `agree`, `mags` and `tracking` are about the
+                # MEASUREMENT, and re-entering the range buys them nothing but
+                # five minutes.
+                level = (adapter.HEAVY if ver['why'] == 'state'
+                         else adapter.LIGHT)
                 if not adapter.reset(rigging, level=level):
                     print('   [!] reset failed — treating as systemic')
                     break
