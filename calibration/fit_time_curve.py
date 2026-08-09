@@ -537,6 +537,14 @@ def _synth(n_frames=300, span=3.4, total=3300.0, K=1.5474, scale=1.0,
     chased, because the point of a synthetic magazine is that the fit recovers
     `total` at WHATEVER K generated it. Pinning it to config would make the
     gate agree with the constant instead of testing the fit.
+
+    ⚠ WHICH IS WHY THE SIGHT IS `synth` AND NOT `red_dot` (2026-08-09).
+    samples.analysis_k now resolves a magazine's K from its SIGHT — the live
+    estimate, because K describes the game and not the burst — and a synthetic
+    magazine labelled `red_dot` would have been silently restated to config's
+    red dot value, which is the one thing the paragraph above forbids. `synth`
+    has no profile, so analysis_k falls back to the stored K. The label is also
+    just true: nothing fired this through a red dot.
     """
     rng = np.random.default_rng(seed)
     t = np.linspace(0.0, span, n_frames)
@@ -547,7 +555,7 @@ def _synth(n_frames=300, span=3.4, total=3300.0, K=1.5474, scale=1.0,
     y_obs = y_true - comp
     d_counts = np.diff(y_obs) + rng.normal(0, noise, n_frames - 1)
     return S.Magazine(
-        weapon='synth', sight='red_dot', K=K, curve=curve or [],
+        weapon='synth', sight='synth', K=K, curve=curve or [],
         comp_enabled=bool(curve), t=list(t),
         dy_px=list(d_counts * K), human_dy=[0.0] * (n_frames - 1),
         # ⚠ hold_s MATTERS HERE, and leaving it 0 silently disabled a gate.

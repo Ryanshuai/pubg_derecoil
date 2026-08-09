@@ -472,7 +472,42 @@ RECOIL_SIGHT_PROFILES = {
     # obvious guess and is exactly the kind this weapon has already killed
     # three of. Worth checking the same axis against the magazines lost to
     # fire-rate disagreement — vector is second worst on both.
-    'vss_pso1': {'K': 1.875, 'mag': 4, 'keepout': 200,
+    # ⚠ 1.875 -> 1.8283 (2026-08-09). THE OLD NUMBER WAS NEVER MEASURED: it
+    # sat 0.8% off RECOIL_K_DEFAULT_SCOPED, which is what an unmeasured sight
+    # falls back to, and nothing in the tree records a run that produced it.
+    #
+    # Measured the same way as p90_integral — a RATIO against the red dot in
+    # the same calibrate_k flavour, because calibrate_k accumulates the
+    # correlator's per-pair bias while red_dot's stored 1.5413 comes from the
+    # one-pair probe. See the p90 block above for why a level is not
+    # comparable and a ratio is.
+    #
+    #     counts   K vss   K red_dot   ratio    sem
+    #         50  1.8948      1.5927  1.1897  0.47%
+    #        100  1.8840      1.5929  1.1827  0.42%
+    #        200  1.8686      1.5789  1.1835  0.58%
+    #        300  1.8595      1.5548  1.1960  0.72%
+    #
+    #     1.5413 x 1.1862 = 1.8283
+    #
+    # ⚠ ALL FOUR AMOUNTS AGREE HERE (1.1827..1.1960) where the p90's 300 row
+    # broke away, so the 50/100 restriction costs nothing on this sight and is
+    # kept only so the two constants are derived the same way.
+    #
+    # ⚠ THE TWO SIDES USED DIFFERENT PATCH GEOMETRY and it cannot be helped:
+    # this profile has 3 columns because four of the default seven land on the
+    # PSO-1's tube, where they are fixed to the screen and read a clean zero.
+    # The vss side was the cleaner of the two — per-patch spread 0.50%, "no
+    # positional bias", against a red_dot run with one patch at std 0.25.
+    #
+    # ⚠ AND IT DOES NOT RESCUE THE VSS CELL. Re-analysing the 15 stored
+    # magazines at the new K moves the arm disagreement 19.7% -> 18.9%: K
+    # biases only the weak arms, where y_obs is most of the answer, and 2.6%
+    # of that is worth ~15 counts. The cell fails for a different reason (two
+    # of its four arms hold one and two magazines).
+    #
+    # One run per side. Not replicated.
+    'vss_pso1': {'K': 1.8283, 'mag': 4, 'keepout': 200,
                  'patch_xs': (1265, 1330, 2010)},
     # The p90's optic is part of the gun -- no scope slot, so nothing on screen
     # names it and detector.weapon.INTEGRAL_SIGHT does (2026-08-09). Before that

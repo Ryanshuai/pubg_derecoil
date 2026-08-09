@@ -315,6 +315,25 @@ def main():
         print(f'injection durations rotated per trial: {inject_sweep} s')
     xs = ([int(x) for x in args.patch_xs.split(',') if x.strip()]
           if args.patch_xs else None)
+    # ⚠ THE SIGHT ALREADY KNOWS WHERE ITS PATCHES GO, and this file used to
+    # ignore that. RECOIL_SIGHT_PROFILES carries patch_xs for exactly the
+    # reason --patch-xs exists: on a magnified scope four of the seven default
+    # columns land on the SCOPE BODY, which is fixed to the screen and reads a
+    # clean zero, dragging the median down with it. vss_pso1 has three columns
+    # for that reason and is the only profile with a different patch COUNT.
+    #
+    # Taking them from the profile rather than from a flag the operator has to
+    # remember is the difference between a measurement and a plausible wrong
+    # number: nothing in the output says "four of these patches were on the
+    # tube". An explicit --patch-xs still wins, so a NEW sight with no profile
+    # yet can be measured.
+    if xs is None and args.sight:
+        from config import RECOIL_SIGHT_PROFILES
+        prof = RECOIL_SIGHT_PROFILES.get(args.sight) or {}
+        xs = prof.get('patch_xs')
+        if xs:
+            print(f"patches   : from RECOIL_SIGHT_PROFILES[{args.sight!r}], "
+                  f"not the default set")
     tracker = ViewTracker(patch_xs=xs)
     if xs and len(xs) % 2 == 0:
         print(f"[!] {len(xs)} patches (even) — the median averages the middle "
@@ -611,6 +630,21 @@ def report(rows, raw, args):
                 abs(np.nanmean(pos)) + abs(np.nanmean(neg)))
             print(f"\n  up/down asymmetry      = {asym:.2f}%   "
                   f"(K+ {np.nanmean(pos):.4f} / K- {np.nanmean(neg):.4f})")
+            # ⚠ THIS IS A NOISE READING, NOT A PROPERTY. Operator, 2026-08-09:
+            # the gun SWAYS on its own (the breathing idle), so every trial
+            # carries a little vertical float that does not come from the
+            # injected counts. There is ONE K; up and down are the same number
+            # and the gap here is how much sway leaked into this run.
+            #
+            # The repo's own numbers agree: 0.21% (red dot) and 1.32% (p90)
+            # this same day, against an archive claim of 6.32% that was
+            # withdrawn -- it had n=3 on one arm, all from one run, all needing
+            # un-aliasing first. Read this line as a noise estimate: small is
+            # a clean run, large means re-run, and NEITHER means model two Ks.
+            if asym > 3.0:
+                print(f"    [!] {asym:.2f}% is a lot of sway for one run — "
+                      f"this is noise, not a direction. Re-run rather than "
+                      f"splitting K in two.")
 
         print("\n  VERDICT")
         ok = True

@@ -290,6 +290,22 @@ class Magazine:
     # mid-burst; it catches dropping out and STAYING out, which is worth
     # ~3x in K and is what actually happens.
     ads_end: object = None
+    # ⚠ THE WITNESS FOR `sight`, WHICH IS OTHERWISE A FLAG. `sight` above is
+    # what the run ASKED for; this is the raw optic asset `read_sight` took off
+    # the gun in the same breath. collect_timed already refuses when the two
+    # disagree -- but that refusal happened in another process on another day,
+    # and a magazine that cannot be re-checked is a magazine whose sight is an
+    # assertion. Root CLAUDE.md's second law is a program can only check a
+    # thing that exists in TWO places; before this it existed in one.
+    #
+    # Deliberately NOT in RECOIL_SLOTS and NOT in config_key: the key has to be
+    # stable and the magazine slot destabilised it once already. `sight` is
+    # already how pools are separated (calibration/calibrate_scope.py splits on
+    # it); this is the evidence for that split, not a second axis.
+    #
+    # '' means "not recorded", which is every magazine before 2026-08-09 and is
+    # why calibrate_scope.audit() reports the count rather than dropping them.
+    sight_asset: str = ''
     # ⚠ THE OTHER HALF OF RECOIL_FIRE_DELAY_MS, and the two must agree or the
     # loop diverges -- see y_true_counts for the L*omega argument.
     #
@@ -354,7 +370,7 @@ class Magazine:
                  else np.zeros_like(dy))
         oor = (np.asarray(self.oor, dtype=bool) if self.oor
                else np.zeros(len(dy), dtype=bool))
-        counts = dy / self.K + human
+        counts = dy / analysis_k(self) + human
         counts = np.where(oor, np.nan, counts)
         return (np.asarray(self.t, dtype=float),
                 np.concatenate([[0.0], np.nancumsum(counts)]))
@@ -486,6 +502,49 @@ def append(mag: Magazine):
     return p
 
 
+def analysis_k(mag):
+    """The K to ANALYSE this magazine at — the LIVE estimate, not the stored one.
+
+    ⚠ `mag.K` IS A RECORD OF THE RUN, NOT A PROPERTY OF THE BURST. What the
+    burst actually produced is `dy_px`, raw screen pixels; K is this
+    repository's estimate of a GAME CONSTANT at the moment of collection, and
+    the game constant did not change when the estimate did.
+
+    Baking the collection-time K into the answer breaks MODEL.md's pooling
+    licence, which is that every magazine under one (weapon, config) estimates
+    the same y_true(t). Counted 2026-08-09, and it is not a corner case:
+
+        red_dot   (live)   576 magazines
+                  1.5474   285          <- superseded estimate
+                  1.5128    31          <- superseded estimate
+        vss_pso1  1.875     15          <- superseded the same day
+
+    (The live value is spelled `(live)` rather than written out: `pixi run
+    params` counts a prose copy of a current config constant as a second author
+    of it, and it is right to -- the superseded ones below are RECORDS of
+    numbers that no longer exist anywhere and so are exempt by the same rule.)
+
+    316 of 907 red_dot magazines — 35% — were being pooled with the other 576
+    as estimates of the same quantity while being scaled by a different
+    constant. On a weak arm y_obs IS the whole answer, so that difference goes
+    straight into y_true and nothing downstream can see it.
+
+    config.py's red_dot block already argued this and stopped one step short:
+    "K is a property of the game that did not change — only the estimate did —
+    so re-analysing the store at [the new value] is legitimate, and it is not
+    done silently here." Right about legitimate; the silence was being bought
+    by never doing it at all. It is done here and announced by load().
+
+    ⚠ FALLS BACK TO THE STORED K when the sight has no live profile. That
+    covers `iron`, any optic measured before its profile exists, and — on
+    purpose — the synthetic magazines in fit_time_curve's gate, whose whole
+    point is that the fit recovers `total` at WHATEVER K generated them.
+    """
+    from config import RECOIL_SIGHT_PROFILES
+    live = (RECOIL_SIGHT_PROFILES.get(mag.sight) or {}).get('K')
+    return live or mag.K
+
+
 def load(weapon, config=None, path=None, fire_mode=None):
     """Every magazine ever stored for this weapon+config. [] when none."""
     p = path or path_for(weapon, config, fire_mode)
@@ -512,8 +571,30 @@ def load(weapon, config=None, path=None, fire_mode=None):
                       flush=True)
             continue
         out.append(m)
+    # ⚠ RESTATED, NOT REWRITTEN, AND NEVER SILENTLY. dy_px on disk is
+    # untouched; only the counts derived from it move. One line per (file,
+    # stored K) because a pool is loaded on every fit.
+    restated = {}
+    for m in out:
+        k_live = analysis_k(m)
+        if m.K and abs(k_live - m.K) > 1e-9:
+            restated[(m.sight, m.K, k_live)] = restated.get(
+                (m.sight, m.K, k_live), 0) + 1
+    for (sight, k_was, k_now), n in sorted(restated.items()):
+        said = _K_SAID.setdefault(p, set())
+        if (sight, k_was, k_now) in said:
+            continue
+        said.add((sight, k_was, k_now))
+        print(f'[samples] {os.path.basename(p)}: {n} magazine(s) collected at '
+              f'{sight} K={k_was} are analysed at {k_now} '
+              f'({100 * (k_now / k_was - 1):+.2f}%) — K estimates the game, '
+              f'and the game did not change when the estimate did. dy_px on '
+              f'disk is untouched.', flush=True)
     return out
 
+
+# Same idea as _SKIPPED_SAID below, for the K restatement.
+_K_SAID = {}
 
 # One line per (file, reason), because a pool is loaded on every fit and the
 # same skip would otherwise print on every one of them.
