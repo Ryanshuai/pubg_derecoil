@@ -598,11 +598,260 @@ def selftest():
     return 0
 
 
+# ── Does the fit depend on WHICH session it was fitted from? ────────────────
+#
+# ⚠ "REPLICATE IT" HAS NO MEANING ON POOLED DATA, and that is why this exists.
+# Every other measurement in MODEL.md gets replicated by firing a second run;
+# a fit eats the WHOLE store at once, and the store spans dozens of sessions.
+# So the replication question here is not "run it again", it is
+#
+#     cut the store by session, fit each slice, do the slices agree?
+#
+# ⚠ AND IT MUST SPLIT BY THE CURVE ARM TOO, WHICH THE FIRST VERSION DID NOT.
+# Grouping by session alone reported 1.54% for mp5k and 3.72% for m416 and
+# called it a session effect. It is not: the store's early sessions fired
+# uncompensated and the middle ones fired compensated, so "session" and "which
+# curve was playing" were partly the same axis. MODEL.md sec.4's own nine-run
+# table has the same flaw -- its first three runs are a pure comp-OFF arm
+# (mean 821.1) and its middle four a pure compensated arm (865.4), 5.1% apart,
+# and the whole spread was read as time.
+#
+# Split BOTH ways and it comes apart (MODEL.md sec.4.2):
+#
+#     compensated arm, between sessions   1.28% observed vs 1.09% sampling
+#     comp-OFF arm,    between sessions   2.53% observed vs 1.23% sampling
+#
+# The compensated arm IS sampling noise -- so y_true has no session term, the
+# gun is the gun. The excess sits only on the arm whose answer is 100%
+# measurement (|y_obs| 830 counts against 36), which is where a MULTIPLICATIVE
+# error lands and an additive one could not. That multiplier is K, drifting
+# 1-2% per session.
+#
+# ⚠ "IT DEPENDS ON THE SESSION" IS NOT A MODEL, IT IS A LABEL FOR IGNORANCE. If
+# y_true really were per-session there would be nothing to fit and nothing to
+# play back tomorrow. Raised from the chair in exactly those terms, and the
+# data agreed.
+#
+# ⚠ NO NUMBER HERE MEANS ANYTHING WITHOUT A BASELINE. A group holds 3..45
+# magazines, so "two groups differ by 2%" is not a finding until sampling alone
+# is shown to predict less. The baseline is computed from the WITHIN-group
+# per-magazine CV, and for the shape comparison each group is also split
+# alternately in two and fitted twice. This is sec.3's interleave-vs-replicate
+# rule, pointed at the fitter instead of at the gun.
+SESSION_GAP_MIN = 5.0            # same cut as MODEL.md sec.4's nine runs
+SESSION_MIN_MAGS = 4             # below this a "session fit" is one magazine
+SESSION_T_REF = 2.40             # where y_true is read, as in MODEL.md sec.4
+ARM_ROUND = -2                   # curve totals binned to 100 counts
+
+
+def _arm(m):
+    """Which compensation arm this magazine was fired on, in counts."""
+    return int(round(sum(k['dy'] for k in (m.curve or [])), ARM_ROUND))
+
+
+def _y_at(m, t_ref=SESSION_T_REF):
+    t, y = m.y_true_counts()
+    if len(t) < 3 or t[-1] < t_ref:
+        return None
+    return float(np.interp(t_ref, t, y))
+
+
+def _ts_minutes(ts):
+    """'0808_143749' -> minutes. Returns None if it is not that shape."""
+    try:
+        d, hms = ts.split('_')
+        h, m, s = int(hms[:2]), int(hms[2:4]), int(hms[4:6])
+        return int(d[:2]) * 1440 + int(d[2:]) * 1440 + h * 60 + m + s / 60.0
+    except (ValueError, IndexError, AttributeError):
+        return None
+
+
+def _sessions(mags, gap_min=SESSION_GAP_MIN):
+    """Split the store's append order wherever the clock jumps by `gap_min`."""
+    out, cur, prev = [], [], None
+    for m in mags:
+        t = _ts_minutes(getattr(m, 'ts', ''))
+        if t is None:
+            continue
+        if prev is not None and t - prev > gap_min:
+            out.append(cur)
+            cur = []
+        cur.append(m)
+        prev = t
+    if cur:
+        out.append(cur)
+    return out
+
+
+def _curve(r):
+    """A fit result -> (t seconds, cumulative counts)."""
+    t = np.array([k['t_ms'] for k in r['knots']], float) / 1000.0
+    return t, np.cumsum([k['dy'] for k in r['knots']])
+
+
+def _compare(curves, grid):
+    """-> (level per curve, shape matrix on `grid`). Shape is normalised by
+    each curve's OWN level, so a pure scale difference vanishes from it."""
+    lev, shp = [], []
+    for t, y in curves:
+        yi = np.interp(grid, t, y)
+        lev.append(yi[-1])
+        shp.append(yi / yi[-1] if yi[-1] else yi * np.nan)
+    return np.array(lev), np.array(shp)
+
+
+def by_session(mags, gap_min=SESSION_GAP_MIN, min_mags=SESSION_MIN_MAGS,
+               t_ref=SESSION_T_REF):
+    """Two-way: (session x curve arm). See the block comment above for why the
+    arm axis is not optional."""
+    cells = {}
+    for s in _sessions(mags, gap_min):
+        ts = getattr(s[0], 'ts', '?')
+        for m in s:
+            y = _y_at(m, t_ref)
+            if y is not None:
+                cells.setdefault((ts, _arm(m)), []).append((y, m))
+    if not cells:
+        print(f'[!] no magazine reaches t = {t_ref:.2f} s')
+        return 2
+
+    sessions = sorted({t for t, _ in cells})
+    arms = sorted({a for _, a in cells})
+    print(f'  y_true at t = {t_ref:.2f} s, sessions x curve arm '
+          f'(cell = mean over n magazines)')
+    print(f'{"session":>13} ' + ' '.join(f'{a:>10}' for a in arms))
+    for t in sessions:
+        row = f'{t:>13} '
+        for a in arms:
+            v = cells.get((t, a))
+            row += (f'{np.mean([y for y, _ in v]):7.1f}/{len(v):<2d} '
+                    if v else f'{"":>10} ')
+        print(row)
+    print('  (value / how many magazines).  arm = total counts in the curve '
+          'that was playing; 0 means the compensation was off')
+
+    # ── the decisive comparison: between sessions, WITHIN one arm ──
+    print()
+    print(f'{"arm":>22}  {"groups":>6}  {"per-mag CV":>10}  '
+          f'{"sampling":>8}  {"observed":>8}  {"ratio":>6}')
+    verdicts = {}
+    for a in arms:
+        g = [v for (t, aa), v in sorted(cells.items())
+             if aa == a and len(v) >= 3]
+        if len(g) < 3:
+            continue
+        means = np.array([np.mean([y for y, _ in v]) for v in g])
+        ns = np.array([len(v) for v in g], float)
+        wcv = float(np.sqrt(sum((len(v) - 1) * np.var([y for y, _ in v], ddof=1)
+                                for v in g) / (ns - 1).sum()) / means.mean())
+        pred = wcv / np.sqrt(ns.mean())
+        obs = float(means.std(ddof=1) / means.mean())
+        verdicts[a] = (obs, pred, len(g))
+        print(f'{a:22d}  {len(g):6d}  {100*wcv:9.2f}%  {100*pred:7.2f}%  '
+              f'{100*obs:7.2f}%  {obs/pred:5.2f}x')
+    if not verdicts:
+        print('  [!] no arm has 3 groups of >= 3 magazines. NOT A VERDICT — '
+              'this store cannot separate session from arm, and reporting a '
+              'session number from it would be the confound this check exists '
+              'to catch.')
+        return 4
+    print('  sampling = the WITHIN-group per-magazine CV over sqrt(mean n). '
+          'ratio ~1 means the between-session spread IS sampling noise, i.e. '
+          'no session term at all.')
+
+    print()
+    comp = [(a, v) for a, v in verdicts.items() if a]
+    off = verdicts.get(0)
+    if comp:
+        worst = max(r for _, (o, p, _) in comp for r in [o / p])
+        if worst < 1.5:
+            print(f'  ✅ NO SESSION TERM on the compensated arm(s): the '
+                  f'between-session spread is sampling noise (worst ratio '
+                  f'{worst:.2f}x). y_true is a property of the gun, not of '
+                  f'the evening.')
+        else:
+            print(f'  ⚠ the compensated arm still scatters {worst:.2f}x more '
+                  f'than sampling predicts — something session-dependent '
+                  f'survives even where |y_obs| is small.')
+    if off and comp:
+        o, p, n = off
+        excess = (o ** 2 - p ** 2) ** 0.5 if o > p else 0.0
+        base = max(r for _, (oo, pp, _) in comp for r in [oo / pp])
+        print(f'  comp-OFF arm: {100*o:.2f}% observed against {100*p:.2f}% '
+              f'sampling -> {100*excess:.2f}% excess, on {n} groups.')
+        if excess > 0.01 and o / p > 1.5 > base:
+            print('  That excess appears ONLY where the answer is measurement '
+                  '(|y_obs| is the whole of y_true there and near zero on the '
+                  'compensated arm), which is where a MULTIPLICATIVE error '
+                  'lands and an additive one could not. It is K, drifting per '
+                  'session. MODEL.md sec.4.2.')
+            print('  -> collect on the COMPENSATED arm. The closer the curve, '
+                  'the smaller |y_obs|, the less of that drift reaches the '
+                  'answer. It is a nulling measurement.')
+
+    # ── shape, per arm, so pooling's cost is separated from the level's ──
+    _shape_by_session(cells, arms, min_mags)
+    return 0
+
+
+def _shape_by_session(cells, arms, min_mags):
+    """Does the CURVE SHAPE depend on the session, within one arm?"""
+    for a in arms:
+        groups = [(t, [m for _, m in v]) for (t, aa), v in sorted(cells.items())
+                  if aa == a and len(v) >= min_mags]
+        if len(groups) < 2:
+            continue
+        fits = []
+        for t, ms in groups:
+            r = fit(ms, window=0)
+            if r['ok']:
+                fits.append((t, ms, r))
+        if len(fits) < 2:
+            continue
+        span = min(r['span_s'] for _, _, r in fits)
+        grid = np.arange(0.0, span + 1e-9, 0.02)
+        lev, shp = _compare([_curve(r) for _, _, r in fits], grid)
+        obs = float(np.nanmean(np.nanstd(shp, axis=0, ddof=1))
+                    / np.nanmean(np.abs(np.nanmean(shp, axis=0))))
+        # baseline: halve each group and fit twice
+        w = []
+        for t, ms, _ in fits:
+            if len(ms) < 2 * min_mags:
+                continue
+            hs = [fit(ms[0::2], window=0), fit(ms[1::2], window=0)]
+            if not all(h['ok'] for h in hs):
+                continue
+            hg = np.arange(0.0, min(min(h['span_s'] for h in hs), span) + 1e-9,
+                           0.02)
+            _, s2 = _compare([_curve(h) for h in hs], hg)
+            w.append(float(np.sqrt(np.nanmean((s2[1] - s2[0]) ** 2))))
+        print()
+        if not w:
+            print(f'  SHAPE, arm {a}: {len(fits)} sessions, spread '
+                  f'{100*obs:.2f}% — NO BASELINE (no group held '
+                  f'{2*min_mags} magazines), so this number cannot be read.')
+            continue
+        samp = float(np.sqrt(np.mean(np.square(w)))) / 2.0
+        eff = (obs ** 2 - samp ** 2) ** 0.5 if obs > samp else 0.0
+        print(f'  SHAPE, arm {a}: {len(fits)} sessions   observed '
+              f'{100*obs:.2f}%   sampling {100*samp:.2f}%   '
+              f'session effect {100*eff:.2f}%  '
+              f'= {eff*lev.mean():.1f} counts on a {lev.mean():.0f}-count curve')
+
+
 def main():
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, OSError):
+        pass
     ap = argparse.ArgumentParser()
     ap.add_argument('--weapon')
     ap.add_argument('--config', default=None,
                     help='config key as stored, e.g. "bare"')
+    ap.add_argument('--by-session', action='store_true',
+                    help='cut the store by session and ask whether the fitted '
+                         'curve depends on which session it came from')
+    ap.add_argument('--gap-min', type=float, default=SESSION_GAP_MIN)
     ap.add_argument('--selftest', action='store_true')
     a = ap.parse_args()
     if a.selftest:
@@ -614,6 +863,10 @@ def main():
     if not mags:
         print(f'no samples at {p}')
         return 2
+    if a.by_session:
+        print(f'{a.weapon} {a.config or "bare"}: {len(mags)} magazines, '
+              f'cut wherever the clock jumps {a.gap_min:.0f} min')
+        return by_session(mags, gap_min=a.gap_min)
     r = fit(mags)
     if not r['ok']:
         print(r['why'])

@@ -112,3 +112,11 @@ fit-time = "python calibration/fit_time_curve.py --selftest"
 # peak-locking. Its first version read delta^-0.23 off data built dead flat.
 # Reversing the chi2 comparison makes it exit 1 — verified 2026-08-08.
 bias-judge = "python tools/probe_correlator_bias.py --selftest"
+# "Replicate it" has no meaning on pooled data -- a fit eats the whole store at
+# once. This is the shape that rule takes there: cut by (session x curve arm)
+# and ask whether the slices agree, with the baseline computed from the
+# within-group per-magazine CV so "they differ by 2%" has a yardstick. The arm
+# axis is not optional: without it the same check reported 1.54% and called it
+# a session effect, which is the confound MODEL.md sec.4's nine-run table also
+# has. Offline; no game, no Pico.
+session-split = "python calibration/fit_time_curve.py --weapon mp5k --config bare --by-session"
