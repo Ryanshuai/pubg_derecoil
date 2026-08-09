@@ -148,6 +148,10 @@ def boot_excess(obs, singles, bare, n=BOOT):
 
 
 def main():
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, OSError):
+        pass
     cells, quarantined = {}, []
     for label, frag in CUBE:
         p = DIR / f'{WEAPON}__{frag}.jsonl'
@@ -242,6 +246,38 @@ def main():
                   f'sd {ao.std(ddof=1):5.1f}   |   comp ON n={len(an):2d} '
                   f'y_true {an.mean():7.1f} sd {an.std(ddof=1):5.1f}   '
                   f'-> {an.mean()/ao.mean()-1:+.1%}')
+            # ⚠ AND WHETHER THE TWO ARMS EVER SHARED A SESSION, because
+            # without that this line is not an arm comparison at all. On
+            # 2026-08-08 mp5k bare read +4.1% (3.4 sigma) between arms whose
+            # timestamps do not overlap by a single magazine -- OFF at 14:37
+            # and 15:2x, ON from 17:xx onward. config.RECOIL_FIRE_DELAY_MS
+            # records THIRTY COUNTS of between-session drift on the same gun
+            # and the same lane twenty minutes apart, which on 950 is 3.2%:
+            # the size of the whole disagreement.
+            #
+            # The same question asked with the arms INTERLEAVED -- the scale
+            # sweep, 0.90/1.00/1.10 rotated per magazine -- answers 940.6 /
+            # 941.5 / 943.1, flat to 0.3%. Same question, same evening, two
+            # orders of magnitude apart in the answer, and the only difference
+            # is interleaving.
+            #
+            # MODEL.md calls this check the one thing a fit cannot arrange.
+            # That is true of the check; it is not true of a version that
+            # compares two afternoons.
+            t_off = sorted(m['ts'] for m in off if m.get('ts'))
+            t_on = sorted(m['ts'] for m in on if m.get('ts'))
+            if t_off and t_on:
+                overlap = (t_off[0] <= t_on[-1] and t_on[0] <= t_off[-1])
+                if not overlap:
+                    print(f'        ⚠ THE ARMS DO NOT OVERLAP IN TIME '
+                          f'(OFF {t_off[0]}..{t_off[-1]}, '
+                          f'ON {t_on[0]}..{t_on[-1]}). This number cannot '
+                          f'separate an arm difference from session drift, '
+                          f'which runs ~3% on this gun. NOT A VERDICT.')
+                else:
+                    print(f'        arms interleave in time '
+                          f'({t_off[0]}..{t_off[-1]} vs '
+                          f'{t_on[0]}..{t_on[-1]}) — comparable')
 
     if quarantined:
         print()
