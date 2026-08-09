@@ -98,24 +98,27 @@ class Dispatcher(DaemonLoop):
         # does not touch tab_open, so every cond below still sees the screen as
         # it is right now.
         #
-        # ⚠ BOTH EDGES, BECAUSE WHICH EDGE CLOSES THE PANEL IS THE GAME'S
-        # BINDING TO DECIDE, NOT THIS FILE'S. This comment used to say Tab was
-        # HELD; it is a TOGGLE, measured off 66 saved tap pairs -- key down
-        # 43..225 ms (median 97) against 2.1 s between taps. So a session is
-        # two taps, and the panel lands on the OPENING tap's release (30/66)
-        # and the CLOSING tap's press (28/66). Retraction and table in
-        # control/tab_watch.py's module docstring.
+        # ⚠ THE PRESS EDGE ONLY, AND THE FILTER LIVES HERE RATHER THAN IN
+        # TabWatch. Which key events matter is the dispatcher's question;
+        # TabWatch's is what the SCREEN says at whatever moment it is handed.
+        # Keeping it that way is what made a WRONG belief about this keybind
+        # cost nothing when it was held for a day (this comment used to say Tab
+        # was HELD and the release was what closed it -- retracted, with the
+        # measurement, in control/tab_watch.py's module docstring). Flipping
+        # back to both edges is this one line.
         #
-        # Press-only would therefore have caught the final state after all.
-        # Both edges are still right, for the other reason: 7 of those 66 taps
-        # produced NO reading at all (a swallowed key), so the second edge is a
-        # second sample of a panel that is otherwise read once per session.
+        # Tab is a TOGGLE -- 66 saved tap pairs, key down 43..225 ms, median
+        # 97, against 2.1 s between taps -- so a session is two taps and the
+        # panel lands on the OPENING tap's release and the CLOSING tap's press.
+        # The press is the one that carries the FINAL state, which is what a
+        # loadout has to be. Measured on those same taps, by session:
         #
-        # Handling both costs one extra ~10 ms grab per Tab and needs no belief
-        # about the keybind -- which is what made the wrong belief above cost
-        # nothing. TabWatch decides what to do with each edge from what the
-        # SCREEN says, which is the only thing here that knows.
-        if ev.key == 'tab':
+        #     30   sessions with a panel on some edge
+        #     29   ... a PRESS caught it too
+        #      1   ... release-only, i.e. what this drops   (3.3%)
+        #
+        # and it halves the grabs, 4.4 per session to 2.2.
+        if ev.key == 'tab' and ev.event == 'press':
             self.tab.on_key(ev.ts, ev.event)
 
         # DETECT_TABLE: schedule detections using CURRENT state

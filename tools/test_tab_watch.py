@@ -502,9 +502,15 @@ print('\n=== the close leaves its frame on disk, in ITS OWN directory ===')
 # the one real play writes to.
 before = set(glob.glob(os.path.join(SHOT_DIR, '*.png')))
 w9, state9, screen9 = build()
-# Tab HELD: press opens it, release closes it. Both edges arrive, and the
-# names have to say which edge saw what — that pairing is the only thing a
-# frame on disk can be matched against a line in the log by.
+# ⚠ BOTH EDGES ARE FED HERE ON PURPOSE, even though the live path sends only
+# the press (control/match.py). TabWatch must not know which edge it is being
+# handed -- `event` names the file and nothing else -- and the keybind claim
+# has been wrong twice in one day without costing anything precisely because
+# of that. Feeding it only what production feeds it would let a version that
+# reads `event` and branches on it pass.
+#
+# Tab is a TOGGLE: the opening tap is press=world / release=PANEL and the
+# closing tap is press=PANEL / release=world. Scripted that way below.
 screen9.open = False
 w9.on_key(time.perf_counter(), 'press')
 screen9.open = True
@@ -525,6 +531,47 @@ check('and the name carries the edge, and only the edge',
       [n.split('_')[-1] for n in new], ['press.png', 'release.png'])
 check('and NOT into the directory real play writes to',
       os.path.abspath(SHOT_DIR) != os.path.abspath(REAL_SHOT_DIR), True)
+
+print('\n=== the dispatcher sends the PRESS and only the press ===')
+# ⚠ THIS IS THE ONE CLAIM THAT IS NOT TabWatch'S, so it is the one that needs
+# a real Dispatcher. The class above deliberately cannot tell a press from a
+# release; which edges reach it at all is control/match.py's decision, so
+# testing it on TabWatch would test nothing. Dispatcher.__new__ skips the
+# poller, the threads and the hardware, as tools/test_detect_retry.py does.
+#
+# What it buys: Tab is a toggle, a session is two taps, and the CLOSING tap's
+# press is the one carrying the final state. 29 of 30 sessions in the 66-tap
+# corpus had a panel on a press; dropping the release costs 3.3% of sessions
+# and halves the grabs, 4.4 per session to 2.2.
+from collections import deque, namedtuple                      # noqa: E402
+from control.match import Dispatcher                           # noqa: E402
+
+KeyEvent = namedtuple('KeyEvent', ['key', 'event', 'ts', 'held_keys'])
+
+
+class _CountingTab:
+    def __init__(self):
+        self.edges = []
+
+    def on_key(self, ts, event):
+        self.edges.append(event)
+
+
+dsp = Dispatcher.__new__(Dispatcher)
+dsp.state = FakeState()
+dsp.state.stop_recoil = False
+dsp._detectors = {}
+dsp._pending = deque()
+dsp._apply_hw = lambda hw: None
+dsp.tab = _CountingTab()
+now = time.perf_counter()
+dsp._handle_key(KeyEvent('tab', 'press', now, frozenset()))
+dsp._handle_key(KeyEvent('tab', 'release', now + 0.097, frozenset()))
+check('the press reached TabWatch', dsp.tab.edges, ['press'])
+# ⚠ AND THE RELEASE STILL HAS TO BE A KEY EVENT THAT ARRIVES. The poller emits
+# it either way; if this ever fails because `tab` release stopped being polled,
+# the fix is the poller, not this line.
+check('the release did not', 'release' in dsp.tab.edges, False)
 
 print('\n=== the chatter goes to the FILE, the table to the TERMINAL ===')
 # ⚠ THIS IS A PROHIBITION ON A CHANNEL, not on content, and it is written that
