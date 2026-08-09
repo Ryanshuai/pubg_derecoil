@@ -434,6 +434,42 @@ class AttachmentDetector:
             out[gun] = slots
         return out
 
+    def any_drawn(self, frame):
+        """Is the weapon panel PAINTED at all? -> bool.
+
+        ⚠ "NOTHING IS FITTED" AND "THE PANEL IS NOT ON SCREEN YET" COME OUT OF
+        classify() AS THE SAME ANSWER, and that is what this exists to
+        separate. read_tile returns ('', inf, 0.0) when `drawn()` is False,
+        read_slots turns inf into None, classify turns None into '' -- the
+        same '' a genuinely empty slot produces. Downstream,
+        GameState.set_attachments writes those '' onto the weapon and the
+        recoil lookup keys on `bare`.
+
+        It bites on the TAB TRANSITION, where tab_watch reads the instant the
+        panel becomes detectable (_set_open sets _next_refresh = 0.0). The
+        panel is legible before its slot tiles are painted, so the first read
+        after every open could report a fully kitted gun as wearing nothing --
+        seen in a play log as `vector | full - | - | - | -` one line after
+        `[tab] open`, followed by the compensation being cleared.
+
+        A tile that is merely EMPTY is still DRAWN (detector/CLAUDE.md: the
+        border ring reads Sobel p90 46-173 empty against 5-26 for no tile at
+        all), so this does not refuse a bare gun. It refuses a panel with no
+        tiles anywhere.
+
+        ⚠ IT ALSO REFUSES TWO GUNS THAT DRAW NO TILES AT ALL -- a pair of P90s
+        would do it, since that gun has no slots and paints nothing. The
+        honest outcome there is "we cannot tell", which is what the caller
+        gets, rather than "it is wearing nothing", which is a claim.
+        """
+        for gun in (1, 2):
+            for slot in SLOT_NAMES:
+                y, x, h, w = HUD_REGIONS[f'att_{gun}_{slot}']
+                crop = frame[y:y + h, x:x + w]
+                if crop.size and self.drawn(crop):
+                    return True
+        return False
+
     def classify(self, frame, weapons=None):
         """-> {1: {slot: name}, 2: {slot: name}}, '' where nothing was read.
 

@@ -48,7 +48,13 @@ class FakeScreen:
         self.guns = ('aug', 'm416')
         self.type_reads = 0
         self.panel_reads = 0
+        self.att_reads = 0
         self.att_told = 'never called'   # what the attachment read was given
+        # ⚠ PAINTED IS NOT THE SAME AS OPEN, and conflating them is the bug
+        # this flag exists to script. tab_watch reads the loadout the instant
+        # the screen becomes legible as open (_set_open sets _next_refresh to
+        # 0.0), and the slot tiles are painted some milliseconds after that.
+        self.painted = True
 
     def type_det(self):
         s = self
@@ -76,7 +82,15 @@ class FakeScreen:
             # this recorded argument exists to catch.
             def classify(_self, frame, weapons=None):
                 s.att_told = weapons
+                s.att_reads += 1
                 return {1: {'muzzle': 'comp'}, 2: {'muzzle': ''}}
+
+            # Is the panel PAINTED. Separate from `open`, because the panel is
+            # legible as open before its slot tiles are drawn -- and an
+            # unpainted tile reads '' out of classify(), the same '' an empty
+            # slot gives. See AttachmentDetector.any_drawn.
+            def any_drawn(_self, frame):
+                return s.painted
         return D()
 
 
@@ -190,6 +204,31 @@ w4.on_key(t)                             # on_key reads once more, still up
 t = run(w4, 0.05, t0=t)
 check('closed', w4.open, False)
 check('final loadout survives the close', state4.weapon_gt, ('kar98k', 'ump45'))
+
+print('\n=== a panel that is OPEN but not PAINTED publishes no attachments ===')
+# ⚠ THIS IS THE ONE THAT BIT IN PLAY. _set_open sets _next_refresh to 0.0, so
+# the loadout is read the instant the screen reads as open -- and the slot
+# tiles are painted a few ms later. An unpainted tile comes out of classify()
+# as '', the same '' an empty slot gives, so a fully kitted gun was published
+# as wearing nothing and its compensation was cleared.
+#
+# The NAMES still publish: the plates are painted before the tiles, and it is
+# only the tiles this can be wrong about. Refusing everything would trade one
+# wrong answer for a slower one.
+w6, state6, screen6 = build()
+screen6.open = True
+screen6.painted = False
+w6._set_open(True)
+t = run(w6, TAB_REFRESH_S * 2, t0=time.perf_counter())
+check('the panel WAS read', screen6.panel_reads > 0, True)
+check('attachments NOT published', 1 in state6.attachments, False)
+check('attachment read never even attempted', screen6.att_reads, 0)
+check('but the weapon names still are', state6.weapon_gt, ('aug', 'm416'))
+
+# ...and it recovers on its own once the tiles land, with no extra keypress.
+screen6.painted = True
+t = run(w6, TAB_REFRESH_S * 2, t0=t)
+check('published once painted', state6.attachments.get(1), {'muzzle': 'comp'})
 
 print('\n=== idle costs nothing but the drift check ===')
 w5, state5, screen5 = build()

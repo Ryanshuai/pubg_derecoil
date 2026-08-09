@@ -111,15 +111,34 @@ class TabWatch:
                 out['weapons'] = weap.classify(
                     {k: _crop(frame, k) for k in NAME_REGIONS})
             if att is not None:
-                # The names go INTO the attachment read. They were already on
-                # this frame and were being thrown away, while the slots were
-                # matched blind against all 55 templates -- which is how a UZI
-                # came to be wearing a sniper cheek pad and an SKS an SMG
-                # suppressor. This feeds state.set_attachments() and from
-                # there the recoil scale, so a wrong slot is a wrong curve.
-                named = {i + 1: n for i, n in enumerate(out['weapons'] or ())
-                         if n}
-                out['attachments'] = att.classify(frame, named)
+                # ⚠ AN UNPAINTED PANEL IS NOT A BARE GUN, AND THIS READ IS THE
+                # ONE MOST LIKELY TO CATCH ONE. _set_open sets _next_refresh
+                # to 0.0, so the first loadout read happens the instant the
+                # screen becomes legible as "open" -- and the panel is legible
+                # before its slot tiles are painted. classify() reports the
+                # unpainted tiles as '' , the same '' an empty slot gives, and
+                # _publish below writes them onto both weapons: a fully kitted
+                # gun becomes `bare` and the compensation is cleared. Seen in
+                # a play log one line after `[tab] open`.
+                #
+                # `attachments = None` is already the "nothing to say" value
+                # here -- _publish skips it -- so refusing costs one stale
+                # cycle and the refresh loop reads again in TAB_REFRESH_S.
+                if not att.any_drawn(frame):
+                    self._log('panel not painted yet — not publishing '
+                              'attachments (an unpainted tile is not an '
+                              'empty slot)')
+                else:
+                    # The names go INTO the attachment read. They were already
+                    # on this frame and were being thrown away, while the
+                    # slots were matched blind against all 55 templates --
+                    # which is how a UZI came to be wearing a sniper cheek pad
+                    # and an SKS an SMG suppressor. This feeds
+                    # state.set_attachments() and from there the recoil scale,
+                    # so a wrong slot is a wrong curve.
+                    named = {i + 1: n
+                             for i, n in enumerate(out['weapons'] or ()) if n}
+                    out['attachments'] = att.classify(frame, named)
         except Exception as e:
             self._log(f'panel read failed: {e}')
             return None
