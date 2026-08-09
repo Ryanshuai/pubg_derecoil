@@ -91,9 +91,17 @@ def load(path):
         # for one: "the screen first moves 195 ms after the click" was really
         # 69 ms, which is the difference between "after two shots" and "during
         # the first".
+        # ⚠ THE ARM IS "WAS ANY COMPENSATION DELIVERED", NOT `comp_enabled`.
+        # A --scale-sweep=0 magazine is armed with a curve of 174 knots that
+        # are all ZERO, so comp_enabled is True while y_true = y_obs exactly --
+        # a compensation-OFF magazine by every property that matters here.
+        # Splitting on the flag put the 8 interleaved scale-0 magazines on the
+        # compensated side and left the interleaving check reporting NO
+        # OVERLAP on a run fired specifically to overlap.
         out.append({'ts': m.ts, 't': t, 'y': y, 'K': m.K,
                     'mag': m.magazine_size, 'sight': m.sight,
-                    'comp': m.comp_enabled, 'config': m.config})
+                    'comp': bool(sum(k.get('dy', 0.0) for k in m.curve)),
+                    'config': m.config})
     return out
 
 
