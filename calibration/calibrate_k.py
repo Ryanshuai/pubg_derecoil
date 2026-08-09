@@ -48,6 +48,8 @@ WARMUP_S = 0.10         # before injection starts
 INJECT_S = 0.15         # spread of the injected counts
 COOLDOWN_S = 0.35       # after injection, for the view to settle
 INJECT_STEPS = 20       # sub-steps the counts are broken into
+DEAD_PX = 2.0           # a trial moving less than this measured nothing
+DEAD_TRIALS = 3         # consecutive dead trials that end the run
 SETTLE_S = 0.45         # pause between trials (and after the reset move)
 ADS_SETTLE_S = 0.40     # time for the scope-in animation before measuring
 
@@ -283,7 +285,7 @@ def main():
 
     print(f"\nTrials    : {len(amounts)} amounts x {args.repeats} repeats "
           f"x2 directions = {len(amounts) * args.repeats * 2}")
-    print(f"Per trial : {WARMUP_S}+{INJECT_S}+{COOLDOWN_S} s "
+    print(f"Per trial : {WARMUP_S}+{args.inject_s}+{COOLDOWN_S} s "
           f"(wall-clock, not frame-counted)")
     # ensure_ready rather than a countdown plus a focus check: it takes the
     # foreground itself (the countdown survives as its fallback), and its match
@@ -308,6 +310,7 @@ def main():
     rows = []
     raw = []
     lost_focus = 0
+    n_dead = 0
     try:
         for amount in amounts:
             for sign in (+1, -1):
@@ -324,6 +327,44 @@ def main():
                     if not focused:
                         lost_focus += 1
                     res = rec.finish()
+                    # ⚠ A TRIAL THAT MOVED NOTHING MEASURED NOTHING, and this
+                    # has to stop the run rather than be averaged in. On
+                    # 2026-08-08 all 32 trials read ~0.01 px because the SPAWN
+                    # TOOL panel was open: it is MODAL to the world, so the HUD
+                    # is drawn, the character does not move, and the correlator
+                    # returns a beautiful zero. Two minutes of injection into a
+                    # menu, and the final verdict (R^2 -0.019, CV 556%) only
+                    # said so at the END.
+                    #
+                    # ⚠ THE POINT IS THAT THIS GATE NAMES NO MECHANISM. The
+                    # panel is one way to get here; a lost window, the view
+                    # against a pitch clamp, a screen full of sky, and the game
+                    # simply not taking input are others, and they are
+                    # indistinguishable from inside. What they share is that
+                    # the counts did not reach the view -- so that is what is
+                    # tested, not the list.
+                    #
+                    # ⚠ AND IT EXISTS BECAUSE THE READINESS CHECK IS ONCE.
+                    # ensure_ready runs before the first trial and the loop
+                    # then runs for two minutes; `focused` above is re-read
+                    # EVERY trial while the other four legs are not. One
+                    # precondition polled and four assumed, in the same loop.
+                    if not args.dry_run and abs(float(np.nansum(res.dy))) < DEAD_PX:
+                        n_dead += 1
+                        print(f"    [!] {counts:+d} #{r}: the view did not move "
+                              f"({float(np.nansum(res.dy)):+.2f} px for "
+                              f"{counts:+d} counts)")
+                        if n_dead >= DEAD_TRIALS:
+                            print(f"\n[!] ABORT: {n_dead} trials in a row moved "
+                                  f"less than {DEAD_PX} px. The injected counts "
+                                  f"are not reaching the view — a modal panel "
+                                  f"(SPAWN TOOL is modal to the world), the "
+                                  f"window, a pitch clamp, or a featureless "
+                                  f"picture. Nothing measured so far is worth "
+                                  f"keeping.")
+                            raise SystemExit(2)
+                    else:
+                        n_dead = 0
                     s = summarise(rec, res, log,
                                   counts if not args.dry_run else 1)
                     s['repeat'] = r

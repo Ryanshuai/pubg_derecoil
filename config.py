@@ -256,7 +256,7 @@ RECOIL_MAD_FLOOR = 0.5
 # easily here — calibrate_k's `--ads` held the right button, which is SHOULDER
 # AIM, so four runs carried the wrong state; and an ADS-verified red dot
 # re-measured 1.29 against the 1.5474 below.
-#   red_dot   1.5474   0.99999   0.3%   7
+#   red_dot   1.5128   0.99984   1.1%   7   <- 2026-08-08, see below
 #   2x        1.8254   0.99948   2.0%   3
 #   3x        1.8802   0.99977   1.4%   3
 #   4x        1.88+-0.03         3 runs  5    (1.8827 / 1.8725 / 1.9000)
@@ -294,7 +294,42 @@ RECOIL_MAD_FLOOR = 0.5
 RECOIL_SIGHT_PROFILES = {
     'hipfire': {'K': 0.50,   'mag': 1, 'keepout': RECOIL_KEEPOUT,
                 'patch_xs': RECOIL_PATCH_XS},
-    'red_dot': {'K': 1.5474, 'mag': 1, 'keepout': RECOIL_KEEPOUT,
+    # ⚠ 1.5474 -> 1.5128 on 2026-08-08, and the OLD one was never cleanly
+    # measured. Two things said K was high (the scale sweep's F-coefficient
+    # slope, and compensation-OFF magazines reading 6.4% below compensation-ON
+    # in the same cell, 5.3 sigma), so the four stored red_dot runs were
+    # re-read. 76 of their 98 rows have their tracked patches disagreeing by a
+    # median of 76%, and the 22 survivors still ranged 0.39..1.59 WITH the
+    # patches agreeing to 0.3% -- because the correlator ALIASES BY EXACTLY
+    # RECOIL_PATCH_H = 256 px past its unambiguous range, every patch the same
+    # way, and `max_abs_frame` cannot see it (an aliased pair reports a SMALL
+    # displacement). tools/audit_k.py, pixi run k-audit.
+    #
+    # Re-measured with the injection spread over 1.0 s instead of 0.15 so no
+    # frame gap approaches 128 px, gun in hand, red dot read back, 32 trials
+    # across two magnitudes and both directions:
+    #
+    #     K = 1.5128   R^2 0.99984   CV 1.1%   sem 0.003
+    #     -240 1.5117  -120 1.5191  +120 1.5285  +240 1.5083
+    #     up/down asymmetry 0.19%
+    #
+    # 1.5474 is 2.29% above it, which against sem 0.003 is 11 sigma.
+    #
+    # ⚠ AND THE ARCHIVE'S "6.32% up/down asymmetry" IS NOT REAL. It measures
+    # 0.19% here. That archive figure came from an `up` arm of n=3, all from
+    # one run, all needing un-aliasing first -- and a whole argument was built
+    # on it (that 1.5474 was a blend of two directions and K_down was the right
+    # one). The argument is void; the constant it argued for happened to move
+    # the same way for a different reason.
+    #
+    # ⚠ THE STORED MAGAZINES KEEP 1.5474 and that is a different case from
+    # comp_lag_s and fire_delay_ms. Those record what the MACHINE DID, so a
+    # later constant would describe a different machine. K is a property of the
+    # game that did not change -- only the estimate did -- so re-analysing the
+    # store at 1.5128 is legitimate, and it is not done silently here. Doing it
+    # takes the two arms from 6.41% (5.3 sigma) to 4.07% (3.4 sigma): a third
+    # of the gap, right sign. The rest is still open.
+    'red_dot': {'K': 1.5128, 'mag': 1, 'keepout': RECOIL_KEEPOUT,
                 'patch_xs': RECOIL_PATCH_XS},
     '2x':      {'K': 1.8254, 'mag': 2, 'keepout': 60,
                 'patch_xs': (1390, 1530, 1850),
