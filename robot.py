@@ -2,7 +2,20 @@
 
 Creates components, registers detectors, starts threads. No business logic.
 All behavior is driven by config tables.
+
+⚠ IT ALSO KEEPS A LOG, AND UNTIL 2026-08-09 IT DID NOT. Everything this
+process knows about why it is not compensating -- which curve it looked up,
+which one it could not find, which part it could not name, whether the upload
+to the Pico raised -- was printed to a terminal and then scrolled away. The
+first time somebody said "I just tried it and it does not hold the gun down",
+the answer was already gone.
+
+That is the same shape as the rule in the root CLAUDE.md about not grepping a
+live run: a session you cannot replay is the one session whose evidence you
+must not throw away. A play session is exactly that.
 """
+import datetime
+import os
 import sys
 
 # Force UTF-8 stdout so CN attachment names don't crash print_status
@@ -13,6 +26,58 @@ try:
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 except (AttributeError, OSError):
     pass
+
+
+class _Tee:
+    """Write to the terminal AND to a file. Never swallows the terminal.
+
+    ⚠ THE FILE IS THE COPY, NOT THE DESTINATION. If the log file cannot be
+    opened or a write to it raises, the terminal write has already happened
+    and the failure is dropped -- a broken log must not be able to take down
+    a session that is otherwise fine, and least of all one that is driving
+    hardware.
+    """
+
+    def __init__(self, stream, fh):
+        self._stream, self._fh = stream, fh
+
+    def write(self, s):
+        n = self._stream.write(s)
+        try:
+            self._fh.write(s)
+            self._fh.flush()
+        except (OSError, ValueError):
+            pass
+        return n
+
+    def flush(self):
+        self._stream.flush()
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+def start_log(root=None):
+    """Tee stdout+stderr into calibration/artifacts/robot/<stamp>.log.
+
+    -> the path, or None if it could not be opened. One file per run, because
+    the question a log answers here is always "what happened in THAT session".
+    """
+    root = root or os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                'calibration', 'artifacts', 'robot')
+    try:
+        os.makedirs(root, exist_ok=True)
+        stamp = datetime.datetime.now().strftime('%m%d_%H%M%S')
+        path = os.path.join(root, f'{stamp}.log')
+        fh = open(path, 'a', encoding='utf-8', errors='replace')
+    except OSError as e:
+        print(f'[log] cannot open a log file ({e}) -- terminal only',
+              flush=True)
+        return None
+    sys.stdout = _Tee(sys.stdout, fh)
+    sys.stderr = _Tee(sys.stderr, fh)
+    print(f'[log] {path}', flush=True)
+    return path
 
 from detector.game_state import GameState
 from detector.weapon_hud_detector import WeaponHudDetector
@@ -87,6 +152,10 @@ class Robot:
 
 
 if __name__ == '__main__':
+    # ⚠ BEFORE Robot(), because the lines worth having start at import: which
+    # curves loaded, which ones are seeds, and the first `[curves] no fitted
+    # curve for ...` a gun produces the moment it is picked up.
+    start_log()
     robot = Robot()
     try:
         # NOT dispatcher.join(). See DaemonLoop.wait -- a no-timeout join on

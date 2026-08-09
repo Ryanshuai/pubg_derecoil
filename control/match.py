@@ -192,6 +192,20 @@ class Dispatcher(DaemonLoop):
                 if callable(method):
                     method()
 
+    _pattern_said = None
+
+    def _said_pattern(self, msg):
+        """Print what is armed, once per distinct answer.
+
+        upload_pattern fires on every weapon, attachment, posture and fire-mode
+        change, which is many times a second while a Tab read settles. Printing
+        each one would bury the log it exists to make readable; printing only
+        changes makes the log a list of what actually changed.
+        """
+        if msg != self._pattern_said:
+            self._pattern_said = msg
+            print(f'[armed] {msg}', flush=True)
+
     def _apply_hw(self, hw_list):
         """Apply hardware actions."""
         for action in hw_list:
@@ -205,8 +219,27 @@ class Dispatcher(DaemonLoop):
                     w = self.state.active
                     if len(w.dy_s) == 0 or self.state.stop_recoil:
                         m.clear_pattern()
+                        self._said_pattern('CLEARED — ' + (
+                            'stop_recoil is set (Tab, spawner panel, a menu)'
+                            if self.state.stop_recoil else
+                            f'no curve for {w.name or "(empty hands)"}'))
                     else:
                         m.upload_pattern(w.dx_s, w.dy_s, w.t_s)
+                        # ⚠ THE SUCCESS LINE IS THE POINT, NOT THE FAILURE
+                        # ONE. set_seq already says when it cannot find a
+                        # curve; nothing said when it COULD, so a log showing
+                        # no complaint was indistinguishable from a log of a
+                        # session that never reached here -- and "it is not
+                        # holding the gun down" is asked against exactly that
+                        # ambiguity. Deduped on the content, so it costs one
+                        # line per distinct thing actually armed.
+                        self._said_pattern(
+                            f'{w.name} {w.posture} '
+                            f'muzzle={w.muzzle or "-"} grip={w.grip or "-"} '
+                            f'stock={w.butt or "-"} scope={w.scope or "-"} '
+                            f'fire={w.fire_mode or "-"} -> {len(w.dy_s)} knots'
+                            f', {sum(w.dy_s):.0f} counts over '
+                            f'{(w.t_s[-1] if w.t_s else 0):.2f}s')
                 elif action == 'shutdown':
                     self.shutdown()
                     self._running = False
