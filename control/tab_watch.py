@@ -6,13 +6,21 @@ HUD at the bottom, so having both in one DXGI bounding box cost 5.46 ms of
 every frame — 87% of the capture budget — for a panel that is usually not on
 screen. See config.FRAME_REGIONS.
 
-⚠ ONE READ PER TAB SESSION, TAKEN ON THE KEYPRESS THAT CLOSES IT — WHILE THE
-PANEL IS STILL ON SCREEN. NOTHING IS READ AT ANY OTHER TIME.
+⚠ THE TAB KEY GRABS AND SAVES, IMMEDIATELY, BEFORE ANYTHING IS DECIDED. Both
+presses. Then, and only if the panel was up, that same frame is classified.
 
-    panel opens          nothing
+    Tab pressed, shut    ONE grab, saved `<stamp>_opening.png`
     panel is up          nothing
-    Tab pressed, up      ONE grab, ONE classify, publish
-    anchor reads shut    nothing — the reading was taken 100 ms ago
+    Tab pressed, up      ONE grab, saved `<stamp>_closing.png`, classify, publish
+    anchor reads shut    nothing — the reading was taken ~100 ms ago
+
+Nothing is checked, asked or measured before the grab. A grab is ~10 ms;
+deciding first is what put a permission in front of it that only arrives once
+the panel is already down.
+
+Both presses are saved even though only one has a panel to read. The opening
+frame costs one grab and answers a question the closing one cannot: an opening
+frame with a panel still in it means the previous close never registered.
 
 THE KEY LEADS THE CLOSE BY 77-128 ms, measured. The poller can hold an event
 for a tick or two, so the read lands 10-20 ms after the press — still 57 ms or
@@ -185,13 +193,37 @@ class TabWatch:
             self._log(f'open-check failed: {e}')
             return None
 
-    def read_loadout(self):
-        """Grab the weapon panel and read both guns off it. -> dict or None.
+    def snap(self, tag):
+        """Grab the weapon panel and put it on disk. -> the frame, or None.
 
-        ⚠ CALLED ONCE PER TAB SESSION, ON THE CLOSE, AND THE TIMING IS THE
-        DESIGN. See the module docstring: the anchor stops being legible before
-        the panel stops being drawn, so this runs at a moment when there is
-        still a panel to read.
+        ⚠ THE GRAB IS THE FIRST THING THAT HAPPENS ON A TAB KEY, AND THE SAVE
+        IS THE SECOND. Nothing is decided, checked or classified before them.
+        A grab is ~10 ms; deciding first is what put a permission in front of
+        it that only arrives once the panel is down.
+
+        It fires on BOTH presses, the one that opens and the one that closes,
+        and the file says which. Only one of the two has a panel to read, but
+        both have a picture worth having: an OPENING frame with a panel in it
+        means the previous close never registered, and an opening frame of bare
+        world is what a normal open looks like. Two labelled pictures per Tab
+        say more than one unlabelled one.
+        """
+        try:
+            frame = self._panel_frame()
+        except Exception as e:
+            self._log(f'panel grab failed: {e}')
+            return None
+        self._log(f'snap ({tag}){self._save(frame, tag)}')
+        return frame
+
+    def read_loadout(self, frame=None):
+        """Read both guns off a panel frame. -> dict or None.
+
+        ⚠ CALLED ONCE PER TAB SESSION, ON THE KEYPRESS THAT CLOSES IT, AND ON
+        THE FRAME `snap` ALREADY TOOK. Grabbing again here would be a second
+        picture some tens of milliseconds later than the one saved beside the
+        log — so the evidence and the reading would be of two different
+        moments, which is the whole failure this file keeps having.
 
         ⚠ NAMES AND ATTACHMENTS COME OFF ONE FRAME, which is the root
         CLAUDE.md's second law rather than a convenience: the names are what
@@ -203,11 +235,10 @@ class TabWatch:
         att = self._detectors.get('tab_attachment')
         if weap is None and att is None:
             return None
-        try:
-            frame = self._panel_frame()
-        except Exception as e:
-            self._log(f'panel grab failed: {e}')
-            return None
+        if frame is None:
+            frame = self.snap('read')
+            if frame is None:
+                return None
         out = {'ts': time.perf_counter(), 'weapons': None, 'attachments': None}
         try:
             if weap is not None:
@@ -262,7 +293,7 @@ class TabWatch:
         except Exception as e:
             self._log(f'panel read failed: {e}')
             return None
-        self._log(_describe(out) + self._save(frame))
+        self._log(_describe(out))
         return out
 
     def _names(self, out):
@@ -281,8 +312,8 @@ class TabWatch:
             known = ('', '')
         return tuple(m or k for m, k in zip(mine, known))
 
-    def _save(self, frame):
-        """Write the frame this reading came from. -> ' shot <path>' or ''.
+    def _save(self, frame, tag):
+        """Write a frame beside the run's log. -> '   shot <path>' or ''.
 
         ⚠ IT SAVES THE WHOLE BLOCK, not the crops it read. The crops are what
         the detector looked at; the block is what the SCREEN looked like, and
@@ -300,7 +331,7 @@ class TabWatch:
             os.makedirs(self._shot_dir, exist_ok=True)
             y, x, h, w = _BLOCK()
             stamp = datetime.datetime.now().strftime('%m%d_%H%M%S_%f')[:-3]
-            path = os.path.join(self._shot_dir, f'{stamp}.png')
+            path = os.path.join(self._shot_dir, f'{stamp}_{tag}.png')
             if not cv2.imwrite(path, frame[y:y + h, x:x + w]):
                 return '   (frame not saved: imwrite refused)'
             return f'   shot {path}'
@@ -340,13 +371,16 @@ class TabWatch:
         # closed it -- which is exactly the number needed to work out how much
         # panel was left by the time anything looked. It had to be inferred
         # from the game's 77-128 ms instead of read off.
-        self._log(f'Tab key seen while {"open" if self.open else "closed"}')
-        if self.open:
-            got = self.read_loadout()
+        was_open = self.open
+        self._log(f'Tab key seen while {"open" if was_open else "closed"}')
+        # ⚠ GRAB AND SAVE FIRST, DECIDE AFTER, ON BOTH PRESSES.
+        frame = self.snap('closing' if was_open else 'opening')
+        if was_open and frame is not None:
+            got = self.read_loadout(frame)
             if got is not None:
                 self._publish(got)
         self._watch_until = now + TAB_SETTLE_S
-        self._want = not self.open
+        self._want = not was_open
 
     def tick(self, now=None):
         """One unit of work, at most one anchor check. From the dispatch loop."""

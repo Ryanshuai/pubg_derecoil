@@ -226,22 +226,27 @@ w.on_key(t)                      # user pressed Tab; screen has NOT changed yet
 check('open right after the key', w.open, False)
 t = run(w, 0.05, t0=t)           # ticks, but the fake screen is still closed
 check('open while the screen stays closed', w.open, False)
-check('and the key itself read nothing', screen.grabs, 0)
+# ⚠ IT DOES SNAP — both presses do, unconditionally, and the file says which.
+# What it does not do is CLASSIFY: there is no panel to read yet, and the
+# picture is kept because "an opening frame with a panel still in it" is how a
+# close that never registered would show itself.
+check('the key snapped one frame', screen.grabs, 1)
+check('and classified nothing', screen.att_reads + screen.name_reads, 0)
 
 print('\n=== it opens when the SCREEN opens, and reads nothing ===')
 screen.open = True               # now the game actually drew it
 t = run(w, 0.05, t0=t)
 check('open once the screen shows it', w.open, True)
 check('state.tab_open followed', state.tab_open, True)
-check('opening did NOT read the panel', screen.grabs, 0)
+check('opening classified nothing', screen.att_reads + screen.name_reads, 0)
 
 print('\n=== and NOTHING is read for as long as it stays up ===')
 # ⚠ THE PROHIBITION. Two seconds of ticks, a whole rummage through the
 # inventory, and the weapon panel must not be looked at once. Anything that
 # reads here is describing a moment the player is still changing.
-before_anchor = screen.anchor_reads
+before_anchor, before_grabs = screen.anchor_reads, screen.grabs
 t = run(w, 2.0, t0=t)
-check('two seconds open, panel grabs', screen.grabs, 0)
+check('two seconds open, panel grabs', screen.grabs - before_grabs, 0)
 check('nothing classified', screen.att_reads + screen.name_reads, 0)
 check('weapon_gt untouched', state.weapon_gt, ('', ''))
 # ⚠ AND THE ANCHOR IS NOT POLLED EITHER, which is a COST claim rather than a
@@ -257,12 +262,14 @@ print('\n=== the read happens on the KEYPRESS, while the panel is up ===')
 # ⚠ NOT when the anchor says shut. Six frames saved at that moment on
 # 2026-08-09 were all pure game world: by then the panel is GONE, not fading.
 # The press leads the close by 77-128 ms, and that margin is the design.
+at_key = screen.grabs
 w.on_key(t)                      # the closing press: panel still on screen
-check('the panel was grabbed on the KEY', screen.grabs, 1)
+check('the panel was grabbed on the KEY', screen.grabs - at_key, 1)
+after_key = screen.grabs
 screen.open = False              # ...and the game takes it down afterwards
 t = run(w, 0.05, t0=t)
 check('closed', w.open, False)
-check('the close itself grabbed nothing more', screen.grabs, 1)
+check('the close itself grabbed nothing more', screen.grabs - after_key, 0)
 check('classified exactly once', screen.att_reads, 1)
 check('weapon_gt published', state.weapon_gt, ('aug', 'm416'))
 check('attachments published', state.attachments[1], {'muzzle': 'comp'})
@@ -334,7 +341,7 @@ screen5.open = False
 screen5.painted = False          # by the time drift notices, it is gone
 t = run(w5, TAB_DRIFT_S + 0.05, t0=time.perf_counter())
 check('the drift check noticed', w5.open, False)
-check('and looked at nothing', screen5.grabs, 0)
+check('and looked at nothing', screen5.grabs, 0)   # no press, no snap
 check('nothing published', state5.weapon_gt, ('', ''))
 
 print('\n=== an unpainted panel still refuses to publish a kit ===')
@@ -350,7 +357,7 @@ screen5b.show(1, ('vss', 'p90'))
 screen5b.painted = False
 w5b._set_open(True)
 w5b.on_key(time.perf_counter())
-check('the panel WAS read', screen5b.grabs, 1)
+check('the panel WAS snapped and read', screen5b.grabs, 1)
 check('attachments NOT published', 1 in state5b.attachments, False)
 check('attachment read never even attempted', screen5b.att_reads, 0)
 check('but the weapon names still are', state5b.weapon_gt, ('vss', 'p90'))
@@ -399,13 +406,18 @@ print('\n=== the close leaves its frame on disk, in ITS OWN directory ===')
 # the one real play writes to.
 before = set(glob.glob(os.path.join(SHOT_DIR, '*.png')))
 w9, state9, screen9 = build()
+screen9.open = False
+w9.on_key(time.perf_counter())            # the press that opens it
 screen9.open = True
-w9._set_open(True)
-w9.on_key(time.perf_counter())
+run(w9, 0.05, t0=time.perf_counter())
+w9.on_key(time.perf_counter())            # the press that closes it
 screen9.open = False
 run(w9, 0.05, t0=time.perf_counter())
 after = set(glob.glob(os.path.join(SHOT_DIR, '*.png')))
-check('one frame written for one close', len(after - before), 1)
+new = sorted(os.path.basename(f) for f in after - before)
+check('one frame per press, both presses', len(new), 2)
+check('and the file says which press it was',
+      [n.split('_')[-1] for n in new], ['opening.png', 'closing.png'])
 check('and NOT into the directory real play writes to',
       os.path.abspath(SHOT_DIR) != os.path.abspath(REAL_SHOT_DIR), True)
 
