@@ -92,6 +92,7 @@ from control.session import ensure_ready                          # noqa: E402
 from capture.cropper import DXGISyncGrabber                      # noqa: E402
 from detector.view_tracker import MagazineRecorder                # noqa: E402
 from calibration.weapon_build import build_weapon                 # noqa: E402
+import config as cfg                                              # noqa: E402
 from config import RECOIL_COMP_LAG_MS                             # noqa: E402
 
 
@@ -444,7 +445,8 @@ def one_magazine(rig, grabber, weapon, mag_size, interval_s, curve,
 
 
 def fire_one_into_store(rig, grabber, weapon, config, posture, curve,
-                        interval_s, prior=(), note='', label=''):
+                        interval_s, prior=(), note='', label='',
+                        fire_mode=None):
     """Reload, re-aim, fire one magazine, store it.
 
     -> (Magazine, why|None, interval_s). The third value is the per-round time
@@ -480,6 +482,30 @@ def fire_one_into_store(rig, grabber, weapon, config, posture, curve,
     never filled, and the log said nothing. A second copy of THIS loop would
     have been the third instance.
     """
+    # ⚠ BEFORE ANYTHING ELSE, BECAUSE IT IS THE GUN'S IDENTITY. Every gun here
+    # is meant to be in full auto and most spawn that way, so this looked like
+    # a formality and was therefore never called at all -- GunDriver has
+    # carried `ensure_fire_mode` and `FIRE_MODE_FOR = {'mg3': 'high'}` the
+    # whole time, and no collection path in this repository has ever pressed B.
+    # The mg3 has two automatic modes 1.50x apart; its two stored rates were
+    # measured in whichever one it happened to spawn in, four days apart, and
+    # neither magazine says which. The Mk14 and the DMRs are worse: they spawn
+    # SINGLE, and a held trigger then fires one round into a magazine's worth
+    # of analysis.
+    want_mode = fire_mode or cfg.fire_mode_for(weapon)
+    got_mode = rig.gun.ensure_fire_mode(weapon, want=want_mode)
+    if got_mode is None:
+        # ⚠ NOT ROUNDED UP TO THE ONE WE WANTED. Unreadable is stored as its own
+        # value so a later question -- "did this magazine's mode agree with its
+        # siblings?" -- can tell "no" from "nobody looked".
+        print(f'      [!] {label}: the fire mode could not be read. Stored as '
+              f'unreadable, NOT as {want_mode!r}.')
+    elif got_mode != want_mode:
+        return None, (f'fire mode reads {got_mode!r} and this cell wants '
+                      f'{want_mode!r} — B was pressed and watched and the HUD '
+                      f'never agreed. A burst in the wrong mode is a different '
+                      f'gun, not a noisier one'), interval_s
+
     mag_size, _ = rig.fire.top_up(weapon=weapon)
     if not mag_size:
         return None, 'no ammo counter — cannot say how long this burst is', interval_s
@@ -517,6 +543,8 @@ def fire_one_into_store(rig, grabber, weapon, config, posture, curve,
     mag, out = one_magazine(rig, grabber, weapon, mag_size, interval_s,
                             curve, config, posture, note=note,
                             fire_delay_ms=float(rig.mouse.RECOIL_FIRE_DELAY_MS))
+    # The READBACK, and it decides which file samples.append writes to.
+    mag.fire_mode = got_mode if got_mode is not None else 'unreadable'
     # ⚠ ASK THE COUNTER WHETHER THE BURST ACTUALLY EMPTIED THE MAGAZINE. Read
     # BEFORE wait_reload, because a reload puts rounds back and then the number
     # answers a different question. See Magazine.rounds_left for the mg3, where
@@ -559,7 +587,7 @@ def fire_one_into_store(rig, grabber, weapon, config, posture, curve,
 
 
 def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
-                       note_prefix='', scope_asset=None):
+                       note_prefix='', scope_asset=None, fire_mode=None):
     """Fire `mags` magazines into the sample store, alternating curve arms.
 
     -> (fired, error|None). Never raises for a game problem: a burst that threw
@@ -623,9 +651,15 @@ def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
     # changed and the unattended path never used. It is not iteration and there
     # are no rounds: the fit eats the whole pool every time, so this is simply
     # "use the best estimate that exists" (MODEL.md).
+    # ⚠ THE SAME FIRE MODE'S POOL, NOT THE WEAPON'S. The mg3's two automatic
+    # modes are 1.50x apart in cyclic rate, so they are two different y_true(t)
+    # and samples.fire_tag files them apart; fitting across them would average
+    # a fast gun with a slow one and fire the result at both.
+    want_mode = fire_mode or cfg.fire_mode_for(weapon)
     try:
         from calibration.fit_time_curve import fit as _fit
-        prev = [m for m in S.load(weapon, config) if m.comp_enabled]
+        prev = [m for m in S.load(weapon, config, fire_mode=want_mode)
+                if m.comp_enabled]
         if prev:
             r = _fit(prev)
             if r.get('ok'):
@@ -713,7 +747,7 @@ def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
                 curve = []
             mag, why, interval_s = fire_one_into_store(
                 rig, grabber, weapon, config, posture, curve,
-                interval_s, prior=prior,
+                interval_s, prior=prior, fire_mode=want_mode,
                 note=f'{note_prefix}arm={"comp" if comp else "none"}',
                 label=f'mag {i} ({"comp" if comp else "no-comp"})')
             if mag is None:
@@ -792,6 +826,13 @@ def main():
                          'only the offset moves, and the arms interleave in '
                          'time so nothing that varies between runs can line up '
                          'with an arm.')
+    ap.add_argument('--fire-mode', default=None,
+                    help="fire mode to measure in, e.g. 'full' or 'high'. "
+                         "Defaults to config.FIRE_MODE_FOR, which is 'full' "
+                         "everywhere except the mg3 ('high'). Ask for the "
+                         "other one to measure it: the mg3's two automatic "
+                         "modes are 1.50x apart in cyclic rate and are two "
+                         "different y_true(t), stored in separate files.")
     ap.add_argument('--scale-sweep', default=None,
                     help='comma-separated curve multipliers, ROTATED PER '
                          'MAGAZINE off one fit — the amplitude twin of '
@@ -1094,6 +1135,13 @@ def main():
         span_ms = w.t_s[-1] * 1000.0 if len(w.t_s) else 0.0
         print(f'  {a.weapon}: interval {interval_s*1000:.2f} ms, '
               f'curve spans {span_ms:.0f} ms over {len(w.t_s)} knots')
+        # Which gun this run is measuring. It picks the sample file, the curve
+        # file and what fire_one_into_store drives the HUD to before firing.
+        want_mode = a.fire_mode or cfg.fire_mode_for(a.weapon)
+        if want_mode != cfg.fire_mode_for(a.weapon):
+            print(f'  fire mode: {want_mode} — NOT this weapon\'s ordinary '
+                  f'{cfg.fire_mode_for(a.weapon)}, so it stores and ships '
+                  f'under its own name and pools with nothing else')
 
         if a.from_fit:
             # Fit from what is already stored and fire THAT, rather than the
@@ -1113,7 +1161,8 @@ def main():
             # bare" -- which then loads the wrong file, or none at all, and
             # reports it as "nothing stored". The refusal now lives at the
             # readback itself (return 4), which is strictly earlier.
-            prev = [m for m in S.load(a.weapon, config)
+            prev = [m for m in S.load(a.weapon, config,
+                                      fire_mode=want_mode)
                     if a.fit_all or m.comp_enabled]
             if not prev:
                 print('  [!] --from-fit with nothing stored for this config')
@@ -1313,6 +1362,7 @@ def main():
             mag, why, interval_s = fire_one_into_store(
                 rig, grabber, a.weapon, config, a.posture,
                 [] if a.no_comp else curve, interval_s, prior=prior,
+                fire_mode=want_mode,
                 note='no-comp' if a.no_comp else f'scale={mag_scale:g}',
                 label=f'mag {i}')
             if mag is None:
@@ -1328,7 +1378,7 @@ def main():
 
     if written:
         from calibration.fit_time_curve import fit
-        mags = S.load(a.weapon, config)
+        mags = S.load(a.weapon, config, fire_mode=want_mode)
         r = fit(mags)
         if r['ok']:
             print(f'\n  fit over {r["n_kept"]}/{r["n_total"]} stored '

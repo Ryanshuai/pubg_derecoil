@@ -985,7 +985,7 @@ def _shape_by_session(cells, arms, min_mags):
               f'= {eff*lev.mean():.1f} counts on a {lev.mean():.0f}-count curve')
 
 
-def _write_curve(r, weapon, config, sight, posture, n_total):
+def _write_curve(r, weapon, config, sight, posture, n_total, fire_mode=None):
     """Put a fitted curve where the runtime reads from. Prints what it replaced.
 
     `config` is the {slot: part} MAPPING, or the `slot-part_slot-part` string
@@ -1056,12 +1056,20 @@ def _write_curve(r, weapon, config, sight, posture, n_total):
         # different estimators are not two measurements that disagree, and the
         # file has to be able to say which one it is.
         'centre': r.get('centre', CENTRE),
+        'fire_mode': fire_mode or cfg.fire_mode_for(weapon),
         'scaled_by': 'NOTHING. Final mouse counts; set_seq emits them with no '
                      'factors, because scope, scale, attachment and posture '
                      'are already in the magazines this was fitted from.',
     }
     os.makedirs(cfg.CURVES_DIR, exist_ok=True)
-    path = os.path.join(cfg.CURVES_DIR, f'{weapon}__{_ck(cfg_dict)}.json')
+    # ⚠ THE SAME TAG THE SAMPLES USE, from the same function, because the two
+    # have to agree about which gun this is. A weapon's ordinary mode files
+    # untagged -- so the runtime's lookup is unchanged and the mg3's 'high'
+    # curve stays where detector/weapon.py already reads it -- and the
+    # deliberate other mode gets its own file rather than overwriting it.
+    path = os.path.join(
+        cfg.CURVES_DIR,
+        f'{weapon}__{_ck(cfg_dict)}{S.fire_tag(weapon, fire_mode)}.json')
     was = None
     if os.path.exists(path):
         with open(path, encoding='utf-8') as f:
@@ -1089,6 +1097,8 @@ def main():
                     help='cut the store by session and ask whether the fitted '
                          'curve depends on which session it came from')
     ap.add_argument('--gap-min', type=float, default=SESSION_GAP_MIN)
+    ap.add_argument('--fire-mode', default=None,
+                    help='which fire mode to read and write. Defaults to config.FIRE_MODE_FOR.')
     ap.add_argument('--selftest', action='store_true')
     ap.add_argument('--write', action='store_true',
                     help='write the fitted curve to config.CURVES_DIR, which '
@@ -1133,7 +1143,8 @@ def main():
               f'y_true only rises under the trigger.')
     print(f'  {r["cluster_why"]}')
     if a.write:
-        _write_curve(r, a.weapon, a.config, a.sight, a.posture, len(mags))
+        _write_curve(r, a.weapon, a.config, a.sight, a.posture, len(mags),
+                     fire_mode=a.fire_mode)
     print(f'  samples per knot {r["samples_per_knot"]:.1f}, '
           f'spread {r["spread_counts"]:.1f} counts')
     if r['minority']:

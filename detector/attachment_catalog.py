@@ -392,6 +392,23 @@ SLOTS = {
     # while `--sight red_dot` supplied K, and K is worth about 3x between
     # sights. That is the same shape as the optic before the readback check
     # existed, arriving through the catalogue instead.
+    # ⚠ AND THE SECOND OBSERVATION CONTRADICTS THE FIRST, 2026-08-09, same day.
+    # A night run kitted a freshly spawned p90 and the readback came back EMPTY:
+    #
+    #     [!] scope should be red_dot, reads ''
+    #     attempt 1: state — kit: scope reads ''
+    #
+    # So one frame says the p90 wears a sight that reads `red_dot`, and one run
+    # says the slot will not take one. Both cannot describe the same gun, and
+    # NEITHER is enough on its own: `reads ''` is also what a gesture that never
+    # landed looks like, and the earlier frame may have been PUBG auto-fitting an
+    # optic rather than this repository installing one.
+    #
+    # ⚠ WHAT MAKES IT EXPENSIVE RATHER THAN ANNOYING: with no optic there is no
+    # K (`iron` is not a key in RECOIL_SIGHT_PROFILES), so a p90 that cannot be
+    # given a red dot cannot be MEASURED AT ALL by this pipeline -- it is not one
+    # lost cell. Until somebody puts a sight on one by hand and reads it back,
+    # this stays `inferred-scope` and the p90 stays out of the weapon queue.
     'p90':      {'slots': ('scope', 'magazine'), 'conf': 'inferred-scope'},
     # Non-replaceable laser sight and silencer as standard.
     'mp9':      {'slots': ('scope', 'magazine', 'stock'), 'conf': 'measured'},

@@ -48,11 +48,20 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass, field, asdict
 
 import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+# ⚠ THE ONLY THING THIS STORE READS FROM config, and it reads it because
+# fire_tag decides which FILE a magazine lands in. A second copy of that table
+# here would be a second answer to "where does this data go".
+import config as cfg                                            # noqa: E402
+
 SAMPLE_DIR = os.path.join(ROOT, 'calibration', 'artifacts', 'recoil', 'samples')
 
 # Schema version. Bumped when a field changes meaning rather than when one is
@@ -260,6 +269,18 @@ class Magazine:
     # None means not recorded (every magazine before this existed). 0 is a
     # different and much better answer: the magazine emptied.
     rounds_left: object = None
+    # ⚠ IT IS PART OF THE GUN'S IDENTITY, NOT A SETTING, and it decides which
+    # FILE this magazine lands in (path_for). GunDriver.FIRE_MODE_FOR has
+    # carried "the MG3 has TWO automatic modes -- a slow one and a fast one"
+    # since before any of this, and `ensure_fire_mode` presses B and watches
+    # until the HUD agrees -- and NOTHING IN THE COLLECTION PATH EVER CALLED IT.
+    # So both of this gun's stored rates were measured by whichever mode it
+    # happened to spawn in, and neither magazine says which.
+    #
+    # 'full' / 'high' / 'single' / ... is the READBACK off the HUD, never the
+    # request. 'unreadable' means the read ran and failed -- which is different
+    # from None, and None here means only "fired before this field existed".
+    fire_mode: object = None
     ads_frac: float = float('nan')
     # ⚠ TWO POINTS, NOT A RATE, and it exists because ads_frac is nan on
     # every magazine ever stored -- the timed firing path never wired that
@@ -416,13 +437,42 @@ class Magazine:
 
 # ── disk ──
 
-def path_for(weapon, config=None):
-    return os.path.join(SAMPLE_DIR, f'{weapon}__{config_key(config)}.jsonl')
+def fire_tag(weapon, fire_mode):
+    """The filename fragment for a fire mode. '' for this weapon's ORDINARY one.
+
+    ⚠ THE BASELINE IS PER WEAPON (config.fire_mode_for), NOT THE LITERAL
+    'full', and the difference is the whole design. The mg3's ordinary mode is
+    'high' -- that is what its curve is timed for and what the runtime will
+    meet -- so 'high' files untagged and the SLOW one gets `__fire-full`. A
+    tag keyed on the literal 'full' would have pushed the mg3's real curve into
+    a tagged file that nothing at runtime looks up, which is a worse state than
+    the bug it was fixing.
+
+    Everything else has exactly one automatic mode, so its tag is always '' and
+    200-odd stored magazines and every curve on disk stay exactly where they
+    are. None -- "fired before this field existed" -- also gives '', because
+    that is where those magazines already live.
+
+    ⚠ AND IT IS DRIVEN BY THE READBACK. append() passes `mag.fire_mode`, which
+    is what the HUD said, not what the run asked for -- so a magazine fired in
+    the wrong mode files itself under the wrong mode instead of pooling into
+    the right one's numbers. This project has paid twice for a record that
+    described the request.
+    """
+    if fire_mode in (None, '') or fire_mode == cfg.fire_mode_for(weapon):
+        return ''
+    return f'__fire-{fire_mode}'
+
+
+def path_for(weapon, config=None, fire_mode=None):
+    return os.path.join(
+        SAMPLE_DIR,
+        f'{weapon}__{config_key(config)}{fire_tag(weapon, fire_mode)}.jsonl')
 
 
 def append(mag: Magazine):
     """One line per magazine, append-only."""
-    p = path_for(mag.weapon, mag.config)
+    p = path_for(mag.weapon, mag.config, mag.fire_mode)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     d = asdict(mag)
     # Round the arrays: 3 decimals on a pixel shift is a thousandth of a pixel,
@@ -436,9 +486,9 @@ def append(mag: Magazine):
     return p
 
 
-def load(weapon, config=None, path=None):
+def load(weapon, config=None, path=None, fire_mode=None):
     """Every magazine ever stored for this weapon+config. [] when none."""
-    p = path or path_for(weapon, config)
+    p = path or path_for(weapon, config, fire_mode)
     if not os.path.exists(p):
         return []
     out = []

@@ -1040,7 +1040,7 @@ LOBBY_TAB_MIN_W = 20           # a label is wider than this; specks are not
 LOBBY_TAB_MIN_MARGIN = 5.0
 
 # Naming gate: TM_CCOEFF_NORMED of a run's mask against the stored label masks
-# in training_data/pubg_assets/lobby/tabs/. Below it the run is nameless, which
+# in data/templates/pubg_assets/lobby/tabs/. Below it the run is nameless, which
 # is the correct answer for the event icon and for a label in a language this
 # repo has no template for. Measured by
 # `calibration/build_lobby_tab_templates.py --verify`; set from that report, and
@@ -1345,6 +1345,30 @@ KIT_RECORDS_PATH    = os.path.join(DATA_DIR, 'kit_records.jsonl')
 # of the directory. There was nothing to revert to.
 CURVES_DIR = os.path.join(DATA_DIR, 'curves')
 TEMPLATES_DIR = os.path.join(DATA_DIR, 'templates')
+
+# Which fire mode a weapon's stored curve DESCRIBES. Everything here is
+# full-auto and comes out 'full'; the mg3 is the exception, because it has two
+# automatic modes and they are 1.50x apart in cyclic rate.
+#
+# ⚠ IT LIVES HERE RATHER THAN ON GunDriver BECAUSE TWO LAYERS NEED THE SAME
+# ANSWER, and they need it for two different reasons: control/ presses B until
+# the HUD reads this, and calibration/samples.py decides from it which FILE a
+# magazine belongs in. A weapon's ordinary mode files untagged; anything else
+# gets its own file, so the two never pool and the runtime keeps reading the
+# curve that describes the gun it will actually meet.
+#
+# ⚠ THE mg3 ENTRY IS THE ONE THAT HAS ALREADY COST SOMETHING. Its two stored
+# rates -- 59.97 ms/round (2026-08-04, bullet detection) and 88-92 ms
+# (2026-08-09, the traces' own autocorrelation) -- were each measured in
+# whichever mode the gun happened to spawn in, and NEITHER magazine records
+# which. `ensure_fire_mode` existed the whole time and no collection path ever
+# called it. docs/game_quirks.md carries the full account.
+FIRE_MODE_FOR = {'mg3': 'high'}
+
+
+def fire_mode_for(weapon):
+    """The fire mode this weapon's untagged curve and samples describe."""
+    return FIRE_MODE_FOR.get(weapon, 'full')
 
 # ════════════════════════════════════════════════════════════
 # Mouse / Pico

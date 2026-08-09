@@ -42,6 +42,7 @@ from press.pico_mouse import (HID_KEY_TAB, HID_KEY_C, HID_KEY_Z, HID_KEY_B,
 
 import cv2
 
+from config import FIRE_MODE_FOR as _CONFIG_FIRE_MODE_FOR
 from detector.tab_detector import TabTypeDetector
 
 ADS_SETTLE_S = 0.5
@@ -76,7 +77,12 @@ class GunDriver:
     # and a fast one -- and WEAPON_RPM['mg3'] is 990, the fast one. Firing the
     # slow mode against a curve timed for the fast one spaces the compensation
     # wrong on every single round.
-    FIRE_MODE_FOR = {'mg3': 'high'}
+    #
+    # ⚠ THE TABLE MOVED TO config (2026-08-09) AND THIS IS AN ALIAS. It is read
+    # by calibration/samples.py as well, to decide which file a magazine lands
+    # in, and two copies of a table that decides where DATA GOES is this
+    # repository's most expensive recurring shape.
+    FIRE_MODE_FOR = _CONFIG_FIRE_MODE_FOR
 
     def __init__(self, frames, mouse, posture_det, ads_det,
                  fire_det=None, gun_det=None, att_det=None, dump_dir=None):
@@ -492,9 +498,11 @@ class GunDriver:
                     # That explanation was checked on 2026-08-05 and is wrong:
                     # the one stored failure has a CLEAN 424 px mask and reads
                     # crouching at IoU 0.756 — the sample is mislabelled, not
-                    # misread. Over 1714 labelled crops the reader scores
-                    # 0.993 and three alternative masks/templates cannot beat
-                    # it. So say what was observed and nothing more; the icon
+                    # misread. Three alternative masks/templates cannot beat
+                    # the current reader either; the accuracy figure itself
+                    # lives in detector/posture_detector.py's docstring and is
+                    # not restated here. So say what was observed and nothing
+                    # more; the icon
                     # is simply not drawn at every moment (it needs ADS — see
                     # docs/game_quirks.md), and moving the view costs time
                     # during which it can appear.
@@ -564,9 +572,16 @@ class GunDriver:
         return None if crop is None else \
             self.fire_det.classify({'fire_mode': crop})
 
-    def ensure_fire_mode(self, weapon, tries=6):
+    def ensure_fire_mode(self, weapon, tries=6, want=None):
         """L1 — Press B and watch until the HUD reads a mode. RETURNS THE MODE
         STRING, not a bool — alone among the ensure_* here.
+
+        `want` overrides FIRE_MODE_FOR for callers that are deliberately
+        measuring the other one. ⚠ IT IS A PARAMETER HERE RATHER THAN A SECOND
+        LOOP IN THE CALLER: the mg3's slow mode has to be measurable on purpose,
+        and calibration/CLAUDE.md opens with what a parallel driver costs --
+        every copy in this repository drifted from what it copied, and the
+        symptom was a batch of numbers that looked completely normal.
 
         ⚠ 'single' IS TRUTHY AND None IS NOT SAFE. It gives up after `tries`
         and hands back whatever it ended on, so the caller compares against
@@ -583,7 +598,7 @@ class GunDriver:
         pressing once and hoping. Returns the mode it ended in, or None if the
         detector cannot see one at all (which is not the same as being wrong).
         """
-        want = self.FIRE_MODE_FOR.get(weapon, 'full')
+        want = want or self.FIRE_MODE_FOR.get(weapon, 'full')
         seen = self.read_fire_mode()
         if seen is None:
             return None
