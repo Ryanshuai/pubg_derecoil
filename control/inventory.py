@@ -618,8 +618,8 @@ class InventoryControl(Driver):
         The old way to be sure of the state was to force a known cycle: close
         it if it was open, open it, read, close it. Three keypresses, and with
         the sleeps those carried, 1.25 s to look at something that was very
-        often already on screen -- auto_calibrate.detect_attachments did
-        exactly that, and sweep.read_loadout still does.
+        often already on screen -- two collectors did exactly that, and both
+        are gone with the modules that held them.
 
         There is nothing to force. tab_open() answers the same question in
         3-6 ms, so this opens the screen only if it is shut and undoes only

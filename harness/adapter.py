@@ -451,7 +451,7 @@ def _reach(rec, rigging, weapon, cfg):
 
     # Bare: pinned sight and magazine, every other controlled slot forced
     # EMPTY rather than left alone. The rule and the reason live in
-    # harvest.want_for, in one copy, on purpose.
+    # control.kitting.want_for, in one copy, on purpose.
     # ⚠ EVERY SLOT THIS CELL DOES NOT FILL IS FORCED EMPTY, not left alone.
     # PUBG auto-fits whatever the backpack holds onto a gun the moment it
     # arrives, so an unmentioned slot is not empty -- it is whatever the last
@@ -813,6 +813,46 @@ def _agreement(pool):
     return (len(curves),
             float(np.nanmax(np.nanmax(M, 0) - np.nanmin(M, 0)) / abs(ref)),
             (lo, hi))
+
+
+def look():
+    """What is actually on the screen right now, in one line. Never raises.
+
+    Takes nothing: it builds its own LobbyControl, whose pointer is lazy, so
+    asking costs no hardware. `pixi run params` removed the `rigging` argument
+    it was first given -- a parameter no body reads is a knob a caller believes
+    is wired.
+
+    ⚠ THE FAILURE PATH HAD NO EYES. `reset` returns a bool, the loop printed
+    "treating as systemic", and the reason was drawn on the monitor the whole
+    time: 2026-08-09, the character had been evicted and the screen was the
+    LOBBY under a daily-mission modal. Every cell after it reported "inventory
+    would not open for kitting: focused=True, tab_open=False" -- all true, and
+    useless, because Tab does nothing in a lobby.
+
+    ⚠ AND THE PICTURE WAS ALREADY BEING SAVED. adapter.dump writes before.png,
+    tab.png and state.json on every failure; nothing read them. A dump is
+    evidence for the morning. This is the same question asked while the loop can
+    still act on the answer, which is the difference between four dead cells and
+    one.
+
+    Reports rather than repairs: LobbyControl.state() is the thing that knows
+    how to fix each of these, and a reporter that drives would be the second
+    opinion sitting next to the one it is supposed to describe.
+    """
+    try:
+        from control.lobby import LobbyControl
+        with LobbyControl() as lc:
+            st = lc.state()
+        # `.value` is the display string LobbyControl's own CLI prints, and
+        # `.playable` is the one bit that decides whether pressing anything can
+        # do anything -- only IN_GAME is True.
+        return (f'{getattr(st, "value", st)}'
+                + ('' if getattr(st, 'playable', False)
+                   else ' — NOT playable, so Tab, the spawner and the trigger '
+                        'all do nothing here'))
+    except Exception as e:                          # noqa: BLE001 — reported
+        return f'unreadable ({type(e).__name__}: {e})'
 
 
 def reset(rigging, level=LIGHT):

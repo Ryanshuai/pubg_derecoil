@@ -88,8 +88,7 @@ AGREE_BAND_MIN_S = 0.25
 # -- the artefact interleaving exists to remove.
 AGREE_SPREAD_MAX = 0.05
 
-# DERIVED FROM THE FAILURE MODE, and the same number the measurement layer
-# uses (calibration/analysis.ADS_FRAC_MIN). Hip fire is what this is for: the
+# DERIVED FROM THE FAILURE MODE. Hip fire is what this is for: the
 # posture icon stops rendering, the burst is analysed with the scoped K of 1.55
 # against the hip's 0.50, and a confident +498 counts comes back on a weapon
 # that measured -31 an hour earlier. That is a ~3x error, nowhere near 90%.
@@ -107,13 +106,15 @@ AGREE_SPREAD_MAX = 0.05
 # two full attempts, with 5/5 magazines kept, rate spread 0.19 ms, tracking 99%
 # and every other check clean. Twice rejected for two tenths of a point.
 #
-# Kept here rather than deleted as redundant, and kept at the SAME value: this
-# layer has to judge a record even if the measurement layer's gate is changed,
-# bypassed, or the record came from somewhere else. Defence in depth with the
-# same derived number is honest; a stricter arbitrary one is a second opinion
-# nobody derived. tools/test_harness.py asserts the two stay equal.
+# ⚠ THIS USED TO BE THE SECOND OF TWO COPIES, and the paragraph here described
+# keeping them equal ("defence in depth ... tools/test_harness.py asserts the
+# two stay equal"). The other copy was calibration/analysis.ADS_FRAC_MIN, and
+# analysis.py went with the old coordinate -- so there is nothing left to stay
+# equal TO, and no such assertion in test_harness. The line below is now the
+# only definition in the repository, which is the outcome that paragraph wanted
+# and could not have.
 #
-# 2026-08-06: 0.80 -> 0.30, following calibration/analysis, and the reason is
+# 2026-08-06: 0.80 -> 0.30, and the reason is
 # not a loosening of standards -- it is that the quantity turned out not to
 # measure what the floor assumed. FIRING CANNOT CHANGE ADS (right click is a
 # toggle, nothing touches it during a burst, the reload is after), so

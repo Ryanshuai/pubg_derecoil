@@ -79,7 +79,7 @@ self.ac.pointer.drag(src, dst)       # ✗ 绕过了 _reject()
 | **实验设计** | `collect_timed.py`（打进样本库；`--kit` 装配、自己刷枪，**四样东西读不出或对不上就拒绝**，见下）· `sweep.py`（只剩 `Rig` 装配壳）· `scan_compat.py` / `scan_fits.py`（槽位/配件兼容性）· `collect_templates.py` · `capture_ads.py` |
 | **分析** | `samples.py`（样本库，**永不删除**）· `fit_time_curve.py`（聚类 + 一次性全量拟合，`--selftest` 离线）· `bullet_detect.py` |
 | **落盘 / 事实存储** | `capture_run.py`（`CaptureRun` 格式）· `rpm_store.py` · `kit_facts.py` |
-| **模板构建 / 审计** | `solve_template.py` · `score_attachments.py` · `build_name_templates.py` · `build_lobby_tab_templates.py` · `build_weapon_hud_bank.py` · `audit_curves.py` |
+| **模板构建 / 审计** | `solve_template.py` · `score_attachments.py` · `build_name_templates.py` · `build_lobby_tab_templates.py` · `build_weapon_hud_bank.py` |
 | **状态与库存** | `state.py`（只读探针）· `mismatch.py` · `scan_slot_bleed.py` |
 | **后坐力事实** | `build_kit_factors.py`（→ `data/kit_factors.json`，`pixi run kit-factors`）· `probe_hole_pattern.py` |
 
@@ -109,7 +109,7 @@ self.ac.pointer.drag(src, dst)       # ✗ 绕过了 _reject()
 
 58 处已改（`import rpm_store` 要写成 `from calibration import rpm_store`，否则局部名不再绑定）。`sys.path.insert` 那几行**故意留着**——删它是另一件更险的事，而只要它们在，规则 10 就是唯一挡着第二份 `sweep.py` 的东西。
 
-`analysis.py` 那条「除 numpy 什么都不拉」是可验证的收益，不是形容词：以前查一个 `fit_interval` 要先 import 一个 Pico 后端、一个 torch 的火力模式检测器和 win32gui。离线回归 `pixi run analysis`（合成 trace 的属性检查 + 411 个历史弹匣回放）。
+⚠ **这里原来有一段 `analysis.py` 的「除 numpy 什么都不拉」，连着 `pixi run analysis`。两个都不存在了**（模块随旧坐标删除，任务跟着删）。同一条原则还活着，只是换了持有者：`calibration/fit_time_curve.py` 是纯分析，离线自检 `pixi run fit-time`。
 
 ## 产物往哪写
 

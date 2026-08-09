@@ -11,7 +11,7 @@ one false diagnosis:
 
 The screen said 「因长时间没有动作, 您已被踢出游戏」. The spawner was fine,
 the rack reader was fine, the posture detector was fine; the character was not
-in the game. `harvest.setup_verdict` is the branch that now tells those apart,
+in the game. `setup_verdict` is the branch that now tells those apart,
 and this is its offline check.
 
 TWO-SIDED, deliberately. The failure this gate is named after wants it to

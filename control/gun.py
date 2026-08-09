@@ -600,8 +600,10 @@ class GunDriver:
     #
     # CONVERGED. There used to be a second implementation of "is the Tab screen
     # up" right here — cv2 luma instead of the channel maximum, a closed band
-    # instead of an open one — and stocktake.open_tab called the disagreement a
-    # feature. It was a fork, and it carried the sky false-positive that
+    # instead of an open one — and what is now control/stock.open_tab called
+    # the disagreement a feature (its own docstring still records that, under
+    # "this docstring has been wrong twice"). It was a fork, and it carried the
+    # sky false-positive that
     # detector/tab_detector.py now rejects with a dark-floor test.
     #
     # What is still legitimately different is the CAPTURE path, not the

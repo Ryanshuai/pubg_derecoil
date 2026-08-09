@@ -51,9 +51,10 @@ from control.spawner import SpawnerControl, ROSTER
 from control.inventory import InventoryControl, slot_matches
 from control.stock import open_tab, restock
 from calibration.kit_facts import KitFacts
-# ONE construction site for the fired Weapon; fit_curve.rebuild uses the same
-# one. Two copies drifted and the scope fix reached only this file --
-# see calibration/weapon_build.py.
+# ONE construction site for the fired Weapon, and every caller goes through it
+# (calibration/collect_timed.py is the only one left). Two copies drifted once
+# and the scope fix reached only one of them -- see calibration/weapon_build.py,
+# which is where that history is kept.
 
 # ── ⚠ SEVEN EMA/CONVERGENCE THRESHOLDS STOOD HERE AND ARE GONE (2026-08-09) ──
 #
@@ -201,10 +202,13 @@ def setup_verdict(in_range, attempt, tries=SETUP_TRIES):
         return 'exhausted'
     return 'retry'
 
-# Which magazines are admissible is decided by analysis.magazine_fault, and
-# its gates (ADS_FRAC_MIN, HAND_COUNTS_MAX, OOR_FRAC_MAX, ROUNDS_TOL, Z_MAX)
-# live there with it — they are properties of the measurement, not of this
-# run's schedule.
+# ⚠ THIS NAMED `analysis.magazine_fault` AND ITS FIVE GATES, AND BOTH HALVES
+# ARE GONE. analysis.py went with the old coordinate, and under MODEL.md no
+# magazine is discarded at collection time at all: the store never deletes, and
+# calibration/fit_time_curve.py picks the main CLUSTER at fit time with every
+# magazine in view. Admissibility is a fit-time question now, and
+# harness/verdict.py judges the cell that comes out. Still not this run's
+# schedule to decide, which was the point worth keeping.
 
 # How far the fitted fire rate may sit from the one the curve is timed to
 # before the cell re-times and refires. Deliberately tight: the error is a

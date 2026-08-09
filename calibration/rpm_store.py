@@ -44,8 +44,9 @@ REWRITE_FRAC = 0.005
 # How far magazines of the SAME cell may disagree about the interval before
 # their average is not worth storing.
 #
-# This is the check analysis.interval_from_span asks its callers for in so many
-# words -- "a missed LAST change shortens the span and reads as a faster gun
+# This is the check the old analysis.interval_from_span asked its callers for
+# in so many words (that module is gone; the wording is kept because the check
+# is not) -- "a missed LAST change shortens the span and reads as a faster gun
 # ... it shows up as a rate that disagrees between magazines of the same cell,
 # so the caller should require agreement before storing one" -- and which no
 # caller performed. The cost of not performing it, measured: the AUG stored

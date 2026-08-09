@@ -234,7 +234,7 @@ def plan_cells(weapons, postures, sight, configs=('bare',)):
     has one muzzle and no lower rail; asking it for `muzzle+grip` would fail
     four times in a row and stop the night on the strength of a plan error.
 
-    The filtering is calibration.harvest.supported_configs, not a catalogue
+    The filtering is control.kitting.supported_configs, not a catalogue
     lookup here: layering rule 5 forbids this package from importing detector,
     and the reason applies exactly to this -- a planner that decides for itself
     what a weapon can wear is a second opinion about the game sitting beside
@@ -351,7 +351,18 @@ def run(manifest, rigging, mags, out_dir):
                 level = (adapter.HEAVY if ver['why'] == 'state'
                          else adapter.LIGHT)
                 if not adapter.reset(rigging, level=level):
-                    print('   [!] reset failed — treating as systemic')
+                    # ⚠ SAY WHAT IS ON THE SCREEN, DO NOT JUST GIVE UP ON IT.
+                    # This printed "treating as systemic" and stopped, while the
+                    # answer was drawn on the monitor: on 2026-08-09 the screen
+                    # was the LOBBY under a daily-mission modal, and every cell
+                    # after it reported "inventory would not open" — which is
+                    # true and useless, because Tab does nothing in a lobby.
+                    #
+                    # The evidence was already being SAVED (adapter.dump writes
+                    # before.png, tab.png, state.json) and nothing READ it. A
+                    # dump is for the morning; this is for the loop.
+                    print(f'   [!] reset failed — the screen says '
+                          f'{adapter.look()}')
                     break
 
         if ver and ver['usable']:
