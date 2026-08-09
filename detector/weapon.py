@@ -574,17 +574,24 @@ class Weapon():
                       f'--weapon {self.name} --sight {sight}`.', flush=True)
             self.dx_s, self.dy_s, self.t_s = [], [], []
             return
-
-            from detector.weapon_attachments import calibration_factor, attachment_factor
-            # Reverse calibration to get naked scale, then apply current attachments
-            cal_f = calibration_factor(self.name)
-            att_f = attachment_factor(self.name, self.muzzle, self.grip,
-                                      self.butt, self.posture)
-            naked_scale = self.scale / cal_f
-            factor = self.scope_factor * naked_scale * att_f * posture_f
-
-            self.dx_s, self.dy_s, self.t_s = self.bullet_calculator.calculate_press_seq(
-                self.name, factor, 'standing', has_att=True)
+        # ⚠ TEN LINES OF THE PRE-PLAN-A FACTOR PATH STOOD HERE, AFTER THAT
+        # `return`, AND WERE UNREACHABLE (deleted 2026-08-09). They rebuilt the
+        # curve as scope_factor * (scale / calibration_factor) *
+        # attachment_factor * posture_factor and called calculate_press_seq.
+        #
+        # Deleted rather than left, because unreachable code that reads like
+        # policy is worse than none: it named `attachment_factor` as the way a
+        # kitted gun gets compensated, and under plan A there ARE no factors --
+        # the curve is looked up by the exact configuration and emitted with
+        # none applied ('scaled_by: NOTHING'). Anyone reading this file for how
+        # attachments reach the firmware would have found the wrong answer in
+        # live-looking code.
+        #
+        # It also passed CATALOGUE KEYS to attachment_factor, which wants ASSET
+        # names -- the same vocabulary error that made every kitted seed print
+        # `kit x1.0000` until it was found in tools/import_kava4.py the same
+        # day. Had this path ever run, it would have applied a factor of 1.0 to
+        # every gun and looked entirely reasonable doing it.
         else:
             # sp (bolt-action snipers) etc. — no recoil control
             self.dx_s, self.dy_s, self.t_s = [], [], []

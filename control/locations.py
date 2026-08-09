@@ -207,9 +207,6 @@ def is_slot(loc):
     return loc[0] == 'weapon'
 
 
-    return None
-
-
 def loc_str(loc):
     loc = as_loc(loc)
     if is_gun(loc):

@@ -278,7 +278,6 @@ def _ship(rec, cell):
     Asked for 2026-08-09:「每次结尾都更新曲线？」
     """
     from calibration.fit_time_curve import _write_curve
-    from calibration.samples import config_key
     try:
         # Every key _write_curve needs, by name and NOT with `.get`: a missing
         # one has to raise here rather than write a curve with a hole in it.
@@ -287,7 +286,12 @@ def _ship(rec, cell):
                'span_s': rec['span_s'],
                'spread_counts': rec.get('spread_counts'),
                'samples_per_knot': rec.get('samples_per_knot')}
-        _write_curve(res, cell['weapon'], config_key(rec.get('config_read')),
+        # ⚠ THE DICT, NOT THE KEY. `config_key(...)` here wrote
+        # `vector__muzzle-comp.json` for a gun wearing comp_smg, because the
+        # key joins with "_" and the part name contains one. The readback is
+        # already a mapping; stringifying it only to have _write_curve guess it
+        # back was a lossy round trip with nothing checking it.
+        _write_curve(res, cell['weapon'], rec.get('config_read') or {},
                      rec.get('sight_read') or cell.get('sight') or 'red_dot',
                      cell['posture'], rec.get('n_total'))
     except Exception as e:                          # noqa: BLE001 — reported

@@ -882,8 +882,23 @@ def _shape_by_session(cells, arms, min_mags):
               f'= {eff*lev.mean():.1f} counts on a {lev.mean():.0f}-count curve')
 
 
-def _write_curve(r, weapon, config_key, sight, posture, n_total):
+def _write_curve(r, weapon, config, sight, posture, n_total):
     """Put a fitted curve where the runtime reads from. Prints what it replaced.
+
+    `config` is the {slot: part} MAPPING, or the `slot-part_slot-part` string
+    the CLI takes.
+
+    ⚠ THE STRING FORM IS AMBIGUOUS AND THIS USED TO TAKE ONLY THAT. config_key
+    joins `slot-part` pairs with `_`, and almost every part name CONTAINS an
+    underscore, so splitting the key back apart is not a round trip:
+
+        'muzzle-comp_smg'.split('_')  ->  ['muzzle-comp', 'smg']
+
+    which rebuilt `{'muzzle': 'comp'}` and wrote `vector__muzzle-comp.json` --
+    a filename the runtime never looks up, under a part that does not exist,
+    while printing "the RUNTIME will now play this". Caught 2026-08-09 the
+    first time a night shipped a kitted cell. A caller holding the dict must
+    pass the dict; parsing is only for the CLI, which has nothing else.
 
     ⚠ THIS CLOSES THE ONLY GAP LEFT IN THE LOOP. Collection could already
     iterate -- `--from-fit` re-fits the store in memory and uploads that -- but
@@ -900,12 +915,25 @@ def _write_curve(r, weapon, config_key, sight, posture, n_total):
     """
     import config as cfg
     from calibration.samples import config_key as _ck
-    cfg_dict = {}
-    if config_key and config_key != 'bare':
-        for part in config_key.split('_'):
-            slot, _, val = part.partition('-')
-            if slot and val:
-                cfg_dict[slot] = val
+    if isinstance(config, dict):
+        cfg_dict = dict(config)
+    else:
+        # CLI only. ⚠ Lossy whenever a part name holds an underscore -- see the
+        # docstring. It is kept because `--config` is a string and there is
+        # nothing better to parse, and it SAYS SO when it cannot round-trip.
+        cfg_dict = {}
+        if config and config != 'bare':
+            for part in str(config).split('_'):
+                slot, _, val = part.partition('-')
+                if slot and val:
+                    cfg_dict[slot] = val
+        if config and config != 'bare' and _ck(cfg_dict) != config:
+            print(f'  [!] REFUSING: --config {config!r} does not round-trip '
+                  f'through the key parser (it reads back as '
+                  f'{_ck(cfg_dict)!r}). The key joins slot-part pairs with '
+                  f'"_" and part names contain "_", so this is ambiguous and '
+                  f'the curve would be written where nothing looks it up.')
+            return None
     shots = []
     prev_t = 0.0
     for i, k in enumerate(r['knots']):

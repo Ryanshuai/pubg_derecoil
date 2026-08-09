@@ -552,6 +552,47 @@ def selftest():
     return 0
 
 
+def unreachable(dirs=DIRS + ('tools',)):
+    """Statements a `return`/`raise`/`break`/`continue` makes dead. -> [(k, why)]
+
+    ⚠ CODE THAT CANNOT RUN AND READS LIKE POLICY IS WORSE THAN NO CODE. Ten
+    lines sat after a `return` in detector/weapon.set_seq describing how a
+    kitted gun gets compensated -- scope_factor * naked_scale *
+    attachment_factor * posture_f -- and under plan A there ARE no factors: the
+    curve is looked up by the exact configuration and emitted with none
+    applied. Anyone reading that file for how attachments reach the firmware
+    found the wrong answer, in code that looked live.
+
+    It also called attachment_factor with CATALOGUE KEYS where that function
+    wants ASSET names, so had it ever run it would have applied 1.0 to every
+    gun and looked entirely reasonable doing it (the same vocabulary error was
+    found live in tools/import_kava4.py the same day).
+
+    Only the FIRST dead statement per block is reported: the rest are dead for
+    the same reason and listing them buries the cause.
+    """
+    term = (ast.Return, ast.Raise, ast.Continue, ast.Break)
+    out = []
+    for d in dirs:
+        for path in sorted((ROOT / d).rglob('*.py')):
+            try:
+                tree = ast.parse(path.read_text(encoding='utf-8'))
+            except (SyntaxError, UnicodeDecodeError):
+                continue
+            rel = path.relative_to(ROOT).as_posix()
+            for node in ast.walk(tree):
+                body = getattr(node, 'body', None)
+                if not isinstance(body, list):
+                    continue
+                for i, st in enumerate(body[:-1]):
+                    if isinstance(st, term):
+                        out.append((f'{rel}:{body[i + 1].lineno}',
+                                    f'unreachable — the {type(st).__name__} '
+                                    f'on line {st.lineno} always fires first'))
+                        break
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--all', action='store_true',
@@ -578,6 +619,18 @@ def main():
             print()
 
     rc = rc_self
+    dead = unreachable()
+    if dead:
+        rc = 1
+        print(f'✗ {len(dead)} unreachable statement(s) — delete them or move '
+              f'them above the exit. Dead code that reads like policy is how a '
+              f'wrong answer survives in a file people consult:')
+        for k, why in dead:
+            print(f'    {k}  {why}')
+        print()
+    else:
+        print('✓ nothing sits after a return/raise/break/continue')
+
     # The ratchet: a DEBT entry that has been paid must be deleted. Without
     # this the table silently stops covering the file it names, which is how a
     # ledger becomes an amnesty.
