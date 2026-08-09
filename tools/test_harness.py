@@ -32,12 +32,21 @@ for _s in (sys.stdout, sys.stderr):
         pass
 
 from harness.verdict import (judge, PROBE_FOR, OK,            # noqa: E402
-                             ADS_FRAC_MIN, TRACK_ALIVE_MIN,
-                             CLUSTER_MIN, AGREE_SPREAD_MAX)
+                             ADS_FRAC_MIN, TRACK_ALIVE_MIN, MAGS_MIN,
+                             AGREE_ARMS_MIN, AGREE_SPREAD_MAX,
+                             RATE_RESID_MS_MAX)
 
 # A record that passes everything. Every case below is this, one field moved.
-GOOD = dict(reached=True, n_kept=6, n_total=9, fired=3, ads_frac=0.95,
+#
+# ⚠ THE FIELD NAMES MOVED AND THIS FILE DID NOT, so `pixi run harness` was RED
+# on an ImportError for CLUSTER_MIN. The measurement layer's names won --
+# harness/adapter.py writes `mags_kept` and a `rate_resid_ms` -- but every
+# BEHAVIOUR asserted below is unchanged, including the one that mattered:
+# MODEL.md's out-of-loop check, which verdict.py had meanwhile replaced with an
+# impulse check whose probe no longer exists.
+GOOD = dict(reached=True, mags_kept=6, fired=3, ads_frac=0.95,
             track_alive_frac=0.99, agree_arms=2, agree_spread=0.03,
+            rate_resid_ms=0.2,
             span_s=3.8, total_counts=900.0, spread_counts=25.0)
 
 
@@ -65,13 +74,23 @@ def main():
     print('\n=== 2. enough magazines in the fitter\'s MAIN CLUSTER ===')
     # ⚠ THE POOL, NOT THE NIGHT. Samples accumulate forever, so a thin night
     # on top of a fat history is a good cell.
-    bad += case(f'{CLUSTER_MIN} in the cluster is enough',
-                dict(GOOD, n_kept=CLUSTER_MIN), True, OK)
-    bad += case(f'{CLUSTER_MIN - 1} is not',
-                dict(GOOD, n_kept=CLUSTER_MIN - 1), False, 'samples')
+    bad += case(f'{MAGS_MIN} in the cluster is enough',
+                dict(GOOD, mags_kept=MAGS_MIN), True, OK)
+    bad += case(f'{MAGS_MIN - 1} is not',
+                dict(GOOD, mags_kept=MAGS_MIN - 1), False, 'mags')
     bad += case('an absent count is not a pass',
-                {k: v for k, v in GOOD.items() if k != 'n_kept'},
-                False, 'samples')
+                {k: v for k, v in GOOD.items() if k != 'mags_kept'},
+                False, 'mags')
+
+    print('\n=== 2b. the fire rate settled ===')
+    bad += case('a settled rate passes',
+                dict(GOOD, rate_resid_ms=RATE_RESID_MS_MAX), True, OK)
+    bad += case('magazines disagreeing about the rate fails',
+                dict(GOOD, rate_resid_ms=RATE_RESID_MS_MAX + 0.1),
+                False, 'rate')
+    bad += case('an absent rate is not a pass',
+                {k: v for k, v in GOOD.items() if k != 'rate_resid_ms'},
+                False, 'rate')
 
     print('\n=== 3. was the burst aimed ===')
     bad += case(f'{ADS_FRAC_MIN:.0%} passes',
@@ -123,7 +142,7 @@ def main():
     # A verdict nobody can act on is a verdict that gets ignored. The routing
     # lives beside the thresholds so it cannot fall out of step; this checks
     # that it did not.
-    whys = {'crash', 'state', 'samples', 'ads', 'agree', 'tracking'}
+    whys = {'crash', 'state', 'mags', 'rate', 'ads', 'agree', 'tracking'}
     missing = sorted(whys - set(PROBE_FOR))
     extra = sorted(set(PROBE_FOR) - whys)
     print(f'  {"ok  " if not missing and not extra else "FAIL"}  '

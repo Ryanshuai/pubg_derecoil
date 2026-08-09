@@ -28,12 +28,44 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ── thresholds ──
 #
-# MEASURED. tools/probe_impulse_align.py fired a curve that is zero except one
-# spiked bullet and watched which round the view jumped on: 0 rounds off at
-# bullet 12 AND at bullet 30, three magazines each. That excludes a constant
-# offset and a proportional (interval) error at once. Half a round is the
-# slack this allows on top of a result that measured exactly zero twice.
-IMPULSE_OFF_MAX = 0.5           # rounds
+# ── THE OUT-OF-LOOP CHECK ────────────────────────────────────────────────
+#
+# MODEL.md is the law and its external check is this: magazines fired under
+# DIFFERENT compensation curves must, once each one's own y_comp is added back,
+# estimate the SAME y_true. The fitter never sees which arm a magazine came
+# from, so it is the one signal a fit cannot arrange.
+#
+# ⚠ IT USED TO BE AN IMPULSE CHECK AND THAT WAS A REGRESSION. `impulse_off_
+# rounds` asked WHICH ROUND moved, i.e. it lived in the bullet-index
+# coordinate, and both that coordinate and its probe
+# (tools/probe_impulse_align.py) were deleted on 2026-08-08. Nothing has
+# written that field since, so item 4 answered "no impulse check was run" for
+# EVERY cell -- a gate that cannot pass is not a gate. Meanwhile
+# harness/adapter.py had already migrated: it computes _agreement(pool) and
+# writes agree_arms / agree_spread, and imports AGREE_BAND_S from here, which
+# did not exist either. The whole path was dead at both ends.
+#
+# ⚠ ONE ARM IS "NOT CHECKED", NOT "PASSED". _agreement returns (1, None) for a
+# single-arm pool and this refuses it. That asymmetry is the entire value of
+# the check.
+AGREE_ARMS_MIN = 2
+
+# The MID-BAND, not the endpoint. Four arms measured agreeing to 0.9% at
+# t=1.5 s and diverging to 15% by t=3.8 s, with the divergence coming entirely
+# from the strongest arm in the last 1.1 s -- a region MODEL.md says is not
+# understood. Judging the model there would judge it on the one part nobody
+# claims to model. MODEL.md's own two-arm table is read at 2.40 s.
+AGREE_BAND_S = (1.0, 2.4)
+
+# A FRACTION of y_true, not counts: 30 counts means something different on a
+# Vector than on an MG3.
+#
+# Placed against the noise, not picked: MODEL.md's strongest pass is 0.4%
+# across an 85x excursion, and an arm difference carries ~1.5% by construction
+# (one arm n=8, per-magazine CV 3%). 5% is ~3x that noise, and it sits well
+# under the 6.41% that cross-session comparison produced on the same question
+# -- the artefact interleaving exists to remove.
+AGREE_SPREAD_MAX = 0.05
 
 # DERIVED FROM THE FAILURE MODE, and the same number the measurement layer
 # uses (calibration/analysis.ADS_FRAC_MIN). Hip fire is what this is for: the
@@ -122,9 +154,10 @@ def judge(rec):
     the two things this function exists to keep apart. Each check therefore
     fails closed, and says which field was missing.
     """
-    m = {k: rec.get(k) for k in ('reached', 'mags_kept', 'impulse_off_rounds',
-                                 'ads_frac', 'track_alive_frac',
-                                 'rate_resid_ms', 'rounds')}
+    m = {k: rec.get(k) for k in ('reached', 'mags_kept', 'agree_arms',
+                                 'agree_spread', 'ads_frac',
+                                 'track_alive_frac', 'rate_resid_ms',
+                                 'rounds')}
 
     def bad(why, detail):
         return {'usable': False, 'why': why, 'detail': detail, 'metrics': m}
@@ -168,15 +201,25 @@ def judge(rec):
     #    A run can satisfy every check above and still be measuring on a grid
     #    shifted from the one the firmware plays on -- the fit absorbs the
     #    shift and reports a small residual for a distorted curve. Only a
-    #    signal the fit could not have arranged separates them, which is what
-    #    the impulse is: a curve that is zero except one spiked bullet, and an
-    #    observation of which round actually moved.
-    off = rec.get('impulse_off_rounds')
-    if off is None:
-        return bad('impulse', 'no impulse check was run for this cell')
-    if abs(off) > IMPULSE_OFF_MAX:
-        return bad('impulse', f'the spike landed {off:+.1f} rounds from where '
-                              f'it was commanded')
+    #    signal the fit could not have arranged separates them: magazines from
+    #    DIFFERENT curve strengths must give the same y_true once each one's
+    #    own y_comp is added back, and the fitter cannot see which arm a
+    #    magazine came from.
+    arms = rec.get('agree_arms')
+    if arms is None:
+        return bad('agree', 'agree_arms missing — nobody checked the arms')
+    if arms < AGREE_ARMS_MIN:
+        return bad('agree', f'only {arms} curve arm(s) in the pool; one arm is '
+                            f'NOT CHECKED, which is not the same as passed')
+    spread = rec.get('agree_spread')
+    if spread is None:
+        return bad('agree', 'agree_spread missing — the arms exist but not '
+                            'enough of them reach the comparison band')
+    if spread > AGREE_SPREAD_MAX:
+        return bad('agree', f'{arms} arms disagree about y_true by '
+                            f'{spread:.1%} over t={AGREE_BAND_S[0]:.1f}'
+                            f'..{AGREE_BAND_S[1]:.1f}s, over '
+                            f'{AGREE_SPREAD_MAX:.0%}')
 
     # 5. Was the player actually aiming? Firing from the hip measures a
     #    different weapon.
@@ -212,8 +255,10 @@ PROBE_FOR = {
                 'find out at which stage',
     'rate':     'calibration/rpm_store.py + the cell trace — the fire rate '
                 'never settled',
-    'impulse':  'tools/probe_impulse_align.py — the timing chain. Nothing '
-                'downstream is trustworthy until this passes.',
+    'agree':    "MODEL.md's out-of-loop check -- fire more than one curve "
+                "strength, INTERLEAVED (calibration/collect_timed.py "
+                "--scale-sweep). One arm is NOT CHECKED, not passed, and "
+                "nothing downstream is trustworthy until this passes.",
     'ads':      'detector/ads_detector.py + calibration/capture_ads.py — the '
                 'crosshair gate',
     'tracking': 'the ViewTracker reference frame (the wrap after 3-4 '
