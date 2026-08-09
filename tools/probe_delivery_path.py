@@ -100,6 +100,11 @@ SETTLE_S = 0.40
 DEAD_PX = 2.0        # a trial that moved less than this measured nothing
 TEXTURE_MIN = 40.0   # Laplacian variance the patches need to be trackable
 ALIAS_PX = 110.0     # per-frame ceiling; RECOIL_PATCH_H/2 is 128
+PATCH_WAIT_S = 4.0   # how long a trial may wait for a trackable patch
+# A `none` arm -- button held, pattern off -- that MOVES means a weapon is
+# out and the trigger is firing it. Measured across two runs at every hold:
+# 0.0 to 0.3 px. Five is twenty times the largest honest reading.
+NONE_MAX_PX = 5.0
 
 # ── --hold-sweep: is comp_counts_at() the firmware, or an idealisation? ──────
 #
@@ -233,7 +238,16 @@ def one_trial(rig, grabber, arm, sign):
     for _ in range(3):
         grabber.grab_timed()
     prev = None
+    # ⚠ BOUNDED. `slice_frame` returns None whenever it cannot find the patch --
+    # blank sky is enough -- so the exit condition is supplied by THE WORLD and
+    # this loop had no opinion about how long to wait for it. On 2026-08-08 it
+    # held the foreground for EIGHT MINUTES, moving the cursor, immediately
+    # before a mouse-down; the only way out was killing the process from
+    # another session. layering rule 15 exists because of this loop.
+    _t_wait = time.perf_counter()
     while prev is None:
+        if time.perf_counter() - _t_wait > PATCH_WAIT_S:
+            return float('nan'), float('inf')
         _t, f = grabber.grab_timed()
         prev = rig.tracker.slice_frame(f) if f is not None else None
 
@@ -398,7 +412,16 @@ def one_hold_trial(rig, grabber, hold_s, sign, arm):
     for _ in range(3):
         grabber.grab_timed()
     prev = None
+    # ⚠ BOUNDED. `slice_frame` returns None whenever it cannot find the patch --
+    # blank sky is enough -- so the exit condition is supplied by THE WORLD and
+    # this loop had no opinion about how long to wait for it. On 2026-08-08 it
+    # held the foreground for EIGHT MINUTES, moving the cursor, immediately
+    # before a mouse-down; the only way out was killing the process from
+    # another session. layering rule 15 exists because of this loop.
+    _t_wait = time.perf_counter()
     while prev is None:
+        if time.perf_counter() - _t_wait > PATCH_WAIT_S:
+            return float('nan'), float('inf')
         _t, f = grabber.grab_timed()
         prev = rig.tracker.slice_frame(f) if f is not None else None
 
@@ -438,12 +461,21 @@ def one_hold_trial(rig, grabber, hold_s, sign, arm):
 
 def hold_sweep(rig, grabber, trials):
     from calibration.samples import comp_counts_at
-    if not holster(rig):
-        print('[!] REFUSING: could not get the weapon out of hand, and holding '
-              'the trigger with one out fires it. The recoil would cancel '
-              'between the arms but its 2-4% per-magazine scatter would not, '
-              'and that is bigger than the 2% being measured.')
-        return 7
+    # ⚠ THE PRE-FLIGHT HUD CHECK IS GONE, and what replaced it is the `none`
+    # arm itself. Two versions of that check were wrong in the same way: they
+    # thresholded BRIGHTNESS over the ammo readout, and that region shows THE
+    # WORLD when no weapon is out -- so a bright arm across it read as "a
+    # weapon is out", X did nothing (there was nothing to holster), and the
+    # probe refused a session that was already correct. Said from the chair:
+    # 「你手上没枪，所以收不了枪，所以收枪失败」. It is the same shape as
+    # map_open reading true in a sunset and tab_open behind a tree.
+    #
+    # The `none` arm holds the button for the same time with the pattern OFF,
+    # so if a weapon were out its recoil would land there and nowhere else. It
+    # measured 0.0-0.3 px at every hold across two runs. That is a POSITIVE
+    # reading of the thing that actually matters, taken in the measurement's
+    # own conditions, and no threshold about HUD pixels can fool it.
+    holster(rig)                      # best effort, and it says what it saw
     curve = _arm_sweep_curve(rig.mouse, +1)
     rig.mouse.set_recoil_enabled(False)
     held = sum(k.get('dy', 0.0) for k in curve)
@@ -456,23 +488,58 @@ def hold_sweep(rig, grabber, trials):
         f'{t:.2f}s={min(t/SWEEP_SPAN_S,1)*abs(held):.0f}' for t in HOLD_SWEEP)
         + '   <- the gap is what makes the shape testable')
 
+    from control.focus import focus_keeper
     got = {t: {'curve': [], 'move': [], 'none': []} for t in HOLD_SWEEP}
     for r in range(trials):
-        for sign in (+1, -1):
-            for t in HOLD_SWEEP:
-                # `none` only at the ends: it has measured 0.0-0.3 px every
-                # time, so it is a drift control, not a term.
-                arms = ('curve', 'move')
-                if t in (HOLD_SWEEP[0], HOLD_SWEEP[-1]):
-                    arms = arms + ('none',)
-                line = f'  r{r} {sign:+d} {t:.2f}s '
-                for arm in arms:
+        for t in HOLD_SWEEP:
+            # ⚠ STOP WHEN THE OPERATOR TAKES THE SCREEN. focus_keeper regains
+            # it a bounded number of times and then answers False, and its own
+            # docstring says why: "either something is contending, or a human
+            # is trying to get out. Both mean stop." This loop never asked, so
+            # taking the foreground three times did not stop it -- said from
+            # the chair, and it is the whole point of layering rule 15.
+            if not focus_keeper().ok(f'hold sweep r{r} {t:.2f}s'):
+                print('[!] STOPPING: the foreground was taken away and would '
+                      'not stay. Nothing here is worth measuring through that, '
+                      'and a run that will not stop is worse than one that '
+                      'fails.')
+                return 8
+            # `none` FIRST at the shortest hold: it is the abort gate, and an
+            # abort six minutes in is a refusal nobody benefits from.
+            arms = ('curve', 'move')
+            if t == HOLD_SWEEP[0]:
+                arms = ('none',) + arms
+            elif t == HOLD_SWEEP[-1]:
+                arms = arms + ('none',)
+            for arm in arms:
+                # ⚠ THE TWO DIRECTIONS FIRE BACK TO BACK, so the view returns
+                # inside every pair. The sign used to sit in the OUTER loop,
+                # which meant twelve pushes the same way (6 holds x 2 arms)
+                # before it flipped -- up to ~4800 counts against a pitch range
+                # of ~3400. It drove the view into the TOP CLAMP, where the
+                # tracker sees sky and BLIND READS AS "IT DID NOT MOVE".
+                # 「顶到天了，你这个测试怎么能顶到区间外呢？」
+                line = f'  r{r} {t:.2f}s {arm:5s}'
+                for sign in (+1, -1):
                     px, worst = one_hold_trial(rig, grabber, t, sign, arm)
-                    if worst > ALIAS_PX:
-                        line += f' {arm}=ALIASED({worst:.0f})'
+                    if not np.isfinite(px):
+                        line += '  NO-PATCH'
                         continue
+                    if worst > ALIAS_PX:
+                        line += f'  ALIASED({worst:.0f})'
+                        continue
+                    if arm == 'none' and abs(px) > NONE_MAX_PX:
+                        print(line + f'  {px:.1f}')
+                        print(f'[!] ABORT: the button was held with the pattern '
+                              f'OFF and the view moved {abs(px):.1f} px '
+                              f'(> {NONE_MAX_PX:.0f}). A WEAPON IS OUT and the '
+                              f'trigger is firing it. Its recoil cancels '
+                              f'between the arms but its 2-4% per-magazine '
+                              f'scatter does not, and that is bigger than the '
+                              f'2% being measured. Holster it (X) and re-run.')
+                        return 7
                     got[t][arm].append(sign * px)
-                    line += f' {arm}={sign*px:7.1f}'
+                    line += f' {sign * px:8.1f}'
                 print(line)
     return _report_sweep(got, curve)
 

@@ -96,6 +96,7 @@ from calibration.sweep import Rig
 ALIAS_PX = 127.0
 SETTLE_S = 0.35
 TEXTURE_MIN = 40.0
+PATCH_WAIT_S = 4.0   # how long a trial may wait for a trackable patch
 
 # The original two-arm test, kept so the old invocation still means what it did.
 PAIR_CELLS = [(70, 0.0), (70, 1.5)]
@@ -132,11 +133,21 @@ def texture(rig, grabber):
 
 
 def _first_patch(rig, grabber):
-    while True:
+    """-> a trackable patch, or None if the world will not supply one.
+
+    ⚠ BOUNDED, and it was not. `slice_frame` answers None whenever it cannot
+    find the patch -- blank sky is enough -- so the exit condition here comes
+    from THE WORLD and the loop had no opinion about how long to wait for it.
+    A sibling probe held the foreground for eight minutes on that exact shape
+    (layering rule 15). A probe that cannot finish must say so, not wait.
+    """
+    t0 = time.perf_counter()
+    while time.perf_counter() - t0 < PATCH_WAIT_S:
         _t, f = grabber.grab_timed()
         p = rig.tracker.slice_frame(f) if f is not None else None
         if p is not None:
             return p
+    return None
 
 
 def one_pair(rig, grabber, sign, counts):
@@ -144,11 +155,17 @@ def one_pair(rig, grabber, sign, counts):
     for _ in range(3):
         grabber.grab_timed()
     a = _first_patch(rig, grabber)
+    if a is None:
+        return {'px': float('nan'), 'pairs': 0, 'mean_abs': float('nan'),
+                'max_abs': float('nan'), 'dur': 0.0}
     rig.mouse.move(0, -sign * counts)
     time.sleep(SETTLE_S)
     for _ in range(2):
         grabber.grab_timed()          # flush anything caught mid-motion
     b = _first_patch(rig, grabber)
+    if b is None:
+        return {'px': float('nan'), 'pairs': 0, 'mean_abs': float('nan'),
+                'max_abs': float('nan'), 'dur': SETTLE_S}
     m = rig.tracker.measure_pair(a, b, 0.0)
     d = abs(m.dy) if np.isfinite(m.dy) else float('nan')
     return {'px': d, 'pairs': 1, 'mean_abs': d, 'max_abs': d, 'dur': SETTLE_S}
@@ -159,6 +176,9 @@ def many_pairs(rig, grabber, sign, counts, spread_s):
     for _ in range(3):
         grabber.grab_timed()
     prev = _first_patch(rig, grabber)
+    if prev is None:
+        return {'px': float('nan'), 'pairs': 0, 'mean_abs': float('nan'),
+                'max_abs': float('nan'), 'dur': 0.0}
     n_steps = max(5, int(spread_s * 200))
     t0 = time.perf_counter()
 

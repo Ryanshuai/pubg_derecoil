@@ -502,6 +502,228 @@ def check_eager_pointer(path, rel):
     return out
 
 
+# ── Rule 15: a loop that holds the screen must be escapable ──────────────
+#
+# ⚠ THE OPERATOR HAS TO BE ABLE TO TAKE THE MACHINE BACK, and on 2026-08-08
+# they could not. tools/probe_delivery_path.py --hold-sweep sat in
+#
+#     prev = None
+#     while prev is None:
+#         _t, f = grabber.grab_timed()
+#         prev = rig.tracker.slice_frame(f) if f is not None else None
+#
+# with the mouse button about to go down, driving the cursor, for eight
+# minutes until it was killed from another session. slice_frame returns None
+# whenever the tracker cannot place its patch -- a blank sky is enough -- so
+# the exit condition is a thing the WORLD has to provide, and nothing in the
+# loop had an opinion about how long to wait for it.
+#
+# The escape hatch already exists and that file simply never called it:
+# control.focus.focus_keeper().ok(tag) returns False once a human has taken
+# the foreground MAX_REGAINS times, and its own docstring says why -- "either
+# something is contending, or a human is trying to get out. Both mean stop."
+# A run that never asks cannot be stopped by asking.
+#
+# ⚠ SCOPE IS THE SCRIPT LAYERS ONLY. control/ has `while True` loops by the
+# dozen and they are fine: every one is inside a driver that carries its own
+# timeout, and _await_frame already consults focus_keeper. The rule is about
+# the layer that OWNS a run -- the thing that took the foreground and will
+# hold it for minutes.
+_CLOCK = {'perf_counter', 'monotonic', 'time', 'sleep', 'deadline', 'timeout',
+          'elapsed', 'budget', 'until', 'end', 't0', 'tries', 'attempts'}
+
+# ⚠ NINE LOOPS AT THE MOMENT THE RULE WAS WRITTEN, five of them the identical
+# `while prev is None` frame-grab. Same ratchet as rules 6 and 9: the reason
+# belongs to SCHEDULE, so an entry that stops offending must be deleted or
+# this reports it. New files are covered from their first line.
+# ⚠ INFERRED, NOT CODE, AND THE DISTINCTION IS _ledger.py's OWN. A CODE
+# reason must carry a check, and a check tests the REASON rather than the
+# rule. Here the reason IS the rule -- "this file still has a loop nothing can
+# interrupt" is precisely what check_escape_hatch already answers on every
+# build. Attaching a check would re-run the rule and make the entry look
+# doubly verified when it is verified exactly once.
+ESCAPE_DEBT = {
+    'calibration/capture_ads.py':
+        Reason('`while len(out) < n` collecting frames — bound it or ask '
+               'focus_keeper', INFERRED),
+    'calibration/collect_templates.py':
+        Reason('`while remaining` over the spawn list — one pass that spawns '
+               'nothing must end it', INFERRED),
+    'tools/fit_pitch_level.py':
+        Reason('`while rises < BAND_MAX` climbing the pitch band', INFERRED),
+    'tools/probe_additivity.py':
+        Reason('`while prev is None` frame grab', INFERRED),
+    'tools/probe_human_sign.py':
+        Reason('`while prev is None` frame grab', INFERRED),
+    'tools/probe_input_latency.py':
+        Reason('`while prev is None` frame grab', INFERRED),
+}
+
+
+def _names_in(node):
+    """Every called name, attribute and bare name under `node`."""
+    out = set()
+    for n in ast.walk(node):
+        if isinstance(n, ast.Call):
+            nm = _call_name(n)
+            if nm:
+                out.add(nm)
+        elif isinstance(n, ast.Attribute):
+            out.add(n.attr)
+        elif isinstance(n, ast.Name):
+            out.add(n.id)
+    return out
+
+
+def check_escape_hatch(path, rel):
+    """while-loops in a foreground-holding script must be escapable.
+
+    -> [(lineno, test_source)]
+
+    A loop passes if anything in it -- test or body -- mentions the clock or
+    calls focus_keeper. Deliberately generous: the point is not to audit how
+    the loop ends, it is to catch loops that have NO opinion about ending.
+    `while prev is None` mentions neither, and that is exactly the shape that
+    held the machine.
+
+    ⚠ THE BODY COUNTS, NOT JUST THE TEST, and the first draft checked only
+    the test. That flagged every `while True:` in control/ whose body does
+    `if elapsed > timeout: return` -- 28 findings, almost all of them correct
+    code. Reading the body drops it to 9, and all 9 are real.
+
+    ⚠ A `break` IS NOT ACCEPTED as an escape. All nine offenders have no
+    break at all, so nothing is lost today, and accepting one would take any
+    `if x: break` as proof of termination when x is exactly the world-provided
+    condition in question.
+    """
+    if rel.parts[0] not in ('tools', 'calibration', 'harness'):
+        return []
+    try:
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+    except (SyntaxError, UnicodeDecodeError):
+        return []
+    # Taking the foreground is the honest declaration that this holds the
+    # screen -- the same predicate rule 9 uses, for the same reason.
+    if not ({'ensure_ready', 'ensure_focus'} & _names_in(tree)):
+        return []
+    out = []
+    for w in [n for n in ast.walk(tree) if isinstance(n, ast.While)]:
+        scope = _names_in(w.test)
+        for st in w.body:
+            scope |= _names_in(st)
+        if _CLOCK & scope or 'focus_keeper' in scope:
+            continue
+        out.append((w.lineno, ast.unparse(w.test)[:48]))
+    return out
+
+
+ESCAPE_WHY = (
+    'holds the foreground and loops with no clock and no focus check, so a '
+    'human cannot take the machine back by clicking away — the loop exits '
+    'only when the WORLD provides its condition, and nothing bounds the wait. '
+    'This is what sat on the cursor for eight minutes on 2026-08-08. Fix: '
+    '`if not focus_keeper().ok("<tag>"): break` in the loop (focus_keeper '
+    'returns False once a human has taken the foreground MAX_REGAINS times), '
+    'or give the loop a deadline. Or add an ESCAPE_DEBT entry with a date.')
+
+# ⚠ SIX CASES, THREE OF WHICH MUST BITE. Case 4 is the shape that actually
+# held the machine; 5 and 6 are the two false-positive families the drafts
+# produced (a body-level clock, and a library loop in a file that never takes
+# the foreground).
+_ESCAPE_CASES = [
+    ('the loop that held the machine', True, '''
+from control.session import ensure_ready
+def probe(grabber, rig):
+    ensure_ready(label='x')
+    prev = None
+    while prev is None:
+        _t, f = grabber.grab_timed()
+        prev = rig.tracker.slice_frame(f)
+'''),
+    ('bare while True with no clock', True, '''
+from control.session import ensure_ready
+def probe():
+    ensure_ready(label='x')
+    while True:
+        step()
+'''),
+    ('a counter the world has to satisfy', True, '''
+from control.session import ensure_ready
+def probe():
+    ensure_ready(label='x')
+    rises = 0
+    while rises < 12:
+        rises += look()
+'''),
+    ('asks focus_keeper', False, '''
+from control.session import ensure_ready
+from control.focus import focus_keeper
+def probe(grabber):
+    ensure_ready(label='x')
+    prev = None
+    while prev is None:
+        if not focus_keeper().ok('grab'):
+            break
+        prev = grabber.grab()
+'''),
+    ('deadline in the BODY, not the test', False, '''
+from control.session import ensure_ready
+import time
+def probe(grabber):
+    ensure_ready(label='x')
+    end = time.perf_counter() + 5
+    while True:
+        if time.perf_counter() > end:
+            break
+        grabber.grab()
+'''),
+    ('never takes the foreground', False, '''
+def analyse(rows):
+    prev = None
+    while prev is None:
+        prev = rows.pop()
+'''),
+]
+
+
+def selftest_escape():
+    """-> (passed, total, bitten). Rule 15 proving it can be both."""
+    import tempfile
+    passed = bitten = 0
+    for label, must_bite, src in _ESCAPE_CASES:
+        with tempfile.NamedTemporaryFile('w', suffix='.py', delete=False,
+                                         encoding='utf-8') as fh:
+            fh.write(src)
+            tmp = pathlib.Path(fh.name)
+        try:
+            got = bool(check_escape_hatch(tmp, pathlib.Path('tools/x.py')))
+        finally:
+            tmp.unlink(missing_ok=True)
+        ok = got == must_bite
+        passed += ok
+        bitten += must_bite
+        if not ok:
+            print(f'  SELFTEST FAIL  rule 15 / {label}: expected '
+                  f'{"a bite" if must_bite else "silence"}, got the other')
+    return passed, len(_ESCAPE_CASES), bitten
+
+
+def check_escape_ledger(offenders):
+    """The rule 15 ratchet. -> [(path, message)]"""
+    out = []
+    for rel in sorted(ESCAPE_DEBT):
+        if rel in offenders:
+            continue
+        if not (ROOT / rel).exists():
+            out.append((rel, 'listed as escape-hatch debt but the file is '
+                             'gone — delete the entry'))
+        else:
+            out.append((rel, 'every loop in it can now be escaped — the debt '
+                             'is PAID. Delete its ESCAPE_DEBT entry so rule 15 '
+                             'starts covering this file again.'))
+    return out
+
+
 # ── Rule 14: one trip into the backpack ──────────────────────────────────
 #
 # ⚠ THE RULE WAS ALREADY WRITTEN DOWN, IN InventoryControl.tab_up's OWN
@@ -820,6 +1042,7 @@ def main():
     offenders = set()
     unready = []
     not_ready = set()
+    no_escape = set()
     checked = 0
     for f in sorted(ROOT.rglob('*.py')):
         rel = f.relative_to(ROOT)
@@ -857,15 +1080,32 @@ def main():
                 f'{na}() at line {la}, then {nb}() in {fn}()',
                 TAB_CHURN_WHY))
 
+        loose = check_escape_hatch(f, rel)
+        if loose:
+            no_escape.add(rel.as_posix())
+            if rel.as_posix() not in ESCAPE_DEBT:
+                for lineno, test in loose:
+                    violations.append((
+                        'a loop that holds the screen must be escapable',
+                        rel.as_posix(), lineno, f'while {test}', ESCAPE_WHY))
+
         why = check_ready(f, rel, imps)
         if why:
             not_ready.add(rel.as_posix())
             if rel.as_posix() not in READY_LEDGER:
                 unready.append((rel.as_posix(), why))
 
-    stale = check_ledger(offenders) + check_ready_ledger(not_ready)
+    stale = (check_ledger(offenders) + check_ready_ledger(not_ready)
+             + check_escape_ledger(no_escape))
 
-    print(f'checked {checked} files against {len(RULES) + 3} rules')
+    print(f'checked {checked} files against {len(RULES) + 4} rules')
+    ep, et, eb = selftest_escape()
+    print(f'  {"✓" if ep == et else "✗"} rule 15 self-test {ep}/{et} '
+          f'({eb} of them must BITE, so "never report" does not pass)')
+    if ep != et:
+        violations.append(('rule 15 self-test', 'tools/check_layering.py', 0,
+                           'the escape-hatch rule itself',
+                           f'{et - ep} of {et} cases answered wrong.'))
     # ⚠ PRINTED EVEN WHEN GREEN, because rule 14 has no ledger and therefore
     # no other evidence that it is still able to fire. tools/CLAUDE.md's line:
     # a gate nobody can say what would turn red has not been verified.
@@ -905,10 +1145,20 @@ def main():
     # true", which nothing did until 2026-08-08 — and a reason nothing checks
     # is how tools/drive_screen.py sat on the debt list for a year behind
     # three clauses that were each one grep from being disproven.
+    if ESCAPE_DEBT:
+        left = [r for r in sorted(ESCAPE_DEBT)
+                if r not in {x for x, _ in stale}]
+        print(f'\n{len(left)} script(s) still holding the screen in a loop '
+              f'nobody can interrupt (rule 15 debt) — add '
+              f'`if not focus_keeper().ok("<tag>"): break`')
+        for rel in left:
+            print(f'  {rel:38s} {ESCAPE_DEBT[rel].why.split(" — ")[0]}')
+
     led_lines, led_bad = audit([('rule6 EXEMPT', EXEMPT),
                                 ('rule6 DEBT', DEBT),
                                 ('rule9 EXEMPT', READY_EXEMPT),
                                 ('rule9 DEBT', READY_DEBT),
+                                ('rule15 DEBT', ESCAPE_DEBT),
                                 ('rule7 owners', ICON_BOX_OWNERS)])
     for line in led_lines:
         print(line)
