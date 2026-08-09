@@ -266,6 +266,14 @@ class Dispatcher(DaemonLoop):
         if self._tab_was and not now and self.state.stop_recoil:
             self.state.stop_recoil = False
             self._cause = 'tab seen to close'
+            # ⚠ IT PRINTS, because the key path prints and this one did not --
+            # so a log showed `stop_recoil False -> True` on every Tab press
+            # and never once showed it coming back. Reading it, the tool looked
+            # permanently disarmed after the first inventory, which is exactly
+            # the bug this function fixed. One direction of a two-directional
+            # flag is worse than neither: it reads as evidence.
+            print(f'[state] stop_recoil True -> False   '
+                  f'(after {self._cause})', flush=True)
             self._apply_hw(['recoil_on', 'upload_pattern'])
         self._tab_was = now
 

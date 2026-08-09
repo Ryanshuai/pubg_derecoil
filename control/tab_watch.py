@@ -60,12 +60,43 @@ the flag only ever changes because the screen was looked at.
 Nothing here blocks: tick() does at most one 5 ms anchor check, except on the
 tick where the panel closes, which also grabs and classifies.
 """
+import datetime
+import os
 import time
 
 from config import HUD_REGIONS, TAB_DRIFT_S, TAB_SETTLE_S
 
 ATT_REGIONS = [k for k in HUD_REGIONS if k.startswith('att_')]
 NAME_REGIONS = ['gun_name_1', 'gun_name_2']
+
+# ⚠ EVERY CLOSE LEAVES ITS FRAME ON DISK, and it is on by default because the
+# question it answers cannot be answered any other way. This file rests on a
+# claim about what the screen looks like at one instant -- the anchor text has
+# gone, the panel has not -- and no amount of reasoning settles that. The
+# picture does. It sits beside the run's log, named with the same clock, so a
+# line in the log and the frame it was read from are one lookup apart.
+#
+# It is the right of the operator to look at what the machine looked at. When a
+# reading is wrong, "what did it see" has been, every single time in this
+# repository, the question that ended the argument -- and until now the only
+# way to ask it was to reproduce the moment.
+SHOT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
+    __file__))), 'calibration', 'artifacts', 'robot', 'tab')
+
+_BLOCK_RECT = None
+
+
+def _BLOCK():
+    """The rectangle TabGrabber fills: both name plates and all ten tiles.
+
+    Asked of detector/tab_items rather than spelled here, and lazily, so that
+    importing this module still costs nothing on a state-only path.
+    """
+    global _BLOCK_RECT
+    if _BLOCK_RECT is None:
+        from detector.tab_items import tab_blocks
+        _BLOCK_RECT = tab_blocks()['right']
+    return _BLOCK_RECT
 
 
 class TabWatch:
@@ -158,6 +189,16 @@ class TabWatch:
             if weap is not None:
                 out['weapons'] = weap.classify(
                     {k: _crop(frame, k) for k in NAME_REGIONS})
+                # ⚠ INK IS THE SECOND, INDEPENDENT SOURCE, and without it a
+                # blank name has two causes that print identically: the plate
+                # was not there, or it was there and the OCR could not read it.
+                # `ink` counts white-text pixels THROUGH THE SAME MASK classify
+                # matches with, so "there is text here" and "the OCR read it"
+                # are claims about the same pixels rather than two opinions.
+                # One says the panel had gone before this ran; the other says
+                # this file's premise holds and the templates are the problem.
+                # Nothing downstream can tell them apart, so the log must.
+                out['ink'] = [_ink(weap, frame, k) for k in NAME_REGIONS]
             if att is not None:
                 # ⚠ AN UNPAINTED PANEL IS NOT A BARE GUN, AND IT IS ALSO THE
                 # EVIDENCE FOR THE PREMISE ABOVE. classify() reports an
@@ -175,21 +216,40 @@ class TabWatch:
                 # CLAUDE.md: border-ring Sobel p90 46-173 empty against 5-26 for
                 # no tile at all), so this does not refuse a bare gun. It
                 # refuses a panel with no tiles anywhere.
-                if not att.any_drawn(frame):
-                    self._log('the panel was already gone when the anchor '
-                              'said so — no tiles painted, so the kit is NOT '
-                              'published (an unpainted tile is not an empty '
-                              'slot). Expected after an alt-tab or a dialog, '
-                              'where no key announced the close.')
-                else:
+                out['painted'] = bool(att.any_drawn(frame))
+                if out['painted']:
                     named = {i + 1: nm
                              for i, nm in enumerate(out['weapons'] or ()) if nm}
                     out['attachments'] = att.classify(frame, named)
-                    self._log('read at the close, panel still painted')
         except Exception as e:
             self._log(f'panel read failed: {e}')
             return None
+        self._log(_describe(out) + self._save(frame))
         return out
+
+    def _save(self, frame):
+        """Write the frame this reading came from. -> ' shot <path>' or ''.
+
+        ⚠ IT SAVES THE WHOLE BLOCK, not the crops it read. The crops are what
+        the detector looked at; the block is what the SCREEN looked like, and
+        when a reading is wrong the two questions have different answers --
+        a crop can be perfectly readable while the panel behind it is the
+        wrong panel, half drawn, or somebody else's.
+
+        Failure is one line and never fatal: a log that cannot save a picture
+        is still a log, and this runs on the tick that re-arms the firmware.
+        """
+        try:
+            import cv2
+            os.makedirs(SHOT_DIR, exist_ok=True)
+            y, x, h, w = _BLOCK()
+            stamp = datetime.datetime.now().strftime('%m%d_%H%M%S_%f')[:-3]
+            path = os.path.join(SHOT_DIR, f'{stamp}.png')
+            if not cv2.imwrite(path, frame[y:y + h, x:x + w]):
+                return '   (frame not saved: imwrite refused)'
+            return f'   shot {path}'
+        except Exception as e:
+            return f'   (frame not saved: {e!r})'
 
     # ── Driving ──
 
@@ -266,16 +326,87 @@ class TabWatch:
             self._publish(got)
 
     def _publish(self, got):
-        """Write a reading through to GameState, as the detections used to."""
+        """Write a reading through to GameState, as the detections used to.
+
+        ⚠ A KIT IS NOT PUBLISHED FOR A GUN NOTHING CAN NAME, and that is the
+        root CLAUDE.md's second law rather than caution. The slot templates are
+        narrowed BY the weapon name; with no name every tile is matched against
+        all 55, and a blind match does not fail, it answers. Seen in a play log
+        2026-08-09, both name plates blank: `muzzle-choke` (a shotgun part) on
+        one gun and `stock-cheek_pad` (a sniper part) on the other, published
+        and keyed into the curve store as if measured.
+
+        The name checked is the EFFECTIVE one -- weapon_hud's reading counts,
+        so a gun already identified from the HUD keeps its kit even when the
+        Tab plate is unreadable.
+        """
         self.loadout = got
         if got['weapons'] is not None:
             self.state.weapon_gt = got['weapons']
             self.state.sync_weapons()
         if got['attachments'] is not None:
+            eff = self.state.weapon_name
             for gun_id, a in got['attachments'].items():
+                if not eff[gun_id - 1]:
+                    self._log(f'gun {gun_id}: slots read but the name plate '
+                              f'was not, so the kit describes a gun nothing '
+                              f'can name — NOT published (an unnamed gun '
+                              f'matches every template blind)')
+                    continue
                 self.state.set_attachments(gun_id, a)
 
 
 def _crop(frame, key):
     y, x, h, w = HUD_REGIONS[key]
     return frame[y:y + h, x:x + w]
+
+
+def _ink(weap, frame, key):
+    """White-text pixel count on a name plate, or None if it cannot be had."""
+    fn = getattr(weap, 'ink', None)
+    if fn is None:
+        return None
+    try:
+        return int(fn(_crop(frame, key)))
+    except Exception:
+        return None
+
+
+def _short(asset):
+    """`Muzzle_Compensator_Large_C` -> `Compensator_Large`, for one log line."""
+    if not asset:
+        return '-'
+    s = asset
+    for pre in ('Upper_', 'Lower_', 'Muzzle_', 'Stock_', 'Magazine_',
+                'SideRail_'):
+        if s.startswith(pre):
+            s = s[len(pre):]
+            break
+    return s[:-2] if s.endswith('_C') else s
+
+
+def _describe(out):
+    """The whole reading on one line: what was read, and what it was read from.
+
+    ⚠ THE POINT IS THAT IT NAMES THE READING, NOT THE EVENT. `read at the
+    close, panel still painted` was the previous version and it said only that
+    something had happened -- so a session where every plate came back blank
+    and every slot was matched blind logged eleven identical successful-looking
+    lines. What a reading SAYS is the only thing that makes a log diagnosable
+    without reproducing the moment.
+    """
+    names = out.get('weapons') or ('', '')
+    ink = out.get('ink') or [None, None]
+    kit = out.get('attachments') or {}
+    bits = []
+    for i in (0, 1):
+        got = names[i] or '?'
+        pen = '' if ink[i] is None else f' ink {ink[i]}'
+        slots = kit.get(i + 1)
+        worn = ('  ' + ' '.join(f'{k}={_short(v)}'
+                                for k, v in sorted(slots.items()))
+                if slots else '')
+        bits.append(f'gun{i + 1} {got}{pen}{worn}')
+    paint = ('tiles painted' if out.get('painted') else
+             'NO tiles painted — the panel had already gone, kit not read')
+    return 'read at the close: ' + ' | '.join(bits) + f' | {paint}'

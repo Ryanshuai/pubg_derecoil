@@ -51,8 +51,21 @@ class FakeState:
     def __init__(self):
         self.tab_open = False
         self.weapon_gt = ('', '')
+        self.weapon_pred = ('', '')
         self.attachments = {}
         self.synced = 0
+
+    @property
+    def weapon_name(self):
+        """Effective names: GT then pred, as the real GameState resolves them.
+
+        Modelled rather than stubbed because a kit is only published for a gun
+        this answers for, and the fallback to `pred` is the half that matters:
+        a gun already named by the HUD detector keeps its kit even when the Tab
+        plate is unreadable. A stub returning weapon_gt alone would pass every
+        case here and drop the kit in the one that counts.
+        """
+        return tuple(g or p for g, p in zip(self.weapon_gt, self.weapon_pred))
 
     def sync_weapons(self):
         self.synced += 1
@@ -302,6 +315,42 @@ check('it did look', screen5.grabs, 1)
 check('attachments NOT published', 1 in state5.attachments, False)
 check('attachment read never even attempted', screen5.att_reads, 0)
 check('but the weapon names still are', state5.weapon_gt, ('vss', 'p90'))
+
+print('\n=== a gun nothing can NAME gets no kit ===')
+# ⚠ MEASURED IN A PLAY LOG, 2026-08-09. Both name plates came back blank for a
+# whole session, and the slot templates are narrowed BY the weapon name -- so
+# every tile was matched against all 55, and a blind match does not fail, it
+# answers: `muzzle-choke` (a shotgun part) on one gun, `stock-cheek_pad` (a
+# sniper part) on the other, published and keyed into the curve store.
+#
+# The names publishing while the kit does not is the honest split: the plate
+# read is its own evidence, the slot read is only as good as the name.
+w7, state7, screen7 = build()
+screen7.open = True
+screen7.show(1, ('', ''), kit={1: {'muzzle': 'choke'},
+                               2: {'stock': 'cheek_pad'}})
+w7._set_open(True)
+screen7.open = False
+w7.on_key(time.perf_counter())
+t = run(w7, 0.05, t0=time.perf_counter())
+check('the slots WERE read', screen7.att_reads, 1)
+check('but no kit was published for gun 1', 1 in state7.attachments, False)
+check('nor for gun 2', 2 in state7.attachments, False)
+
+# ...and a gun the HUD already named keeps its kit, because the name it is
+# checked against is the EFFECTIVE one. Dropping the kit whenever the Tab
+# plate is unreadable would throw away a reading that was never in doubt.
+w8, state8, screen8 = build()
+state8.weapon_pred = ('m416', '')
+screen8.open = True
+screen8.show(1, ('', ''), kit={1: {'muzzle': 'comp_ar'}, 2: {'stock': 'x'}})
+w8._set_open(True)
+screen8.open = False
+t = run(w8, 0.05, t0=time.perf_counter())
+check('gun 1 is named by the HUD, so its kit publishes',
+      state8.attachments.get(1), {'muzzle': 'comp_ar'})
+check('gun 2 is still nameless, so its kit does not',
+      2 in state8.attachments, False)
 
 print('\n=== idle costs nothing but the drift check ===')
 w6, state6, screen6 = build()
