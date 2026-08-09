@@ -391,6 +391,25 @@ def one_magazine(rig, grabber, weapon, mag_size, interval_s, curve,
     out = rig.fire.fire_magazine_timed(grabber, mag_size, interval_s)
     # Before the reload: R drops out of ADS on its own (docs/game_quirks.md),
     # so a read taken after it would report the reload, not the burst.
+    #
+    # ⚠ BUT NOT AT THE INSTANT OF RELEASE, WHICH IS WHAT THIS DID. AdsDetector
+    # answers by the ABSENCE of the hip crosshair, and detector/CLAUDE.md
+    # records it reading low WHILE THE VIEW IS SHAKING: 387/387 correct on a
+    # still VSS and 0.79 on the same VSS firing, scaling with recoil across the
+    # roster. Read on the last shaking frame it therefore measures the recoil,
+    # not the optic.
+    #
+    # Measured 2026-08-09 the moment a second gun ran: the vector -- 2.2 s
+    # burst, 620-870 counts -- read 100% on every cell, and the AUG -- 3.9 s,
+    # ~1400 counts -- read 50-60% with magazines whose y_true agreed to under
+    # 2%. Two guns, one detector, and the difference is how hard the screen was
+    # moving when the question was asked.
+    #
+    # ADS_SETTLE_S is the same wait GunDriver already uses after the ADS
+    # animation, so the number is not new here. R is not pressed until
+    # wait_reload, several calls later, so nothing is racing it.
+    from control.gun import ADS_SETTLE_S
+    time.sleep(ADS_SETTLE_S)
     try:
         ads_end = bool(rig.gun.in_ads())
     except Exception as e:                       # noqa: BLE001

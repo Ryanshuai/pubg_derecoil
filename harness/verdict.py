@@ -127,18 +127,34 @@ AGREE_SPREAD_MAX = 0.05
 # says never up, and one of them is lying.
 ADS_FRAC_MIN = 0.30
 
-# The `ads_end` floor, and it is 1.0 rather than a fraction because the two
-# quantities are not the same kind of thing. `ads_frac` is a per-FRAME ratio
-# within one burst, and it reads low under recoil shake — that is why its floor
-# is 0.30. `ads_end_ok` is the fraction of MAGAZINES whose burst ended scoped:
-# a whole magazine, one endpoint each, no shake in it. One magazine out of five
-# ending out of the scope is one magazine analysed with a constant that is
-# wrong by ~3x, and it belongs in the cell's numbers rather than in a tolerance.
+# ⚠ THE `ads_end` FLOOR WAS 1.0 FOR ONE NIGHT AND IT WAS WRONG, on a reasoning
+# error worth keeping. The argument was "one magazine out of five ending out of
+# the scope is one analysed with a constant wrong by ~3x". True — and it assumes
+# the reading MEANS that. Measured the moment a second gun ran:
 #
-# ⚠ An UNREADABLE end counts against this (adapter counts only `is True`),
-# because "nobody could tell" and "it was fine" are the two states this file
-# exists to keep apart.
-ADS_END_MIN = 1.0
+#     aug comp_ar    ads_end True   n=5   y_true(3.5s) 1395.4 +- 16.6
+#                    ads_end False  n=5                1432.5 +- 68.3
+#
+# A burst genuinely fired from the hip is analysed with the scoped K and reads
+# about THREE TIMES off. Four of those five flagged magazines sit inside the
+# unflagged range. The flag is a false alarm, and detector/CLAUDE.md already
+# says why: AdsDetector answers by the absence of the hip crosshair and reads
+# low WHILE THE VIEW IS SHAKING — 387/387 on a still VSS, 0.79 on the same VSS
+# firing, scaling with recoil. The vector (2.2 s, ~700 counts) read 100%; the
+# AUG (3.9 s, ~1400) read 50-60% with magazines that agreed to under 2%.
+#
+# ⚠ AND THE SAME FILE ALREADY SAID THE GATE WAS UNNECESSARY: "FIRING CANNOT
+# CHANGE ADS (right click is a toggle, nothing touches it during a burst), so
+# GunDriver.ensure_ads settles the question before the trigger and this reading
+# adds nothing about whether the magazine was aimed." ensure_ads reads back and
+# retries; it is a VERIFIED precondition, not an absence. A floor built on top
+# of it was a second opinion nobody derived, contradicting a documented one.
+#
+# What survives is the CONTRADICTION, which is what that paragraph keeps for
+# `ads_frac` at 0.30: ensure_ads said the scope was up and every single reading
+# in the pool says it never was — one of them is lying, and that is worth
+# stopping for. A ~50% false-alarm rate cannot produce 0 of N on a scoped pool.
+ADS_END_MIN = 0.0
 
 # NOT a target -- a floor under a known defect. Phase-correlation tracking is
 # lost after 3-4 magazines of 5 ("the reference match has wrapped"), so half of
@@ -293,11 +309,17 @@ def judge(rec):
         if ends is None:
             return bad('ads', 'neither ads_frac nor ads_end_ok — nothing says '
                               'this burst was aimed')
-        # A whole pool, so anything under 1.0 is a magazine that ended out of
-        # the scope and was analysed with the scoped K anyway.
-        if ends < ADS_END_MIN:
-            return bad('ads', f'{ends:.0%} of the pool ended in ADS, want '
-                              f'{ADS_END_MIN:.0%}')
+        # ⚠ THE CONTRADICTION, NOT A TOLERANCE. `<=` and not `<`: the refusal
+        # is "NOT ONE magazine in this pool ended scoped", which contradicts the
+        # ensure_ads that ran before every trigger and read itself back. A
+        # reading that false-alarms at ~50% under AR recoil cannot produce 0 of
+        # N on a genuinely scoped pool; a cell that never scoped produces
+        # exactly that.
+        if ends <= ADS_END_MIN:
+            return bad('ads', f'{ends:.0%} of the pool ended in ADS — '
+                              f'ensure_ads verified the scope before every '
+                              f'trigger and not one burst agrees; one of them '
+                              f'is lying')
 
     # 6. How much of each magazine the tracker survived. Last because it is a
     #    known defect rather than a symptom of anything: a cell can be perfect

@@ -235,8 +235,17 @@ def main():
     noads = {k: v for k, v in GOOD.items() if k != 'ads_frac'}
     bad += case('...and with no fraction, the ENDPOINTS answer',
                 dict(noads, ads_end_ok=1.0), True, OK)
-    bad += case('one magazine ending out of the scope fails',
-                dict(noads, ads_end_ok=0.8), False, 'ads')
+    # ⚠ ONE MAGAZINE READING OUT OF THE SCOPE MUST NOT FAIL THE CELL, and this
+    # case asserted the opposite for one night. AdsDetector reads low while the
+    # view is SHAKING, so on an AR the flag false-alarms about half the time --
+    # measured: aug comp_ar, 5 flagged magazines whose y_true sits inside the
+    # unflagged range, against the ~3x a real hip-fired burst produces.
+    bad += case('...and a half-flagged pool is NOT a failure',
+                dict(noads, ads_end_ok=0.5), True, OK)
+    # What survives is the contradiction: ensure_ads verified the scope before
+    # every trigger and NOT ONE burst agrees.
+    bad += case('a pool where nothing ended scoped IS',
+                dict(noads, ads_end_ok=0.0), False, 'ads')
     # Neither reading is still a refusal: the fallback changes WHICH quantity
     # answers, not whether one has to.
     bad += case('neither reading is not a pass', noads, False, 'ads')
