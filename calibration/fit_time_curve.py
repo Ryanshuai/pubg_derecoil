@@ -45,6 +45,7 @@ is exactly the thing it discards.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 
@@ -858,6 +859,65 @@ def _shape_by_session(cells, arms, min_mags):
               f'= {eff*lev.mean():.1f} counts on a {lev.mean():.0f}-count curve')
 
 
+def _write_curve(r, weapon, config_key, sight, posture, n_total):
+    """Put a fitted curve where the runtime reads from. Prints what it replaced.
+
+    ⚠ THIS CLOSES THE ONLY GAP LEFT IN THE LOOP. Collection could already
+    iterate -- `--from-fit` re-fits the store in memory and uploads that -- but
+    nothing ever wrote the answer down, so detector/weapon.set_seq kept reading
+    whatever was on disk. For a gun seeded from the community patterns that
+    means the GAME still fires somebody else's guess after we have measured the
+    real thing: m762 sat at a 1523-count seed while its own 24 magazines said
+    1942.
+
+    ⚠ AND IT IS THE SEED'S RETIREMENT, which is what it was imported for --
+    "将来可能我们就有了自己的，以后它这个就不要了". A fit replacing a seed is
+    the one overwrite that always gains information, so unlike the seed writer
+    this refuses nothing; it just says loudly which it displaced.
+    """
+    import config as cfg
+    from calibration.samples import config_key as _ck
+    cfg_dict = {}
+    if config_key and config_key != 'bare':
+        for part in config_key.split('_'):
+            slot, _, val = part.partition('-')
+            if slot and val:
+                cfg_dict[slot] = val
+    shots = []
+    prev_t = 0.0
+    for i, k in enumerate(r['knots']):
+        shots.append({'delay_ms': 0 if i == 0 else k['t_ms'] - prev_t,
+                      'dx': float(k.get('dx', 0.0)), 'dy': float(k['dy'])})
+        prev_t = k['t_ms']
+    doc = {
+        'weapon': weapon, 'sight': sight, 'posture': posture,
+        'config': cfg_dict, 'shots': shots,
+        'source': 'MODEL.md time-domain fit',
+        'n_magazines': r['n_kept'], 'n_total': n_total,
+        'grid_ms': r['grid_ms'], 'total_counts': r['total_counts'],
+        'span_s': r['span_s'], 'spread_counts': r.get('spread_counts'),
+        'samples_per_knot': r.get('samples_per_knot'),
+        'knots': len(r['knots']),
+        'scaled_by': 'NOTHING. Final mouse counts; set_seq emits them with no '
+                     'factors, because scope, scale, attachment and posture '
+                     'are already in the magazines this was fitted from.',
+    }
+    os.makedirs(cfg.CURVES_DIR, exist_ok=True)
+    path = os.path.join(cfg.CURVES_DIR, f'{weapon}__{_ck(cfg_dict)}.json')
+    was = None
+    if os.path.exists(path):
+        with open(path, encoding='utf-8') as f:
+            old = json.load(f)
+        was = ('a SEED of %.0f counts' % old.get('total_counts', 0)
+               if old.get('seed') else
+               'a fit of %.0f counts from %s magazines'
+               % (old.get('total_counts', 0), old.get('n_magazines', '?')))
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(doc, f, indent=1)
+    print(f'  wrote {os.path.relpath(path, ROOT)} — the RUNTIME will now '
+          f'play this' + (f', replacing {was}' if was else ''))
+
+
 def main():
     try:
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -872,6 +932,18 @@ def main():
                          'curve depends on which session it came from')
     ap.add_argument('--gap-min', type=float, default=SESSION_GAP_MIN)
     ap.add_argument('--selftest', action='store_true')
+    ap.add_argument('--write', action='store_true',
+                    help='write the fitted curve to config.CURVES_DIR, which '
+                         'is what the RUNTIME plays. Until this exists a fit '
+                         'lives only inside the process that made it: '
+                         '`collect_timed --from-fit` re-fits in memory every '
+                         'run, so collection improves while the game keeps '
+                         'firing whatever is on disk — a seed, or nothing.')
+    ap.add_argument('--sight', default='red_dot',
+                    help='part of the curve key; set_seq looks up (weapon, '
+                         'config, posture, sight) and a curve fitted at the '
+                         'red dot played while hip firing is out by 3x')
+    ap.add_argument('--posture', default='standing')
     a = ap.parse_args()
     if a.selftest:
         return selftest()
@@ -902,6 +974,8 @@ def main():
               f'the trigger was still down (gate {HOLD_DRAWDOWN_MAX:.0%}). '
               f'y_true only rises under the trigger.')
     print(f'  {r["cluster_why"]}')
+    if a.write:
+        _write_curve(r, a.weapon, a.config, a.sight, a.posture, len(mags))
     print(f'  samples per knot {r["samples_per_knot"]:.1f}, '
           f'spread {r["spread_counts"]:.1f} counts')
     if r['minority']:

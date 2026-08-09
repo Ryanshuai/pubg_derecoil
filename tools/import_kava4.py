@@ -190,9 +190,95 @@ def parse_pattern(body):
 # costs texture the same way the sky does and reaches a clamp just as fast.
 UNIT_COUNTS = 0.4520
 
+# How long a seed must keep compensating for.
+#
+# ⚠ THE SCRIPT'S PATTERNS ARE SHORTER THAN A MAGAZINE AND THE TAIL IS THE
+# DANGEROUS END. Kava4's m762 is 148 knots = 2.50 s; an m762 magazine measured
+# here runs 3.79 s. So the last 1.29 SECONDS OF EVERY BURST HAD NO
+# COMPENSATION AT ALL, which is exactly where the recoil has been accumulating
+# longest and the view is highest. Said from the chair on 2026-08-09:
+#
+#     如果弹夹比他那个卡瓦提供的长，那你就要把那个用最后一发的那个后座力
+#     填补到后边，不然后面空了直接飞了
+#
+# m762 survived it -- 1962 counts of truth against a 1523-count seed leaves
+# ~440 of rise, inside the pitch headroom -- but that is luck, not design, and
+# the guns whose patterns are shortest (vector, 0.94 s) have the least of it.
+#
+# ⚠ OVERSHOOTING IS FREE, which is why this is a flat number rather than a
+# per-weapon magazine length nobody has measured yet. The firmware plays the
+# curve only while the trigger is down, so a curve longer than the burst costs
+# nothing; a curve SHORTER than the burst costs the end of every magazine.
+# 4.0 s clears the longest span measured here (3.81 s, m416).
+SEED_SPAN_S = 4.0
 
-def write_seeds(names, pats, posture, sight):
-    """Write bare-standing seed curves for `names`. -> exit code."""
+
+PLATEAU_N = 10
+
+
+def _plateau(shots):
+    """The steady-state per-knot (dx, dy) to extend a pattern with.
+
+    ⚠ NOT THE LAST KNOT, and that mistake survived one run. Kava4 ends several
+    patterns on a SENTINEL rather than on the plateau -- VECTORR's last dy is
+    0.0 and AUGG's is 1.0 against plateaus of 19 and 23 -- so repeating the
+    final value padded vector with 179 knots of ZERO. The report said
+    "+179 padded knots" and the total stayed 378: the tail was still empty and
+    the fix looked like it had worked.
+
+    The median of the last few non-zero knots is the plateau by construction
+    and cannot be fooled by one or two sentinels.
+    """
+    nz = [(dx, dy) for dx, dy in shots if dy]
+    if not nz:
+        return shots[-1]
+    tail = nz[-PLATEAU_N:]
+    med = sorted(dy for _, dy in tail)[len(tail) // 2]
+    dxs = sorted(dx for dx, _ in tail)
+    return dxs[len(tail) // 2], med
+
+
+def _pad_to_span(shots, span_s):
+    """Extend at the plateau rate out to `span_s`. -> (shots, n_added)."""
+    want = int(span_s * 1000 / GRID_MS)
+    if len(shots) >= want:
+        return shots, 0
+    return shots + [_plateau(shots)] * (want - len(shots)), want - len(shots)
+
+
+def _magazine_span_s(weapon, rounds):
+    """How long a full burst lasts, from the MEASURED fire rate.
+
+    ⚠ A FLAT NUMBER WAS WRONG IN BOTH DIRECTIONS. Padding every gun to 4.0 s
+    took the m762 seed to 2624 counts against a measured truth of 1942 -- 35%
+    over, and over is the direction that drives the view into the ground. The
+    guns differ by more than 2x in fire rate (vector 1130 rpm, m762 706), so
+    the span has to come from the gun.
+
+    detector.weapon.WEAPON_RPM is the wiki table already overwritten by
+    calibration/artifacts/recoil/weapon_rpm.json where anything has been timed
+    -- m762's 85.00 ms there comes from 24 magazines agreeing to 0.81 ms.
+    """
+    from detector.weapon import WEAPON_RPM
+    rpm = WEAPON_RPM.get(weapon)
+    if not rpm:
+        return SEED_SPAN_S
+    return rounds * 60.0 / float(rpm)
+
+
+def write_seeds(names, pats, posture, sight, config=None, span_s=None,
+                rounds=40):
+    """Write seed curves for `names`. -> exit code.
+
+    `config` is a dict like {'muzzle': 'comp_ar', 'grip': 'vert_grip'}; the
+    bare pattern is scaled by that kit's measured recoil factor.
+
+    ⚠ THE FACTOR DOES NOT HAVE TO BE RIGHT, and that is not a shrug -- it is
+    the same property that licenses the whole file. C is read back off the
+    device, so y_true = y_obs + C is exact whatever C was. A kit factor that
+    is 15% off moves counts between the two terms and nowhere else. Asked in
+    those words: 「配的系数不就有问题吗？反正就说随便一个作为基准」.
+    """
     import config as cfg
     rev = {}
     for lua, ours in OURS.items():
@@ -215,12 +301,12 @@ def write_seeds(names, pats, posture, sight):
         try:
             from calibration import samples as _S
             from calibration.fit_time_curve import fit as _fit
-            # ⚠ load(weapon, {}), NOT a filter on all_magazines. samples
+            # ⚠ load(weapon, cfg), NOT a filter on all_magazines. samples
             # .config_key({}) is 'bare', not '' -- filtering on '' silently
             # matches NOTHING, so this whole check would pass every gun
             # through while looking like it ran. It did exactly that on its
             # first run, and only mp5k having obvious data caught it.
-            have = [m for m in _S.load(ours, {}) if m.comp_enabled]
+            have = [m for m in _S.load(ours, config or {}) if m.comp_enabled]
             got = _fit(have) if have else {'ok': False}
             if got.get('ok'):
                 print(f'  ✗ {ours}: SKIPPED — the store already fits this '
@@ -231,14 +317,25 @@ def write_seeds(names, pats, posture, sight):
                 continue
         except Exception as e:                       # noqa: BLE001
             print(f'    ({ours}: could not consult the store — {e})')
+        span = span_s if span_s else _magazine_span_s(ours, rounds)
+        raw, padded = _pad_to_span(pats[lua], span)
+        kit_f = 1.0
+        if config:
+            from detector.weapon_attachments import attachment_factor
+            kit_f = attachment_factor(ours, config.get('muzzle', '') or '',
+                                      config.get('grip', '') or '',
+                                      config.get('stock', '') or '', posture)
         shots = [{'delay_ms': GRID_MS if i else 0,
-                  'dx': round(dx * UNIT_COUNTS, 4),
-                  'dy': round(dy * UNIT_COUNTS, 4)}
-                 for i, (dx, dy) in enumerate(pats[lua])]
+                  'dx': round(dx * UNIT_COUNTS * kit_f, 4),
+                  'dy': round(dy * UNIT_COUNTS * kit_f, 4)}
+                 for i, (dx, dy) in enumerate(raw)]
         total = sum(s['dy'] for s in shots)
         doc = {
-            'weapon': ours, 'sight': sight, 'posture': posture, 'config': {},
+            'weapon': ours, 'sight': sight, 'posture': posture,
+            'config': dict(config or {}),
             'shots': shots,
+            'padded_knots': padded,
+            'kit_factor': kit_f,
             # ⚠ THE FIELD THE RUNTIME PRINTS ON. detector/weapon.py warns when
             # it fires one of these, because a seed and a fit are
             # indistinguishable from the outside otherwise -- root CLAUDE.md's
@@ -256,7 +353,8 @@ def write_seeds(names, pats, posture, sight):
             'scaled_by': 'NOTHING further. These are final mouse counts; '
                          'set_seq emits them with no factors.',
         }
-        path = os.path.join(cfg.CURVES_DIR, f'{ours}__bare.json')
+        from calibration.samples import config_key as _ck
+        path = os.path.join(cfg.CURVES_DIR, f'{ours}__{_ck(config or {})}.json')
         if os.path.exists(path):
             with open(path, encoding='utf-8') as f:
                 old = json.load(f)
@@ -272,8 +370,14 @@ def write_seeds(names, pats, posture, sight):
                 continue
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(doc, f, indent=1, ensure_ascii=False)
+        note = []
+        if padded:
+            note.append(f'+{padded} padded to {span:.2f}s at the plateau')
+        if config:
+            note.append(f'kit x{kit_f:.4f}')
         print(f'  seeded {ours:8s} {total:7.0f} counts over {doc["span_s"]:.2f}s '
-              f'({len(shots)} knots) -> {os.path.relpath(path, ROOT)}')
+              f'({len(shots)} knots{", " + ", ".join(note) if note else ""}) '
+              f'-> {os.path.relpath(path, ROOT)}')
     return rc
 
 
@@ -289,6 +393,23 @@ def main():
                          'which is the whole intent')
     ap.add_argument('--posture', default='standing')
     ap.add_argument('--sight', default='red_dot')
+    ap.add_argument('--config', default=None,
+                    help='kit for the seed, as "muzzle=comp_ar,grip=vert_grip"'
+                         '. The bare pattern is scaled by that kit\'s measured '
+                         'recoil factor — which does NOT have to be right, '
+                         'because C is read back off the device and cancels '
+                         'out of y_true either way')
+    ap.add_argument('--rounds', type=int, default=40,
+                    help='magazine size, for deriving how long the seed must '
+                         'keep compensating from the MEASURED fire rate '
+                         '(default 40)')
+    ap.add_argument('--span-s', type=float, default=None,
+                    help=f'pad the tail out to this many seconds by repeating '
+                         f'the last knot (default {SEED_SPAN_S}). Kava4\'s '
+                         f'patterns are SHORTER than a magazine — m762 is '
+                         f'2.50s against a 3.79s burst — so without this the '
+                         f'end of every magazine fires uncompensated, which is '
+                         f'the highest the view ever gets')
     a = ap.parse_args()
 
     if not os.path.exists(SRC):
@@ -356,8 +477,17 @@ def main():
             print(f'    ... and {len(skipped) - 6} more')
 
     if a.seed:
+        kit = None
+        if a.config:
+            kit = {}
+            for part in a.config.split(','):
+                k, _, v = part.partition('=')
+                if k.strip():
+                    kit[k.strip()] = v.strip() or None
+            kit = {k: v for k, v in kit.items() if v}
         return write_seeds([s.strip() for s in a.seed.split(',') if s.strip()],
-                           pats, a.posture, a.sight)
+                           pats, a.posture, a.sight, config=kit,
+                           span_s=a.span_s, rounds=a.rounds)
 
     if not a.write:
         print(f'\n  (nothing written — pass --write for '
