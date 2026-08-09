@@ -59,7 +59,6 @@ import sys
 import time
 from datetime import datetime
 
-import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -290,6 +289,67 @@ def read_sight(lo, weapon=None):
     return _sight_of(asset, weapon), asset
 
 
+def ensure_sight(ac, sc, slot, weapon, sight, require_profile=True):
+    """Fit `sight` onto the gun and PROVE it is there. -> (worn, asset) | (None, why)
+
+    ⚠ IT LIVES HERE BECAUSE read_sight DOES. This is the write half of the same
+    statement -- "I asked for X" / "the gun wears X" -- and it existed twice
+    before this: once inline in calibrate_k.main and once as calibrate_scope's
+    own copy. Two spellings of a three-step refusal is two things to keep in
+    step, and the step that would have drifted is the third one, which only one
+    of them had.
+
+    The three steps, and each is a different failure:
+
+        the part will not fit     nothing to measure
+        the gun wears something   every count is scaled by the wrong constant,
+        else                      worth about 3x, and the magazine records the
+                                  FLAG so nothing downstream can see it
+        no K measured for what    Rig falls back to RECOIL_K_DEFAULT_SCOPED --
+        it wears                  the MAGNIFIED group's constant. Both sides say
+                                  the same word and the word has no K behind it
+
+    ⚠ `require_profile=False` IS FOR calibrate_k AND ONLY FOR IT, and merging
+    without it would have broken that tool outright. The third refusal asks
+    "has a K been measured for this optic" -- which is precisely the question
+    calibrate_k exists to answer, so applying it there refuses every first
+    measurement of every new sight. The check is right for anything CONSUMING
+    K and wrong for the thing that produces it.
+
+    ⚠ ONE Tab session across the fit and the readback (rule 14, and
+    Kitter.session()'s docstring): two entries into the backpack with only pure
+    computation between them is churn, and worse, it makes the fit and the
+    reading two observations of a gun that gets recorded as one.
+    """
+    from control.kitting import SIGHT_SCOPE
+    from control.stock import restock
+
+    part = SIGHT_SCOPE.get(sight, ...)
+    if part is ...:
+        return None, (f'{sight!r} is not in SIGHT_SCOPE, so nothing here knows '
+                      f'which part to fit')
+    # None is an INTEGRAL optic -- the VSS's PSO-1, the p90's -- and there is
+    # no slot to fit it into. The readback below still has to agree.
+    if part:
+        restock(ac, sc, {part}, leave='shut')
+        ac.ensure_kit(slot, {'scope': part}, weapon=weapon)
+    with ac.tab_up():
+        lo = ac.loadout()
+    worn, asset = read_sight(lo, weapon)
+    if worn != sight:
+        return None, (f'asked for {sight!r} and the gun reads {worn!r}. A count '
+                      f'is worth a different angle through each, so every '
+                      f'number would be filed under a sight it was not '
+                      f'measured through -- and invisible downstream.')
+    if require_profile and worn not in cfg.RECOIL_SIGHT_PROFILES:
+        return None, (f'the gun wears {worn!r} and no K has ever been measured '
+                      f'for it, so every count would be scaled by '
+                      f'RECOIL_K_DEFAULT_SCOPED -- the magnified group\'s '
+                      f'constant, wrong by about 3x on an unmagnified sight. '
+                      f'Measure a K for it first (calibration/calibrate_k.py).')
+    return worn, asset
+
+
 # The key `travel()` and calibration/artifacts/pitch/pitch_travel.json use for "not looking
 # through anything". Spelled once, here, because the one thing that must not
 # happen is this move reading a ruler measured through a sight.
@@ -452,7 +512,7 @@ def one_magazine(rig, grabber, weapon, mag_size, interval_s, curve,
 
 def fire_one_into_store(rig, grabber, weapon, config, posture, curve,
                         interval_s, prior=(), note='', label='',
-                        fire_mode=None):
+                        fire_mode=None, scope_asset=None):
     """Reload, re-aim, fire one magazine, store it.
 
     -> (Magazine, why|None, interval_s). The third value is the per-round time
@@ -551,6 +611,14 @@ def fire_one_into_store(rig, grabber, weapon, config, posture, curve,
                             fire_delay_ms=float(rig.mouse.RECOIL_FIRE_DELAY_MS))
     # The READBACK, and it decides which file samples.append writes to.
     mag.fire_mode = got_mode if got_mode is not None else 'unreadable'
+    # ⚠ THE OPTIC THE CALLER READ OFF THE GUN, travelling WITH the magazine.
+    # `mag.sight` is `rig.sight`, which is the flag; main() and calibrate_scope
+    # both refuse when read_sight disagrees with it, but that refusal lives in
+    # the caller and leaves nothing in the record. Stored here for the same
+    # reason fire_mode and rounds_left are: this is the one function every
+    # magazine passes through, so a field set here cannot be set on one path
+    # and forgotten on the other. See samples.Magazine.sight_asset.
+    mag.sight_asset = str(scope_asset or '')
     # ⚠ ASK THE COUNTER WHETHER THE BURST ACTUALLY EMPTIED THE MAGAZINE. Read
     # BEFORE wait_reload, because a reload puts rounds back and then the number
     # answers a different question. See Magazine.rounds_left for the mg3, where
@@ -754,6 +822,7 @@ def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
             mag, why, interval_s = fire_one_into_store(
                 rig, grabber, weapon, config, posture, curve,
                 interval_s, prior=prior, fire_mode=want_mode,
+                scope_asset=scope_asset,
                 note=f'{note_prefix}arm={"comp" if comp else "none"}',
                 label=f'mag {i} ({"comp" if comp else "no-comp"})')
             if mag is None:
@@ -1388,7 +1457,7 @@ def main():
             mag, why, interval_s = fire_one_into_store(
                 rig, grabber, a.weapon, config, a.posture,
                 [] if a.no_comp else curve, interval_s, prior=prior,
-                fire_mode=want_mode,
+                fire_mode=want_mode, scope_asset=scope_asset,
                 note='no-comp' if a.no_comp else f'scale={mag_scale:g}',
                 label=f'mag {i}')
             if mag is None:

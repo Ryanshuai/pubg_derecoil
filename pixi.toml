@@ -107,6 +107,14 @@ plan-order = "python tools/test_plan_order.py"
 # a step written in Markdown is invisible to every import graph.
 pointers = "python tools/check_pointers.py"
 fit-time = "python calibration/fit_time_curve.py --selftest"
+# What a magnified optic does to the counts a gun needs. `scope` reads the
+# store and stops (no game, no hardware); the live run wants --weapon and fires.
+# ⚠ The scope factor is DERIVABLE from config.RECOIL_SIGHT_PROFILES, so this
+# exists to falsify that derivation, not to fit around it — see the module
+# docstring. `scope-test` plants a known ratio and a known K and checks both
+# come back, plus the four refusals.
+scope = "python calibration/calibrate_scope.py"
+scope-test = "python calibration/calibrate_scope.py --selftest"
 # The correlator-bias judge, against three known b(delta) it has to tell apart:
 # flat px-per-pair, a fixed fraction of each pair (absorbed by K, harmless), and
 # peak-locking. Its first version read delta^-0.23 off data built dead flat.

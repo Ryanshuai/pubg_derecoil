@@ -104,7 +104,6 @@ from detector.tab_layout import (DROP_XY, INV_ROWS, PARK_XY, att_slot_point,
                                  gun_tag_point, row_point)
 from detector.weapon_template_detector import TabWeaponDetector
 from press.pico_mouse import HID_KEY_1, HID_KEY_2, HID_KEY_TAB
-from press.pointer import Pointer
 from control.driver import Driver
 from control.focus import game_focused, ensure_focus
 

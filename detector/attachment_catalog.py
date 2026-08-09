@@ -558,9 +558,37 @@ EXCLUDE = {
     # takes a same-session control -- not a re-reading of the logs, which is
     # what produced the retracted sentence.
     #
-    # This is measurement-only; no wiki claim was consulted either way. One
-    # hand-drag of a 4x onto an mp5k refutes it if it is wrong.
-    'mp5k':  {'scope_4x'},
+    # ══ RETRACTED IN TURN, 2026-08-09 ══
+    #
+    # The entry above closed with its own exit condition: "One hand-drag of a
+    # 4x onto an mp5k refutes it if it is wrong." The operator did that drag.
+    # An mp5k takes a 4x.
+    #
+    # ⚠ AND THE SAME-SESSION CONTROL DID NOT SAVE IT, WHICH IS THE PART WORTH
+    # KEEPING. The control was real and correctly run; what it could not see is
+    # that BOTH arms ran through a bug that had not been found yet. Two days
+    # later `right_click_equip` was caught computing its target ONCE outside the
+    # retry loop (control/CLAUDE.md, 2026-08-07): the first click lands, the
+    # displaced part is pushed into the backpack, every row below it shifts, and
+    # the retry -- aimed at the stale coordinate -- puts the ORIGINAL part back.
+    # The signature of that bug is `reads <the old part>`, on a clean gesture,
+    # with the gun still in the rack. That is this entry's evidence, line for
+    # line. The aug arm differed only in that its readback happened to land
+    # before the retry fired.
+    #
+    # Six fake `mp5k magazine ext_smg` failures were written into kit_facts.json
+    # by the same bug and have already been struck. This is the seventh, and it
+    # is the one that reached a table other code consults.
+    #
+    # ⚠ A POSITIVE CONTROL BOUNDS THE DIFFERENCE BETWEEN ITS ARMS, NOT THE
+    # CORRECTNESS OF WHAT THEY SHARE. Both arms shared this repository's own
+    # gesture layer, so no amount of same-session discipline could have divided
+    # "the game refuses this pairing" from "we un-fit it ourselves 400 ms
+    # later". The operator's hand had to be outside the loop -- and that is
+    # exactly what the exit condition asked for.
+    #
+    # 'mp5k': {'scope_4x'},   <- struck. Do not restore without a hand-drag
+    #                            that fails, taken after 2026-08-07's fix.
     # MEASURED 2026-08-09, and the game says it in TEXT, which is the strongest
     # kind of entry this table has (it is what the ONLY table is built from).
     #

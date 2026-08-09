@@ -398,11 +398,10 @@ def main():
         # this first). ensure_weapon_in_hand proves the gun by its AMMO
         # COUNTER, which is presence evidence rather than another absence.
         if args.weapon:
-            from calibration.collect_timed import read_sight
+            from calibration.collect_timed import ensure_sight
             from control.inventory import InventoryControl
-            from control.kitting import SIGHT_SCOPE
             from control.spawner import SpawnerControl
-            from control.stock import ensure_weapon_in_hand, restock
+            from control.stock import ensure_weapon_in_hand
             with InventoryControl() as ac, SpawnerControl() as sc:
                 slot = ensure_weapon_in_hand(ac, sc, weapon=args.weapon)
                 if not slot:
@@ -417,27 +416,24 @@ def main():
                 # "it is wearing a red dot" are two different statements --
                 # and the gap between them is what made two mp5k cells come
                 # out 2.07x apart with every printed number looking fine.
-                # SIGHT_SCOPE answers None for an integral optic: nothing to
-                # fit, and the readback still has to agree.
-                part = SIGHT_SCOPE.get(args.sight, SIGHT_SCOPE.get('red_dot'))
-                if args.sight and part:
-                    restock(ac, sc, {part}, leave='shut')
-                    ac.ensure_kit(slot, {'scope': part}, weapon=args.weapon)
+                # ⚠ `require_profile=False`, AND THAT ARGUMENT IS THE WHOLE
+                # REASON THIS CALL IS NOT THE SAME AS EVERY OTHER ONE.
+                # ensure_sight's third refusal is "no K has ever been measured
+                # for what it wears" -- correct for anything that CONSUMES K,
+                # and fatal here, because measuring a K that does not exist yet
+                # is what this file is for. It would refuse every first
+                # measurement of every new optic, which is the only kind this
+                # tool is ever pointed at.
+                #
+                # The other two refusals (the part will not fit; the gun wears
+                # something else) apply in full, and the second one is the hole
+                # this block was written to close.
                 if args.sight:
-                    # `ac` is already open, so the reading is taken through it
-                    # rather than through read_loadout(), which builds its own
-                    # InventoryControl -- that would be a second Tab open/close
-                    # inside one that is already held, the exact churn
-                    # tab_up()'s docstring names.
-                    with ac.tab_up():
-                        lo = ac.loadout()
-                    worn, _asset = read_sight(lo, args.weapon)
-                    if worn != args.sight:
-                        print(f"\n[!] ABORT: asked for {args.sight!r} and the "
-                              f"gun reads {worn!r}. Every count below would be "
-                              f"filed under a sight it was not measured "
-                              f"through -- worth about 3x between iron sights "
-                              f"and a red dot, and invisible downstream.")
+                    worn, _asset = ensure_sight(ac, sc, slot, args.weapon,
+                                                args.sight,
+                                                require_profile=False)
+                    if worn is None:
+                        print(f"\n[!] ABORT: {_asset}")
                         grabber.close()
                         return 1
                     print(f"  sight: {worn} (read back off the gun)")
