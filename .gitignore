@@ -98,3 +98,13 @@ docs/model_error_history.md
 # tools/import_kava4.py 的文件头记着 URL 和它自己的 sha256。
 # 要重新取:见 import_kava4.py 缺文件时打印的那条 curl。
 docs/kava4/*.lua
+
+# ⚠ ONE EXCEPTION TO `*.png`, and it is evidence rather than a corpus.
+# docs/p90_has_no_slots.png is the two-frame strip that settles whether the p90
+# has a scope slot -- detector/attachment_catalog.py cites it for an entry that
+# decides whether a drag happens, and a drag at a slot that does not exist
+# drops the part (or the gun) on the ground. The source frames live under
+# calibration/artifacts, which IS ignored, so without this line the only copy
+# of the answer is one cleanup away from gone -- exactly how 40 weapons' curves
+# were lost while `git status` stayed clean.
+!docs/p90_has_no_slots.png

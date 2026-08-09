@@ -378,38 +378,52 @@ SLOTS = {
     # Suppressor-only muzzle, vertical-only grip.
     'tommy':    {'slots': ('scope', 'muzzle', 'grip', 'magazine'), 'conf': 'measured'},
     # Integral holo + laser + suppressor, none removable.
-    # ⚠ `scope` ADDED 2026-08-09, AND `conf` DEMOTED, because 'measured' was
-    # never true of this slot for ANY weapon. scan_compat reads the tile border
-    # to decide a slot exists, and this file's own notes say the scope slot
-    # DRAWS NO TILE -- "存在性只能靠装一个瞄具确认". So every scope entry in this
-    # table is an inference wearing a measurement's label, and on the p90 the
-    # inference was wrong: the 2026-08-09 evidence frame shows the gun WEARING a
-    # sight, and read_sight came back `red_dot` off it.
+    # ⚠ THE p90 HAS NO ATTACHMENT SLOTS AT ALL. docs/p90_has_no_slots.png is the
+    # att_1 strip cut from two night frames at identical coordinates:
     #
-    # The cost of the omission is not a missing cell, it is a wrong constant.
-    # `fixed_kit` skips a slot the weapon "does not have", so nothing would ask
-    # for the red dot -- the p90 would fire under whatever optic PUBG auto-fitted
-    # while `--sight red_dot` supplied K, and K is worth about 3x between
-    # sights. That is the same shape as the optic before the readback check
-    # existed, arriving through the catalogue instead.
-    # ⚠ AND THE SECOND OBSERVATION CONTRADICTS THE FIRST, 2026-08-09, same day.
-    # A night run kitted a freshly spawned p90 and the readback came back EMPTY:
+    #     mg3   ONE tile, with a red dot sitting in it   <- the region is right
+    #     p90   no tile at all, the strip is empty
     #
-    #     [!] scope should be red_dot, reads ''
-    #     attempt 1: state — kit: scope reads ''
+    # The mg3 half is the positive control and it is the reason this is a
+    # measurement rather than a squint: a blank strip only means "no slots" if
+    # tiles are known to render there, and on the mg3 they do. The optic visible
+    # on the p90's rail is drawn ON THE GUN, i.e. weapon art -- the same thing
+    # the VSS does with its fixed PSO-1, per this file's header. Same answer
+    # shape as win94 above: no slots, because the gun has an integrated optic.
     #
-    # So one frame says the p90 wears a sight that reads `red_dot`, and one run
-    # says the slot will not take one. Both cannot describe the same gun, and
-    # NEITHER is enough on its own: `reads ''` is also what a gesture that never
-    # landed looks like, and the earlier frame may have been PUBG auto-fitting an
-    # optic rather than this repository installing one.
+    # Source frames, both kept:
+    #   calibration/artifacts/nights/night_20260809_0546/fail_p90_standing_red_dot/tab.png
+    #   calibration/artifacts/nights/night_20260809_0827/fail_mg3_standing_red_dot/tab.png
     #
-    # ⚠ WHAT MAKES IT EXPENSIVE RATHER THAN ANNOYING: with no optic there is no
-    # K (`iron` is not a key in RECOIL_SIGHT_PROFILES), so a p90 that cannot be
-    # given a red dot cannot be MEASURED AT ALL by this pipeline -- it is not one
-    # lost cell. Until somebody puts a sight on one by hand and reads it back,
-    # this stays `inferred-scope` and the p90 stays out of the weapon queue.
-    'p90':      {'slots': ('scope', 'magazine'), 'conf': 'inferred-scope'},
+    # On that frame the Red Dot Sight the night asked for is sitting in
+    # VICINITY / Ground. `[!] scope should be red_dot, reads ''` is the honest
+    # report of a part that had nowhere to go.
+    #
+    # ⚠ AND THE ENTRY THAT STOOD HERE WAS WRITTEN OFF THAT SAME ARTWORK. It
+    # claimed "the evidence frame shows the gun WEARING a sight, and read_sight
+    # came back `red_dot` off it" -- which is how `scope` got added to a weapon
+    # that has no scope slot, and how a red dot ended up on the floor.
+    #
+    # ⚠ THE FOLLOW-UP CLAIM THAT read_sight IS FOOLED BY WEAPON ART IS WITHDRAWN.
+    # I wrote it here before checking, and the check refutes it: on that exact
+    # frame AttachmentDetector.read_slots({1: 'p90'}) answers None for all five
+    # slots, blind or with the weapon named. The reader does NOT invent an optic
+    # off the integral sight -- it declines, which is what the header says it
+    # does for the VSS. Where the earlier `red_dot` reading came from is
+    # unknown, and it is not in this frame.
+    #
+    # ⚠ SO THE p90 CANNOT BE MEASURED BY THIS PIPELINE AS IT STANDS, and that is
+    # a bigger statement than "a cell failed". Its sight is neither `red_dot`
+    # nor `iron`; it is an integral optic with no K in RECOIL_SIGHT_PROFILES.
+    # Measuring the gun needs a K for that sight first (calibration/calibrate_k),
+    # not another kitting attempt.
+    #
+    # ⚠ AND SlotDetector CANNOT COVER FOR THIS. On the same frame it answers
+    # scope/grip/magazine = 'empty' where the truth is 'absent', because no tile
+    # is drawn and existence is unreadable there. An 'empty' slot is an
+    # INVITATION to drag, and a drag at a slot that does not exist is how
+    # attachments -- and whole guns -- end up on the ground.
+    'p90':      {'slots': (), 'conf': 'measured-screenshot'},
     # Non-replaceable laser sight and silencer as standard.
     'mp9':      {'slots': ('scope', 'magazine', 'stock'), 'conf': 'measured'},
     # No grip slot (ring 18.6) and no stock (14.2). The grip was a guess,
