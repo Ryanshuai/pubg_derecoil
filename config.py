@@ -256,7 +256,7 @@ RECOIL_MAD_FLOOR = 0.5
 # easily here — calibrate_k's `--ads` held the right button, which is SHOULDER
 # AIM, so four runs carried the wrong state; and an ADS-verified red dot
 # re-measured 1.29 against the 1.5474 below.
-#   red_dot   1.5128   0.99984   1.1%   7   <- 2026-08-08, see below
+#   red_dot   1.5413   -         0.3%   7   <- 2026-08-08, ONE correlation
 #   2x        1.8254   0.99948   2.0%   3
 #   3x        1.8802   0.99977   1.4%   3
 #   4x        1.88+-0.03         3 runs  5    (1.8827 / 1.8725 / 1.9000)
@@ -329,7 +329,37 @@ RECOIL_SIGHT_PROFILES = {
     # store at 1.5128 is legitimate, and it is not done silently here. Doing it
     # takes the two arms from 6.41% (5.3 sigma) to 4.07% (3.4 sigma): a third
     # of the gap, right sign. The rest is still open.
-    'red_dot': {'K': 1.5128, 'mag': 1, 'keepout': RECOIL_KEEPOUT,
+    # ⚠ 1.5128 -> 1.5413, and the reason retires BOTH earlier numbers. K was
+    # measured two ways that disagreed by 9.4 sigma (1.5171 with duplicate
+    # frames dropped, 1.5520 with them kept), and the only difference between
+    # them is HOW MANY FRAME PAIRS share the same total motion -- dropping a
+    # frame correlates k-1 against k+1, halving the pair count and doubling the
+    # displacement per pair.
+    #
+    # tools/probe_correlator_bias.py puts the same 70 counts through ONE
+    # correlation and through ~223 of them, alternating, both directions,
+    # scoped, no click:
+    #
+    #     one-pair    n=16   K = 1.5413   sd 0.0043   sem 0.0011
+    #     many-pairs  n=16   K = 1.6574   sd 0.0185   sem 0.0046
+    #     +7.54%, 24.4 sigma
+    #
+    # THE CORRELATOR OVER-READS EVERY PAIR BY ABOUT 0.04 px AND IT ACCUMULATES.
+    # So both stored numbers were accumulation artefacts and the unbiased one
+    # is the single correlation: 1.5413.
+    #
+    # ⚠ AND THE BIAS IS IN EVERY STORED MAGAZINE. y_obs_counts() is a cumsum
+    # over ~450 frame pairs, so each trace carries ~450 doses of it. How much
+    # depends on whether the bias is a fixed 0.04 px per pair or a fraction of
+    # each pair's displacement, and one probe cannot tell those apart -- that
+    # is the next measurement, not a conclusion.
+    #
+    # ⚠ ONE RUN, ONE DISPLACEMENT MAGNITUDE. Tonight a 4.7 sigma interleaved
+    # result (eta) was overturned by a replication, so: this wants firing again
+    # at a different step size before it is leaned on. It is installed anyway
+    # because unlike eta the MECHANISM is identified and the effect is 24.4
+    # sigma, not because the number is pretty.
+    'red_dot': {'K': 1.5413, 'mag': 1, 'keepout': RECOIL_KEEPOUT,
                 'patch_xs': RECOIL_PATCH_XS},
     '2x':      {'K': 1.8254, 'mag': 2, 'keepout': 60,
                 'patch_xs': (1390, 1530, 1850),
