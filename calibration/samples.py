@@ -75,8 +75,19 @@ def config_key(config):
 def comp_counts_at(curve, t_s):
     """Compensation DELIVERED by time t, in mouse counts. Vectorised over t.
 
-    This reproduces the firmware, not an idealisation of it
-    (pico_firmware/src/main.c, get_recoil_delta + bullet_duration):
+    ⚠ IT DOES NOT REPRODUCE THE FIRMWARE, AND THAT IS MEASURED. This
+    docstring used to open with "This reproduces the firmware, not an
+    idealisation of it". Two runs of tools/probe_delivery_path.py --hold-sweep
+    say otherwise: curve/move RISES with how long the button was held,
+    +0.0148/s (2.8 sigma) and +0.0242/s (5.7 sigma). Pixels per count cannot
+    know the hold duration, so that trend can only be the integration below.
+    It peaks exactly when the curve finishes playing and is flat after, so it
+    is the LATE, SMALL knots -- where the firmware's int(accum)-with-carry
+    lives -- and not the freeze at release. 3-4% at burst-length holds, on a
+    C of ~900 counts inside a y_true of ~940. MODEL.md's open item 1.
+
+    What it MODELS (pico_firmware/src/main.c, get_recoil_delta +
+    bullet_duration):
 
       - each knot i starts at `t_ms` and its delta is spread EVENLY over
         `dur_i` ms, so the cumulative curve is piecewise LINEAR between knots,
@@ -311,14 +322,26 @@ class Magazine:
 
             y_true(t) = y_obs(t) + C(t - L)
 
-        ⚠ AND IT NEEDS NO eta. On 2026-08-08 a term was added here --
-        y_true = y_obs + eta*C with eta = 0.9711 -- because two interleaved
-        arms (zero compensation and a full 948-count curve, alternating 15 s
-        apart) disagreed by 3.28% at 4.7 sigma, and one fitted coefficient
-        closed them over the whole path to 2.9 counts rms. IT IS RETRACTED.
+        ⚠ AND IT NEEDS NO eta -- eta IS NOISE, and that is the settled
+        reading, not a preference between runs. It has been measured three
+        times, as the disagreement between two interleaved arms:
 
-        A stronger replication two hours later, THREE arms with the view's
-        excursion spanning 85x:
+            0.971   1.004   0.980      mean 0.9850 +- 0.0098
+                                       1.52 sigma from 1.00
+
+        and an arm difference carries sem 1.50% BY CONSTRUCTION (one arm n=8,
+        per-magazine CV 3%) against an observed spread of 1.73%. Not a penny
+        more. The 4.7 and 6.2 sigma that kept resurrecting it were computed
+        against the WITHIN-RUN sem, which does not predict reproducibility.
+
+        All four candidate mechanisms are separately refuted: SIZE (240
+        one-count moves deliver full K), PATH (0.90% short, not 4%), recoil
+        recovery (no trend over an 85x excursion), and the accounting error
+        (comp_counts_at UNDER-states -- the wrong direction). A term that
+        cannot say why it should affect y_true does not go in the model.
+
+        The middle reading, THREE arms with the view's excursion spanning
+        85x:
 
             curve 0    n=5   y_true(2.40s) 853.8 +-5.7   excursion 853.8
             curve 473  n=5                 853.5 +-3.9              428.8

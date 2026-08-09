@@ -1058,7 +1058,7 @@ class LobbyControl(Driver):
         # reading taken before the walk-back cannot be paired with one taken
         # after. 2026-08-08 paid for this once -- a K reading was taken, the
         # game fell back to the lobby, and pairing the two would have been the
-        # exact confound MODEL.md sec.4 spends a section removing.
+        # exact confound MODEL.md's noise floor spends a section removing.
         rec['entered'] = entered
         if not rec['ok'] or not range_name:
             return rec

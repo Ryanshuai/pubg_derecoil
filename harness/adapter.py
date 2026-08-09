@@ -325,7 +325,8 @@ def measure(rigging, cell, mags):
 # whole trajectories, not averaged.
 #
 # ⚠ `False` MEANS NO CURVE AT ALL, which measures y_true directly. It is the
-# cheapest second arm and the one MODEL.md §5之二 used. It is NOT a better
+# cheapest second arm and the one the mid-band measurement used
+# (docs/model_error_history.md). It is NOT a better
 # arm: that section measured its y_true at t=3.8 s as the lowest of four, 13%
 # under the plateau, and named "the no-comp arm is an unbiased anchor" as one
 # of the things it got wrong.
@@ -417,7 +418,8 @@ def _agreement(pool):
     pool with one arm returns (1, None) and judge() refuses the cell — "not
     checked" is not "passed".
 
-    ⚠ THE MID-BAND, NOT THE ENDPOINT. MODEL.md §5之二 measured the four arms
+    ⚠ THE MID-BAND, NOT THE ENDPOINT. docs/model_error_history.md measured
+    the four arms
     agreeing to 0.9% at t=1.5 s and diverging to 15% by t=3.8 s, with the
     divergence coming entirely from the strongest arm in the last 1.1 s. That
     end is a known unexplained region; judging the model there would be judging

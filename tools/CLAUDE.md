@@ -162,7 +162,7 @@ if not ensure_ready(label='the pitch probe')['ok']:
 ## 有机器在管
 
 ```
-pixi run layering        # 14 条规则
+pixi run layering        # 15 条规则
 pixi run params          # 死参数 + 私有调用点实参个数
 pixi run protocol-check  # PC/固件两端的生成物跟 protocol.toml 漂了没有
 ```
@@ -174,6 +174,33 @@ pixi run protocol-check  # PC/固件两端的生成物跟 protocol.toml 漂了�
 理由是实的：那四个常量唯一的用处就是算那个包围盒，而唯一 import 它们的调用方**把算术手抄了一遍并漏掉 `max(0, ...)` 钳位**。规则实测过会咬人，报文件、行号、符号名和修法。
 
 **规则 10**（2026-08-07）：`calibration/` 的模块只有一个名字 `calibration.X`。裸的 `from sweep import Rig` 会让文件被加载两遍、产生两个 `Rig` 类——实测无人值守夜晚就是这个状态。这条也管 `tools/`，因为一半探针 import calibration。
+
+**规则 15**（2026-08-08）：**占着屏幕的脚本,每个 `while` 循环都必须能被人打断。**
+
+判据:循环的 **test 或 body** 里必须提到时钟(`perf_counter` / `timeout` / `elapsed` / …)**或者**调 `focus_keeper()`。两样都没有 → 红。范围是 `tools/` `calibration/` `harness/`,触发条件是文件调了 `ensure_ready` / `ensure_focus`——**抢前台就是「我要占屏幕」这句声明**(跟规则 9 同一个判据)。
+
+⚠ **它是一次实机付账买来的。** 2026-08-08 晚,`probe_delivery_path.py --hold-sweep` 卡在
+
+```python
+prev = None
+while prev is None:
+    _t, f = grabber.grab_timed()
+    prev = rig.tracker.slice_frame(f) if f is not None else None
+```
+
+**八分钟**,一边占着前台一边动光标,而且这一段就在按下鼠标键之前。`slice_frame` 只要认不出 patch 就返回 `None`——对着空白天空就够了——**所以退出条件要由「世界」来提供,而循环对等多久没有任何意见。** 只能从另一个会话把进程杀掉。
+
+⚠ **逃生阀本来就存在,那个文件只是从来没调。** `control.focus.focus_keeper().ok(tag)` 在人把前台抢走 `MAX_REGAINS` 次之后返回 `False`,它自己的 docstring 就写着理由:「either something is contending, or a human is trying to get out. **Both mean stop**」。**一个从不发问的循环,没法用「回答」来叫停。**
+
+三个判定,每个都是一次误报买来的:
+
+| | |
+|---|---|
+| **body 也算,不只是 test** | 第一版只看 test,报了 28 处,其中大半是 `control/` 里 `while True:` 而 body 第一行就是 `if elapsed > timeout: return`——**正确的代码**。读 body 之后降到 9 处,9 处全是真的 |
+| **`break` 不算逃生阀** | 九个违规者**一个 break 都没有**,所以今天不损失什么;而认 break 等于把 `if x: break` 当成终止证明,**而 x 恰好就是那个「世界要提供的条件」** |
+| **只管脚本层** | `control/` 有几十个 `while True`,它们都在带 timeout 的驱动里,`_await_frame` 本来就查 `focus_keeper`。这条规矩管的是**拥有一次运行**的那一层 |
+
+自证 **6/6,3 条必须咬**。棘轮两个方向都实测过:新写一个占前台+无界循环的脚本 → **当场红**;往 `ESCAPE_DEBT` 里塞一个不违规的文件或一个不存在的文件 → **也红**。存量 8 个在账本里,每次跑都打印。
 
 **规则 14**（2026-08-08）：**一个语句块里不许两次进背包,中间只有纯计算。** 管所有层。判据反着写:**中间只要有任何一个不是内建/容器方法的调用,它就闭嘴**——所以只有「什么都没发生」才报。反过来列一张「必须在背包外做的事」的白名单是会烂的,这张是语言封闭的。
 

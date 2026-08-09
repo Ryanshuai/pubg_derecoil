@@ -102,7 +102,7 @@ self.ac.pointer.drag(src, dst)       # ✗ 绕过了 _reject()
 
 **全部在 `docs/` 下，不在 `calibration/` 旁边。** `.gitignore` 里**故意不再有任何 `calibration/` 规则**——哪天有脚本回退写到源码旁边，`git status` 会变脏，那正是发现它的机制。
 
-**`docs/` 整个不进 git**（`.gitignore` 第 19 行就一个 `docs`），2.7 GB，0 个文件被跟踪。
+⚠ **这句话现在是假的,而它曾经是真的。** 那 2.7 GB 语料 2026-08-08 搬去了 `calibration/artifacts/`,`.gitignore` 跟着搬走了——**`docs/` 现在是跟踪的**,底下十个 markdown 都在 git 里。唯一被单独忽略的是 `docs/model_error_history.md`(模型的错误史,确认之后就删)。
 
 ⚠ 这里原来写着一张「结论进 git、原始数据不进」的分界表，点名 `calibration/artifacts/recoil/weapon_rpm.json` 等三个文件在 git 里。**那从来没成立过**——查一次 `git ls-files docs/` 就知道是 0。2026-08-05 改成实际情况。
 

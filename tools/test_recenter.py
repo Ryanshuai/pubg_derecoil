@@ -30,6 +30,7 @@ no texture failure in it, so a pass here does not mean recentring works in the
 game — it means the arithmetic closes. The failures it cannot see are exactly
 the ones the live probes are for.
 """
+import contextlib
 import glob
 import os
 import sys
@@ -84,6 +85,21 @@ class FakeWorld:
     def move(self, dx, dy):
         self.moves.append(dy)
         self.p -= dy
+
+    # ⚠ THE NET-TRAVEL GUARD IS NOT MODELLED, ONLY ACCEPTED. PicoMouse.move()
+    # refuses past NET_DY_LIMIT and ViewDriver._send() opts out of that with
+    # travel_budget(), because this class knows where the view is and a raw
+    # caller does not (see _send). Implementing the refusal here would make
+    # this fixture test the guard instead of the aiming, and the guard has its
+    # own coverage; NOT implementing these two at all is what broke the
+    # fixture when _send landed, which is the fixture correctly reporting that
+    # the interface it stands in for had changed.
+    @contextlib.contextmanager
+    def travel_budget(self, counts):
+        yield self
+
+    def reset_travel(self):
+        return 0
 
     def click(self, *a, **kw):
         pass

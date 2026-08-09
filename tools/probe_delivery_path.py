@@ -5,7 +5,7 @@
 eta = 0.96..0.97 is measured twice over (calibration/samples.py) and has no
 cause. It is the last unexplained term in MODEL.md's identity:
 
-    y_true(t) = y_obs(t) + eta * C(t - L)
+    y_true(t) = y_obs(t) + C(t - M)        <- and eta is NOT in it, see below
 
 Two mechanisms fit every number, and the recoil data cannot separate them
 because a burst only ever delivers compensation one way:
@@ -124,7 +124,7 @@ TRIAL_OVERHEAD_S = 0.35
 
 # ── --hold-sweep: is comp_counts_at() the firmware, or an idealisation? ──────
 #
-# MODEL.md sec.4.2.2 measured the two firing arms 2.16% apart with K pinned
+# A measurement put the two firing arms 2.16% apart with K pinned
 # independently, and TWO things produce exactly that, with the same sign and
 # the same size:
 #
@@ -662,7 +662,7 @@ def _report_sweep(got, curve):
               f'{abs(slope)/max(se_slope,1e-12):.1f} sigma). comp_counts_at '
               f'reproduces the firmware across the whole hold, INCLUDING the '
               f'freeze at release.')
-        print(f'  -> the 2.16% arm offset in MODEL.md sec.4.2.2 is NOT an '
+        print(f'  -> the 2.16% arm offset is NOT an '
               f'accounting error. It is a scale, and eta is what is left.')
         print(f'  -> and the level itself is a second reading of eta: '
               f'{rs.mean():.4f}, i.e. the firmware path delivers '

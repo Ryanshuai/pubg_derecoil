@@ -129,6 +129,12 @@ PROBE_COUNTS = 30       # for tracking_confirmed()
 # refuses to rotate further" is the same place every time.
 CLAMP_PUSH = 4000       # one open-loop shove, comfortably past the travel
 CLAMP_SETTLE_S = 0.35
+# The ceiling _send() raises PicoMouse's net-travel guard to. Comfortably past
+# the largest single command this class issues -- goto_midline's shove is
+# CLAMP_OVERSHOOT * 8034 = 12051 hip-fire -- because inside _send the guard is
+# not the safety net, KNOWING WHERE THE VIEW IS is. It is not infinity so that
+# a genuine runaway in this file still stops somewhere.
+RANGING_LIMIT = 20000
 BAND_STEP = 100         # rise per probe while mapping the measurable band
 BAND_MAX = 3000         # stop rising; the travel is well inside this
 BAND_TRACK_FRAC = 0.5   # observed/commanded above this counts as measurable
@@ -421,9 +427,36 @@ class ViewDriver:
         pending_pitch, so a recenter() afterwards is measuring from a belief
         this call already invalidated. Use goto_level / recenter / reaim.
         """
-        self.mouse.move(int(yaw), int(pitch))
+        self._send(int(yaw), int(pitch))
         if settle_s:
             time.sleep(settle_s)
+
+    def _send(self, dx, dy):
+        """L0 — Every pitch/yaw command this class issues goes through here.
+
+        ⚠ IT EXISTS TO BE EXEMPT FROM A GUARD, and the asymmetry is the point.
+        PicoMouse.move() refuses once net vertical travel passes
+        NET_DY_LIMIT, because a caller that keeps pushing one way arrives at a
+        pitch stop where the game DISCARDS further counts — the commands
+        succeed, the view does not move, and every reading after that is of a
+        stationary screen reported as a small effect. A probe walked ~4800
+        counts that way on 2026-08-08 with its +1/-1 sign in the outer loop.
+        THAT guard is for callers who do not know where the view is.
+
+        This class does know. home_to_clamp pushes past any possible travel
+        ON PURPOSE, and goto_midline then walks back a measured half — 4017
+        counts hip-fire, past the limit by itself. A threshold cannot separate
+        the two cases: 4017 is legitimate and 4800 is the bug. WHO IS PUSHING
+        separates them, and this method is that answer expressed in code.
+
+        `reset_travel()` afterwards is the other half: every route through
+        here ends with the view at a place this class can name, so the next
+        raw caller's budget starts from a known origin instead of inheriting
+        ours.
+        """
+        with self.mouse.travel_budget(RANGING_LIMIT):
+            self.mouse.move(int(dx), int(dy))
+        self.mouse.reset_travel()
 
     def ads_tap(self, hold_ms=60, settle_s=0.0):
         """L0 — Toggle the sight in or out. OPEN LOOP, and the module's second
@@ -614,7 +647,7 @@ class ViewDriver:
         # fail into a shove that stops short of the stop, and every caller
         # would go on treating where it landed as absolute.
         push = CLAMP_PUSH * max(1.0, self.pitch_scale())
-        self.mouse.move(0, int(direction * push))
+        self._send(0, int(direction * push))
         time.sleep(CLAMP_SETTLE_S)
 
     def track_still(self, timeout_s=TRACK_TIMEOUT_S, still_s=TRACK_STILL_S,
@@ -689,7 +722,7 @@ class ViewDriver:
         while left:
             step = max(-RECENTER_STEP, min(RECENTER_STEP, left))
             prev = self.tracker.slice_frame(self.grab())
-            self.mouse.move(0, step)
+            self._send(0, step)
             left -= step
             got = self.track_still(timeout_s=0.8, still_s=0.10, prev=prev)
             moved += got
@@ -1088,7 +1121,7 @@ class ViewDriver:
         # 1.18x on a model that is the reason for this whole measurement. cap
         # is the give-up bound, so if the travel is beyond it nothing here was
         # going to work anyway.
-        self.mouse.move(0, cap)
+        self._send(0, cap)
         time.sleep(CLAMP_SETTLE_S)
         reached('bottom')
         up_ok, d['up'] = self.to_stop(-1, step, 'up  ', cap, verbose)
@@ -1312,13 +1345,13 @@ class ViewDriver:
         # guaranteed overshoot is just a multiple of it. One less place for the
         # model to be wrong, and a real margin instead of CLAMP_PUSH's 4000
         # against a red-dot travel of 3400.
-        self.mouse.move(0, int(t * CLAMP_OVERSHOOT))
+        self._send(0, int(t * CLAMP_OVERSHOOT))
         time.sleep(CLAMP_SETTLE_S)
         # Two moves, and nothing measured between them: the stop says where the
         # view started and half the travel says how far to go. Stepping would
         # only buy the correlator's opinion of a distance already known -- an
         # opinion it cannot give anyway over the bare ground this passes over.
-        self.mouse.move(0, -half)
+        self._send(0, -half)
         time.sleep(CLAMP_SETTLE_S)
         self.pitch_centre = half
         self.pitch_band = None
@@ -1367,7 +1400,7 @@ class ViewDriver:
         if not up:
             return 0
         self.home_to_clamp(+1)
-        self.mouse.move(0, -int(up * self.pitch_scale()))
+        self._send(0, -int(up * self.pitch_scale()))
         time.sleep(CLAMP_SETTLE_S)
         self.pitch_centre = int(up)
         self.pitch_band = None
@@ -1399,7 +1432,7 @@ class ViewDriver:
         rises, usable = 0, []
         while rises < BAND_MAX:
             prev = self.tracker.slice_frame(self.grab())
-            self.mouse.move(0, -step)
+            self._send(0, -step)
             got = self.track_still(timeout_s=0.7, still_s=0.10, prev=prev)
             rises += step
             if abs(got) > step * BAND_TRACK_FRAC:
@@ -1456,7 +1489,7 @@ class ViewDriver:
         # and re-measuring the way home only buys the correlator's opinion of
         # a distance already known — twenty-odd tracked steps per magazine for
         # an answer that was in hand before the first one.
-        self.mouse.move(0, -int(self.pitch_centre))
+        self._send(0, -int(self.pitch_centre))
         time.sleep(RECENTER_SETTLE_S)
         self.pending_pitch = 0.0
         return int(self.pitch_centre)

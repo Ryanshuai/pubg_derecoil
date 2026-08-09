@@ -178,7 +178,7 @@ data you would need to retune them.
 
 ## The one place the model is known to be wrong
 
-MODEL.md §5之二, and it is worth reading before trusting a number from the ends
+docs/model_error_history.md, and it is worth reading before trusting a number from the ends
 of a burst. 28 magazines of m416 bare, four curve strengths spanning 3x:
 
 ```

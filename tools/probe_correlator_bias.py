@@ -10,8 +10,9 @@ burst lives in. Measured over the whole sample store (272 magazines):
     old probe, one-pair arm                      108 px
     old probe, many-pairs arm                   0.48 px
 
-478 pairs per magazine, and the +7.54% correction the store now carries was
-extrapolated from the 0.48 px end. If the over-read is a fixed 0.04 px per pair
+478 pairs per magazine, and the +7.54% figure that WAS going to be applied
+to the store was extrapolated from the 0.48 px end. ⚠ It never was applied,
+and the grid below is why: over a real magazine the net is -0.28% / -0.81%. If the over-read is a fixed 0.04 px per pair
 a magazine is 1.2% high; if it is a fixed FRACTION of each pair's motion it is
 7.5% high. Nothing measured so far separates those, because separating them
 needs the two decades in between.
@@ -398,13 +399,13 @@ def main():
     else:
         print()
         print('⚠ ONE RUN. Nothing here moves K until a second, independent run '
-              'agrees — see MODEL.md sec.3. Re-run with '
+              'agrees — see MODEL.md, the two-arm gate. Re-run with '
               f'--replicate <the --save file from this run>.')
     return rc
 
 
 def replicate(path, rows_b):
-    """Two independent runs, side by side. The gate MODEL.md sec.13 says is
+    """Two independent runs, side by side. The gate MODEL.md still says is
     missing: eta survived one run at 4.7 sigma and died on the second."""
     import json
     import contextlib

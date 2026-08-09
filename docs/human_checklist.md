@@ -98,7 +98,7 @@ Muzzle_FlashHider_SniperRifle_C   963.1   ← 第三名，远 45 倍
 
 ## ~~3 — `training_data/` 进不进 git~~　✅ 已定：**开白名单**（2026-08-05）
 
-这条是「**代码能不能跑**」，不是「结论要不要历史」（后者已定：`docs/` 整个不进，代价认了）。
+这条是「**代码能不能跑**」，不是「结论要不要历史」。⚠ **后者 2026-08-08 变了**：语料搬去 `calibration/artifacts/`，`docs/` 现在是跟踪的。
 
 2026-08-05 起 `detector/lobby_nav.read_page` 从「按位置认名」改成「按字形认名」，于是它依赖 `training_data/pubg_assets/lobby/tabs/` 下的模板。`training_data/` 整个被 gitignore，所以新克隆的仓库读不出任何语言的顶栏，`ensure_in_match()` 整条链拒绝动作。
 
@@ -183,7 +183,7 @@ Muzzle_FlashHider_SniperRifle_C   963.1   ← 第三名，远 45 倍
 
 ### `factor_model.md` 进不进 git —— 不进（2026-08-05）
 
-`docs/` 整个不进 git，包括这份 checklist。代价认了：结论只在盘上，没有版本历史。
+⚠ **这句已经不成立**：2026-08-08 语料搬去 `calibration/artifacts/`，`.gitignore` 跟着搬走，**`docs/` 现在是跟踪的**，这份 checklist 也有版本历史了。唯一单列忽略的是 `docs/model_error_history.md`。
 
 ### vss 的一切 —— 根因不是 vss，是 `build_weapon` 从来不设 `scope`
 

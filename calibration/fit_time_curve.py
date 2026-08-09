@@ -611,12 +611,13 @@ def selftest():
 # Grouping by session alone reported 1.54% for mp5k and 3.72% for m416 and
 # called it a session effect. It is not: the store's early sessions fired
 # uncompensated and the middle ones fired compensated, so "session" and "which
-# curve was playing" were partly the same axis. MODEL.md sec.4's own nine-run
-# table has the same flaw -- its first three runs are a pure comp-OFF arm
+# curve was playing" were partly the same axis. The nine-run table (now only
+# in docs/model_error_history.md) has the same flaw -- its first three runs
+# are a pure comp-OFF arm
 # (mean 821.1) and its middle four a pure compensated arm (865.4), 5.1% apart,
 # and the whole spread was read as time.
 #
-# Split BOTH ways and it comes apart (MODEL.md sec.4.2):
+# Split BOTH ways and it comes apart (MODEL.md, the noise-floor section):
 #
 #     compensated arm, between sessions   1.28% observed vs 1.09% sampling
 #     comp-OFF arm,    between sessions   2.53% observed vs 1.23% sampling
@@ -626,7 +627,7 @@ def selftest():
 # measurement (|y_obs| 830 counts against 36), which is where a MULTIPLICATIVE
 # error lands and an additive one could not.
 #
-# ⚠ AND IT IS NOT CALLED DRIFT. MODEL.md sec.0 is a premise: y_true is a fixed
+# ⚠ AND IT IS NOT CALLED DRIFT. MODEL.md's "no drift" PREMISE: y_true is a fixed
 # curve, nothing drifts, and two readings that disagree mean at least one is
 # wrong. So that multiplier is an UNLOCATED MEASUREMENT FAULT, not a property
 # of the system -- naming it "K drifting per session" is what produced a
@@ -643,9 +644,9 @@ def selftest():
 # per-magazine CV, and for the shape comparison each group is also split
 # alternately in two and fitted twice. This is sec.3's interleave-vs-replicate
 # rule, pointed at the fitter instead of at the gun.
-SESSION_GAP_MIN = 5.0            # same cut as MODEL.md sec.4's nine runs
+SESSION_GAP_MIN = 5.0            # same cut as the nine-run table in the history
 SESSION_MIN_MAGS = 4             # below this a "session fit" is one magazine
-SESSION_T_REF = 2.40             # where y_true is read, as in MODEL.md sec.4
+SESSION_T_REF = 2.40             # where y_true is read, as in the noise floor
 ARM_ROUND = -2                   # curve totals binned to 100 counts
 
 
@@ -788,7 +789,7 @@ def by_session(mags, gap_min=SESSION_GAP_MIN, min_mags=SESSION_MIN_MAGS,
             print('  That excess appears ONLY where the answer is measurement '
                   '(|y_obs| is the whole of y_true there and near zero on the '
                   'compensated arm), which is where a MULTIPLICATIVE error '
-                  'lands and an additive one could not. MODEL.md sec.4.2.')
+                  'lands and an additive one could not. MODEL.md, the noise floor.')
             print('  ⚠ THIS IS THE SCATTER, NOT THE ARMS\' MEAN OFFSET, and '
                   'they are different quantities. Naming this one K and then '
                   'predicting the mean offset from it missed by 5.8 sigma '

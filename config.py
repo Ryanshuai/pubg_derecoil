@@ -351,7 +351,7 @@ RECOIL_SIGHT_PROFILES = {
     # ⚠ THAT LAST PARAGRAPH IS TRUE ONLY AT delta ~ 0.6 px, WHICH IS WHERE THAT
     # PROBE'S SPREAD ARM HAPPENED TO SIT. --grid re-ran it as a (step size x
     # spread) sweep, twice, and the per-pair over-read is a CURVE that CHANGES
-    # SIGN (MODEL.md sec.2.1):
+    # SIGN (MODEL.md, the constants table):
     #
     #     delta px      0     0.6     1.1    2.0-2.2    3.8-4.4     7-8
     #     b px/pair  +0.000  +0.047  +0.076   +0.039     -0.098    -0.21
@@ -373,7 +373,8 @@ RECOIL_SIGHT_PROFILES = {
     # Within a run the four step sizes (20/35/50/70) agree to +-0.1% and the
     # sem is 0.06%; BETWEEN runs K_true moves 0.55%, nine times that.
     #
-    # ⚠ THAT IS NOT K DRIFTING. MODEL.md sec.0 is a premise, not a finding:
+    # ⚠ THAT IS NOT K DRIFTING. MODEL.md's "no drift" is a PREMISE, not a
+    # finding:
     # y_true is a FIXED curve and nothing here drifts, because a curve fitted
     # today and played tomorrow presupposes exactly that. So two readings that
     # disagree mean AT LEAST ONE OF THEM IS WRONG, and the job is to find the

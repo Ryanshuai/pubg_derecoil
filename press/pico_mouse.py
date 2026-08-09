@@ -11,6 +11,7 @@ this docstring would be a third copy, and it was already drifting: it listed
 three of the thirteen commands.
 """
 
+import contextlib
 import os
 import queue
 import threading
@@ -71,6 +72,22 @@ HID_KEY_M   = 0x10   # opens/closes the map; in the training range the map is
 _instance = None
 
 
+# Net vertical counts one caller may command before move() refuses. The
+# measured pitch ranges it sits under (control/CLAUDE.md, artifacts/pitch):
+#
+#     hip fire   8034 counts full travel, midline 4017
+#     red dot    3400                     midline 1700
+#     prone      1450                     midline  725
+#
+# From the midline — where every magazine starts, because goto_midline puts it
+# there — the reachable displacement is the HALF range. 3000 is under hip
+# fire's 4017 and over every other half-range, so it fires before the view can
+# be pinned against a limit in any configuration this repo measures, and it
+# does not fire during ordinary aiming. A sweep that means to reach a limit
+# says so with `travel_budget()`.
+NET_DY_LIMIT = 3000
+
+
 class PicoMouse:
     # ⚠ can_key / can_click STOOD HERE AND ARE GONE (2026-08-08). They let a
     # caller ask "can this backend press a key / click" instead of probing
@@ -86,6 +103,9 @@ class PicoMouse:
         self._ser = None
         self._human = (0, 0)
         self._human_seen = False
+        # Net vertical counts commanded since the last reset — see move().
+        self._net_dy = 0
+        self._net_dy_limit = NET_DY_LIMIT
         # Firmware chatter that is not a human-movement report. Bounded: a
         # reply nobody collects must not grow without limit, and a stale one
         # must not be mistaken for an answer -- ask() drains before it writes.
@@ -269,7 +289,7 @@ class PicoMouse:
     def upload_pattern(self, dx_s, dy_s, t_s):
         """Upload the curve AS GIVEN. One knot in, one knot out.
 
-        ⚠ IT USED TO MERGE TO ONE POINT PER BULLET, and MODEL.md §4 named this
+        ⚠ IT USED TO MERGE TO ONE POINT PER BULLET, and MODEL.md named this
         method as the single thing standing between the model and the
         firmware: "挡在中间的只有一处". Whatever grid the fitter produced, this
         re-binned it by `bullet_interval_s` and summed — so a 17 ms curve
@@ -488,7 +508,73 @@ class PicoMouse:
         return None
 
     def move(self, dx, dy):
+        """Send a relative move. Refuses to walk the view off its own range.
+
+        ⚠ THE PITCH AXIS HAS TWO HARD LIMITS AND NOTHING USED TO NOTICE THEM.
+        A caller that keeps pushing one way arrives at the limit and every
+        further count is DISCARDED BY THE GAME -- the commands succeed, the
+        device sends them, and the view stops moving. Every measurement taken
+        after that point is of a stationary screen, and it looks like a real
+        reading of a very small effect.
+
+        Measured 2026-08-08: a probe put its +1/-1 sign in the OUTER loop, so
+        one sign ran 6 hold-durations x 2 arms = 12 pushes the same way,
+        ~4800 counts. Half the hip-fire range is 4017 from the midline, so it
+        was against the ceiling for the back half of the sweep and reported
+        numbers for it.
+
+        `_net_dy` is the only thing this layer can honestly track -- it knows
+        what it was told to send, not where the view is -- but that is exactly
+        the quantity that goes out of range, because the view starts near the
+        midline and a net displacement IS a distance from it.
+
+        ⚠ A PROBE THAT MEANS TO WALK THE WHOLE RANGE MUST SAY SO, with
+        `travel_budget()`. Two do (the pitch-range sweep and the level fit);
+        for everything else a net 3000 counts is already past any half-range
+        this repo measures except hip fire's 4017.
+        """
+        self._net_dy += int(dy)
+        if abs(self._net_dy) > self._net_dy_limit:
+            raise RuntimeError(
+                f'net vertical travel {self._net_dy:+d} counts exceeds '
+                f'{self._net_dy_limit} — the view is at or past a pitch '
+                f'limit, where the game discards further counts and every '
+                f'reading is of a stationary screen. Alternate the sign in '
+                f'the INNER loop, recentre between trials, or declare the '
+                f'sweep with `mouse.travel_budget(n)` if walking the whole '
+                f'range is the point.')
         self._write(struct.pack(CMD_MOVE_FMT, CMD_MOVE, int(dx), int(dy)))
+
+    @property
+    def net_dy(self):
+        """Net vertical counts commanded since the last reset."""
+        return self._net_dy
+
+    def reset_travel(self):
+        """Declare the view back at its starting point. -> the net it had.
+
+        Call after a recentre or a range re-entry: the budget is about how far
+        one direction has been walked, and both of those put the view back.
+        """
+        was, self._net_dy = self._net_dy, 0
+        return was
+
+    @contextlib.contextmanager
+    def travel_budget(self, counts):
+        """Raise the net-travel ceiling for a block that means to walk far.
+
+        The pitch-range sweep walks to BOTH hard limits on purpose -- 8034
+        counts hip-fire -- and refusing that would refuse the measurement the
+        limit constant comes from. Restored on exit, exception or not, so a
+        probe cannot widen the guard for everything after it.
+        """
+        was_limit, was_net = self._net_dy_limit, self._net_dy
+        self._net_dy_limit = int(counts)
+        self._net_dy = 0
+        try:
+            yield self
+        finally:
+            self._net_dy_limit, self._net_dy = was_limit, was_net
 
     def click(self, buttons=0x01, duration_ms=80):
         """-> the perf_counter instant the bytes went out.

@@ -542,7 +542,7 @@ def main():
                          'scatter by exactly what an arm difference carries by '
                          'construction (1.73%% against 1.50%%), the mean sits '
                          '1.52 sigma from 1, and all four candidate mechanisms '
-                         'were separately refuted (MODEL.md sec.13). What the '
+                         'were separately refuted (MODEL.md, the ruled-out table). What the '
                          'sweep is still FOR is sec.3\'s two-arm gate: curves '
                          'of different strength must give the same y_true, and '
                          'the fitter cannot arrange that. '
@@ -721,7 +721,8 @@ def main():
         # and an unreadable-but-fitted part looks exactly like that. That much
         # is a property of slot_detector's deliberate trade and needs no
         # example. What does NOT survive is trusting a diagnosis built from one
-        # cell's total — see MODEL.md §5之二, and note that this is that law
+        # cell's total — see docs/model_error_history.md (that section did not
+        # survive the cut to a spec), and note that this is that law
         # biting through a number that was measured correctly.
         #
         # So: what you ASKED for is the one thing this layer knows that the

@@ -24,7 +24,8 @@ them asks anyone to look at a trace and judge.
 
 What this does NOT cover: whether the compensation lands on the right ROUND.
 That is not observable from the wire -- it needs the game and the screen.
-An alignment probe used to answer it; MODEL.md §4 carries what it found,
+An alignment probe used to answer it; docs/model_error_history.md carries
+what it found,
 and the probe itself went on 2026-08-08 with the coordinate it measured
 in (both grids are anchored to the click now, so there is nothing to
 align).
@@ -217,7 +218,7 @@ def main():
     print(f'all {len(rep.rows)} checks pass.\n\n'
           'Not covered here: whether the compensation lands on the right '
           'ROUND. That is\nnot observable from the wire — '
-          'a deleted alignment probe; MODEL.md §4 carries the conclusion, and it needs the game.')
+          'a deleted alignment probe; docs/model_error_history.md carries it, and it needs the game.')
     return 0
 
 
