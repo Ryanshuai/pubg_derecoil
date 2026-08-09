@@ -140,6 +140,67 @@ def order_configs(configs):
     return [names[i] for i in order]
 
 
+def gray_order(axes):
+    """Every combination of `axes`, ordered so ONE slot changes per step.
+
+    `axes` is {slot: [value, ...]} with None meaning empty, e.g.
+
+        {'muzzle': [None, 'comp_ar'], 'grip': [None, 'vert_grip', 'half_grip']}
+
+    -> [{'muzzle': ..., 'grip': ...}, ...], every combination exactly once.
+
+    ⚠ THIS IS THE GENERALISATION order_configs CANNOT DO, and the difference is
+    not size, it is kind. order_configs works on SETS OF SLOT NAMES -- a config
+    is "which slots are filled" -- so it cannot express vert_grip against
+    angled_grip at all. Today a second part in the same slot is a separate
+    night (`--parts grip=tilted_grip`), which means the ordering never crosses
+    that axis and every boundary between runs pays the worst case. Asked for in
+    those terms: 「grip 那一步，其实是多个 grip 轮番换。这个多种的怎么做格雷码」.
+
+    ⚠ AND IT IS A CONSTRUCTION, NOT A SEARCH, because the search does not
+    survive the generalisation. order_configs brute-forces 8! = 40320 and calls
+    the winner optimal. Five grips x four muzzles x three stocks is 60 cells,
+    and 60! is not a number anything enumerates.
+
+    The mixed-radix reflected Gray code needs no search: write the index in
+    mixed radix, then reflect digit j whenever the digits ABOVE it sum to odd.
+    That is the same trick the binary reflected code uses, with unequal bases.
+
+    ⚠ WHY THE RESULT IS OPTIMAL WITHOUT BEING CHECKED AGAINST ANYTHING:
+    visiting N cells takes at least N-1 transitions, and every transition here
+    costs exactly one slot change, so the tour costs exactly N-1. Nothing can
+    beat that. What `pixi run gray` verifies is not the optimality -- it is the
+    PROPERTY the optimality rests on, because a construction that quietly
+    changed two slots somewhere would still look like a plausible tour.
+    """
+    slots = list(axes)
+    radix = [len(axes[s]) for s in slots]
+    if not slots or any(r == 0 for r in radix):
+        return []
+    total = 1
+    for r in radix:
+        total *= r
+    out = []
+    for i in range(total):
+        digits, rem = [0] * len(radix), i
+        for j in range(len(radix) - 1, -1, -1):
+            digits[j] = rem % radix[j]
+            rem //= radix[j]
+        cell, higher = {}, 0
+        for j, s in enumerate(slots):
+            d = radix[j] - 1 - digits[j] if higher % 2 else digits[j]
+            cell[s] = axes[s][d]
+            # ⚠ THE OUTPUT DIGIT, NOT THE INPUT ONE. Accumulating digits[j]
+            # here reads like the same thing and is not: on radices (2,2,2) it
+            # sends index 4 to (1,1,1) where the binary reflected code says
+            # (1,1,0), so one step changes TWO slots and the 2^3 tour costs 8
+            # instead of 7. `pixi run gray` caught it on the case that pins the
+            # number order_configs already proves.
+            higher += d
+        out.append(cell)
+    return out
+
+
 def plan_cells(weapons, postures, sight, configs=('bare',)):
     """Every (weapon, posture, sight, config) the night will attempt.
 

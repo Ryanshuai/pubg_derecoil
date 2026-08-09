@@ -134,6 +134,14 @@ kava4 = "python tools/import_kava4.py"
 # moment it grows its own idea of "ready", the thing scripts depend on and the
 # thing a human checks stop being the same thing.
 ready = "python control/session.py"
+# The cell order when a slot has MORE THAN TWO values. order_configs solves the
+# binary case by brute-forcing 8!; five grips x four muzzles x three stocks is
+# 60 cells and 60! is not enumerable. gray_order constructs the mixed-radix
+# reflected Gray tour instead -- N cells in N-1 slot changes, which is the
+# floor by counting rather than by search. ⚠ Its first version accumulated the
+# INPUT digit instead of the output one and sent the 2^3 tour to 8 changes
+# where order_configs already proves 7; that case is in here for that reason.
+gray = "python tools/test_gray_order.py"
 # "Replicate it" has no meaning on pooled data -- a fit eats the whole store at
 # once. This is the shape that rule takes there: cut by (session x curve arm)
 # and ask whether the slices agree, with the baseline computed from the
