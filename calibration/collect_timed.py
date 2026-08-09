@@ -479,11 +479,35 @@ def fire_one_into_store(rig, grabber, weapon, config, posture, curve,
     mag_size, _ = rig.fire.top_up()
     if not mag_size:
         return None, 'no ammo counter — cannot say how long this burst is'
+    # ⚠ SAID OUT LOUD, NOT REFUSED (2026-08-09). This used to stop the cell, and
+    # what it stopped was a REAL difference -- the m416's whole 143-magazine
+    # corpus holds 40 rounds and the current setup order produces 42 -- but
+    # "these two are not comparable" is not "this one cannot be measured".
+    #
+    # The comparison the refusal protected is `total_counts`, where a shorter
+    # burst reads as a very effective attachment. Every factor in this project
+    # is now read at a COMMON t instead, and y_true(t) over the overlapping
+    # window is the same curve whatever the magazine holds; the longer burst
+    # simply has more tail.
+    #
+    # ⚠ WHAT IS GENUINELY UNMEASURED IS WHETHER THE MAGAZINE ITSELF MOVES THE
+    # RECOIL. A quick-draw and an extended magazine are different attachments,
+    # and this repository has been wrong twice about parts that "should not"
+    # matter -- `laser` reads 1.0058 in the grip slot, and tactical_stock is
+    # 0.9852 on the vector and 0.9260 on the ace32, so even "is this part
+    # inert" turns out to be a statement about the WEAPON. Refusing made that
+    # question unanswerable, because the magazines needed to answer it could
+    # not be stored.
+    #
+    # So: recorded on every magazine (`magazine_size`), printed here when it
+    # disagrees with the store, and pooled. Same shape as `ads_end` -- a fact
+    # worth knowing that must not silently decide a cell.
     if prior and mag_size not in prior:
-        return None, (f'this magazine holds {mag_size} rounds and every stored '
-                      f'{weapon} magazine holds {sorted(prior)}; a cell whose '
-                      f'burst is a different LENGTH cannot be compared with '
-                      f'the others')
+        print(f'      [!] this magazine holds {mag_size} rounds and every '
+              f'stored {weapon} magazine holds {sorted(prior)}. Recorded and '
+              f'POOLED — read cells at a common t, not by total_counts, and '
+              f'note that whether the magazine part itself moves the recoil '
+              f'has never been measured.')
     if not aim_and_scope(rig, posture):
         return None, 'could not re-aim'
     mag, out = one_magazine(rig, grabber, weapon, mag_size, interval_s,
