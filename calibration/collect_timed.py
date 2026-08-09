@@ -804,12 +804,41 @@ def main():
 
         rig.ensure_posture(a.posture)
 
+        # ⚠ THE CAPACITY IS THE MAGAZINE'S IDENTITY, so it has to be the SAME
+        # capacity as every magazine this weapon's cube is being compared
+        # against. The operator's rule (2026-08-08): read the number after the
+        # reload and let it decide, because the icon cannot -- see
+        # samples.Magazine.magazine_size for the measured reason.
+        #
+        # Constant, not looked up. Nothing in this repository has a measured
+        # base-capacity table, and inventing one would be a game fact asserted
+        # rather than observed. What the store already knows is what every
+        # earlier magazine of this weapon fired, and a cube whose cells differ
+        # in burst LENGTH is not a cube -- a base magazine is 10 rounds and
+        # ~0.65 s shorter, which looks exactly like a very effective attachment.
+        prior = {m.magazine_size for m in S.all_magazines(a.weapon)
+                 if m.magazine_size}
+        if prior:
+            print(f'  magazine: every stored {a.weapon} magazine holds '
+                  f'{sorted(prior)} rounds')
+
         grabber = DXGISyncGrabber(rig.tracker.regions())
         for i in range(a.mags):
             mag_size, _ = rig.fire.top_up()
             if not mag_size:
                 print(f'  mag {i}: no ammo counter — stopping')
                 break
+            if prior and mag_size not in prior:
+                print(f'  [!] REFUSING: this magazine holds {mag_size} rounds '
+                      f'and every {a.weapon} magazine already stored holds '
+                      f'{sorted(prior)}. The capacity IS the magazine (the icon '
+                      f'reads 591.9 MSE against 32-51 for every other slot, so '
+                      f'it cannot say), and a cell whose burst is a different '
+                      f'LENGTH cannot be compared with the others — a base '
+                      f'magazine looks like a very effective attachment.\n'
+                      f'      Fit the same magazine, or start a separate study '
+                      f'and say so.')
+                return 9
             # ⚠ ONE HOMING PER MAGAZINE, NOT TWO. There used to be a
             # goto_midline right after ensure_posture as well, so the first
             # magazine dipped the view to the bottom clamp TWICE before firing

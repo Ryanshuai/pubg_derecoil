@@ -28,6 +28,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import control.lobby as L                                    # noqa: E402
 import control.map as M                                      # noqa: E402
 
+# Captured before main() swaps M.MapControl for FakeMap. The branch table
+# needs the fake; the click cases at the bottom need the real thing.
+_REAL_MAPCONTROL = M.MapControl
+
 CALLS = []
 
 
@@ -126,6 +130,17 @@ def main():
     check('5b the match-settle retry fired',
           len(CALLS) == 2, f'{CALLS}')
 
+    # ⚠ AND ON THE `already in` PATH TOO, which is what this used to skip. The
+    # retry was gated on `entered`, reasoning from the CAUSE it was written for
+    # (a match too fresh to take input) rather than from the symptom. A process
+    # that found the game already in a match hit the same map_open false
+    # positive on 2026-08-08, got no retry, and failed hard twice in a row --
+    # while the run after it succeeded on its first try.
+    L.forget_placement()
+    r = run(['in_game'], teleport_ok=False)
+    check('5c already in, teleport failed        -> retry fires ANYWAY',
+          len(CALLS) == 2, f'{CALLS}')
+
     # ── leaving forgets ──
     run(['lobby', 'in_game'])
     L.LobbyControl._pump = fake_pump(['in_game', 'lobby'])
@@ -133,12 +148,108 @@ def main():
     check('8  exit_to_lobby                      -> belief dropped',
           L.placed_at() is None, str(L.placed_at()))
 
+    # ── and MapControl itself: WHEN MAY IT CLICK? ──
+    #
+    # Everything above replaces MapControl wholesale, so nothing up here can
+    # see the one decision that costs ammunition. `map_open` can answer True on
+    # a screen with no map on it -- the left panel's yellow selection border --
+    # and a click aimed at the 200m box then lands in the WORLD, where a left
+    # click fires the weapon. Measured 2026-08-08: two runs, eight clicks, the
+    # counter went 40 -> 32 on the gun under test.
+    #
+    # The disagreement was already being logged ("player is at None") and
+    # already documented in ensure_map's docstring. It clicked anyway.
+    print()
+    print('MapControl.goto_range — when may it click?')
+    fails += _map_click_cases()
+
     print()
     if fails:
         print(f'{len(fails)} branch(es) are not what the code claims')
         return 1
-    print('9 branches, 3 of them negative — the placement table holds')
+    print('12 branches, 5 of them negative — the placement table holds')
     return 0
+
+
+def _map_click_cases():
+    """goto_range with the SCREEN faked, not MapControl. -> [failed labels]"""
+    # ⚠ THE REAL CLASS, not M.MapControl -- main() replaced that name with
+    # FakeMap for the branch table above, and reading it here would test the
+    # fake against itself. _REAL_MAPCONTROL is captured at import, before any
+    # patching, for exactly this.
+    import control.map as MC
+    real_cls = _REAL_MAPCONTROL
+    bad = []
+
+    def check(label, cond, detail=''):
+        print(f'  {"ok  " if cond else "FAIL"}  {label}'
+              + (f'   {detail}' if detail and not cond else ''))
+        if not cond:
+            bad.append(label)
+
+    class FakePointer:
+        def __init__(self):
+            self.clicks = []
+
+        def click_at(self, x, y):
+            self.clicks.append((x, y))
+
+        class pico:
+            @staticmethod
+            def key(*a, **k):
+                pass
+
+    def build(marker, at_range=False):
+        """A MapControl whose screen says map_open=True and player_xy=marker."""
+        mc = real_cls.__new__(real_cls)
+        mc.verbose = False
+        # `pointer` is a PROPERTY whose getter opens the serial port other
+        # agents share. Setting `_pointer` is what keeps this test off the
+        # Pico -- see Driver.pointer on why it is lazy in the first place.
+        mc._pointer = FakePointer()
+        mc.det = type('D', (), {
+            'state': lambda self: type('S', (), {'playable': True,
+                                                 'value': 'in_game'})(),
+            'close': lambda self: None})()
+        return mc
+
+    real = (MC.capture_screen, MC.map_open, MC.player_xy, MC.at_range_xy,
+            MC.move_cursor, MC.focus_keeper, MC.MAP_SETTLE, MC.MAP_RETRY_AFTER)
+    try:
+        MC.capture_screen = lambda *a, **k: 'FRAME'
+        MC.map_open = lambda f: True          # the lie under test
+        MC.move_cursor = lambda *a, **k: None
+        MC.focus_keeper = lambda: type('F', (), {'ok': lambda s, t: True})()
+        MC.MAP_SETTLE = 0.0
+        MC.MAP_RETRY_AFTER = 0.0
+
+        # 10. The false positive: map "open", no player marker anywhere.
+        MC.player_xy = lambda f: None
+        MC.at_range_xy = lambda w, n: False
+        mc = build(None)
+        r = real_cls.goto_range(mc, '200m', timeout=0.2)
+        check('10 map_open lies, no marker        -> NO click',
+              mc.pointer.clicks == [], f'clicked {mc.pointer.clicks}')
+        check('11 ...and it reports the refusal', not r['ok'] and
+              'marker' in (r['error'] or ''), r.get('error'))
+
+        # 12. The real thing still works: marker present, not at the range.
+        seen = {'n': 0}
+
+        def _xy(f):
+            seen['n'] += 1
+            return (1900, 1000)
+        MC.player_xy = _xy
+        MC.at_range_xy = lambda w, n: seen['n'] > 2   # arrives after a click
+        mc = build((1900, 1000))
+        r = real_cls.goto_range(mc, '200m', timeout=1.0)
+        check('12 marker present, not at range    -> it DOES click',
+              len(mc.pointer.clicks) >= 1, f'clicked {mc.pointer.clicks}')
+    finally:
+        (MC.capture_screen, MC.map_open, MC.player_xy, MC.at_range_xy,
+         MC.move_cursor, MC.focus_keeper, MC.MAP_SETTLE,
+         MC.MAP_RETRY_AFTER) = real
+    return bad
 
 
 if __name__ == '__main__':

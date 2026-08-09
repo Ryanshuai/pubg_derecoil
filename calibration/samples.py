@@ -157,6 +157,32 @@ class Magazine:
     hold_s: float = 0.0
 
     # ── context, for clustering and for asking questions later ──
+    # ⚠ `magazine_size` IS THE MAGAZINE'S IDENTITY, and the icon is not.
+    # Measured 2026-08-08 on a freshly spawned mp5k, ONE frame for the picture
+    # and the reading:
+    #
+    #     scope     red_dot         mse   45.9    runner-up  918.3
+    #     muzzle    comp_smg        mse   32.0    runner-up  137.8
+    #     grip      vert_grip       mse   34.5    runner-up 1198.8
+    #     stock     tactical_stock  mse   50.8    runner-up 1844.4
+    #     magazine  quickext_smg    mse  591.9    runner-up  874.0   <-- 1.48x
+    #
+    # Every other slot wins by 3-35x with an MSE under 51. The magazine's best
+    # is 12x worse than any of them and ABOVE MSE_EMPTY_TH (450), so the reader
+    # calls a plainly-occupied tile empty; across runs the same slot answered
+    # '?', quick_smg and quickext_smg. That is why `magazine` is out of
+    # RECOIL_SLOTS and why it must not be read back INTO the key.
+    #
+    # The count settles what the icon cannot, and it is the operator's rule:
+    # read the number after the reload. A quickdraw-only magazine does not
+    # change capacity, so `quick_smg` on a gun that fires 40 is impossible.
+    # Confirmed from the chair: this gun wears a 快速扩容弹匣 and reads 40.
+    #
+    # ⚠ It cannot separate extended from extended-quickdraw -- same capacity.
+    # That is fine and worth saying: quickdraw changes RELOAD SPEED, which is
+    # invisible to y_true. What it does catch is a base magazine, which fires
+    # 10 rounds fewer and shortens the burst, and nothing else in the record
+    # would say so.
     magazine_size: int = 0
     ads_frac: float = float('nan')
     # ⚠ TWO POINTS, NOT A RATE, and it exists because ads_frac is nan on
@@ -263,9 +289,36 @@ def load(weapon, config=None, path=None):
 
 
 def configs_for(weapon):
-    """Which configs have samples on disk."""
+    """Which configs have LIVE samples on disk. Quarantined cells excluded.
+
+    ⚠ A QUARANTINED CELL IS A FILENAME, NOT A DELETION -- magazines are never
+    deleted here, they are renamed to `<weapon>__<config>.MISLABELLED_<why>.jsonl`
+    with the reason in the name. So the directory holds files this must not
+    report: `bare.MISLABELLED_kitted_gun_read_as_bare` is not a config, and
+    handing it back as one would load five magazines fired out of a different
+    gun into whatever asked.
+
+    `config_key` never emits a dot -- it joins sorted `slot-part` pairs with
+    underscores -- so a dot in the fragment is exactly the quarantine mark.
+    """
     if not os.path.isdir(SAMPLE_DIR):
         return []
     pre = f'{weapon}__'
     return sorted(f[len(pre):-6] for f in os.listdir(SAMPLE_DIR)
-                  if f.startswith(pre) and f.endswith('.jsonl'))
+                  if f.startswith(pre) and f.endswith('.jsonl')
+                  and '.' not in f[len(pre):-6])
+
+
+def all_magazines(weapon):
+    """Every LIVE magazine stored for this weapon, across every config.
+
+    For the questions that are about the WEAPON rather than about one cell --
+    "has anything ever fired a different magazine capacity here" is the first,
+    and it is the one thing that makes two cells incomparable no matter how
+    clean each is on its own.
+    """
+    out = []
+    for cfg in configs_for(weapon):
+        out.extend(load(weapon, None,
+                        path=os.path.join(SAMPLE_DIR, f'{weapon}__{cfg}.jsonl')))
+    return out

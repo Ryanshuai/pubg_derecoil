@@ -71,6 +71,39 @@ MIN_CLUSTER_FRAC = 0.5
 # are trivially "the largest cluster". Fit them all and say so.
 MIN_FOR_CLUSTERING = 4
 
+# ── A magazine that is not a burst ──────────────────────────────────────────
+# WHILE THE TRIGGER IS DOWN, y_true CAN ONLY RISE. Recoil pushes the view up;
+# nothing in the model pushes it back. So a trajectory that falls materially
+# below its own running maximum BEFORE the release is not a magazine measured
+# badly, it is not a magazine.
+#
+# ⚠ MEASURED BOTH SIDES, 204 stored magazines, drawdown as a fraction of the
+# final value and taken ONLY over t <= 0.95 * hold_s:
+#
+#     0808_093842  m416 bare       10.23%     <- the one bad magazine
+#     second worst                  4.16%
+#     p99                           4.15%
+#     p90                           2.62%
+#     median                        0.65%
+#
+# 6% sits in a 2.5x gap: it rejects the one and keeps all 203 others with 1.44x
+# of margin below and 1.7x above.
+#
+# ⚠ THE RESTRICTION TO THE HOLD IS WHAT MAKES IT WORK, and without it there is
+# no gate at all. Over the WHOLE magazine the same statistic reads 10.2% on the
+# bad one and 10.2% on a perfectly good one -- because after the trigger
+# releases the game settles the view back down, and that drawdown is real in
+# every magazine. The first version of this idea was measured unrestricted,
+# found no separation, and would have been asserted as a gate anyway if the
+# measurement had not been taken.
+#
+# What it catches, concretely: 0808_093842's y_true climbs to 702 counts at
+# t=2.4 s, falls to 641, and then FLATLINES for the last 1.5 s of a 3.46 s
+# hold. Clustering could not see it -- separation 5.55x against a gate of 8.0,
+# "one population, all 13 kept" -- and it is the single reason the m416 bare
+# cell reads cv 22.3% where every other m416 cell reads 0.6..3.2%.
+HOLD_DRAWDOWN_MAX = 0.06
+
 # How many of the most recent magazines the fit runs on. The store keeps
 # everything forever; this bounds what any ONE fit averages.
 #
@@ -174,6 +207,31 @@ def _components(D, eps, n):
     return sorted(groups.values(), key=len, reverse=True)
 
 
+def _hold_drawdown(m):
+    """How far y_true falls below its own running max WHILE THE TRIGGER IS DOWN,
+    as a fraction of the magazine's final value. 0.0 when unanswerable.
+
+    Unanswerable rather than zero-by-default matters: `hold_s` is 0 on every
+    magazine stored before 2026-08-08, and treating those as "no drawdown"
+    is a claim about them. It reads as "this gate does not apply", which is
+    what it is -- the release time is not recorded, so there is no hold to
+    restrict to. See HOLD_DRAWDOWN_MAX for why the restriction is the gate.
+    """
+    if not getattr(m, 'hold_s', 0):
+        return 0.0
+    t, y = m.y_true_counts()
+    tt = np.asarray(t, dtype=float)
+    if len(tt) < 10:
+        return 0.0
+    tt = tt - tt[0]
+    sel = tt <= m.hold_s * 0.95
+    if int(sel.sum()) < 10:
+        return 0.0
+    yy = np.asarray(y, dtype=float)[sel]
+    end = max(abs(float(y[-1])), 1.0)
+    return float(np.nanmax(np.maximum.accumulate(yy) - yy) / end)
+
+
 def cluster(M):
     """-> (keep_idx, drop_idx, eps, why) with eps chosen by the data.
 
@@ -226,6 +284,25 @@ def cluster(M):
             f'no cut: best separation only {sep:.2f}x (need {SEPARATION_MIN}), '
             f'{span} — one population, all {n} kept')
     groups = _components(D, eps, n)
+    # ⚠ "TAKE THE LARGEST CLUSTER" IS A COIN FLIP WHEN THE SPLIT IS EVEN, and
+    # it landed on the wrong side. Measured 2026-08-08: mp5k `grip-vert_grip`
+    # held 5 clean magazines and 5 fired out of a different gun. The cut was
+    # textbook -- separation 20.3x against a gate of 8.0 -- and then the fit
+    # ran on the CONTAMINATED five, reporting 435.2 counts where the clean five
+    # say 669. Nothing in the output said which five; `n_kept 5/10` looks
+    # identical either way.
+    #
+    # An even split is not a cluster to pick, it is a cell holding two
+    # populations of equal weight, and the size rule has no information left.
+    # So it refuses, and the caller has to say which gun it meant -- which is
+    # exactly what happened by hand, and cost a re-measurement to discover.
+    if len(groups) > 1 and len(groups[0]) == len(groups[1]):
+        return [], list(range(n)), eps, (
+            f'REFUSING: separation {sep:.1f}x split {n} magazines into groups '
+            f'of {[len(g) for g in groups]} — an even split means two '
+            f'populations of equal weight, and "the largest cluster" is then a '
+            f'coin flip. One of these is not the gun you asked for; quarantine '
+            f'it (rename the file, never delete) and fit again.')
     keep = sorted(groups[0])
     drop = sorted(i for g in groups[1:] for i in g)
     why = (f'cut at {eps:.1f} counts RMS, separation {sep:.1f}x '
@@ -247,6 +324,24 @@ def fit(mags, grid_ms=GRID_MS, window=RECENT_MAGS):
     mags = [m for m in mags if m.n_frames() >= 3]
     if not mags:
         return {'ok': False, 'why': 'no magazines with samples'}
+
+    # ⚠ VALIDITY BEFORE CLUSTERING, and they are different questions. Clustering
+    # asks "is this magazine like the others"; this asks "is this a burst at
+    # all". A trajectory that reverses mid-hold fails the second regardless of
+    # how many others happen to reverse with it -- and clustering demonstrably
+    # cannot cover for it (see HOLD_DRAWDOWN_MAX: separation 5.55x against a
+    # gate of 8.0, so the flatlined magazine was kept as "one population").
+    not_bursts = [(m, _hold_drawdown(m)) for m in mags
+                  if _hold_drawdown(m) > HOLD_DRAWDOWN_MAX]
+    if not_bursts:
+        bad = {id(m) for m, _ in not_bursts}
+        mags = [m for m in mags if id(m) not in bad]
+        if not mags:
+            return {'ok': False,
+                    'why': f'every magazine falls more than '
+                           f'{HOLD_DRAWDOWN_MAX:.0%} below its own running '
+                           f'maximum while the trigger is still down — none of '
+                           f'them is a burst'}
     n_all = len(mags)
     if window and len(mags) > window:
         mags = mags[-window:]
@@ -300,6 +395,10 @@ def fit(mags, grid_ms=GRID_MS, window=RECENT_MAGS):
         'dropped': [dict(_label(mags[i]),
                          rms_to_centre=_dist_to(M, i, keep))
                     for i in drop],
+        # ⚠ REPORTED, NOT JUST FILTERED. A run that silently drops a magazine
+        # reads exactly like one that had nothing to drop, and tools/CLAUDE.md's
+        # rule is that a bound on coverage has to say what it bounded.
+        'not_bursts': [dict(_label(m), hold_drawdown=d) for m, d in not_bursts],
         'n_kept': len(keep), 'n_total': len(mags),
         'n_stored': n_all, 'window': window,
         'eps': eps, 'cluster_why': why,
@@ -367,6 +466,12 @@ def _synth(n_frames=300, span=3.4, total=3300.0, K=1.5474, scale=1.0,
         weapon='synth', sight='red_dot', K=K, curve=curve or [],
         comp_enabled=bool(curve), t=list(t),
         dy_px=list(d_counts * K), human_dy=[0.0] * (n_frames - 1),
+        # ⚠ hold_s MATTERS HERE, and leaving it 0 silently disabled a gate.
+        # _hold_drawdown answers 0.0 when the release time is unknown -- that
+        # is honest for the pre-2026-08-08 magazines that never recorded one,
+        # and it made every synthetic magazine exempt from the burst check, so
+        # the case written to prove that check worked passed by not running it.
+        hold_s=span,
         oor=[False] * (n_frames - 1), ts=f'seed{seed}')
 
 
@@ -436,6 +541,45 @@ def selftest():
     if not (s_ok < SEPARATION_MIN < s_bad and s_clean < SEPARATION_MIN):
         fails.append('SEPARATION_MIN no longer sits between the two sides')
 
+    # 4c. NOT A BURST. A trajectory that reverses mid-hold is excluded before
+    #     clustering ever runs, because clustering demonstrably cannot see it:
+    #     on the real m416 bare cell the flatlined magazine sat inside "one
+    #     population, all 13 kept" at separation 5.55x against a gate of 8.0.
+    #     Both directions here -- the reversal is cut, and the clean six are not.
+    reversed_mag = _synth(seed=77)
+    _t, _y = reversed_mag.y_true_counts()
+    half = len(reversed_mag.dy_px) // 2
+    # Undo 12% of the climb over a few frames, well inside the hold. Written on
+    # dy_px (the stored quantity) so it goes through y_true_counts like any
+    # other magazine rather than being injected past it.
+    back = 0.12 * abs(float(_y[-1])) * reversed_mag.K / 5.0
+    for j in range(half, half + 5):
+        reversed_mag.dy_px[j] -= back
+    r4c = fit([_synth(seed=i) for i in range(6)] + [reversed_mag])
+    n_nb = len(r4c.get('not_bursts', ()))
+    print(f'  4c one reversal mid-hold not-a-burst {n_nb}, kept '
+          f'{r4c["n_kept"]}/{r4c["n_total"]}')
+    if n_nb != 1:
+        fails.append(f'the mid-hold reversal was not excluded (not_bursts={n_nb})')
+    if r4c['n_kept'] != 6:
+        fails.append('the six clean magazines did not survive the burst check')
+    r4d = fit([_synth(seed=i) for i in range(6)])
+    if r4d.get('not_bursts'):
+        fails.append('a clean magazine was called not-a-burst')
+
+    # 4e. AN EVEN SPLIT REFUSES. Five clean and five at 0.65x is not a cluster
+    #     to pick -- "the largest" has no information left, and on the real
+    #     mp5k grip cell it picked the CONTAMINATED five (fitting 435 counts
+    #     where the clean five say 669) with a textbook separation of 20.3x.
+    even = [_synth(seed=i) for i in range(5)] + \
+           [_synth(seed=200 + i, scale=0.65) for i in range(5)]
+    r4e = fit(even)
+    refused = r4e['n_kept'] == 0 and 'REFUSING' in r4e['cluster_why']
+    print(f'  4e 5 clean vs 5 at 0.65x  '
+          f'{"REFUSED, as it must" if refused else r4e["cluster_why"][:60]}')
+    if not refused:
+        fails.append('an even two-population split was resolved by coin flip')
+
     # 5. Knot count must stay inside the firmware's table for a long magazine.
     long = [_synth(seed=i, span=12.75, total=9000.0, n_frames=1100)
             for i in range(4)]
@@ -477,6 +621,14 @@ def main():
     print(f'{a.weapon} {a.config or "bare"}: {r["n_kept"]}/{r["n_total"]} '
           f'magazines, {len(r["knots"])} knots @ {r["grid_ms"]:.1f} ms')
     print(f'  total {r["total_counts"]:.1f} counts over {r["span_s"]:.2f} s')
+    # Before the clustering line, because it happened before the clustering and
+    # because `n_total` already excludes these -- printed after, "12/12" reads
+    # like nothing was dropped.
+    for b in r.get('not_bursts', ()):
+        print(f'  [!] NOT A BURST, excluded before clustering: {b["ts"]} fell '
+              f'{b["hold_drawdown"]:.1%} below its own running maximum while '
+              f'the trigger was still down (gate {HOLD_DRAWDOWN_MAX:.0%}). '
+              f'y_true only rises under the trigger.')
     print(f'  {r["cluster_why"]}')
     print(f'  samples per knot {r["samples_per_knot"]:.1f}, '
           f'spread {r["spread_counts"]:.1f} counts')

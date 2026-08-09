@@ -633,8 +633,32 @@ class FireDriver:
             # comes. Settled plus long enough is the same evidence.
             if float(np.mean(sig != empty)) > AMMO_CHANGED or \
                     now - t0 > RELOAD_MIN_S:
-                print("      [reload] the counter never read — settled on "
-                      "pixels instead, which cannot say how many rounds are in")
+                # ⚠ THIS USED TO PRINT "the counter never read — settled on
+                # pixels instead, which cannot say how many rounds are in", and
+                # it printed on EVERY magazine of every run. A warning with a
+                # 100% firing rate is not a warning; it is a line you learn to
+                # scroll past, and this repository has already paid for a
+                # criterion that was blind while looking busy.
+                #
+                # It was also not describing a defect. The digits are genuinely
+                # unreadable while they ANIMATE -- reported from the chair
+                # 2026-08-08, "那个时候它那个数字跳，你那时候是读不准的" -- and
+                # this path exists precisely to wait them out. The pixels settle
+                # BEFORE the digits stop moving, so `digits_seen` is false here
+                # on a completely healthy reload.
+                #
+                # What the count is for decides how much that matters: it is NOT
+                # the time base (that is the click plus DXGI present times) and
+                # it is NOT a per-shot reference. It is how long the trigger is
+                # held, and the magazine's identity (samples.Magazine
+                # .magazine_size). Both need ONE integer read at REST, which is
+                # what happens next: top_up sleeps and then calls
+                # magazine_size(), which requires two agreeing reads. All 41
+                # stored mp5k magazines carry 40 from that path.
+                #
+                # The case that IS a defect keeps its message: digits that never
+                # read even at rest. That is `got is None` in top_up, and
+                # collect_timed stops the run on it ("no ammo counter").
                 time.sleep(SETTLE_AFTER_RELOAD_S)
                 return now - t0
         if self.gun is not None:

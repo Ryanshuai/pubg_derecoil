@@ -263,7 +263,40 @@ class MapControl(Driver):
             # range" -- at_range() would repeat the full-frame pass, and each
             # one is ~55 ms over 14.9 MB.
             where = player_xy(opened['frame'])
-            if at_range_xy(where, name):
+            # ⚠ NO MARKER MEANS NO MAP, AND A CLICK WITH NO MAP IS A GUNSHOT.
+            #
+            # ensure_map's docstring has recorded since 2026-08-08 that
+            # map_open() can answer True on a screen with no map on it -- the
+            # left panel's yellow selection border -- and that `player_xy`
+            # coming back None in the SAME frame is the tell. It logged the
+            # tell and clicked anyway, and called the outcome "loud, bounded
+            # and recovered".
+            #
+            # It is not bounded. Measured the same day: two runs hit it, and
+            # the eight clicks aimed at the 200m box landed in the world as
+            # eight rounds out of the gun under test -- the ammo counter went
+            # 40 -> 32 and the magazine that would have been fired next was
+            # short. In a training range a stray left click is a shot; nothing
+            # about that is confined to the map.
+            #
+            # So the disagreement is now the GATE it always was the evidence
+            # for. Two witnesses to one state, and clicking needs both.
+            if where is None:
+                self._log('the map reads open but the player marker is not '
+                          'there — re-opening rather than clicking, because a '
+                          'click with no map under it goes into the world')
+                opened = step('reopen', self.ensure_map(True, timeout))
+                where = player_xy(opened['frame']) if opened['ok'] else None
+            if where is None:
+                # Set the error and fall through to the `finally`, rather than
+                # raise: this function's contract is a record, and its callers
+                # branch on `ok`. The map still gets closed either way.
+                error = ('the map would not come up: map_open says yes and '
+                         'the player marker says no, twice. Refusing to '
+                         'click — with no map under them those clicks fire '
+                         'the weapon.')
+                step('marker', _rec(0.0, 2, error))
+            elif at_range_xy(where, name):
                 self._log(f'already at the {name} range ({where}) — no click')
                 step('already-there', _rec(0.0, 0))
             else:

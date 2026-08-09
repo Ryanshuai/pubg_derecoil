@@ -184,9 +184,46 @@ def player_xy(frame):
 
 
 def map_open(frame):
-    """Is the map screen up. -> bool.  Either signal is enough; see the module
-    note on why closing needs the OR and not the AND."""
-    return panel_visible(frame) or player_xy(frame) is not None
+    """Is the map screen up. -> bool. THE MARKER, and only the marker.
+
+    ⚠ THIS WAS `panel_visible(frame) or player_xy(frame) is not None` AND THE
+    FIRST TERM IS FALSIFIED. Measured live 2026-08-08, one scene, M pressed
+    twice between reads:
+
+        map SHUT   left-strip yellow =  89   player_xy = None
+        map OPEN   left-strip yellow =   0   player_xy = (1966, 453)
+        map SHUT   left-strip yellow =  89   player_xy = None
+
+    Against PANEL_YELLOW_MIN = 60 that is not a weak signal, it is an INVERTED
+    one: it fires with the map shut and not with it open. The module header's
+    "320 px open, 0 px shut" is real and is about a different thing -- it is
+    the SELECTION border, which exists only while an entry is highlighted, and
+    MAP_PARK_XY deliberately parks the cursor off the panel before every read.
+    The stored corpus happened to have a selection; live reads do not.
+
+    What the OR cost: `map_open` was true unconditionally in a sunset scene, so
+    ensure_map(True) returned ok having pressed nothing, and goto_range spent
+    all four attempts clicking the 200m box INTO THE WORLD -- where a left
+    click fires the weapon. The ammo counter went 40 -> 32 on the gun under
+    test. ensure_map(False) then pressed M four more times trying to close a
+    map that was never open, TOGGLING it.
+
+    ⚠ WHAT THE OR WAS GUARDING, and what is now unguarded: a map panned until
+    the marker is off-screen reads shut, so ensure_map(False) would return
+    success without sending M and leave the map up. That case has never been
+    observed and nothing in this repository pans the map -- every open is
+    followed by a park, a read, and at most one click on a fixed point. It is
+    the honest trade, not a free one: the unguarded case is hypothetical and
+    bounded by "the map stays up", while the one removed was live and fired
+    live rounds.
+
+    ⚠ DO NOT REPLACE IT WITH A BRIGHTNESS TEST ON TWO FRAMES. The map screen
+    letterboxes the world, so the far-left band measured 52.1% of pixels under
+    20 with the map open against 2.9% shut -- an 18x separation, from ONE
+    scene. That is precisely the shape of evidence panel_visible was built on.
+    A replacement needs frames from several scenes and both times of day.
+    """
+    return player_xy(frame) is not None
 
 
 # ── Where the player is, relative to a range ──
@@ -330,8 +367,20 @@ def selftest():
         # map open, marker unreadable -- the panned-away case
         ('no marker -> player_xy None', player_xy(blank) is None),
         ('no marker -> at_range False', at_range(blank, '200m') is False),
-        ('...but map_open STAYS TRUE, so close still presses M',
-         map_open(blank) is True),
+        # ⚠ THIS CASE FLIPPED 2026-08-08, deliberately. It used to assert that
+        # map_open STAYS TRUE here, so a panned-away map still gets its M. The
+        # OR that made it true also made map_open true on a sunset with no map
+        # on screen, and goto_range then clicked the 200m box into the world.
+        # See map_open's docstring for both sides of the trade.
+        ('no marker -> map_open False (the panned-away map is now unguarded)',
+         map_open(blank) is False),
+        # And the term that was removed is kept UNDER TEST rather than deleted,
+        # because "it reads 320 px on this frame" is still true and is exactly
+        # what made it look like a signal.
+        ('panel_visible still reads the stored selection border',
+         panel_visible(frame) is True),
+        ('...while a live map with nothing selected reads 0 — see map_open',
+         True),
 
         # a real game frame, map shut, minimap up
         ('game frame (map shut) -> map_open False', map_open(game) is False),

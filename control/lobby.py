@@ -969,12 +969,18 @@ class LobbyControl(Driver):
         from control.map import MapControl
         with MapControl(verbose=self.verbose) as mc:
             got = mc.goto_range(name)
-            if not got['ok'] and entered:
-                # ONE MORE GO, and only on the path whose reason exists: a
-                # teleport attempted in the first seconds of a match is
-                # attempted at a game that is not yet taking input, and
-                # goto_range spends its own MAX_RETRIES inside that window
-                # rather than after it. See RANGE_SETTLE_S.
+            if not got['ok']:
+                # ⚠ THIS USED TO BE `and entered`, and the condition was
+                # reasoning about the CAUSE instead of the SYMPTOM. The stated
+                # reason -- a match in its first seconds is not taking input
+                # yet -- is real, but it is not the only way the map fails to
+                # come up, and the retry is cheap on every path.
+                #
+                # Measured 2026-08-08: a process that found the game ALREADY in
+                # a match hit the same map_open false positive, took the
+                # `entered=False` branch, got no retry, and failed hard. Twice
+                # in a row, and the run after it succeeded first try -- which
+                # is exactly the transient this retry exists for.
                 self._log(f'the {name} teleport did not land — letting the '
                           f'match settle and trying once more')
                 time.sleep(RANGE_SETTLE_S)
