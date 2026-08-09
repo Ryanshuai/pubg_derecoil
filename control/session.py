@@ -70,7 +70,16 @@ Every step is skipped by argument (`match=False` and so on) for the scripts
 that genuinely mean it — reading the lobby, probing the panel itself. Skipping
 one to make a red run go green is how the failures above were built.
 """
+import os
+import sys
 import time
+
+# ⚠ SO `python control/session.py` WORKS, not just `-m`. Every other CLI in
+# this layer (lobby, spawner, inventory, stock) is invoked that way and this
+# one is useless if it is the exception -- the whole point of it is being
+# reachable in a hurry.
+if __package__ in (None, ''):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from control.focus import ensure_focus
 
@@ -272,3 +281,60 @@ def ensure_ready(label='this script', countdown_s=6, running=True, focus=True,
 
     out['ok'] = True
     return out
+
+
+# ── CLI ─────────────────────────────────────────────────────────────────────
+#
+#     pixi run ready
+#
+# ⚠ A SHELL, ON PURPOSE. Every leg below already existed and every collector
+# already calls ensure_ready() at its first line -- what was missing was a way
+# to ASK, without firing anything. Without it the only way to find out whether
+# the game was driveable was to start a run and watch, which is how the
+# operator ended up being asked to babysit the spawn screen: "这个要你自己
+# 做，自己检测，如果在 spawn 要退出去。之前不是都有吗？" It was. There was
+# just no door on it.
+#
+# ⚠ IT IS NOT A SECOND IMPLEMENTATION and must never become one. It calls
+# ensure_ready and prints what came back. The moment this file grows its own
+# idea of what "ready" means, the thing every script depends on and the thing
+# a human checks stop being the same thing -- which is the root CLAUDE.md's
+# second law, and this repo has paid for it in four layers already.
+def main():
+    import argparse
+    ap = argparse.ArgumentParser(
+        description='Is the game driveable right now? Prints each leg. '
+                    'Drives nothing except closing Tab and the spawner panel, '
+                    'which is what "ready" means.')
+    ap.add_argument('--countdown', type=int, default=6)
+    ap.add_argument('--no-range', action='store_true',
+                    help='skip the 200m teleport (it only fires when this call '
+                         'is the one that walked into the match)')
+    ap.add_argument('--label', default='the readiness check')
+    a = ap.parse_args()
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, OSError):
+        pass
+
+    rec = ensure_ready(label=a.label, countdown_s=a.countdown,
+                       range_name=None if a.no_range else '200m')
+    print()
+    for s in rec.get('steps', []):
+        mark = 'ok  ' if s.get('ok') else 'FAIL'
+        err = f"   {s['error']}" if s.get('error') else ''
+        print(f'  {mark}  {s["step"]}{err}')
+    if rec.get('entered'):
+        print('  note  this call WALKED INTO the match — nothing measured '
+              'before it pairs with anything measured after')
+    if rec['ok']:
+        print('\nREADY — a collector started now will not be typing into a '
+              'menu, a loading screen, or an open panel.')
+        return 0
+    print(f'\nNOT READY at {rec.get("failed")!r}. The leg named is the one '
+          f'that NOTICED; the thing that is wrong is usually one leg earlier.')
+    return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

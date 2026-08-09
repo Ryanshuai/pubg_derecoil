@@ -127,6 +127,13 @@ comp-counts = "python tools/test_comp_counts.py"
 # only; `--seed <guns>` is what writes, and it refuses over both a fitted file
 # and a store that can already answer.
 kava4 = "python tools/import_kava4.py"
+# "Is the game driveable right now" -- ask without firing anything. All five
+# legs already existed and every collector already calls ensure_ready() on its
+# first line; what was missing was a DOOR, so the only way to find out was to
+# start a run and watch. ⚠ It calls ensure_ready and prints what came back; the
+# moment it grows its own idea of "ready", the thing scripts depend on and the
+# thing a human checks stop being the same thing.
+ready = "python control/session.py"
 # "Replicate it" has no meaning on pooled data -- a fit eats the whole store at
 # once. This is the shape that rule takes there: cut by (session x curve arm)
 # and ask whether the slices agree, with the baseline computed from the
