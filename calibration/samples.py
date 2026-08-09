@@ -241,6 +241,25 @@ class Magazine:
     # 10 rounds fewer and shortens the burst, and nothing else in the record
     # would say so.
     magazine_size: int = 0
+    # ⚠ THE SECOND WITNESS TO THE BURST LENGTH, and without it the first one
+    # was never checked. `magazine_size` says how many rounds were in there;
+    # this says how many were still in there when the trigger came up. Anything
+    # above 0 means the hold was too SHORT -- the burst measured part of a
+    # magazine while every number in the record described a whole one.
+    #
+    # Measured 2026-08-09 on the mg3, which is why it exists. The store's rate
+    # for that gun is 59.97 ms/round, the trace's own autocorrelation says
+    # 88-92 ms, so a hold sized for 75 rounds delivered about 50 and left ~25 in
+    # the belt. Then the reload started from a part-full belt and the next
+    # magazine read 58, then 36, then 50, then 41... a different burst length
+    # every time, and the cell failed its arms check at 12.6% with nothing in
+    # the output naming the cause. PUBG's mg3 is the one gun with TWO cyclic
+    # rates (the fire-mode key switches it), so a single stored constant cannot
+    # describe it -- but nothing here needs to know that: the counter says.
+    #
+    # None means not recorded (every magazine before this existed). 0 is a
+    # different and much better answer: the magazine emptied.
+    rounds_left: object = None
     ads_frac: float = float('nan')
     # ⚠ TWO POINTS, NOT A RATE, and it exists because ads_frac is nan on
     # every magazine ever stored -- the timed firing path never wired that

@@ -445,7 +445,11 @@ def one_magazine(rig, grabber, weapon, mag_size, interval_s, curve,
 
 def fire_one_into_store(rig, grabber, weapon, config, posture, curve,
                         interval_s, prior=(), note='', label=''):
-    """Reload, re-aim, fire one magazine, store it. -> (Magazine, why|None).
+    """Reload, re-aim, fire one magazine, store it.
+
+    -> (Magazine, why|None, interval_s). The third value is the per-round time
+    the NEXT magazine should be held for: unchanged when the burst emptied the
+    magazine, and re-derived from the ammo counter when it did not.
 
     ⚠ THE FOUR THINGS EVERY MAGAZINE NEEDS, IN ONE COPY. They were written once
     in main()'s loop and NOT AT ALL in collect_into_store, which is the path
@@ -478,7 +482,7 @@ def fire_one_into_store(rig, grabber, weapon, config, posture, curve,
     """
     mag_size, _ = rig.fire.top_up(weapon=weapon)
     if not mag_size:
-        return None, 'no ammo counter — cannot say how long this burst is'
+        return None, 'no ammo counter — cannot say how long this burst is', interval_s
     # ⚠ SAID OUT LOUD, NOT REFUSED (2026-08-09). This used to stop the cell, and
     # what it stopped was a REAL difference -- the m416's whole 143-magazine
     # corpus holds 40 rounds and the current setup order produces 42 -- but
@@ -509,10 +513,30 @@ def fire_one_into_store(rig, grabber, weapon, config, posture, curve,
               f'note that whether the magazine part itself moves the recoil '
               f'has never been measured.')
     if not aim_and_scope(rig, posture):
-        return None, 'could not re-aim'
+        return None, 'could not re-aim', interval_s
     mag, out = one_magazine(rig, grabber, weapon, mag_size, interval_s,
                             curve, config, posture, note=note,
                             fire_delay_ms=float(rig.mouse.RECOIL_FIRE_DELAY_MS))
+    # ⚠ ASK THE COUNTER WHETHER THE BURST ACTUALLY EMPTIED THE MAGAZINE. Read
+    # BEFORE wait_reload, because a reload puts rounds back and then the number
+    # answers a different question. See Magazine.rounds_left for the mg3, where
+    # the hold was sized from a stored rate that describes the gun's OTHER
+    # cyclic rate and every burst left about a third of the belt in the gun.
+    mag.rounds_left = rig.fire.read_ammo()
+    interval_next = interval_s
+    if mag.rounds_left:
+        fired_n = max(1, mag_size - int(mag.rounds_left))
+        # The k-th round leaves at (k-1)*I, so `fired_n` rounds span
+        # (fired_n - 1) intervals. FIRE_MARGIN_INTERVALS is deliberately not
+        # subtracted: it is slack that was never delivered, and counting it
+        # would make the measured interval depend on the margin.
+        interval_next = mag.hold_s / max(1, fired_n - 1)
+        print(f'      [!] {label} LEFT {mag.rounds_left} OF {mag_size} ROUNDS '
+              f'IN THE GUN. The trigger was held {mag.hold_s:.2f}s for '
+              f'{interval_s * 1000:.1f} ms/round and about {fired_n} went out, '
+              f'so this gun is firing at {interval_next * 1000:.1f} ms/round '
+              f'({60 / interval_next:.0f} rpm). Stored; the next magazine holds '
+              f'for the MEASURED rate, not the stored one.')
     # ⚠ STORED AND SAID OUT LOUD, NOT DROPPED. `ads_end` False means the burst
     # ended out of the scope, so K is wrong by ~3x — and MODEL.md's store never
     # deletes, because a magazine dropped at collection time is one the fit's
@@ -531,7 +555,7 @@ def fire_one_into_store(rig, grabber, weapon, config, posture, curve,
           f'{pre} prefire, {out["n_missed"]} missed), '
           f'y_true {y[-1]:7.1f} counts over {t[-1]:.2f} s')
     rig.fire.wait_reload(expect=mag_size, weapon=weapon)
-    return mag, None
+    return mag, None, interval_next
 
 
 def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
@@ -638,6 +662,13 @@ def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
     base_dy, base_dx = list(w.dy_s), list(w.dx_s)
     grabber = DXGISyncGrabber(rig.tracker.regions())
     fired = 0
+    # ⚠ THE HOLD IS SIZED FROM A MEASUREMENT AFTER THE FIRST MAGAZINE SAYS SO.
+    # It starts at the stored rate and fire_one_into_store hands back what the
+    # ammo counter implies, so a gun whose stored rate is wrong costs ONE short
+    # burst instead of every burst in the cell. It is not a fitted parameter and
+    # there is no loop here: two counter readings and the commanded hold, all
+    # from the same magazine.
+    interval_s = w.bullet_interval_s
     try:
         for i in range(max(1, mags)):
             arm = arm_plan[i % len(arm_plan)]
@@ -680,9 +711,9 @@ def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
                 # what y_true = y_obs requires.
                 rig.fire.disarm()
                 curve = []
-            mag, why = fire_one_into_store(
+            mag, why, interval_s = fire_one_into_store(
                 rig, grabber, weapon, config, posture, curve,
-                w.bullet_interval_s, prior=prior,
+                interval_s, prior=prior,
                 note=f'{note_prefix}arm={"comp" if comp else "none"}',
                 label=f'mag {i} ({"comp" if comp else "no-comp"})')
             if mag is None:
@@ -1279,7 +1310,7 @@ def main():
             # ⚠ THE SAME ONE COPY collect_into_store CALLS. The reload, the
             # capacity check, the homing and the wait were written here and
             # nowhere else, which is why the night path had none of them.
-            mag, why = fire_one_into_store(
+            mag, why, interval_s = fire_one_into_store(
                 rig, grabber, a.weapon, config, a.posture,
                 [] if a.no_comp else curve, interval_s, prior=prior,
                 note='no-comp' if a.no_comp else f'scale={mag_scale:g}',

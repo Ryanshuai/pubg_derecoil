@@ -48,6 +48,7 @@ import argparse
 import json
 import os
 import sys
+import warnings
 
 import numpy as np
 
@@ -311,11 +312,86 @@ def cluster(M):
     return keep, drop, eps, why
 
 
-def fit(mags, grid_ms=GRID_MS, window=RECENT_MAGS):
+# Which per-knot centre the shipped curve uses. See _centre() for the three
+# and tools/probe_estimator.py for the measurement that picked this one.
+CENTRE = 'iqm'
+
+
+def _centre(M, how=None):
+    """One value per knot from the magazines the CLUSTERING ALREADY KEPT.
+
+    `M` is (n_mags, n_knots), NaN where a magazine has no data at that knot.
+    -> (n_knots,), NaN only where a whole column is NaN.
+
+        'median'   the middle magazine
+        'iqm'      the mean of the middle HALF -- drop the lowest 25% and the
+                   highest 25% of the magazines at this knot, average the rest
+        'mean'     all of them
+
+    ⚠ THIS IS NOT THE OUTLIER MECHANISM AND MUST NOT BECOME ONE. A magazine is
+    ruined as a WHOLE -- a hand nudge, the wrong posture, a part that did not
+    seat -- and cluster() above is what rejects it, on the whole trajectory. By
+    the time this runs, everything left is a magazine somebody decided to keep,
+    and this only chooses how to average them. Per-point trimming that has to
+    carry the rejection is the failure mode this file's header names.
+
+    ⚠ SO WHY TRIM AT ALL: the trim here is about EFFICIENCY, not rejection. On
+    Gaussian noise the median throws away about a third of the information the
+    mean would use (asymptotic efficiency 2/pi = 64%), while the interquartile
+    mean keeps about 82% -- and the residual non-Gaussianity inside a kept
+    cluster (a magazine that is fine but drifted a little, one frame where the
+    correlator wrapped) is exactly what makes the plain mean unsafe. The middle
+    half is the estimator between the two, and this repository's own default
+    should be the one the store measures as more repeatable, not the one that
+    sounds most robust. tools/probe_estimator.py is that measurement.
+
+    ⚠ THE EMPTY-MIDDLE FALLBACK IS NOT COSMETIC. With exactly TWO finite values
+    a < b, numpy's q25 and q75 land strictly between them, so NOTHING is inside
+    the interquartile range and a naive implementation returns NaN -- silently,
+    on precisely the knots at the end of the burst where only the longest one or
+    two magazines still have data. Those columns fall back to the median, which
+    at n=2 is the mean of both, i.e. the answer the trim was reaching for.
+    """
+    how = how or CENTRE
+    # ⚠ NO ROWS IS A REAL CASE AND numpy DOES NOT HANDLE IT UNIFORMLY. cluster()
+    # returns an EMPTY keep-list when it refuses an even split, so Mk is (0, n).
+    # np.nanmedian gives (n,) of NaN there, but np.nanpercentile with two
+    # quantiles drops the quantile axis and returns (n,) as well -- which
+    # unpacks into n values instead of 2 and raises four frames down. Answering
+    # "no rows, no centre" here keeps that a shape fact rather than a crash.
+    M = np.asarray(M, dtype=float)
+    if M.ndim != 2 or M.shape[0] == 0:
+        return np.full(M.shape[1] if M.ndim == 2 else 0, np.nan)
+    with np.errstate(all='ignore'), warnings.catch_warnings():
+        # An all-NaN column is legitimate here (a knot past every kept
+        # magazine's end) and fit() fills it forward afterwards; numpy's
+        # "All-NaN slice" warning would only tell the operator about a case
+        # that is already handled.
+        warnings.simplefilter('ignore', RuntimeWarning)
+        if how == 'mean':
+            return np.nanmean(M, axis=0)
+        med = np.nanmedian(M, axis=0)
+        if how == 'median':
+            return med
+        if how != 'iqm':
+            raise ValueError(f'unknown centre {how!r} — median, iqm or mean')
+        q25, q75 = np.nanpercentile(M, [25.0, 75.0], axis=0)
+        inside = (M >= q25) & (M <= q75)
+        mid = np.nanmean(np.where(inside, M, np.nan), axis=0)
+    return np.where(inside.sum(axis=0) > 0, mid, med)
+
+
+def fit(mags, grid_ms=GRID_MS, window=RECENT_MAGS, centre=None):
     """Pool, cluster, fit. -> dict with knots, kept, dropped, diagnostics.
 
     `window` keeps only the most recent N magazines -- see RECENT_MAGS for why
     that is about bias and not about staleness. Pass 0 for all of them.
+
+    `centre` picks the per-knot statistic and defaults to CENTRE. ⚠ IT EXISTS
+    FOR tools/probe_estimator.py AND HAS NO CLI FLAG: the shipped choice is one
+    number this file owns, and a run that could quietly fit under a different
+    estimator would make two curves that disagree look like two measurements
+    that disagree.
 
     ⚠ The order is the store's, which is append order, which is chronological
     because samples.append() only ever appends. Nothing sorts by `ts`: two
@@ -366,8 +442,8 @@ def fit(mags, grid_ms=GRID_MS, window=RECENT_MAGS):
     Mk = M[keep]
     with np.errstate(all='ignore'):
         n_at = np.sum(np.isfinite(Mk), axis=0)
-        Y = np.nanmedian(Mk, axis=0)
         spread = np.nanstd(Mk, axis=0)
+    Y = _centre(Mk, centre)
     # Grid points no kept magazine reached carry no information. Held at the
     # last known value rather than extrapolated: a curve that keeps climbing
     # past the data is compensation for rounds nobody fired.
@@ -401,7 +477,7 @@ def fit(mags, grid_ms=GRID_MS, window=RECENT_MAGS):
         # rule is that a bound on coverage has to say what it bounded.
         'not_bursts': [dict(_label(m), hold_drawdown=d) for m, d in not_bursts],
         'n_kept': len(keep), 'n_total': len(mags),
-        'n_stored': n_all, 'window': window,
+        'n_stored': n_all, 'window': window, 'centre': centre or CENTRE,
         'eps': eps, 'cluster_why': why,
         'minority': frac < MIN_CLUSTER_FRAC,
         'samples_per_knot': float(np.mean(n_at[n_at > 0])) if np.any(n_at > 0)
@@ -597,12 +673,39 @@ def selftest():
     if len(r5['knots']) > 300:
         fails.append('emitted more knots than the firmware can hold')
 
+    # 6. THE CENTRE ITSELF, on the two columns that would fail silently.
+    #    ⚠ n=2 IS THE ONE THAT MATTERS: numpy's q25 and q75 land strictly
+    #    between two values, so nothing is inside the interquartile range and a
+    #    naive interquartile mean returns NaN -- at the END of the burst, where
+    #    only the longest magazines still have data, i.e. exactly where nobody
+    #    would look. fit() then holds the last finite value forward and the
+    #    curve's tail quietly becomes flat.
+    col = np.array([[1.], [2.], [3.], [4.], [100.]])            # one outlier
+    cases = [
+        ('n=1', np.array([[7.]]), 7.0),
+        ('n=2', np.array([[2.], [8.]]), 5.0),                   # falls back
+        ('n=3', np.array([[1.], [5.], [99.]]), 5.0),            # the middle
+        ('n=5 with an outlier', col, 3.0),                      # mean of 2,3,4
+    ]
+    print('  6 the centre')
+    for name, M, want in cases:
+        got = float(_centre(M, 'iqm')[0])
+        ok = np.isfinite(got) and abs(got - want) < 1e-9
+        print(f'      {name:<20} iqm {got:8.3f}  (want {want:.3f})'
+              f'  mean {float(np.nanmean(M)):8.3f}'
+              f'  median {float(np.nanmedian(M)):8.3f}'
+              f'   {"ok" if ok else "FAIL"}')
+        if not ok:
+            fails.append(f'the interquartile mean is wrong at {name}')
+    if np.isfinite(_centre(np.full((0, 3), np.nan), 'iqm')).any():
+        fails.append('an empty kept-set produced a finite centre')
+
     print()
     if fails:
         for f in fails:
             print(f'  [FAIL] {f}')
         return 1
-    print('  all 5 pass')
+    print('  all 6 pass')
     return 0
 
 
@@ -949,6 +1052,10 @@ def _write_curve(r, weapon, config, sight, posture, n_total):
         'span_s': r['span_s'], 'spread_counts': r.get('spread_counts'),
         'samples_per_knot': r.get('samples_per_knot'),
         'knots': len(r['knots']),
+        # Which per-knot statistic made these numbers. Two curves fitted under
+        # different estimators are not two measurements that disagree, and the
+        # file has to be able to say which one it is.
+        'centre': r.get('centre', CENTRE),
         'scaled_by': 'NOTHING. Final mouse counts; set_seq emits them with no '
                      'factors, because scope, scale, attachment and posture '
                      'are already in the magazines this was fitted from.',
