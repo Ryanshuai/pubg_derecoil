@@ -83,7 +83,15 @@ def load(path):
     out = []
     for m in S.load(None, None, path=str(path)):
         t, y = m.y_true_counts()
-        out.append({'ts': m.ts, 't': t - t[0], 'y': y, 'K': m.K,
+        # ⚠ NOT `t - t[0]`. `t` IS ALREADY measured from the click -- the
+        # frames before it carry NEGATIVE times (15-18 of them, ~130 ms), and
+        # re-zeroing on the first frame slides every magazine later by its own
+        # prefire length. It barely moves a comparison taken near the flat end,
+        # and it moved a timing statistic by 130 ms the one time it was used
+        # for one: "the screen first moves 195 ms after the click" was really
+        # 69 ms, which is the difference between "after two shots" and "during
+        # the first".
+        out.append({'ts': m.ts, 't': t, 'y': y, 'K': m.K,
                     'mag': m.magazine_size, 'sight': m.sight,
                     'comp': m.comp_enabled, 'config': m.config})
     return out
@@ -97,7 +105,7 @@ def at(m, t_q):
     measurement. CLAUDE.md names that clamp as one of the things the time
     coordinate was supposed to remove.
     """
-    if t_q > m['t'][-1]:
+    if t_q > m['t'][-1] or t_q < m['t'][0]:
         return None
     return float(np.interp(t_q, m['t'], m['y']))
 
@@ -148,6 +156,17 @@ def main():
         if '.MISLABELLED' in p.name or '.SUSPECT' in p.name:
             quarantined.append((p.name, load(p)))
 
+    # ⚠ ONE ARM FOR THE CUBE. y_true is supposed to be arm-independent, and the
+    # 16-magazine pool proves it holds to 4.6% -- but seven cells have only the
+    # comp-OFF arm and one now has both, so pooling raises THAT cell alone and
+    # slides every f against it. Measured: bare went 903.4 -> 915.0 and all
+    # seven factors moved 1-2% with no measurement having changed.
+    #
+    # A comparison is between like things or it is not a comparison. The
+    # compensated arm is reported below, on its own, where it answers the
+    # question it can actually answer.
+    comp_on = {k: [m for m in ms if m['comp']] for k, ms in cells.items()}
+    cells = {k: [m for m in ms if not m['comp']] for k, ms in cells.items()}
     live = [m for ms in cells.values() for m in ms]
     if not live:
         print('nothing stored')
@@ -209,6 +228,20 @@ def main():
         verdict = 'multiplicative' if lo <= 0 <= hi else 'NOT multiplicative'
         print(f'  {name:14} obs {obs:.4f}  pred {pred:.4f}  '
               f'excess {excess:+6.1f}%  [{lo:+.1%}, {hi:+.1%}]  {verdict}')
+
+    both = [(k, cells[k], comp_on[k]) for k in cells if comp_on.get(k)]
+    if both:
+        print()
+        print('the SAME cell down both arms — MODEL.md says y_true does not '
+              'depend on which curve was playing')
+        for k, off, on in both:
+            ao = np.array([v for v in (at(m, t_q) for m in off) if v is not None])
+            an = np.array([v for v in (at(m, t_q) for m in on) if v is not None])
+            obs = np.array([abs(np.interp(t_q, m['t'], m['y'])) for m in on])
+            print(f'  {k:5} comp OFF n={len(ao):2d} y_true {ao.mean():7.1f} '
+                  f'sd {ao.std(ddof=1):5.1f}   |   comp ON n={len(an):2d} '
+                  f'y_true {an.mean():7.1f} sd {an.std(ddof=1):5.1f}   '
+                  f'-> {an.mean()/ao.mean()-1:+.1%}')
 
     if quarantined:
         print()
