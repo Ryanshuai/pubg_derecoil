@@ -169,7 +169,8 @@ def load_curves():
 # here so detector/ does not import calibration/". config is imported by both
 # layers already, so the copy bought nothing and risked the failure that
 # docstring described -- two authors drifting, and a lookup that just misses.
-from config import config_key, parse_config_key, fire_tag  # noqa: E402,F401
+from config import (config_key, parse_config_key,          # noqa: E402,F401
+                    fire_tag, fire_mode_for)
 # ⚠ THE ONE PLACE THAT KNOWS 'Muzzle_Compensator_Large_C' IS 'comp_ar'.
 # set_seq needs it because the detector speaks assets and the curve store
 # speaks catalogue keys; weapon_attachments imports only config and the
@@ -948,13 +949,38 @@ class Weapon():
             # path's fallback is what fired a bare-gun curve at a gun wearing a
             # compensator, a foregrip and a stock -- 1521 counts against 895 of
             # real recoil, and nothing anywhere said so.
-            said = (self.name, config_key(cfg), self.posture, sight)
+            said = (self.name, config_key(cfg), self.posture, sight, fmode)
             if not _MISSING_SAID.get(said):
                 _MISSING_SAID[said] = True
+                # ⚠ THE FIRE MODE IS IN THE KEY AND WAS NOT IN THIS LINE, which
+                # made the log state a contradiction and hide its own cause.
+                # Measured, play log 0809_163710 lines 95-106: fifteen
+                # MILLISECONDS apart, one vector kit printed `DERIVED -- 506
+                # counts` and then `no fitted curve for vector
+                # grip-vert_grip_muzzle-comp_smg standing red_dot`. Same gun,
+                # same parts, same posture, same optic -- every field this line
+                # printed was identical, and the field that had actually
+                # changed was the only one it left out. The fire mode had gone
+                # to `single`, which tags `__fire-single`, and every curve on
+                # disk is tagged '' -- so the whole store was filtered out.
+                #
+                # It also mis-prescribed: `collect-timed --sight red_dot` fits
+                # the ORDINARY mode, so following that advice would have
+                # produced a curve this lookup still could not reach.
+                extra = ''
+                if fmode:
+                    extra = (f' — and THAT IS WHY: every curve on disk is for '
+                             f'this weapon\'s ordinary mode '
+                             f'({fire_mode_for(self.name)}), and a fire mode '
+                             f'changes the SHAPE, so nothing can be scaled '
+                             f'into it. Switch back to '
+                             f'{fire_mode_for(self.name)} to be compensated')
                 print(f'[curves] no fitted curve for {self.name} '
-                      f'{config_key(cfg)} {self.posture} {sight} -- NOT '
-                      f'compensating. Measure it with `pixi run collect-timed '
-                      f'--weapon {self.name} --sight {sight}`.', flush=True)
+                      f'{config_key(cfg)} {self.posture} {sight} '
+                      f'fire={self.fire_mode or "-"}{fmode and " " + fmode} '
+                      f'-- NOT compensating{extra}. Measure it with `pixi run '
+                      f'collect-timed --weapon {self.name} '
+                      f'--sight {sight}`.', flush=True)
             self.dx_s, self.dy_s, self.t_s = [], [], []
             return
         # ⚠ TEN LINES OF THE PRE-PLAN-A FACTOR PATH STOOD HERE, AFTER THAT
