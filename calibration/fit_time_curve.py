@@ -1115,10 +1115,12 @@ def main():
                          '`collect_timed --from-fit` re-fits in memory every '
                          'run, so collection improves while the game keeps '
                          'firing whatever is on disk — a seed, or nothing.')
-    ap.add_argument('--sight', default='red_dot',
+    ap.add_argument('--sight', default=None,
                     help='part of the curve key; set_seq looks up (weapon, '
                          'config, posture, sight) and a curve fitted at the '
-                         'red dot played while hip firing is out by 3x')
+                         'red dot played while hip firing is out by 3x. '
+                         'Default: whatever the magazines say they were fired '
+                         'through, which is a readback.')
     ap.add_argument('--posture', default='standing')
     a = ap.parse_args()
     if a.selftest:
@@ -1130,6 +1132,27 @@ def main():
     if not mags:
         print(f'no samples at {p}')
         return 2
+    # ⚠ THE SIGHT COMES FROM THE MAGAZINES, NOT FROM A DEFAULT. It used to
+    # default to 'red_dot', so writing a vss or p90 curve without remembering
+    # the flag filed it under an optic the gun cannot wear — the same key
+    # mismatch that meant neither gun had ever played a curve at all. Every
+    # magazine carries `sight` as a READBACK off the gun, so the pool answers
+    # this itself; the flag is kept for a pool that disagrees with itself, and
+    # a flag that contradicts a unanimous pool is refused rather than obeyed.
+    worn = {m.sight for m in mags if m.sight}
+    if a.sight is None:
+        if len(worn) != 1:
+            print(f'  [!] REFUSING: the pool was fired through {sorted(worn)} '
+                  f'— it is not one cell. Pass --sight to say which curve this '
+                  f'is, having first decided whether these magazines pool.')
+            return 4
+        a.sight = worn.pop()
+    elif worn and worn != {a.sight}:
+        print(f'  [!] REFUSING: --sight says {a.sight!r} and the magazines '
+              f'were fired through {sorted(worn)}. A count is worth a '
+              f'different angle through each, so the curve would be filed '
+              f'under an optic it was not measured at.')
+        return 4
     if a.by_session:
         print(f'{a.weapon} {a.config or "bare"}: {len(mags)} magazines, '
               f'cut wherever the clock jumps {a.gap_min:.0f} min')

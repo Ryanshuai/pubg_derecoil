@@ -500,11 +500,13 @@ RECOIL_SIGHT_PROFILES = {
     # The vss side was the cleaner of the two — per-patch spread 0.50%, "no
     # positional bias", against a red_dot run with one patch at std 0.25.
     #
-    # ⚠ AND IT DOES NOT RESCUE THE VSS CELL. Re-analysing the 15 stored
-    # magazines at the new K moves the arm disagreement 19.7% -> 18.9%: K
-    # biases only the weak arms, where y_obs is most of the answer, and 2.6%
-    # of that is worth ~15 counts. The cell fails for a different reason (two
-    # of its four arms hold one and two magazines).
+    # ⚠ K IS NOT WHAT MAKES A CELL AGREE, and the vss is the measurement that
+    # says so: re-analysing its magazines at the new K moved the arm
+    # disagreement 19.7% -> 18.9%. K biases only the weak arms, where y_obs is
+    # most of the answer, and 2.6% of that is worth ~15 counts. What settled
+    # the cell was firing BALANCED arms — six magazines each at 0.5x and 1.0x
+    # — which agree to 0.11%. Arms are compared one-for-one whatever their
+    # count, so plan magazines per ARM (calibration/CLAUDE.md).
     #
     # One run per side. Not replicated.
     'vss_pso1': {'K': 1.8283, 'mag': 4, 'keepout': 200,
