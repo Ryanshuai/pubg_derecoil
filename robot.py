@@ -29,22 +29,41 @@ except (AttributeError, OSError):
 
 
 class _Tee:
-    """Write to the terminal AND to a file. Never swallows the terminal.
+    """Write to the terminal AND to a timestamped file. Never swallows the
+    terminal.
 
     ⚠ THE FILE IS THE COPY, NOT THE DESTINATION. If the log file cannot be
     opened or a write to it raises, the terminal write has already happened
     and the failure is dropped -- a broken log must not be able to take down
     a session that is otherwise fine, and least of all one that is driving
     hardware.
+
+    ⚠ THE CLOCK GOES IN THE FILE ONLY, and that asymmetry is the point. The
+    terminal is read LIVE, where the order is the timing and a column of
+    timestamps is noise. The file is read AFTERWARDS, against a burst the
+    reader remembers and cannot place: without a clock, `[armed] CLEARED` and
+    a burst three seconds later are one line apart and look simultaneous.
+    Every line this process prints is a state CHANGE, so the gaps between them
+    carry as much as the lines do -- and they were being thrown away.
+
+    Prefixing is per LINE, not per write: `print` issues the text and the
+    newline as two calls, and stamping both would put a bare timestamp on the
+    end of every line.
     """
 
     def __init__(self, stream, fh):
         self._stream, self._fh = stream, fh
+        self._at_line_start = True
 
     def write(self, s):
         n = self._stream.write(s)
         try:
-            self._fh.write(s)
+            for part in s.splitlines(keepends=True):
+                if self._at_line_start and part.strip():
+                    self._fh.write(datetime.datetime.now().strftime(
+                        '%H:%M:%S.%f')[:-3] + ' ')
+                self._fh.write(part)
+                self._at_line_start = part.endswith('\n')
             self._fh.flush()
         except (OSError, ValueError):
             pass
