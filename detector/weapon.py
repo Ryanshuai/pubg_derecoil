@@ -169,7 +169,7 @@ def load_curves():
 # here so detector/ does not import calibration/". config is imported by both
 # layers already, so the copy bought nothing and risked the failure that
 # docstring described -- two authors drifting, and a lookup that just misses.
-from config import config_key                              # noqa: E402,F401
+from config import config_key, fire_tag                    # noqa: E402,F401
 
 
 # Guns whose optic is part of the WEAPON, not of the scope slot. An empty
@@ -276,9 +276,18 @@ def load_final_curves():
         # THIS lookup, written 2026-08-08, keyed on (weapon, config, posture)
         # and reintroduced exactly that -- with the sight sitting right there
         # in the file it was reading.
+        # ⚠ AND SO IS THE FIRE MODE (2026-08-09), for a smaller version of the
+        # same reason. The mg3 has two automatic modes 1.5x apart in cyclic
+        # rate; the sample store separates them (`__fire-full`) and this lookup
+        # did not, so whichever mode the gun was in, it played the curve fitted
+        # for the other. It is `fire_tag` and not the raw mode so that the
+        # change is ADDITIVE: a weapon's ordinary mode tags '', an absent
+        # fire_mode field tags '', and every curve already on disk keeps the
+        # key it had.
         key = (data['weapon'], config_key(data.get('config')),
                data.get('posture', data.get('stance', 'standing')),
-               data.get('sight', 'red_dot'))
+               data.get('sight', 'red_dot'),
+               fire_tag(data['weapon'], data.get('fire_mode')))
         # ⚠ A SEED IS NOT A FIT AND MUST NOT LOOK LIKE ONE. tools/import_kava4
         # writes community patterns here so a gun with no measurement of its
         # own still has SOMETHING to fire -- without one the view climbs into
@@ -459,7 +468,12 @@ class Weapon():
             rpm = WEAPON_RPM.get(state, 600)
             self.bullet_interval_s = 60.0 / rpm
             if state in can_full_guns:
-                self.fire_mode = 'full'
+                # ⚠ NOT THE LITERAL 'full'. Picking up a gun sets the mode
+                # this weapon ORDINARILY has, and for the mg3 that is 'high'.
+                # With 'full' here, a freshly held mg3 tagged `__fire-full`
+                # and looked up a curve fitted for the other rate — or, once
+                # the fire mode entered the key, none at all.
+                self.fire_mode = config.fire_mode_for(state)
             if self.name in sp:
                 self.type = 'sp'
             elif self.name in dmr:
@@ -476,7 +490,11 @@ class Weapon():
             self.posture = state if state in ('standing', 'crouching', 'prone') else 'standing'
         elif pos == 'fire_mode':
             if self.name in can_full_guns:
-                self.fire_mode = state if state else 'full'
+                # Same as above: an unreadable HUD falls back to this weapon's
+                # ordinary mode, which is what fire_tag treats as untagged, so
+                # "could not read it" and "it is the usual one" reach the same
+                # curve rather than reaching none.
+                self.fire_mode = state or config.fire_mode_for(self.name)
             else:
                 self.fire_mode = 'single'
         elif pos == 'scope':
@@ -568,8 +586,9 @@ class Weapon():
             cfg = {'muzzle': self.muzzle, 'grip': self.grip,
                    'stock': self.butt}
             sight = _sight_of(self.scope, self.name)
+            fmode = fire_tag(self.name, self.fire_mode)
             shots = self._final.get((self.name, config_key(cfg),
-                                     self.posture, sight))
+                                     self.posture, sight, fmode))
             if shots:
                 t = 0.0
                 self.t_s, self.dx_s, self.dy_s = [], [], []

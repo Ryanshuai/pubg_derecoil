@@ -37,12 +37,31 @@ a week later, be reconstructed against a curve that did not exist when it was
 fired. Every sample in this store would then be quietly wrong, and the store's
 whole reason for existing is that it does not need re-collecting.
 
-⚠ NOTHING IS EVER DELETED FROM HERE. A magazine that looks bad is a magazine
-that the clustering will put outside the main cluster, which is a decision made
-at fit time with all the other magazines visible -- not a decision made at
+⚠ NOTHING IS DROPPED AT COLLECTION TIME. A magazine that looks bad is a
+magazine the clustering will put outside the main cluster, which is a decision
+made at fit time with all the other magazines visible -- not a decision made at
 collection time by whichever gate happened to be in fashion. The gates that
 used to drop magazines at collection time are the reason there is no data on
 what they dropped (root CLAUDE.md: "闸门会审查掉你用来重调它的数据").
+
+⚠ AND THAT RULE IS ABOUT THE MEASUREMENT, NOT ABOUT THE LABEL. This paragraph
+used to open "NOTHING IS EVER DELETED FROM HERE", and on 2026-08-09 that became
+false: 44 magazines in five quarantined files were deleted, having first been
+offered every chance to be named. The distinction the old wording lost:
+
+    a magazine with a bad READING        keep it. The fit can see it, weigh it
+                                         against its siblings, and cut it with
+                                         everything visible.
+    a magazine with an unknown LABEL     nothing can ever pool it. Pooling is
+                                         the only thing this store does, and a
+                                         key nobody can write is not a cell.
+
+The rescue is attempted first and it can succeed -- twelve mg3 magazines were
+taken back the same day because their fire mode is measurable from the trace
+rate, with a positive control on magazines the HUD had labelled. What cannot be
+taken back is a file whose own name records that its label was INFERRED FROM
+ITS OWN NUMBERS: renaming that makes it evidence for the number it was inferred
+from. docs/game_quirks.md carries both halves of that audit.
 """
 from __future__ import annotations
 
@@ -449,31 +468,12 @@ class Magazine:
 
 # ── disk ──
 
-def fire_tag(weapon, fire_mode):
-    """The filename fragment for a fire mode. '' for this weapon's ORDINARY one.
-
-    ⚠ THE BASELINE IS PER WEAPON (config.fire_mode_for), NOT THE LITERAL
-    'full', and the difference is the whole design. The mg3's ordinary mode is
-    'high' -- that is what its curve is timed for and what the runtime will
-    meet -- so 'high' files untagged and the SLOW one gets `__fire-full`. A
-    tag keyed on the literal 'full' would have pushed the mg3's real curve into
-    a tagged file that nothing at runtime looks up, which is a worse state than
-    the bug it was fixing.
-
-    Everything else has exactly one automatic mode, so its tag is always '' and
-    200-odd stored magazines and every curve on disk stay exactly where they
-    are. None -- "fired before this field existed" -- also gives '', because
-    that is where those magazines already live.
-
-    ⚠ AND IT IS DRIVEN BY THE READBACK. append() passes `mag.fire_mode`, which
-    is what the HUD said, not what the run asked for -- so a magazine fired in
-    the wrong mode files itself under the wrong mode instead of pooling into
-    the right one's numbers. This project has paid twice for a record that
-    described the request.
-    """
-    if fire_mode in (None, '') or fire_mode == cfg.fire_mode_for(weapon):
-        return ''
-    return f'__fire-{fire_mode}'
+# ⚠ RE-EXPORTED FROM config (2026-08-09), same reason as config_key:
+# detector/weapon.py's curve lookup needs this word and detector must not
+# import calibration. Until it could say it, the lookup keyed (weapon,
+# config, posture, sight) with no fire mode, so the mg3 played ONE curve for
+# two automatic modes 1.5x apart in cyclic rate.
+from config import fire_tag                                # noqa: E402,F401
 
 
 def path_for(weapon, config=None, fire_mode=None):

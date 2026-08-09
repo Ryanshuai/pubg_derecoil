@@ -1488,6 +1488,40 @@ def fire_mode_for(weapon):
 # round-trip, correctly, without anyone noticing the parser was the fault.
 
 
+def fire_tag(weapon, fire_mode):
+    """The name fragment for a fire mode. '' for this weapon's ORDINARY one.
+
+    ⚠ THE BASELINE IS PER WEAPON (fire_mode_for), NOT THE LITERAL 'full', and
+    the difference is the whole design. The mg3's ordinary mode is 'high' --
+    that is what its curve is timed for and what the runtime will meet -- so
+    'high' files untagged and the SLOW one gets `__fire-full`. A tag keyed on
+    the literal 'full' would have pushed the mg3's real curve into a tagged
+    file that nothing at runtime looks up, which is a worse state than the bug
+    it was fixing.
+
+    Everything else has exactly one automatic mode, so its tag is always '',
+    and every magazine and curve on disk stays exactly where it is. None --
+    "fired before this field existed", or "the HUD could not be read" -- also
+    gives '', because that is where those already live and because the ordinary
+    mode is the right thing to fall back to when nobody could look.
+
+    ⚠ AND IT IS DRIVEN BY THE READBACK. samples.append passes `mag.fire_mode`,
+    which is what the HUD said and not what the run asked for -- so a magazine
+    fired in the wrong mode files itself under the wrong mode instead of
+    pooling into the right one's numbers. This project has paid twice for a
+    record that described the request.
+
+    ⚠ IT LIVES IN config FOR THE SAME REASON config_key DOES: detector/ must
+    not import calibration/, and until 2026-08-09 that meant the runtime curve
+    lookup had no way to say the words. It keyed (weapon, config, posture,
+    sight) with no fire mode, so the mg3 -- whose two automatic modes are 1.5x
+    apart in cyclic rate -- played ONE curve for both of them.
+    """
+    if fire_mode in (None, '') or fire_mode == fire_mode_for(weapon):
+        return ''
+    return f'__fire-{fire_mode}'
+
+
 def config_key(config):
     """A (weapon, attachments) cell's name. -> str
 
