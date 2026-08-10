@@ -75,6 +75,20 @@ with LobbyControl() as lc:
 
 **三个坑（裸 `SetForegroundWindow` 会被拒、调完必须再验一次、焦点不是拿到一次就固定的）连同 settle 时间和最小化还原，写在 `control/CLAUDE.md` 的「先决条件：焦点，每次都要」。** 那是这条规则的唯一一份——focus 是 control 层的东西，这里只留指针，免得两份副本各自漂。
 
+## 槽位名和姿势名各只有一个作者，而它们**曾经有九个和三个**（2026-08-10）
+
+`detector/attachment_catalog.py` 现在同时持有 `SLOT_NAMES`（五个槽）和 `RECOIL_SLOTS`（改后坐力的那三个）；`config.py` 持有 `POSTURES`。别的地方一律 import，不要再写出来。
+
+**选这两个作者的理由是同一条，而且是分层规则给的**：`attachment_catalog` 自己**一个 import 都没有**，而规则 6 只禁 `detector → calibration`，不禁反向——所以每一层都够得着它。`config` 同理，它本来就是无层的。
+
+⚠ **而副本当初存在，正是因为分层规则禁掉了那个方向。** `detector/weapon_attachments.py` 的抄件上面原来写着：
+
+> Slot order must match `calibration/build_kit_factors.RECOIL_SLOTS`, because the key is built the same way on both sides and **a mismatch would silently miss every row rather than raise**.
+
+编码器在 `calibration/`、解码器在 `detector/`，规则 6 不许后者 import 前者，**于是抄一份是当时唯一能把这句话说出口的办法，而没有任何东西在验它**。九份里已经有四份差集不为空。
+
+> **两层之间抄同一个事实，先问它是不是因为分层不许那个方向的 import。是的话，解法不是加一道闸，是找一个两层都能到的叶子模块当作者**——闸只能发现漂移，作者让漂移没有指称对象。
+
 ## 第一铁律：模板漂移是静默的
 
 检测器**不会**因为模板过时而报错。它会给出一个看起来完全合理的错答案。

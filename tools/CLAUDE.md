@@ -237,7 +237,15 @@ while prev is None:
 
 **离线回归**（改完代码就跑）
 
-`analysis` · `abs-offset` · `att-coverage` · `attachments` · `drag-log` · `fire` · `frames` · `gestures` · `harness` · `highlight` · `kit` · `kit-floor` · `locations` · `lobby-detector` · `one-gun` · `panel-state` · `placement` · `pointers` · `recenter` · `runs` · `snaps` · `spawner-plan` · `spread-hosts` · `stocktake-test` · `tab-open` · `tab-watch`
+`abs-offset` · `att-coverage` · `attachments` · `drag-log` · `fire` · `frames` · `gestures` · `harness` · `highlight` · `kit` · `kit-floor` · `locations` · `lobby-detector` · `model-consts` · `names` · `one-gun` · `panel-state` · `placement` · `pointers` · `recenter` · `runs` · `snaps` · `spawner-plan` · `spread-hosts` · `stocktake-test` · `tab-open` · `tab-watch`
+
+⚠ **`analysis` 是这张表 2026-08-10 之前的第一项，而那个 task 不存在**——`analysis.py` 随旧坐标删掉时 pixi task 跟着删了，这张散文表没跟。`pointers` 和 `names` 都看不见它：一个查路径、一个查符号，而**一个 task 名两者都不是**（`check_pointers.py` 的文件头自己写着它看不见「移动了的函数/参数/task 名」）。
+
+⚠ **`model-consts` 是 2026-08-10 补的，判据一句话：`MODEL.md` 三、常数现值那张表里的每个数，必须等于 `config.py` 里那个常数的现值。** 它存在的理由就在它上一个 commit 里——`c196aa0`「MODEL.md carried D = −19 after it became −90」。`MODEL.md` 是主法则，所以**从它那里取数的人做的是对的事**，这正是那张表里一个过期格子比别处任何一条过期注释都贵的原因。
+
+它**每个值都在运行时从 `config` 读，自己不带副本**——带副本的检查器就是第三个作者，而且是最坏的那种：一个会说「全都对得上」的。写在它里面的只有**配对**（哪一行说的是哪个 `config` 名字），因为那是机器唯一推不出来的部分。它还会把**没人配对的行**打出来，免得「这道闸绿了」悄悄变成「这道闸只看了八行里的两行」。
+
+⚠ **它第一次跑是在错的行上红的**：同一节里第二张表也以 `` `D` `` 开头（列的是三个候选 D 值在屏幕上各是什么样），扫全节就匹配到了那一张、读到它的 `0`，然后在常数表是对的时候报它错。**一道在错证据上失败的闸，比一道通过的闸更坏。** 现在只取第一张表。变异 **3/3 咬中**，两个方向都验了：改 `MODEL.md` 里的数、改 `config.py` 里的数、删掉一行被配对的行。
 
 ⚠ **`att-coverage` 是仪表不是闸**（`pixi run att-coverage`）：每个配件模板拍在**几把不同的枪**上，以及有几把枪**能**戴它。今天是 41 个件落在 40 把枪里的 9 把，**20 个件只站在一把枪上**（16 个是 sks，因为 `hosts_for` 的贪心集合覆盖每次都选它）。而「宿主枪不影响这张图」从没被验过——槽位瓦片半透明，背景是另一把枪的剪影。扩充用 `collect_templates --spread N`，规矩和它的四条变异在 `calibration/CLAUDE.md`。
 
