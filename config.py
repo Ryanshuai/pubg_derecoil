@@ -707,8 +707,28 @@ KEY_ACTION_TABLE = [
      'state': [('stop_recoil', False)],
      'hw': ['recoil_on', 'upload_pattern']},
 
-    # ── Right click (ADS) ──
-    {'key': 'right', 'event': 'release', 'cond': '!tab_open',
+    # ── Right click (ADS) ── the ONE key that always means "I am about to
+    # shoot", so it is what re-arms after anything disarmed.
+    #
+    # ⚠ ON THE PRESS, NOT THE RELEASE, AND IT USED TO BE THE RELEASE. Aiming
+    # is the intent; letting go is the end of it. Under release-only the whole
+    # HOLD ran disarmed, and a held right button is not an edge case -- it is
+    # shoulder aim, one of the three aiming states (detector/CLAUDE.md). With
+    # toggle ADS the two edges are ~50 ms apart and it hardly matters; with a
+    # held one it is the entire engagement.
+    #
+    # ⚠ WHAT MADE THIS URGENT IS THE `win` KEY ABOVE, which sets stop_recoil
+    # and had nothing that reliably cleared it. Play log 2026-08-09 17:09:58:
+    # `win` press disarmed the tool and it stayed disarmed for 36 SECONDS,
+    # until a Tab happened to be opened and closed. Every re-arm in this table
+    # hangs off a key the player may simply not press; the right button is the
+    # one they cannot avoid.
+    #
+    # ⚠ REPLACED, NOT ADDED. Both edges would upload twice per aim cycle, and
+    # upload_pattern is a serial round-trip of up to 255 knots on the key most
+    # pressed in a fight. A press always precedes its release, so moving it is
+    # strictly earlier as well as strictly cheaper.
+    {'key': 'right', 'event': 'press', 'cond': '!tab_open',
      'state': [('stop_recoil', False)],
      'hw': ['recoil_on', 'upload_pattern']},
 
@@ -2091,12 +2111,62 @@ COUNTS_PER_PIXEL = 0.5
 # a magazine fired last week went through a different display chain.
 RECOIL_COMP_LAG_MS = 20
 
+# Extra lead ON TOP of -L, for the HEAD of the burst only.
+#
+# ⚠ IT EXISTS BECAUSE -L IS DERIVED FROM A STEADY STATE AND THE FIRST SHOT IS
+# NOT ONE. `y_true(t) = y_obs(t) + C(t - L)` says emit at t - L, and that is
+# exact once the curve is delivering smoothly. At the very start it is not: the
+# fitted curve's first knots are ~0 (aug bare: t=0 -> 0.000, t=17 -> 0.023,
+# t=34 -> 2.402 counts), upload_pattern FOLDS everything before t=0 into a step
+# at t=0, and folding ~0 gives ~0. So the head has nothing to deliver at the
+# moment the first round's kick reaches the screen.
+#
+# MEASURED, and offline: the residual y_true - delivered on the aug's own 30
+# compensated bare magazines, sweeping extra lead. y_true is measured and the
+# curve is the READBACK, so only the delivery time moves.
+#
+#     extra lead   t=51ms   t=100   t=300   whole-burst RMS   end
+#          0 ms     +1.5     -0.1    +4.5        80.9        109.1
+#        -10 ms     -0.4     -1.3    +1.6        78.9        110.9
+#        -20 ms     -1.8     -2.5    -2.5        78.0        111.1
+#        -50 ms     -4.8     -7.6   -11.3        81.3        111.1
+#
+# 10 ms is the SMALLEST SUFFICIENT move: it nulls t=51 (+1.5 -> -0.4) and the
+# whole-burst RMS does not get worse (80.9 -> 78.9). Going further starts
+# over-compensating the head.
+#
+# ⚠ IT IS SEPARATE FROM L RATHER THAN FOLDED INTO IT, so that re-measuring the
+# display chain still moves the firmware and the analysis together. L is a
+# property of the machine; this is a property of the curve's shape at t=0.
+#
+# ⚠ AND IT CONTRADICTS THE FIRED SWEEP, WHICH IS NOT SETTLED. The fired
+# `--fire-delay-sweep` above put -36 WORSE than -19 (P=97%) on whole-burst RMS,
+# and this offline sweep says -30 is fine. Two things the offline version cannot
+# see: the fired arms at -50/-36 were ERRATIC magazine to magazine (5.4..22.7
+# against -19's 5.7..8.5), and a simulation holds y_true fixed by construction.
+# This file records THREE offline decompositions of this residual refuted by
+# firing it. Asked for from the chair on 2026-08-09 -- "第一发欠压,还得往前挪一
+# 点" -- which is a direct observation of the head that no aggregate criterion in
+# this repo was watching.
+#
+# ⚠ SO IT IS PROVISIONAL, AND THE VERDICT NEEDS A CRITERION THE OLD ONE DID NOT
+# HAVE. Fire `--fire-delay-sweep=-20,-30,-40` interleaved and report, PER ARM:
+# the residual at t=51 ms, the whole-burst RMS, AND the magazine-to-magazine
+# spread. Whole-burst RMS alone is what hid this for a month -- root CLAUDE.md,
+# "判据必须能看见它要管的那个维度".
+#
+# ⚠ AND DO NOT EXPECT IT TO FIX THE END. The end residual is 109..111 counts at
+# EVERY offset above -- flat, because it is AMPLITUDE, not phase: aug bare's
+# curve is ~6% short of its own y_true. The first shot and the last are two
+# different problems and this constant only touches the first.
+RECOIL_HEAD_LEAD_MS = 10
+
 # ⚠ DERIVED, NOT CHOSEN. The derivation is the block above RECOIL_COMP_LAG_MS;
 # the one-line version is that a count emitted at t appears at t + L, so
 # cancelling a displacement SEEN at t means emitting at t - L. Anything that
 # re-measures L now moves the firmware and the analysis together, which is the
 # only property here worth defending.
-RECOIL_FIRE_DELAY_MS = -RECOIL_COMP_LAG_MS
+RECOIL_FIRE_DELAY_MS = -(RECOIL_COMP_LAG_MS + RECOIL_HEAD_LEAD_MS)
 
 
 # ⚠ 边玩边观测：**默认关，而且不是因为它没写完。**
