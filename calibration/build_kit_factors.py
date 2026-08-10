@@ -96,9 +96,11 @@ import config  # noqa: E402  (needs the sys.path.insert above)
 OUT = config.KIT_FACTORS_PATH
 RECORDS = config.KIT_RECORDS_PATH
 
-# The slots that change RECOIL. See the module docstring for why scope and
-# magazine are not here.
-RECOIL_SLOTS = ('muzzle', 'grip', 'stock')
+# The slots that change RECOIL, and why scope and magazine are not among them,
+# both live on the tuple itself in detector/attachment_catalog.py. It is the
+# one module every layer may import, which is what lets the decoder
+# (detector/weapon_attachments.py) read the same value instead of a copy.
+from detector.attachment_catalog import RECOIL_SLOTS  # noqa: E402
 
 # A measurement too loose to act on must not ship, because the fallback is not
 # "nothing" -- it is 1.0, or the wiki product, and both are better than a

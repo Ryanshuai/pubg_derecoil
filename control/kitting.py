@@ -41,7 +41,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
 
-from detector.attachment_catalog import fits, has_slot
+from detector.attachment_catalog import RECOIL_SLOTS, fits, has_slot
 import detector.weapon as weapon_mod
 from detector.weapon import Weapon, WEAPON_RPM, can_full_guns
 from detector.weapon import INTEGRAL_SIGHT as _INTEGRAL_SIGHT
@@ -142,12 +142,15 @@ PART_FOR_CLASS = {
     'LMG': {'muzzle': None,       'grip': 'vert_grip', 'stock': 'heavy_stock'},
 }
 
-# Every slot this tool controls. A config names the ones to FILL; the rest are
-# forced empty, never left alone. PUBG auto-fits whatever the backpack holds
-# onto a gun the moment it arrives, so an unmentioned slot is not empty — it is
-# whatever the last strip left lying around. The first "bare" run came back
-# wearing a cheek pad it was never asked for, and a cheek pad reduces recoil.
-TEST_SLOTS = ('muzzle', 'grip', 'stock')
+# Every slot this tool controls IS the set that changes recoil -- it is kitting
+# FOR a recoil measurement, so the two are the same question and RECOIL_SLOTS
+# (imported above) is the one answer. This was a third copy of that tuple.
+#
+# A config names the ones to FILL; the rest are forced empty, never left alone.
+# PUBG auto-fits whatever the backpack holds onto a gun the moment it arrives,
+# so an unmentioned slot is not empty — it is whatever the last strip left
+# lying around. The first "bare" run came back wearing a cheek pad it was never
+# asked for, and a cheek pad reduces recoil.
 
 # Level 3, the largest. Capacity is the whole reason it is here — the parts
 # for a full factorial plus the spares shuttling on and off the gun have to fit
@@ -225,7 +228,7 @@ RPM_TOL = 0.02
 # would confound the two. Red dot is 1x, where counts and pixels agree.
 #
 # PINNED, BUT NO LONGER A CONSTANT. The paragraph above is still the reason
-# the sight is not one of TEST_SLOTS — it belongs to a different axis and
+# the sight is not one of RECOIL_SLOTS — it belongs to a different axis and
 # mixing it into an attachment factorial confounds two things. What it is not
 # a reason for is being unable to measure that axis at all, and until
 # 2026-08-04 this was a literal, so `--sight 4x` changed the MEASUREMENT
@@ -322,7 +325,7 @@ def parse_config(name):
             continue
         slot, _, part = piece.partition('=')
         slot, part = slot.strip(), part.strip()
-        if slot not in TEST_SLOTS:
+        if slot not in RECOIL_SLOTS:
             return None
         out[slot] = part or None
     return out
@@ -336,7 +339,7 @@ def config_name(slots):
     and resumes exactly as before; only a cell that NAMES a part spells it out.
     """
     return '+'.join(s if not slots[s] else f'{s}={slots[s]}'
-                    for s in TEST_SLOTS if s in slots) or 'bare'
+                    for s in RECOIL_SLOTS if s in slots) or 'bare'
 
 
 def effective_config(weapon, cfg, parts):
@@ -451,7 +454,7 @@ def want_for(weapon, cls, fill=None):
     # alone would read an absent slot as a defaulted one and quietly fill every
     # slot on the gun.
     want.update({s: ((fill.get(s) or parts.get(s)) if s in fill else None)
-                 for s in TEST_SLOTS if has_slot(weapon, s)})
+                 for s in RECOIL_SLOTS if has_slot(weapon, s)})
     return want
 
 

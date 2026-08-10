@@ -43,10 +43,14 @@ import cv2
 import numpy as np
 
 from config import HUD_REGIONS
-from detector.attachment_catalog import ATTACHMENTS, compatible
+from detector.attachment_catalog import ATTACHMENTS, SLOT_NAMES, compatible  # noqa: F401
 from detector.geometry import detail
 
-SLOT_NAMES = ['scope', 'muzzle', 'grip', 'magazine', 'stock']
+# SLOT_NAMES is re-exported, not redefined -- control/kit_plan.py,
+# control/inventory.py and calibration/legacy_collect_templates.py import it
+# from here. It used to be a list here and a tuple everywhere else; the two
+# error messages that render it ("... is not one of {SLOT_NAMES}") therefore
+# now print round brackets.
 
 TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'templates',
                         'pubg_assets', 'Item', 'Attachment')

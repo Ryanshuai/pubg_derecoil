@@ -48,7 +48,8 @@ import os
 
 import config
 
-from detector.attachment_catalog import (ATTACHMENTS, SLOTS as CATALOG_SLOTS,
+from detector.attachment_catalog import (ATTACHMENTS, RECOIL_SLOTS,
+                                         SLOTS as CATALOG_SLOTS,
                                          compatible, has_slot, weapon_class)
 
 # Muzzle vertical recoil multipliers
@@ -164,10 +165,12 @@ def validate_attachments(gun_name, attachments):
 # anywhere. `pixi run kit-factors` went 6/18 and was the only thing that
 # said so — every FAIL printed 0.7225, which IS the wiki product.
 _KIT_PATH = config.KIT_FACTORS_PATH
-# Slot order must match calibration/build_kit_factors.RECOIL_SLOTS, because the key
-# is built the same way on both sides and a mismatch would silently miss every
-# row rather than raise.
-_KIT_SLOTS = ('muzzle', 'grip', 'stock')
+# The key is built the same way on both sides and a mismatch would silently
+# miss every row rather than raise, so both sides now read the same tuple --
+# RECOIL_SLOTS, imported above. This used to be a copy with that sentence
+# above it as the only thing guarding it, and rule 6 (detector must not import
+# calibration) is why: the encoder lives in calibration/build_kit_factors.py
+# and could not be reached from here.
 
 
 def _load_kit_factors():
@@ -438,7 +441,7 @@ def measured_kit_factor(gun_name, posture, muzzle='', grip='', stock=''):
     worn = worn_keys(muzzle, grip, stock)
     if worn is None:
         return None
-    kit = '+'.join(sorted(f'{s}={worn[s]}' for s in _KIT_SLOTS if s in worn))
+    kit = '+'.join(sorted(f'{s}={worn[s]}' for s in RECOIL_SLOTS if s in worn))
     if not kit:
         return None                     # bare IS the denominator, always 1.0
     row = _row(per_weapon, posture, kit)
@@ -508,7 +511,7 @@ def explain_factor(gun_name, muzzle='', grip='', stock='',
     worn = worn_keys(muzzle, grip, stock)
     if worn:
         per_slot, any_measured = {}, False
-        for slot in _KIT_SLOTS:
+        for slot in RECOIL_SLOTS:
             if slot not in worn:
                 continue
             f = part_factor(gun_name, slot, worn[slot], posture)

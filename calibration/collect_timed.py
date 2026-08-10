@@ -131,7 +131,7 @@ def measure(tracker, ts, patches, human_fn=None):
 # --from-fit reported "nothing stored" while 34 of its own magazines sat on
 # disk. What the magazine determines is capacity, and that is already recorded
 # per magazine as `magazine_size`.
-RECOIL_SLOTS = ('muzzle', 'grip', 'stock')
+from detector.attachment_catalog import RECOIL_SLOTS               # noqa: E402
 
 
 def read_loadout():

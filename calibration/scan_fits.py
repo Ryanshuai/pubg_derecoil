@@ -61,7 +61,8 @@ for _s in (sys.stdout, sys.stderr):
         pass
 
 from calibration.capture_run import CaptureRun
-from detector.attachment_catalog import ATTACHMENTS, ROSTER, SLOTS, fits
+from detector.attachment_catalog import (ATTACHMENTS, ROSTER, SLOT_NAMES,
+                                         SLOTS, fits)
 from detector.slot_detector import SlotDetector
 from control.focus import focus_keeper
 from control.session import ensure_ready
@@ -71,8 +72,10 @@ KIND = 'fit_scan'
 GUN_SLOT = 2
 
 # scope is excluded by default: SlotDetector cannot confirm the slot exists,
-# so a failed fit there is ambiguous in a way it is not elsewhere.
-DEFAULT_SLOTS = ('muzzle', 'grip', 'magazine', 'stock')
+# so a failed fit there is ambiguous in a way it is not elsewhere. DERIVED from
+# SLOT_NAMES rather than written out, so a sixth slot arrives here by itself
+# and the exclusion stays a statement about scope.
+DEFAULT_SLOTS = tuple(s for s in SLOT_NAMES if s != 'scope')
 
 
 def candidates(weapon, slots):

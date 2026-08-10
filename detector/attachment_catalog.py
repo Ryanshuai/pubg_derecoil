@@ -333,21 +333,47 @@ ATTACHMENTS = {
 #               from what the model shows. MUST be measured before trusting.
 # ════════════════════════════════════════════════════════════
 
-_ALL = ('scope', 'muzzle', 'grip', 'magazine', 'stock')
+# ── the slot vocabulary, and its one author ──────────────────────────────
+#
+# THIS FILE, because it is the only one every layer may reach: it imports
+# nothing itself, and the layering rules forbid detector -> calibration but
+# never the reverse. That asymmetry is what made the copies necessary.
+#
+# ⚠ THERE WERE NINE OF THESE, and the one place where a mismatch is silent
+# said so in a comment with nothing checking it -- weapon_attachments.py:
+# "Slot order must match calibration/build_kit_factors.RECOIL_SLOTS, because
+# the key is built the same way on both sides and a mismatch would silently
+# miss every row rather than raise." The encoder was in calibration/ and the
+# decoder in detector/, so the copy was the only way to say it at all. Four
+# of the nine had already drifted.
+SLOT_NAMES = ('scope', 'muzzle', 'grip', 'magazine', 'stock')
+
+# The slots that change RECOIL, and the order the kit key is built in.
+#
+# `scope` is not here: an optic SCALES the curve (config.RECOIL_SIGHT_RATIO),
+# it does not change its shape, so it travels on its own axis.
+#
+# `magazine` is not here either, and that one cost a run: the tile is
+# translucent, so the same magazine read '?' against one backdrop and
+# 'quickext_ar' against another, and one gun produced TWO filenames an hour
+# apart while --from-fit reported "nothing stored" with 34 of its own
+# magazines on disk. What a magazine determines is capacity, which is already
+# recorded per magazine as `magazine_size`.
+RECOIL_SLOTS = ('muzzle', 'grip', 'stock')
 
 SLOTS = {
     # ── AR ──
     'akm':      {'slots': ('scope', 'muzzle', 'magazine'), 'conf': 'measured'},
     'm762':     {'slots': ('scope', 'muzzle', 'grip', 'magazine'), 'conf': 'measured'},
     'g36c':     {'slots': ('scope', 'muzzle', 'grip', 'magazine'), 'conf': 'measured'},
-    'm416':     {'slots': _ALL, 'conf': 'measured'},
+    'm416':     {'slots': SLOT_NAMES, 'conf': 'measured'},
     'm16':      {'slots': ('scope', 'muzzle', 'magazine', 'stock'), 'conf': 'measured'},
     'scar':     {'slots': ('scope', 'muzzle', 'grip', 'magazine'), 'conf': 'measured'},
-    'mk47':     {'slots': _ALL, 'conf': 'measured'},
+    'mk47':     {'slots': SLOT_NAMES, 'conf': 'measured'},
     'qbz':      {'slots': ('scope', 'muzzle', 'grip', 'magazine'), 'conf': 'measured'},
     'aug':      {'slots': ('scope', 'muzzle', 'grip', 'magazine'), 'conf': 'measured'},
     'groza':    {'slots': ('scope', 'muzzle', 'magazine'), 'conf': 'measured'},
-    'ace32':    {'slots': _ALL, 'conf': 'measured'},
+    'ace32':    {'slots': SLOT_NAMES, 'conf': 'measured'},
     # K2's wiki page states 3 attachment points: sight, muzzle, magazine.
     'k2':       {'slots': ('scope', 'muzzle', 'magazine'), 'conf': 'measured'},
     'famas':    {'slots': ('scope', 'muzzle', 'magazine'), 'conf': 'measured'},
@@ -355,7 +381,7 @@ SLOTS = {
     # ── DMR ──
     'slr':      {'slots': ('scope', 'muzzle', 'magazine', 'stock'), 'conf': 'measured'},
     'mini14':   {'slots': ('scope', 'muzzle', 'magazine'), 'conf': 'measured'},
-    'sks':      {'slots': _ALL, 'conf': 'measured'},
+    'sks':      {'slots': SLOT_NAMES, 'conf': 'measured'},
     'mk14':     {'slots': ('scope', 'muzzle', 'magazine', 'stock'), 'conf': 'measured'},
     # Fixed PSO-1 optic and integral suppressor; only mag + cheek pad are free.
     'vss':      {'slots': ('magazine', 'stock'), 'conf': 'measured'},
@@ -373,8 +399,8 @@ SLOTS = {
     # grip position blank — which is also what confirms an unowned slot is
     # simply not rendered rather than shifted away.
     'uzi':      {'slots': ('scope', 'muzzle', 'magazine', 'stock'), 'conf': 'measured'},
-    'vector':   {'slots': _ALL, 'conf': 'measured'},
-    'mp5k':     {'slots': _ALL, 'conf': 'measured'},
+    'vector':   {'slots': SLOT_NAMES, 'conf': 'measured'},
+    'mp5k':     {'slots': SLOT_NAMES, 'conf': 'measured'},
     # Suppressor-only muzzle, vertical-only grip.
     'tommy':    {'slots': ('scope', 'muzzle', 'grip', 'magazine'), 'conf': 'measured'},
     # Integral holo + laser + suppressor, none removable.

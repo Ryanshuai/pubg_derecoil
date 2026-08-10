@@ -10,10 +10,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from detector.tab_items import Item, TabView
-from detector.attachment_catalog import ATTACHMENTS
+from detector.attachment_catalog import ATTACHMENTS, SLOT_NAMES
 from control.stock import Stock
-
-SLOT_NAMES = ('scope', 'muzzle', 'grip', 'magazine', 'stock')
 
 
 def item(key, row, panel='inventory'):

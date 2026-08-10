@@ -316,7 +316,9 @@ def type_score(frame):
 # absent/empty/filled are detector/slot_detector.py.
 # ════════════════════════════════════════════════════════════
 
-SLOT_NAMES = ('scope', 'muzzle', 'grip', 'magazine', 'stock')
+# Re-exported, not redefined: nine files import SLOT_NAMES from here and the
+# author is detector/attachment_catalog.py -- see the comment on it there.
+from detector.attachment_catalog import SLOT_NAMES     # noqa: E402,F401
 
 
 def slot_tile_box(gun, slot):
