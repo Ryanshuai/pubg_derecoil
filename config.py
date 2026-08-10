@@ -2214,13 +2214,39 @@ RECOIL_COMP_LAG_MS = 20
 # changing it re-derives every fitted curve in the store. Its three readings
 # (18.3..21.7, 24.3, 18.9) are untouched by anything here.
 #
-# ⚠ AND 40..70 IS STILL NOT SWEPT. -60 comes from a faulty comparison plus a
-# fold argument, -90 from an eye. The verdict run is the one described above --
-# interleaved arms, reporting the t=51 ms residual AND whole-burst RMS AND
-# magazine-to-magazine spread per arm -- and it should bracket -40, -60, -90
-# rather than the -20, -30, -40 that was proposed when the head was thought to
-# need single-digit milliseconds.
-RECOIL_HEAD_LEAD_MS = 40
+# ⚠ THE FOLD ARGUMENT THAT PREFERRED -60 IS REFUTED BY THE SCREEN, and what it
+# leaves behind is the sharpest open question here. Four judgements from the
+# chair, in order fired:
+#
+#     -30   不行        t=0 step 0.69 counts
+#     -90   感觉对了     t=0 step 8.55
+#     -60   不行        t=0 step 5.99
+#     -80   set here    t=0 step 7.43
+#
+# So the first shot needs somewhere around 7.4..8.5 counts delivered at the
+# click, against a MEASURED need of 4.1 (y_true at t=51 ms). That is a factor of
+# ~2, it is consistent across four judgements, and the "1.46x is closer to the
+# measurement than 2.1x" reasoning that picked -60 got the sign of its own
+# preference backwards.
+#
+# ⚠ THAT FACTOR OF 2 IS A LEAD, NOT A NUISANCE. Something between the fitted
+# curve and the photons loses about half of the head, and the candidates are
+# nameable: the firmware SPREADS the t=0 step over the interval to the next knot
+# (~22 ms at -80) rather than stepping it, so at t=51 only part of it has been
+# emitted; the tracker may under-read the first shot's displacement while it is
+# still locking, which would make y_true's head too small; or the fold's total is
+# right and its timing is not. The first is arithmetic and can be settled offline
+# against main.c's get_recoil_delta -- `pixi run comp-counts` already transcribes
+# it -- and that is the next thing to do here, not another value.
+#
+# ⚠ 40..70 IS STILL NOT SWEPT AND THE EYE IS NOW THE ONLY CRITERION IN USE. Four
+# judgements on four values is real evidence about the head and says nothing
+# about the whole burst, where over-leading was measured to make magazines
+# ERRATIC (-36 spread 5.4..22.7 against -19's 5.7..8.5) -- and -80 is twice as
+# far out as the -36 that produced that. The verdict run must report, per
+# interleaved arm: the t=51 ms residual AND whole-burst RMS AND the
+# magazine-to-magazine spread. Bracket -60, -80, -100.
+RECOIL_HEAD_LEAD_MS = 60
 
 # ⚠ DERIVED, NOT CHOSEN. The derivation is the block above RECOIL_COMP_LAG_MS;
 # the one-line version is that a count emitted at t appears at t + L, so
