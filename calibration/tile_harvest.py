@@ -47,7 +47,14 @@ OUT = os.path.join(ROOT, 'calibration', 'artifacts', 'attachments', 'harvest')
 TMPL_DIR = os.path.join(ROOT, 'data', 'templates', 'pubg_assets',
                         'Item', 'Attachment')
 
-QUOTA = 10
+QUOTA = 10          # for a (part, rack) with no template at all
+# ⚠ AND A SMALLER QUOTA FOR THE ONES THAT ALREADY HAVE ONE, because a template
+# is never finished. Intersection is MONOTONE -- folding fresh crops in can
+# only remove pixels, never add one -- so every extra backdrop can only strip
+# something that was never the icon. A template built from ten views is a
+# claim about ten backdrops; five more either confirm it (nothing changes, and
+# that is a real result) or shave off pixels nobody should have believed.
+EXTRA = 5
 # Mean absolute difference from the last crop kept for this key. Below it the
 # backdrop has not moved and the crop is a duplicate for intersection
 # purposes. Same constant the collectors use for "did this tile change".
@@ -64,16 +71,28 @@ KEEP_MSE_MAX = 400.0
 KEEP_MARGIN_MIN = 1.6
 
 
-def missing():
-    """Which (part, rack) the live bank has no template for. -> set"""
+def banked():
+    """(part, rack) pairs the live bank already has a template for. -> set"""
     have = set()
     for p in glob.glob(os.path.join(TMPL_DIR, '*.xsect_r*.png')):
         stem = os.path.basename(p)
         asset = stem.split('.')[0].replace('Item_Attach_Weapon_', '')
-        rack = stem.split('_r')[-1][0]
-        have.add((asset, rack))
+        have.add((asset, stem.split('_r')[-1][0]))
     return {(k, r) for k in ATTACHMENTS for r in ('1', '2')
-            if (ATTACHMENTS[k].get('asset'), r) not in have}
+            if (ATTACHMENTS[k].get('asset'), r) in have}
+
+
+def quotas():
+    """How many crops each (part, rack) still wants. -> {(key, rack): n}
+
+    Two tiers, and the reason they differ is what the crops are FOR. A pair
+    with no template needs enough views to solve one from nothing; a pair that
+    has one needs only enough to test it -- and a test that changes nothing is
+    a pass, not a wasted trip.
+    """
+    got = banked()
+    return {(k, r): (EXTRA if (k, r) in got else QUOTA)
+            for k in ATTACHMENTS for r in ('1', '2')}
 
 
 def held():
@@ -94,14 +113,13 @@ class TileHarvester:
     different from the last one kept.
     """
 
-    def __init__(self, detector=None, quota=QUOTA):
+    def __init__(self, detector=None):
         # The live AttachmentDetector, so the crop can be RE-SCORED here. The
         # dispatcher passes only names on, and a name with no score cannot say
         # whether it was a comfortable read or a coin flip -- which is the one
         # thing this corpus needs to record about itself.
         self.det = detector
-        self.quota = quota
-        self.want = missing()
+        self.want = quotas()
         self.count = held()
         self._last = {}                 # (key, rack) -> last crop kept
 
@@ -117,9 +135,8 @@ class TileHarvester:
         for slot, key in (detected or {}).items():
             if not key or key not in ATTACHMENTS:
                 continue
-            if (key, rack) not in self.want:
-                continue
-            if self.count[(key, rack)] >= self.quota:
+            want = self.want.get((key, rack))
+            if not want or self.count[(key, rack)] >= want:
                 continue
             crop = (crops or {}).get(f'att_{gun}_{slot}')
             if crop is None:
@@ -154,6 +171,43 @@ class TileHarvester:
         return kept
 
 
+def refine(key, rack, paths, floor_frac=0.5):
+    """Fold fresh crops INTO the stored template. -> (before, after, rejected)
+
+    ⚠ WITH OUTLIER REJECTION, and without it this operation destroys banks.
+    Exact intersection is one-vote-veto: folding a single disagreeing crop in
+    zeroes the whole template, and that is exactly what happened when the
+    hand-shot solves were merged into the mined bank -- a screen of black
+    squares. `mine_slot_tiles` folds 62 crops from SIX different host guns and
+    survives at 1045 px, and the only difference is that it skips the members
+    that would collapse the pile and says which they were.
+
+    So a crop that would take the template below `floor_frac` of where it
+    started is skipped and counted. Everything surviving is still byte-identical
+    across every crop that was kept -- no tolerance is introduced, only an
+    admission that the pile was not homogeneous.
+    """
+    from calibration.collect_intersect import alive, intersect
+    asset = ATTACHMENTS[key].get('asset')
+    dst = os.path.join(TMPL_DIR, f'Item_Attach_Weapon_{asset}.xsect_r{rack}.png')
+    old = cv2.imread(dst, cv2.IMREAD_UNCHANGED)
+    if old is None or old.ndim != 3 or old.shape[2] != 4:
+        return None
+    acc = old[:, :, :3].copy()
+    acc[old[:, :, 3] <= 128] = 0
+    before = alive(acc)
+    floor = before * floor_frac
+    bad = 0
+    for pth in sorted(paths):
+        img = cv2.imread(pth)
+        nxt = intersect(acc, img) if img is not None else None
+        if nxt is None or alive(nxt) < floor:
+            bad += 1
+            continue
+        acc = nxt
+    return before, alive(acc), bad, acc, dst
+
+
 def main():
     for _s in (sys.stdout, sys.stderr):
         try:
@@ -162,43 +216,71 @@ def main():
             pass
     ap = argparse.ArgumentParser()
     ap.add_argument('--solve', action='store_true',
-                    help='intersect what is collected and report')
+                    help='intersect the gap collections and report')
+    ap.add_argument('--refine', action='store_true',
+                    help='fold the extra crops into templates that already exist')
     ap.add_argument('--install', action='store_true',
-                    help='write the ones that converge into the live bank')
+                    help='write the results into the live bank')
     args = ap.parse_args()
 
-    want, have = missing(), held()
-    short = sorted((k, r) for (k, r) in want if have[(k, r)] < QUOTA)
-    full = sorted((k, r) for (k, r) in want if have[(k, r)] >= QUOTA)
-    print(f'{len(want)} (part, rack) pair(s) have no template; quota {QUOTA}')
-    print(f'  {len(full)} at quota, {len(short)} still short')
-    for k, r in short:
-        print(f'    {k:16} r{r}  {have[(k, r)]}/{QUOTA}')
+    want, have, got = quotas(), held(), banked()
+    gaps = sorted(k for k in want if k not in got)
+    tops = sorted(k for k in want if k in got)
+    print(f'gaps  {sum(1 for k in gaps if have[k] >= want[k])}/{len(gaps)} '
+          f'at quota {QUOTA}')
+    print(f'extra {sum(1 for k in tops if have[k] >= want[k])}/{len(tops)} '
+          f'at quota {EXTRA}   (crops to re-test a template that exists)')
+    short = [(k, have[k], want[k]) for k in gaps if have[k] < want[k]]
+    for (kk, r), h, w in short[:12]:
+        print(f'    {kk:16} r{r}  {h}/{w}')
+    if len(short) > 12:
+        print(f'    ... and {len(short) - 12} more')
 
-    if not (args.solve or args.install):
-        return 0
+    if args.solve or args.install:
+        from calibration.collect_intersect import alive, intersect
+        from calibration.solve_tiles import is_icon
+        print('\nsolving the gaps:')
+        for key, rack in gaps:
+            paths = sorted(glob.glob(os.path.join(OUT, key, f'*_r{rack}.png')))
+            if len(paths) < 3:
+                continue
+            acc = None
+            for pth in paths:
+                acc = intersect(acc, cv2.imread(pth))
+            ok, frac = is_icon(acc)
+            print(f'  {key:16} r{rack}  {len(paths):2d} crop(s) -> '
+                  f'{alive(acc):5d} px  blob {frac:.2f}'
+                  + ('' if ok else '   ⚠ scattered'))
+            if args.install and ok:
+                asset = ATTACHMENTS[key].get('asset')
+                dst = os.path.join(
+                    TMPL_DIR, f'Item_Attach_Weapon_{asset}.xsect_r{rack}.png')
+                if not os.path.exists(dst):
+                    m = (np.any(acc != 0, axis=2) * 255).astype(np.uint8)
+                    cv2.imwrite(dst, np.dstack([acc, m]))
+                    print(f'      -> {os.path.basename(dst)}')
 
-    from calibration.collect_intersect import alive, intersect
-    from calibration.solve_tiles import is_icon
-    print()
-    for k, r in full + short:
-        paths = sorted(glob.glob(os.path.join(OUT, k, f'*_r{r}.png')))
-        if len(paths) < 3:
-            continue
-        acc = None
-        for p in paths:
-            acc = intersect(acc, cv2.imread(p))
-        ok, frac = is_icon(acc)
-        print(f'  {k:16} r{r}  {len(paths):2d} crop(s) -> {alive(acc):5d} px  '
-              f'blob {frac:.2f}' + ('' if ok else '   ⚠ scattered'))
-        if args.install and ok:
-            asset = ATTACHMENTS[k].get('asset')
-            dst = os.path.join(TMPL_DIR,
-                               f'Item_Attach_Weapon_{asset}.xsect_r{r}.png')
-            if not os.path.exists(dst):
+    if args.refine:
+        print('\nrefining the templates that already exist:')
+        for key, rack in tops:
+            paths = sorted(glob.glob(os.path.join(OUT, key, f'*_r{rack}.png')))
+            if not paths:
+                continue
+            out = refine(key, rack, paths)
+            if out is None:
+                continue
+            before, after, bad, acc, dst = out
+            note = ('unchanged — the new backdrops agreed with it'
+                    if after == before else f'{before - after} px removed')
+            print(f'  {key:16} r{rack}  {len(paths)} crop(s), {bad} rejected   '
+                  f'{before} -> {after}   {note}')
+            if args.install and after != before:
                 m = (np.any(acc != 0, axis=2) * 255).astype(np.uint8)
                 cv2.imwrite(dst, np.dstack([acc, m]))
-                print(f'      -> {os.path.basename(dst)}')
+
+    if not (args.solve or args.refine or args.install):
+        print('\n(--solve fills gaps, --refine tightens what exists, '
+              '--install writes either)')
     return 0
 
 
