@@ -857,7 +857,7 @@ COUNTED = ('slots', 'reference rows', 'rows')
 # numbers are right and they are about different things.
 #
 #     reference rows   10/12 -> 12/12    at MSE **0.0**, every row
-#     rows            930/1050 -> 865    same templates, older crops
+#     rows            930/1050 -> 882    same templates, older crops
 #
 # `reference rows` is calibration/artifacts/tab_inventory.png, read off the
 # screenshot by eye: no collector made it and no template touched it. Twelve
@@ -888,11 +888,15 @@ COUNTED = ('slots', 'reference rows', 'rows')
 # of a scoring run. Widening `_SHIFTS` instead is the wrong trade (9 -> 49 on a
 # path already costing 123 ms) and would be tuning around the cause.
 #
-# 865 is therefore recorded as WHAT THIS CORPUS CAN SAY TODAY, not as an
+# 882 is therefore recorded as WHAT THIS CORPUS CAN SAY TODAY, not as an
 # accepted regression. It rises to ~988 the day the geometry is corrected, and
-# a template change that drops it below 865 is still a real regression.
+# a template change that drops it below 882 is still a real regression.
+#
+# (865 -> 882 is ROW_MARGIN_MIN 1.25 -> 1.05, swept against 328 impostor
+# trials: +17 correct, ZERO wrong, impostor rate 7.0% -> 7.6%. The sweep and
+# why the MSE gate was NOT opened with it are at that constant.)
 BASELINE = {'slots': (2067, 2080), 'reference rows': (12, 12),
-            'rows': (865, 1050)}
+            'rows': (882, 1050)}
 
 
 def score(rows, title):

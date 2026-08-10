@@ -74,6 +74,7 @@ import numpy as np
 
 from detector.attachment_detector import AttachmentDetector, INV_TAG
 from detector.attachment_catalog import ATTACHMENTS
+from detector.row_name_detector import RowNameDetector
 from detector.geometry import detail
 from detector.tab_layout import (PANELS, INV_ROWS, icon_box, row_point,
                                  ATT_SLOT_XY)
@@ -85,7 +86,32 @@ from config import HUD_REGIONS, SCREEN_W, SCREEN_H
 # reference captures every true hit scored <= 130 and the best wrong answer
 # scored 169, so 150 separates them without clipping a real match.
 ROW_MSE_MAX = 150
-ROW_MARGIN_MIN = 1.25    # runner-up must be this much worse to trust the win
+# Runner-up must be this much worse to trust the win.
+#
+# ⚠ 1.25 -> 1.05 on 2026-08-10, AND IT IS FREE -- swept over the 1050-crop row
+# corpus with the intersected bank, against 328 impostor trials (drop a part
+# from the bank, feed it its own crops, count how often the rest invents a
+# name for it):
+#
+#     mse   margin | named right  named WRONG  refused | impostors named
+#     150     1.25 |         865            0      185 |   23/328   7.0%
+#     150     1.05 |         882            0      168 |   25/328   7.6%   <-
+#     300     1.25 |         943            2      105 |   76/328  23.2%
+#     300     1.05 |         962           12       76 |  148/328  45.1%
+#     none    1.05 |         963           49       38 |  238/328  72.6%
+#
+# +17 correct reads, ZERO wrong ones, and half a point of impostor rate. The
+# MSE gate is left alone: 150 -> 300 buys 61 more but starts naming things
+# wrong and TRIPLES the impostor rate, and past 300 the correct count plateaus
+# at 943 while only the wrong one keeps climbing.
+#
+# ⚠ THE 185 REFUSALS ARE NOT WHAT THIS GATE IS FOR. 109 of them are rows whose
+# top-1 was ALREADY RIGHT and which the MSE gate refused on a 2 px row-pitch
+# drift (see legacy_score_attachments.BASELINE). Correcting `ROW_PITCH` takes
+# the same corpus to 988/1050 with no gate change and no impostor cost, which
+# is strictly better than opening a gate. Opening gates is the lever to reach
+# for AFTER the geometry one, not instead of it.
+ROW_MARGIN_MIN = 1.05
 
 # Is there a row here at all? Past the end of a list — and everywhere in 附近
 # when nothing is on the ground — the cell shows the blurred world instead of
@@ -99,9 +125,11 @@ _BY_ASSET = {a['asset']: k for k, a in ATTACHMENTS.items() if a.get('asset')}
 
 
 class Item:
-    __slots__ = ('key', 'asset', 'slot', 'zh', 'point', 'where', 'mse', 'margin')
+    __slots__ = ('key', 'asset', 'slot', 'zh', 'point', 'where', 'mse',
+                 'margin', 'source')
 
-    def __init__(self, asset, slot, point, where, mse, margin):
+    def __init__(self, asset, slot, point, where, mse, margin, source='icon'):
+        self.source = source
         self.key = _BY_ASSET.get(asset)
         self.asset = asset
         self.slot = slot
@@ -113,7 +141,7 @@ class Item:
 
     def __repr__(self):
         return (f'<Item {self.key or self.asset} {self.slot} @{self.where} '
-                f'mse={self.mse:.0f} x{self.margin:.1f}>')
+                f'mse={self.mse:.0f} x{self.margin:.1f} {self.source}>')
 
 
 class TabView:
@@ -158,8 +186,9 @@ class TabView:
 class TabItemDetector:
     """Template-matches the Tab screen's lists and weapon slots."""
 
-    def __init__(self, detector=None):
+    def __init__(self, detector=None, names=None):
         self._det = detector or AttachmentDetector()
+        self._names = names or RowNameDetector()
         self._all = list(self._det._templates)
         # slot of each template, so a list hit reports where it would go
         self._slot_of = {}
@@ -218,6 +247,56 @@ class TabItemDetector:
         if mse <= ROW_MSE_MAX and margin >= ROW_MARGIN_MIN:
             return Item(name, self._slot_of.get(name, '?'), row_point(i, panel),
                         (panel, i), mse, margin), True
+        # ── SECOND OPINION, AND ONLY WHERE THE FIRST HAS NONE ──
+        #
+        # The printed NAME is a second, independent reading of the same row:
+        # a different rectangle (the label strip beside the icon) and a
+        # different signal (white glyphs at 255 against a panel at 86-92,
+        # NOT composited). It fails where the icon reader cannot -- a part
+        # whose icon rendering drifted still prints its name.
+        #
+        # ⚠ IT IS A FALLBACK AND NEVER AN OVERRIDE, and that is measured, not
+        # cautious. Over 13 live frames of 2026-08-10 the two readers both
+        # spoke on 129 rows and DISAGREED on 22 -- every one of them a
+        # compensator, and every one of them the name reader's fault:
+        #
+        #     icon  comp_ar   mse 0.00   margin 646879x   <- byte-exact
+        #     name  comp_smg  iou 0.669  and it ranks the truth THIRD (0.447)
+        #
+        # `Compensator (` is a prefix shared by three parts and the windowed
+        # IoU's tie-break is not separating them here. So a plain "take
+        # whichever reader speaks" would have bought 2 rows and introduced 22
+        # wrong muzzles -- and a wrong muzzle is a whole cell of recoil data
+        # filed under the wrong config. The OCR bank needs those three names
+        # re-cut; until then it does not get a vote against an icon.
+        #
+        # ⚠ THE BANK IS ENGLISH-ONLY, AND THAT IS A SCOPE, NOT A RISK. It
+        # scores 0/12 on calibration/artifacts/tab_inventory.png -- not a bad
+        # match, NO match: that capture is a Chinese client ("2倍瞄准镜"), best
+        # matchTemplate 0.26 against a 0.50 floor, so `rank` returns nothing.
+        # The icon bank reads the same capture 12/12 at MSE 0.0, because an
+        # icon is not a language.
+        #
+        # Operator's call, 2026-08-10: the client stays English, so this is out
+        # of scope rather than a live hazard. Recorded because it is a fact
+        # about what this reader can answer -- and because the same shape has
+        # already cost this repository a night (detector/CLAUDE.md: six English
+        # lobby templates while the client ran Chinese, every recovery path
+        # stalled behind a dialog nothing could read). ⚠ If the language ever
+        # moves, this fallback goes to zero and the icon reader does not.
+        #
+        # What it is worth today is 2 rows of 168 (half_grip, supp_ar), with
+        # the compensator family excluded. It is kept because its failure modes
+        # are uncorrelated with the icon's -- a part whose ICON drifts still
+        # prints its name -- which is the only reason a second reader is worth
+        # having. Re-cutting the three compensator names is what would turn it
+        # from a fallback into a real second opinion.
+        key, iou = self._names.read(frame, i, panel)
+        asset = ATTACHMENTS.get(key, {}).get('asset') if key else None
+        if asset:
+            return Item(asset, self._slot_of.get(asset, '?'),
+                        row_point(i, panel), (panel, i),
+                        float('inf'), iou, source='name'), True
         return None, True
 
     def _read_panel(self, frame, panel):
