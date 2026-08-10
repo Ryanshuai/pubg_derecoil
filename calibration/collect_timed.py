@@ -747,7 +747,12 @@ def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
     # thrown away. On a kitted vector the bare curve OVER-compensates and drives
     # the view into the ground, where the correlator is as blind as it is in
     # open sky.
-    w = build_weapon(weapon, posture, dict(config or {}, scope=scope_asset))
+    # ⚠ BEFORE build_weapon, because it is part of the curve key. It used to be
+    # computed below, next to the S.load that pools by it, and the gun was built
+    # without it -- see the note in weapon_build.build_weapon.
+    want_mode = fire_mode or cfg.fire_mode_for(weapon)
+    w = build_weapon(weapon, posture, dict(config or {}, scope=scope_asset),
+                     fire_mode=want_mode)
 
     # ⚠ FIRE WHAT THE STORE ALREADY KNOWS, NOT THE FILE. build_weapon reads
     # data/curves, which for an unmeasured cell holds a SEED -- a community
@@ -769,7 +774,7 @@ def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
     # modes are 1.50x apart in cyclic rate, so they are two different y_true(t)
     # and samples.fire_tag files them apart; fitting across them would average
     # a fast gun with a slow one and fire the result at both.
-    want_mode = fire_mode or cfg.fire_mode_for(weapon)
+    # (`want_mode` is computed above, next to build_weapon, which needs it too.)
     try:
         from calibration.fit_time_curve import fit as _fit
         prev = [m for m in S.load(weapon, config, fire_mode=want_mode)
@@ -1258,11 +1263,22 @@ def main():
         # ---------------------------------------------------------------
         # `config` is the readback, `scope_asset` is the optic as the raw asset
         # string Weapon.set('scope', ...) keys _SCOPE_TO_MAG on. Together they
-        # are the same four things set_seq looks the curve up by, so what the
+        # are four of the FIVE things set_seq looks the curve up by, so what the
         # firmware plays is what was fitted for this exact configuration —
         # under plan A there is no interpolation, so a wrong key is not a
         # slightly-wrong curve, it is another gun's.
-        w = build_weapon(a.weapon, a.posture, dict(config, scope=scope_asset))
+        # ⚠ IT SAID "the same four things" AND THE FIFTH WAS THE ONE MISSING.
+        # The fire mode entered the key on 2026-08-09; this sentence counted the
+        # fields it could see being passed and read as though that were the
+        # whole key. A comment that enumerates a key has to be checked against
+        # the lookup, not against the call above it.
+        # Which gun this run is measuring. It picks the sample file, the curve
+        # file and what fire_one_into_store drives the HUD to before firing --
+        # and it is the FIFTH thing set_seq keys on, so it has to be known
+        # before the gun is built rather than after (see build_weapon's note).
+        want_mode = a.fire_mode or cfg.fire_mode_for(a.weapon)
+        w = build_weapon(a.weapon, a.posture, dict(config, scope=scope_asset),
+                         fire_mode=want_mode)
         interval_s = w.bullet_interval_s
         # The curve is reported by its TIME SPAN, not by a round count:
         # curve_bullets() went with the bullet-bucket coordinate, and the span
@@ -1270,9 +1286,6 @@ def main():
         span_ms = w.t_s[-1] * 1000.0 if len(w.t_s) else 0.0
         print(f'  {a.weapon}: interval {interval_s*1000:.2f} ms, '
               f'curve spans {span_ms:.0f} ms over {len(w.t_s)} knots')
-        # Which gun this run is measuring. It picks the sample file, the curve
-        # file and what fire_one_into_store drives the HUD to before firing.
-        want_mode = a.fire_mode or cfg.fire_mode_for(a.weapon)
         if want_mode != cfg.fire_mode_for(a.weapon):
             print(f'  fire mode: {want_mode} — NOT this weapon\'s ordinary '
                   f'{cfg.fire_mode_for(a.weapon)}, so it stores and ships '

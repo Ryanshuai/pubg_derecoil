@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import detector.weapon as weapon_mod                      # noqa: E402
 from detector.weapon import Weapon                        # noqa: E402
 
-def build_weapon(weapon, posture, att, rpm=None):
+def build_weapon(weapon, posture, att, rpm=None, fire_mode=None):
     """A Weapon carrying the current curve, scale and bullet interval.
 
     Re-reads the measured fire rates first, because detector.weapon caches the
@@ -87,5 +87,31 @@ def build_weapon(weapon, posture, att, rpm=None):
     # the compensation has to match, and the two disagree whenever a fit
     # silently missed.
     w.set('scope', (att or {}).get('scope', ''))
+    # ⚠ THE THIRD FIELD THIS FUNCTION FORGOT TO SET, and the two above are the
+    # other two -- the stock and the scope, each of which cost a day. Same
+    # shape every time: a field that is part of the CURVE KEY is not passed, so
+    # the gun fires a curve fitted for a different configuration. `fire_mode`
+    # entered the key on 2026-08-09 and this call site was not updated.
+    #
+    # WHAT IT COST, and it is narrow but exact: the mg3 is the only weapon with
+    # two automatic modes and BOTH are fitted (`mg3__bare` = high, 644 counts;
+    # `mg3__bare__fire-full` = the slow one, 774). `Weapon.set('name')` sets
+    # `fire_mode_for(weapon)`, so build_weapon always produced `high` -- and
+    # `collect_timed --fire-mode full` would then press B, WATCH the HUD agree,
+    # refuse the cell if it did not, store the magazine as `full` ... and fire
+    # the `high` curve at it. The collection path verified the gun was in a
+    # mode it then did not compensate for.
+    #
+    # ⚠ AND THE MAGAZINE STAYED HONEST, WHICH IS WHY NOTHING CAUGHT IT. y_comp
+    # is read back off the firmware, so y_true = y_obs + C was exact whatever
+    # played. What was lost is the PRECISION the compensated arm exists for:
+    # |y_obs| ~ 130 counts of un-cancelled recoil instead of near zero, which
+    # is the nulling thrown away. The comment three lines above the call site in
+    # collect_timed says exactly this about the kit -- and did not mention the
+    # fire mode.
+    #
+    # None keeps the ordinary mode, so every existing caller is unchanged.
+    if fire_mode:
+        w.set('fire_mode', fire_mode)
     w.set_seq()
     return w
