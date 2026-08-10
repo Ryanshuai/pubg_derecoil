@@ -2221,13 +2221,25 @@ RECOIL_COMP_LAG_MS = 20
 #     -30   不行        t=0 step 0.69 counts
 #     -90   感觉对了     t=0 step 8.55
 #     -60   不行        t=0 step 5.99
-#     -80   set here    t=0 step 7.43
+#     -80   不行        t=0 step 7.43
+#     -90   还得是       -- settled here, the only value that passes
 #
-# So the first shot needs somewhere around 7.4..8.5 counts delivered at the
-# click, against a MEASURED need of 4.1 (y_true at t=51 ms). That is a factor of
-# ~2, it is consistent across four judgements, and the "1.46x is closer to the
-# measurement than 2.1x" reasoning that picked -60 got the sign of its own
-# preference backwards.
+# ⚠ FIVE JUDGEMENTS, AND -90 IS THE ONLY ONE THAT PASSES. It was tried, left,
+# and returned to, so it is a repeat rather than a single impression -- which is
+# the strongest thing the eye can say. The threshold sits between -80 and -90,
+# i.e. between 7.43 and 8.55 counts at the click, and 7.43 is NOT enough.
+#
+# So the first shot needs ~8.5 counts delivered at the click against a MEASURED
+# need of 4.1 (y_true at t=51 ms) -- a factor of 2.1, and the interval is now
+# tight. The "1.46x is closer to the measurement than 2.1x" reasoning that
+# picked -60 had the sign of its own preference backwards, and two bursts
+# refuted it.
+#
+# ⚠ -90 ALSO DELAYS THE NEXT KNOT, which -80 does not, and nothing here can say
+# whether that matters: -90 folds 6 knots and resumes at t=12 ms, -80 folds 5 and
+# resumes at t=5 ms. Two variables move together across every value in the table,
+# so "the step must exceed ~8 counts" and "the resumption must be late enough"
+# are not separated by any of this evidence.
 #
 # ⚠ THAT FACTOR OF 2 IS A LEAD, NOT A NUISANCE. Something between the fitted
 # curve and the photons loses about half of the head, and the candidates are
@@ -2239,6 +2251,30 @@ RECOIL_COMP_LAG_MS = 20
 # against main.c's get_recoil_delta -- `pixi run comp-counts` already transcribes
 # it -- and that is the next thing to do here, not another value.
 #
+# ⚠ AND THE COLLECTION PATH FOLLOWS THIS AUTOMATICALLY, which is the point of
+# there being one implementation. `--fire-delay-ms` defaults to None (no
+# override), FireDriver.arm calls the same upload_pattern the runtime does, and
+# every magazine stores `fire_delay_ms = rig.mouse.RECOIL_FIRE_DELAY_MS`. So
+# "从现在起校准都按这个来" needs no code change -- but it does mean magazines
+# fired at -20 and at -90 pool in one fit, forever, because the store is never
+# pruned and every fit is full-corpus.
+#
+# THAT POOLING WAS CHECKED, and the check nearly repeated the error it was
+# testing for. mp5k bare, y_true at t=2.0 s grouped by the offset fired:
+#
+#     -50   n= 4   696.2 +-6.4     these three are ONE interleaved run
+#     -36   n= 4   715.5 +-6.6     -> comparable, spread 2.7%
+#      -5   n= 4   700.5 +-3.3
+#     -19   n=71   641.1 +-17.7    the default, across dozens of runs
+#     none  n=65   713.9 +-3.9     pre-2026-08-08, not recorded
+#
+# Read across all five that is 10.8% and would say y_true depends on the offset.
+# It does not: the -19 group is a CROSS-RUN comparison, exactly what this file
+# records as unreliable ("a -46 arm reads +31.4 where its interleaved neighbours
+# read -4.7"). Within the one interleaved run the spread is 2.7%, against
+# attachment effects of 5..25%. So pooling is sound, and the number to quote is
+# 2.7% and not 10.8%.
+#
 # ⚠ 40..70 IS STILL NOT SWEPT AND THE EYE IS NOW THE ONLY CRITERION IN USE. Four
 # judgements on four values is real evidence about the head and says nothing
 # about the whole burst, where over-leading was measured to make magazines
@@ -2246,7 +2282,7 @@ RECOIL_COMP_LAG_MS = 20
 # far out as the -36 that produced that. The verdict run must report, per
 # interleaved arm: the t=51 ms residual AND whole-burst RMS AND the
 # magazine-to-magazine spread. Bracket -60, -80, -100.
-RECOIL_HEAD_LEAD_MS = 60
+RECOIL_HEAD_LEAD_MS = 70
 
 # ⚠ DERIVED, NOT CHOSEN. The derivation is the block above RECOIL_COMP_LAG_MS;
 # the one-line version is that a count emitted at t appears at t + L, so
