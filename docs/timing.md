@@ -9,7 +9,7 @@
 > |---|---|
 > | `t_k = W + k·T`,`W = S − L = 13 ms` | **没有 k。** 拟的是 `y_true(t)`,`t` = 距点击多久 |
 > | 「`fit_curve` 拿第一次计数器跳变当 bin 原点」 | **`fit_curve` 已删,没有 bin,而且弹药计数器当原点是被否掉的**(见下) |
-> | `RECOIL_FIRE_DELAY_MS = 13`,在 `press/pico_mouse` | **`config.RECOIL_FIRE_DELAY_MS = -19`**,符号也反了 |
+> | `RECOIL_FIRE_DELAY_MS = 13`,在 `press/pico_mouse` | **`config.RECOIL_FIRE_DELAY_MS`**,符号也反了。⚠ 值见 `MODEL.md` 3.0,不抄在这里——这一格曾经抄着 −19,而 2026-08-10 它是 −90 |
 > | EMA 把偏置吸进曲线 | 没有 EMA、没有轮次 |
 > | `tools/probe_kick_profile.py` / `probe_impulse_ab.py` | 两个都已删除 |
 >
