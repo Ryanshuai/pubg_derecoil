@@ -170,7 +170,7 @@ class SlotDetector:
             self._att = AttachmentDetector()
         y, x, h, w = HUD_REGIONS[f'att_{gun}_{slot}']
         # read_tile carries the `drawn` floor -- the reason 257 of the corpus's
-        # 281 empty tiles never reach a template at all -- and `prefer='solved'`,
+        # 281 empty tiles never reach a template at all -- and `prefer=SLOT_TAG`,
         # which this used to spell out for itself.
         name, mse, _ = self._att.read_tile(frame[y:y + h, x:x + w], slot, weapon)
         return (name, mse)

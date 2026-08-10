@@ -116,6 +116,7 @@ import numpy as np
 from calibration.capture_run import CaptureRun
 from detector.attachment_catalog import ATTACHMENTS, canonical
 import detector.attachment_detector as ad
+from detector.attachment_detector import INV_TAG, SLOT_TAG
 from detector.tab_items import ROW_MSE_MAX, ROW_MARGIN_MIN
 from detector.tab_layout import icon_box
 from calibration.legacy_solve_template import solve
@@ -482,15 +483,21 @@ def read(det, s):
     if not det.drawn(crop):
         return '', 0.0
     if s['target'] != 'slots':
+        # ⚠ INV_TAG, IMPORTED, NOT SPELLED. This line said 'row' -- a bank
+        # deleted the day before -- while `tab_items._read_row` said the same
+        # dead thing, so the ratchet and the live path agreed by being wrong
+        # together. That is the 2026-08-05 failure exactly (`attachments` green
+        # at 930/1050 while the live reader named 0 of 10), and the fix is that
+        # neither of them names the tag any more.
         name, mse, margin = det.best_two(crop, list(det._templates),
-                                        prefer='row')
+                                        prefer=INV_TAG)
         if mse > ROW_MSE_MAX or margin < ROW_MARGIN_MIN:
             return '', margin
         return KEY_OF.get(name, name), margin
     names = det.candidates(s['slot'], s['weapon'])
     if not names:
         return '', 0.0
-    name, mse, margin = det.best_two(crop, names, prefer='solved')
+    name, mse, margin = det.best_two(crop, names, prefer=SLOT_TAG)
     if mse > ad.MSE_EMPTY_TH:
         return '', 0.0
     return KEY_OF.get(name, name), margin
@@ -845,8 +852,47 @@ COUNTED = ('slots', 'reference rows', 'rows')
 #
 # Any future experiment through detector_with must REPLACE the variant list
 # for a key, not extend it, or it is measuring the union again.
-BASELINE = {'slots': (2060, 2080), 'reference rows': (10, 12),
-            'rows': (930, 1050)}
+# ⚠ 2026-08-10, THE ROW BANK CAME BACK -- and `rows` went DOWN while the only
+# row truth this repository did not manufacture went to a perfect score. Both
+# numbers are right and they are about different things.
+#
+#     reference rows   10/12 -> 12/12    at MSE **0.0**, every row
+#     rows            930/1050 -> 865    same templates, older crops
+#
+# `reference rows` is calibration/artifacts/tab_inventory.png, read off the
+# screenshot by eye: no collector made it and no template touched it. Twelve
+# byte-exact hits on it is as strong as this corpus gets, and the 41 templates
+# it is reading were solved by intersection from COMPLETELY DIFFERENT frames
+# (calibration/collect_inventory_vlm.py). Nothing was fitted to it.
+#
+# THE `rows` SHORTFALL IS GEOMETRY, AND IT IS MEASURED, not argued:
+#
+#     every failing part, own template, +-1 shifts    MSE 113 .. 323
+#     the same crops, the same template, +-3 shifts   MSE 0.0, all of them
+#     whole corpus at +-3                             top-1 989, both gates 988
+#
+# 988 is ABOVE the 930 this line used to hold. The row crops in
+# calibration/artifacts/attachments/runs were cut on 2026-08-03..05 with a
+# `tab_layout.row_y` that has since drifted, and `_SHIFTS` only searches +-1.
+#
+# ⚠ AND THE DRIFT IS IN THE PITCH, WHICH IS WHY IT IS NOT A CONSTANT OFFSET.
+# Over 13 live frames of 2026-08-10, the (dy, dx) that scores 0.0:
+#
+#     dx  0 on every row of every frame     the column is exact
+#     dy  +2 at row 0 ... -1 at row 11      ~ -0.21 px per row
+#
+# So `ROW_PITCH = 81.55` is a couple of hundredths too large and `ROW_Y_FIRST`
+# a pixel or two too small. ⚠ NOT CHANGED HERE: `row_y` also feeds
+# `row_point`, which is where control/ presses the mouse to start a drag, so it
+# moves in its own change with its own end-to-end check -- not as a side effect
+# of a scoring run. Widening `_SHIFTS` instead is the wrong trade (9 -> 49 on a
+# path already costing 123 ms) and would be tuning around the cause.
+#
+# 865 is therefore recorded as WHAT THIS CORPUS CAN SAY TODAY, not as an
+# accepted regression. It rises to ~988 the day the geometry is corrected, and
+# a template change that drops it below 865 is still a real regression.
+BASELINE = {'slots': (2067, 2080), 'reference rows': (12, 12),
+            'rows': (865, 1050)}
 
 
 def score(rows, title):

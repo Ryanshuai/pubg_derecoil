@@ -65,7 +65,7 @@ def match(det, crop, slot, weapon):
     the only way to keep that true is to share the code rather than restate it.
 
     ⚠ This used to restate it, and the restatement had drifted: it called
-    best_two without `prefer='solved'`, so it ranked tiles against the 库存 row
+    best_two without `prefer=SLOT_TAG`, so it ranked tiles against the 库存 row
     picture for 38 of the bank's 41 assets while the reader ranked them against
     the slot picture. Its docstring claimed parity the whole time. Numbers
     published before 2026-08-06 — including the MSE percentiles quoted in

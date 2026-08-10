@@ -55,6 +55,32 @@ from detector.geometry import detail
 TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'templates',
                         'pubg_assets', 'Item', 'Attachment')
 
+# ⚠ A SECOND BANK, AND IT IS KEYED DIFFERENTLY ON PURPOSE. These are 库存 ROW
+# icons, solved by intersection over four poses (calibration/
+# collect_inventory_vlm.py), and they are named by CATALOGUE KEY -- `comp_ar
+# .png` -- because the collector spawns parts by key and never learns an asset
+# name. The Attachment bank is named by ASSET, which is what this detector
+# indexes on, so the two are joined through ATTACHMENTS here and nowhere else.
+#
+# WHY A SEPARATE DIRECTORY rather than more `.tag` files next door: a row icon
+# and a weapon-slot tile are two RENDERINGS of one part at two sizes, and this
+# repository has twice paid for reading one with the other's geometry (0/10 at
+# 63x63 against 10/10 at 80x80; and 0.861 -> 0.473 in the other direction).
+# Keeping them in one directory makes that mistake a typo away.
+INV_TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'data',
+                            'templates', 'pubg_assets', 'Item', 'Inventory')
+
+# THE TWO RENDERINGS, NAMED ONCE. Every caller that knows which one it is
+# reading passes one of these to `prefer`, and nothing spells a tag itself --
+# the day a bank is renamed, the rename lands here and every caller follows.
+#
+# ⚠ THEY ARE NOT 'row' AND 'solved'. Those were the names before 2026-08-09,
+# when the row bank was deleted and the slot bank became `.xsect_r*`, and BOTH
+# live callers went on asking for them for a day. See _rank_variant.
+INV_TAG = 'inv'             # intersected as a 库存 row, 80x80
+SLOT_TAG = 'xsect_r1'       # intersected in a weapon's slot tile, 63x63
+
+
 TMPL_SIZE = 48
 ALPHA_TH = 150
 OFFSET_Y = 8
@@ -200,9 +226,12 @@ class AttachmentDetector:
 
     def __init__(self):
         self._templates = {}      # name → [(tmpl_vals, ys, xs), ...] variants
-        self._tags = {}           # name → ['', 'solved', 'row', ...] alongside
+        self._tags = {}           # name → ['', 'xsect_r1', 'inv', ...] alongside
         self._slot_index = {}     # slot_name → [name, ...]
         self._load_templates()
+        # Every tag any file on disk carries. See _rank_variant: this is what
+        # separates "this asset has no such picture" from "no asset does".
+        self._known_tags = {t for tags in self._tags.values() for t in tags}
 
     def _rank_variant(self, name, prefer):
         """Index of the variant the RANKING pass should use for this reading.
@@ -214,54 +243,91 @@ class AttachmentDetector:
         reads the day the untagged game-file icons were retired and variant 0
         silently became `.row` for half the bank.
 
-        Falls back to 0, so an asset with only one picture behaves exactly as
-        before and a caller that does not know its context loses nothing.
+        Falls back to 0 when THIS ASSET has no such picture, so an asset with
+        one variant behaves exactly as before.
+
+        ⚠ BUT A TAG NO FILE ANYWHERE CARRIES IS A TYPO, AND IT USED TO FALL
+        BACK TOO -- which is the same silence twice over. On 2026-08-10 BOTH
+        live callers named a bank that had been renamed or deleted the day
+        before: `_read_row` asked for 'row' (38 pictures, deleted 08-09) and
+        `read_tile` asked for 'solved' (renamed to '.xsect_r1' on 08-09).
+        Neither raised. The row one cost the reference corpus 10/12 -> 1/12 and
+        a night of `unknown` rows; the slot one cost nothing only because the
+        sort order happened to put the right file at index 0.
+
+        **A `prefer` that misses is indistinguishable from a caller that never
+        passed one** -- so the two are separated here, where the bank's actual
+        contents are known, rather than left to a reader to notice.
         """
-        if prefer:
-            tags = self._tags.get(name, ())
-            if prefer in tags:
-                return tags.index(prefer)
-        return 0
+        if not prefer:
+            return 0
+        if prefer not in self._known_tags:
+            raise ValueError(
+                f'prefer={prefer!r} names no picture in the bank; it holds '
+                f'{sorted(self._known_tags)}. A tag that misses would silently '
+                f'rank against variant 0 -- see _rank_variant.')
+        tags = self._tags.get(name, ())
+        return tags.index(prefer) if prefer in tags else 0
+
+    def _add(self, name, img, tag):
+        """One picture of one asset, at its OWN size.
+
+        KEPT AT ITS OWN SIZE. This used to resize every template to 48x48 so
+        one geometry could serve everything, which is the same mistake in the
+        other direction: a row picture squeezed into the slot frame loses a
+        quarter of its scale and lands 6-8 px off. A variant is read against
+        the crop it was photographed from — see TMPL_OFFSETS — and one that
+        does not fit is skipped rather than stretched.
+
+        `tag` says WHICH RENDERING this is: '' for an untagged file, else the
+        tag ('xsect_r1' = intersected in a weapon's slot tile on rack row 1,
+        INV_TAG = intersected as an inventory row). best_two ranks on ONE of
+        them and the icon is not the same size or sharpness in the two places,
+        so the ranking pass has to be told which one it is reading.
+        """
+        if img is None or img.ndim != 3 or img.shape[2] != 4:
+            return
+        mask = img[:, :, 3] > ALPHA_TH
+        if int(mask.sum()) < 30:
+            return
+        ys, xs = np.where(mask)
+        if name not in self._templates:
+            for slot_name, prefixes in SLOT_PREFIXES.items():
+                if any(name.startswith(p) for p in prefixes):
+                    self._slot_index.setdefault(slot_name, []).append(name)
+        self._templates.setdefault(name, []).append(
+            (img[:, :, :3].astype(np.float32)[ys, xs], ys, xs, img.shape[:2]))
+        self._tags.setdefault(name, []).append(tag)
 
     def _load_templates(self):
-        if not os.path.isdir(TMPL_DIR):
-            return
-        for fname in sorted(os.listdir(TMPL_DIR)):
-            if not fname.endswith('.png'):
-                continue
-            img = cv2.imread(os.path.join(TMPL_DIR, fname), cv2.IMREAD_UNCHANGED)
-            if img is None or img.shape[2] != 4:
-                continue
-            # <Asset>.png, or <Asset>.<tag>.png for a variant of the same
-            # asset. Asset names carry no dot, so the first field is the key.
-            stem = fname[:-len('.png')].replace('Item_Attach_Weapon_', '')
-            name = stem.split('.')[0]
-            # KEPT AT ITS OWN SIZE. This used to resize every template to
-            # 48x48 so one geometry could serve everything, which is the same
-            # mistake in the other direction: a row picture squeezed into the
-            # slot frame loses a quarter of its scale and lands 6-8 px off.
-            # A variant is read against the crop it was photographed from —
-            # see TMPL_OFFSETS — and one that does not fit is skipped rather
-            # than stretched.
-            mask = img[:, :, 3] > ALPHA_TH
-            if int(mask.sum()) < 30:
-                continue
-            tmpl_bgr = img[:, :, :3].astype(np.float32)
-            ys, xs = np.where(mask)
-            if name not in self._templates:
-                for slot_name, prefixes in SLOT_PREFIXES.items():
-                    if any(name.startswith(p) for p in prefixes):
-                        self._slot_index.setdefault(slot_name, []).append(name)
-            self._templates.setdefault(name, []).append((tmpl_bgr[ys, xs],
-                                                         ys, xs,
-                                                         img.shape[:2]))
-            # WHICH RENDERING this variant is: '' for the untagged file, else
-            # the tag ('solved' = photographed in a weapon's slot tile, 'row' =
-            # photographed as an inventory row). best_two ranks on ONE of them
-            # and the icon is not the same size or sharpness in the two places,
-            # so the ranking pass has to be told which one it is reading.
-            self._tags.setdefault(name, []).append(
-                stem.split('.', 1)[1] if '.' in stem else '')
+        # THE SLOT BANK FIRST, and the order is load-bearing: best_two's
+        # ranking pass falls back to variant 0, so whatever is appended first
+        # stays the default for every caller that does not pass `prefer`.
+        if os.path.isdir(TMPL_DIR):
+            for fname in sorted(os.listdir(TMPL_DIR)):
+                if not fname.endswith('.png'):
+                    continue
+                # <Asset>.png, or <Asset>.<tag>.png for a variant of the same
+                # asset. Asset names carry no dot, so the first field is the
+                # key.
+                stem = fname[:-len('.png')].replace('Item_Attach_Weapon_', '')
+                self._add(stem.split('.')[0],
+                          cv2.imread(os.path.join(TMPL_DIR, fname),
+                                     cv2.IMREAD_UNCHANGED),
+                          stem.split('.', 1)[1] if '.' in stem else '')
+        # THEN THE ROW BANK, joined key -> asset. A key with no asset entry
+        # cannot be indexed here at all (this detector answers in asset names),
+        # so it is skipped rather than filed under its own key -- a name no
+        # caller could resolve is worse than a missing template.
+        if os.path.isdir(INV_TMPL_DIR):
+            for fname in sorted(os.listdir(INV_TMPL_DIR)):
+                if not fname.endswith('.png'):
+                    continue
+                asset = ATTACHMENTS.get(fname[:-len('.png')], {}).get('asset')
+                if not asset:
+                    continue
+                self._add(asset, cv2.imread(os.path.join(INV_TMPL_DIR, fname),
+                                            cv2.IMREAD_UNCHANGED), INV_TAG)
 
     # ── scoring ──
 
@@ -371,7 +437,7 @@ class AttachmentDetector:
         ('', inf, 0.0) when there is nothing to read: no crop, no candidate
         template for this weapon's slot, or nothing drawn in the tile.
 
-        **This exists to carry `prefer='solved'` so no caller has to remember
+        **This exists to carry `prefer=SLOT_TAG` so no caller has to remember
         it**, and the reason is measured, not stylistic. `prefer` picks the
         variant the RANKING pass scores, and 38 of the bank's 41 assets have
         `.row` at variant 0 — the 库存 row-size picture, which is not what a
@@ -396,7 +462,7 @@ class AttachmentDetector:
         names = self.candidates(slot, weapon)
         if not names or not self.drawn(crop):
             return ('', float('inf'), 0.0)
-        name, mse, margin = self.best_two(crop, names, prefer='solved')
+        name, mse, margin = self.best_two(crop, names, prefer=SLOT_TAG)
         return (name, float(mse), float(margin))
 
     def classify_crop(self, crop, slot, weapon=None):
@@ -406,7 +472,7 @@ class AttachmentDetector:
         the distinction matters.
         """
         # BEHAVIOUR CHANGED 2026-08-06: this used to call best_two WITHOUT
-        # prefer='solved', so it ranked slot tiles against whichever variant
+        # a slot-rendering preference, so it ranked slot tiles against whichever variant
         # happened to be index 0 — `.row`, the 库存 list picture, for 38 of the
         # bank's 41 assets. Both callers cut HUD slot tiles (capture_ads reads
         # `scope`, tools/regression_check reads `muzzle`), so the preference

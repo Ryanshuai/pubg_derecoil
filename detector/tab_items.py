@@ -72,7 +72,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import cv2
 import numpy as np
 
-from detector.attachment_detector import AttachmentDetector
+from detector.attachment_detector import AttachmentDetector, INV_TAG
 from detector.attachment_catalog import ATTACHMENTS
 from detector.geometry import detail
 from detector.tab_layout import (PANELS, INV_ROWS, icon_box, row_point,
@@ -203,9 +203,18 @@ class TabItemDetector:
         # green on a path the game never takes. If this line comes back, that
         # gate will not notice.
         #
-        # prefer='row': this cell is an inventory ROW, and the bank holds a
+        # prefer=INV_TAG: this cell is an inventory ROW, and the bank holds a
         # picture taken as one. See _rank_variant.
-        name, mse, margin = self._det.best_two(cell, self._all, prefer='row')
+        #
+        # ⚠ IT SAID 'row' UNTIL 2026-08-10, NAMING A BANK DELETED ON 08-09, and
+        # nothing anywhere said so: `_rank_variant` falls back to variant 0 for
+        # a tag it cannot find, so the rows were silently ranked against the
+        # 63x63 SLOT picture -- centred in an 80x80 crop, because 63 is not in
+        # TMPL_OFFSETS. Reference rows read 1/12 and the whole corpus 79/1050,
+        # which is what a night of `unknown` rows was made of. A `prefer` that
+        # misses is indistinguishable from a caller that never passed one.
+        name, mse, margin = self._det.best_two(cell, self._all,
+                                               prefer=INV_TAG)
         if mse <= ROW_MSE_MAX and margin >= ROW_MARGIN_MIN:
             return Item(name, self._slot_of.get(name, '?'), row_point(i, panel),
                         (panel, i), mse, margin), True
