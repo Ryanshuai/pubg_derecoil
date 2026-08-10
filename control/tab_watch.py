@@ -10,91 +10,61 @@ screen. See config.FRAME_REGIONS.
 and only if the panel was up, that same frame is classified.
 
     Tab press, panel shut   ONE grab, saved `<stamp>_press.png`
-    panel is up             nothing
     Tab press, panel up     ONE grab, saved, classify, publish
-    anchor reads shut       nothing — the reading was taken ~100 ms ago
+    panel is up             nothing
+    panel seen to close     nothing — the reading was taken ~100 ms ago
 
-⚠ THE PRESS EDGE, AND THE FILTER IS IN control/match.py, NOT HERE. Nothing in
-this file knows or asks which edge it is being handed; `on_key` decides from
-what the SCREEN says at that instant. That is not tidiness — this paragraph
-has been WRONG TWICE about the keybind and cost nothing either time, because
-no behaviour was ever derived from it.
-
-    said, 2026-08-09 am    "Tab toggles, so press-only sees the close"
-    said, 2026-08-09 pm    "Tab is HELD, so the RELEASE is what closes it"
-
-Both were inferred from intervals between log lines that LAG the key. The key
-itself was finally measured off the saved frames' own stamps -- 66 press/
-release pairs, panel judged by the same GunTagDetector the live path uses:
-
-    KEY DOWN, press -> its own release      43..225 ms   median   97
-    tap -> next tap                        279..954 s    median 2071
-
-97 ms is a tap; the 2 seconds is the panel being looked at. So TAB IS A
-TOGGLE, one session is TWO taps, and the panel falls on a different edge of
-each -- which is exactly what the latencies already in docs/game_quirks.md
-predict (28-38 ms to appear, 77-128 ms to go) once the key is known to be
-down for 97:
-
-     30 / 66   OPENING tap    press = world    release = PANEL
-     28 / 66   CLOSING tap    press = PANEL    release = world
-      7 / 66   nothing at all — the key was swallowed
-      1 / 66   panel across both edges
-
-THE PRESS IS THE ONE THAT CARRIES THE FINAL STATE. Every closing tap's press
-catches the panel, and the final state is what a loadout has to be. The
-release would add the ENTRY state, a second sample of the same session; that
-was tried and dropped. By session, on those same taps:
-
-     30   sessions with a panel on some edge
-     29   ... a PRESS caught it too
-      1   ... release-only, i.e. what dropping it costs      3.3%
-                                     grabs 4.4/session -> 2.2
-
-Nothing is checked, asked or measured before the grab. Measured, warm, four
-runs:
-
-    panel grab              8-12 ms   <- the only part that must beat the fade
-    anchor grab + compose   3-9 ms    | after the panel pixels are already
-    png write               ~4 ms     | captured, so they cost nothing that matters
+    panel grab      8-12 ms   <- the only part that must beat the fade
+    png write        ~4 ms    <- after the pixels are already captured
 
 Add the input path — poller 5 ms, dispatcher tick 10 ms — and the panel is on
-disk-bound pixels within ~27 ms of the physical edge, against 77-128 ms before
-the game takes the panel down. 50-100 ms of margin, and it is margin only
-because the grab is FIRST. Deciding first is what put a permission in front of
-it that by measurement only arrives once the panel is already gone.
+disk-bound pixels within ~25 ms of the physical key, against 77-128 ms before
+the game takes it down. 50-100 ms of margin, and it is margin ONLY because the
+grab is FIRST. Deciding first is what put a permission in front of it that by
+measurement only arrives once the panel is already gone.
 
-Both edges are saved even though only one has a panel to read. The opening
-frame costs one grab and answers a question the closing one cannot: an opening
-frame with a panel still in it means the previous close never registered.
+⚠ THE PRESS, AND ONLY THE PRESS. `on_key` takes no edge; the filter is one
+line in control/match.py. Tab is a TOGGLE, so a session is TWO taps and the
+panel falls on the opening tap's release and the CLOSING TAP'S PRESS — which
+is the one carrying the final state. Measured off 66 saved tap pairs; the
+numbers and what press-only costs (3.3% of sessions, and half the grabs) are
+in docs/game_quirks.md.
 
-⚠ THE OBVIOUS ALTERNATIVE — READ WHEN THE ANCHOR SAYS SHUT — WAS BUILT, RUN
-AND REFUTED BY ITS OWN SAVED FRAMES, 2026-08-09. The idea was that the 41x18
+⚠ NOTHING HERE MAY LEARN WHICH EDGE IT GOT. What decides is `up`: whether the
+panel is on THIS frame. That is why this keybind was claimed wrong twice in
+one day at zero cost — no behaviour was ever derived from the claim. A
+function that can be TOLD an edge can BRANCH on one.
+
+Both presses of a session are saved even though only the closing one has a
+panel to read. The opening frame costs one grab and answers a question the
+closing one cannot: an opening frame WITH a panel in it means the previous
+close never registered.
+
+⚠ THE OBVIOUS ALTERNATIVE — READ WHEN THE PANEL IS SEEN TO CLOSE — WAS BUILT,
+RUN AND REFUTED BY ITS OWN SAVED FRAMES, 2026-08-09. The idea was that the
 「类型」 header stops being legible early in the close, leaving the panel
 readable for a moment afterwards. It does not:
 
     six closes, six saved frames, every one pure game world — no panel at all
     ink 0 / 9 / 6 / 0 / 0        (a real name plate reads in the hundreds)
 
-By the time the anchor reads shut the panel is GONE, not fading. Every read
-came back with two blank plates.
+By the time anything says shut, the panel is GONE, not fading.
 
 ⚠ AND THE GUARD THAT SHOULD HAVE CAUGHT IT SAID `tiles painted` ON ALL SIX.
 `any_drawn` asks whether there is DETAIL in the tile rings, and its separation
 (absent 5-26, empty 46-173) was measured with a panel on screen. Bare grass and
 timber score far above 46. It answers "is something drawn here", which is only
 the question you meant while a panel is up — it cannot tell you that one is.
-The thing that CAN is the anchor, which is what `open` already is.
 
 ⚠ WHAT IS GIVEN UP, PLAINLY: a close that no key announced — alt-tab, a
 disconnect dialog, another agent — reads nothing at all. The drift check still
 notices the state change, so `tab_open` stays honest; the loadout simply keeps
 whatever it last knew. A missed reading, not a wrong one.
 
-⚠ AND THE COST IS WHY IT CANNOT SIMPLY POLL. A GDI grab is ~5 ms almost
-regardless of size (41x18 measures 5.2 ms), so at the 10 ms dispatcher tick a
-single unconditional anchor check would be 52% of a core. Checks are
-event-driven, with a slow drift check to catch what no key announced.
+⚠ AND THE COST IS WHY IT CANNOT SIMPLY POLL. A GDI grab is ~6 ms before it
+copies a pixel, so at the 10 ms dispatcher tick an unconditional check would
+be most of a core. Checks are event-driven, with a slow drift check to catch
+what no key announced.
 
 ⚠ NOTHING MAY BE ADDED THAT RUNS WHILE THE PANEL IS UP. Not a periodic
 re-read, not a cached last-good reading, not a buffer of past frames, not a
@@ -104,7 +74,7 @@ already changed" — a gun caught mid-swap, with its muzzle in your hand,
 becomes the gun the compensation is built for. This has been built and removed
 more than once, so the versions are deliberately not described here or
 anywhere else: written down they read as prior art, and prior art comes back.
-`pixi run tab-watch` fails if anything grabs the panel before it closes.
+`pixi run tab-watch` fails if anything CLASSIFIES before the panel closes.
 
 `toggle_tab_open` — the one thing this replaces that is worth remembering —
 flipped a cached bool on every Tab keypress and let a detection 300 ms later
@@ -114,19 +84,16 @@ swallowed keypress (docs/game_quirks.md: one issued right after a previous
 toggle simply does not arrive) left it inverted with nothing to notice. Here
 the flag only ever changes because the screen was looked at.
 
-Nothing here blocks: tick() does at most one 5 ms anchor check. The ~25 ms of
-grab-and-save happens on a Tab edge, where nothing is being fired.
+Nothing here blocks: tick() does at most one grab. The ~15 ms of grab-and-save
+happens on a Tab press, where nothing is being fired.
 """
 import datetime
 import os
 import time
 
-import numpy as np
-
 from config import HUD_REGIONS, TAB_DRIFT_S, TAB_SETTLE_S
 from logbook import note
 
-ATT_REGIONS = [k for k in HUD_REGIONS if k.startswith('att_')]
 NAME_REGIONS = ['gun_name_1', 'gun_name_2']
 
 # ⚠ EVERY CLOSE LEAVES ITS FRAME ON DISK, and it is on by default because the
@@ -163,7 +130,7 @@ class TabWatch:
     """Measured Tab state plus the loadout read as the panel closed.
 
     detectors is the Dispatcher's registry, shared by reference so anything
-    registered later is visible here too. Needs 'tab_type', 'tab_weapon' and
+    registered later is visible here too. Needs 'gun_tag', 'tab_weapon' and
     'tab_attachment'; missing ones just disable their part.
     """
 
@@ -190,7 +157,6 @@ class TabWatch:
         self._shot_dir = shot_dir
         self.open = False
         self.loadout = None          # {'weapons':..., 'attachments':..., 'ts':}
-        self._type_grab = None
         self._panel_grab = None
         self._watch_until = 0.0      # a key was seen; watch for the change
         self._want = None            # what we expect it to become
@@ -198,28 +164,33 @@ class TabWatch:
 
     # ── Capture, built lazily so a state-only caller costs nothing ──
 
-    def _type_crop(self):
-        if self._type_grab is None:
-            from capture.cropper import RegionGrabber
-            self._type_grab = RegionGrabber({'type': HUD_REGIONS['type']})
-        return self._type_grab.grab()
-
     def _panel_frame(self):
+        """The one rectangle this file grabs: both plates, all ten tiles.
+
+        ⚠ ONE GRAB, AND THE COUNT IS THE COST, NOT THE AREA. A GDI grab costs
+        ~6 ms before it copies a pixel -- measured directly, 78.68 ms for the
+        twelve regions actually read against 13.46 for the whole block, and
+        78.68/13 = 6.05. So cutting this into the pieces it uses is 6x slower
+        while moving a sixth of the data:
+
+            cost ~= 6 ms x grabs + ~4-8 ms x megapixels
+
+        Which is also why the block is `only=('right',)` and not the whole Tab
+        screen: 9.6 ms against 18.7, one grab either way, all of the difference
+        in pixels.
+        """
         if self._panel_grab is None:
             from detector.tab_items import TabGrabber
-            # Only the two weapon panels: both name plates and all ten slots,
-            # 9.6 ms, against 18.7 for the whole Tab screen.
             self._panel_grab = TabGrabber(only=('right',))
         return self._panel_grab.grab()
 
     def close(self):
-        for g in (self._type_grab, self._panel_grab):
-            if g is not None:
-                try:
-                    g.close()
-                except Exception:
-                    pass
-        self._type_grab = self._panel_grab = None
+        if self._panel_grab is not None:
+            try:
+                self._panel_grab.close()
+            except Exception:
+                pass
+        self._panel_grab = None
 
     def _log(self, msg):
         """A line for the LOG FILE. Not the terminal. See logbook.py.
@@ -288,8 +259,6 @@ class TabWatch:
         there (no gun, no cell), so the cost is a state that cannot act rather
         than a wrong action. Stated because nothing downstream would say it.
 
-        `tab_type` is kept and still registered: it is the second, independent
-        source, and _compose logs the two whenever they disagree.
         """
         det = self._detectors.get('gun_tag')
         if det is None:
@@ -302,127 +271,6 @@ class TabWatch:
             self._warn(f'open-check failed: {e}')
             return None
 
-    def _anchor_says(self):
-        """What the retired 「类型」 anchor thinks. -> bool or None. Diagnostic."""
-        det = self._detectors.get('tab_type')
-        if det is None:
-            return None
-        try:
-            return bool(det.classify(self._type_crop()))
-        except Exception:
-            return None
-
-    def _compose(self, frame):
-        """The panel block with the ANCHOR STRIP laid above it. -> array.
-
-        ⚠ THE ANCHOR IS IN THE PICTURE BECAUSE IT IS THE OTHER HALF OF THE
-        EVIDENCE. `open` is decided by that 41x18 「类型」 header and by nothing
-        else, so a frame showing only the weapon panel can say "there was no
-        panel" but never "and here is what the thing that decides was showing
-        at the same moment". They sit 1282 px apart on screen and would never
-        appear in one crop by accident.
-
-        It is a SECOND grab, 3-9 ms, taken AFTER the panel one -- so the strip
-        is a few milliseconds newer than the block below it. That is worth
-        knowing when reading a frame caught mid-transition, and it is the right
-        way round: the panel is the thing that has to be caught in time.
-
-        ⚠ TWO GRABS, AND IT IS NOT MONOTONE IN EITHER DIRECTION. Interleaved,
-        n=200 per arm:
-
-            A  panel only                  8.71 ms  sd 1.86
-            B  panel + type, TWO grabs    12.95 ms  sd 2.58   <- what it does
-            C  panel + type, ONE grab     16.16 ms  sd 1.85
-
-            adding type   B - A = +4.24 ms   18.9 sigma
-            one vs two    C - B = +3.21 ms   14.3 sigma
-
-        ONE grab loses because the rectangles overlap in y (panel 123..680,
-        type 129..147) and RegionGrabber bands by y -- asking one grabber for
-        both merges them into a single 1911x557 box, three times the pixels.
-
-        MANY grabs lose far worse. Cutting the panel into the twelve regions
-        actually read is 78.68 ms (n=60) against 13.46 for the block, while
-        moving a sixth of the data: a GDI grab costs ~6 ms before it copies
-        anything, and 78.68/13 = 6.05 is that constant measured directly.
-
-            cost ~= 6 ms x grabs + ~4-8 ms x megapixels
-
-        So: as few grabs as possible, but never at the price of a bounding box
-        that balloons. Two.
-
-        ⚠ THE 4.24 ms IS AFFORDABLE ONLY BECAUSE IT IS SPENT SECOND. The panel
-        pixels are already captured when this runs, so the anchor comes out of
-        the margin against the fade rather than out of the race for it.
-
-        ⚠ AND THE FIRST VERSION OF THIS COMPARISON WAS NOT A MEASUREMENT: 17.47
-        against 18.60, one 40-sample run each, block after block, no variance
-        reported -- 1.13 ms sitting inside a noise band that was never
-        computed. Redone interleaved the gap is real, which is luck, not
-        method. The separate arm's sd alone is twice the difference it was
-        being asked to establish.
-
-        ⚠ THE ANCHOR SHOULD EVENTUALLY MOVE INSIDE THE BLOCK, AND THE REASON IS
-        NOT THE 4.24 ms. tab_layout.gun_tag_point puts the boxed slot numbers
-        「1」「2」 at (2237,145) and (2237,447), both INSIDE the rectangle this
-        already grabs. Reading presence from them would cost no extra grab at
-        all -- and, which matters more, the openness judgement and the loadout
-        would come off THE SAME PIXELS AT THE SAME INSTANT. As it stands the
-        anchor is grabbed 4 ms after the panel, so two rectangles describe two
-        moments, and this file's whole history is that distinction.
-
-        It is also the RIGHT precondition rather than a proxy: those numbers are
-        drawn only when the panel is up AND a gun occupies that slot, and a
-        panel with no gun in it has nothing worth reading.
-
-        ⚠ BUT NOT AS A PIXEL COUNT, AND NOT ON BRIGHTNESS EITHER. Both are
-        measured, and the anchor this would replace is the proof.
-
-        `type`, 41x18, over the same 12 paired backgrounds:
-
-            max        open 238..238    shut 178..236    gap TWO counts
-            mean       open 142..156    shut 167..215    gap 11
-            white px   open 220..249    shut   0..738    OVERLAPS
-            sat_min    open 0.000       shut 0.024..0.125   <- the real one
-
-        Brightness is worth nothing here: the header text clips at exactly 238
-        and a bright background reaches 236. What carries the anchor is that a
-        pure white glyph puts a FULLY DESATURATED pixel on screen and the world
-        never does -- 0.000 against a world minimum of 0.024. And note the
-        `white px` row: counting how much white is present OVERLAPS, on the
-        very region the criterion works on. Amount fails, kind succeeds.
-
-        The play log says the same thing about the plates from the other side:
-        15:24:10 recorded `ink 11248 / 6424` on a frame whose saved picture is
-        bare sky and a shed -- no panel at all -- while a real plate reads in
-        the hundreds. The false positive is BIGGER than the true one.
-
-        ⚠ AND OVEREXPOSED SKY IS ALSO SATURATION ZERO, which is the hole in the
-        12-background corpus: it has no sky in it. So even `sat_min` is not
-        enough on its own. It has to be the GLYPH -- the shape of a boxed digit
-        -- and the shape is what neither amount nor kind can stand in for.
-
-        Which needs one frame of a panel that is actually drawn, and there is
-        not one on disk: the only paired open/shut corpus
-        (calibration/artifacts/tab_type/bg*) was captured with an EMPTY RACK, so
-        its `open` frames show the dimmed blurred world and no weapon panel at
-        all. `snap` now saves both edges of every Tab, which is exactly the
-        corpus that is missing.
-        """
-        y, x, h, w = _BLOCK()
-        block = frame[y:y + h, x:x + w]
-        try:
-            crop = self._type_crop()
-            anchor = crop['type'] if isinstance(crop, dict) else crop
-            ah, aw = anchor.shape[:2]
-        except Exception:
-            return block
-        pad = 4
-        out = np.zeros((h + ah + 3 * pad, max(w, aw + 2 * pad), 3), np.uint8)
-        out[pad:pad + ah, pad:pad + aw] = anchor
-        out[ah + 3 * pad:ah + 3 * pad + h, :w] = block
-        return out
-
     def snap(self, tag):
         """Grab the weapon panel and put it on disk. -> the frame, or None.
 
@@ -431,12 +279,18 @@ class TabWatch:
         A grab is ~10 ms; deciding first is what put a permission in front of
         it that only arrives once the panel is down.
 
-        It fires on BOTH presses, the one that opens and the one that closes,
-        and the file says which. Only one of the two has a panel to read, but
-        both have a picture worth having: an OPENING frame with a panel in it
-        means the previous close never registered, and an opening frame of bare
-        world is what a normal open looks like. Two labelled pictures per Tab
-        say more than one unlabelled one.
+        It fires on BOTH presses of a Tab session, the one that opens and the
+        one that closes. Only the closing one has a panel to read, but both are
+        pictures worth having: an OPENING frame with a panel in it means the
+        previous close never registered, and an opening frame of bare world is
+        what a normal open looks like.
+
+        `tag` says which grab this was, and the two callers pass a literal --
+        'press' from on_key, 'read' from a read_loadout given no frame. It is
+        never a verdict. The names used to be `opening`/`closing`, i.e. what
+        this object BELIEVED, and on 8 of 38 real saves that belief was wrong:
+        bare grass filed as a close, off a stale `open` flag. A filename that
+        carries a belief makes a victim of every later reader.
         """
         try:
             frame = self._panel_frame()
@@ -562,6 +416,19 @@ class TabWatch:
         a crop can be perfectly readable while the panel behind it is the
         wrong panel, half drawn, or somebody else's.
 
+        ⚠ AND THE BLOCK ALONE. A 「类型」 anchor strip was composited above it
+        until 2026-08-09, on the reasoning that a picture must also show what
+        the thing DECIDING was looking at. That reasoning died with the anchor:
+        the decision is `gun_tag`, which is INSIDE this block, so the frame and
+        the verdict already come off the same pixels. The strip cost a second
+        grab of +4.24 ms (n=200 interleaved, 18.9 sigma) on every press to show
+        a signal nothing reads.
+
+        ⚠ SO THE DIRECTORY HOLDS TWO SHAPES. Frames saved on 2026-08-09 between
+        the strip landing and this are TALLER, with an 18 px strip and padding
+        above the block. Reading either kind is the same operation -- take the
+        LAST tab_blocks()['right'] rows -- which is why they were not rewritten.
+
         Failure is one line and never fatal: a log that cannot save a picture
         is still a log, and this runs on the tick that re-arms the firmware.
         """
@@ -569,10 +436,11 @@ class TabWatch:
             return ''
         try:
             import cv2
+            y, x, h, w = _BLOCK()
             os.makedirs(self._shot_dir, exist_ok=True)
             stamp = datetime.datetime.now().strftime('%m%d_%H%M%S_%f')[:-3]
             path = os.path.join(self._shot_dir, f'{stamp}_{tag}.png')
-            if not cv2.imwrite(path, self._compose(frame)):
+            if not cv2.imwrite(path, frame[y:y + h, x:x + w]):
                 return '   (frame not saved: imwrite refused)'
             return f'   shot {path}'
         except Exception as e:
@@ -580,8 +448,8 @@ class TabWatch:
 
     # ── Driving ──
 
-    def on_key(self, now=None, event='press'):
-        """A Tab key EDGE was seen. Watch for the screen to actually change.
+    def on_key(self, now=None):
+        """The Tab key was PRESSED. Watch for the screen to actually change.
 
         `now` should be the KeyEvent's own timestamp: the event may have sat in
         the poller's queue for a tick or two, and the settle window should be
@@ -596,42 +464,35 @@ class TabWatch:
 
         ⚠ AND IF THE PANEL IS UP, THIS IS WHERE IT IS READ. Not on the close
         the watch below detects — by then it is gone. See the module docstring
-        for the six saved frames that settled it. The edge leads the close by
+        for the six saved frames that settled it. The press leads the close by
         77-128 ms and the poller holds an event for at most a tick or two, so
         the grab lands with 57 ms or more of panel left.
 
-        ⚠ THIS FUNCTION DOES NOT KNOW WHICH EDGE IT IS BEING HANDED, AND MUST
-        NOT LEARN. `event` names the file and nothing else. Live it is fed the
-        PRESS only (the filter is in control/match.py, with the measurement);
-        the offline gate feeds it both, which is the point — what decides here
-        is `self.open`, the SCREEN's answer, so an edge seen while the panel is
-        up reads it and an edge seen while it is down does not.
+        ⚠ IT TAKES NO EDGE, AND MUST NOT GROW ONE BACK. The parameter existed
+        for one day, during which the keybind claim behind it was stated wrong
+        TWICE — "Tab toggles" then "Tab is HELD" — and cost nothing but prose
+        both times, because what decides here has never been the edge. It is
+        `up`: the SCREEN's answer on THIS frame. A press seen while the panel
+        is up reads it, a press seen while it is down does not, and neither
+        branch would change if the keybind did. The module docstring holds the
+        measurement and both retractions; control/match.py holds the filter.
 
-        That is why this function needed no correction either time the keybind
-        claim was wrong, and the claim was wrong twice in one day. See the
-        module docstring for both retractions. A version that had encoded "the
-        release is the one that closes it" would have been wrong in BEHAVIOUR.
-
-        The edge is a TRIGGER, never an answer: `open` is still whatever the
+        The press is a TRIGGER, never an answer: `open` is still whatever the
         screen last said, and if the game eats this key the panel stays up and
         the reading simply describes it correctly.
         """
         now = time.perf_counter() if now is None else now
-        # ⚠ LOGGED IN BOTH DIRECTIONS, because the close press was invisible.
-        # `stop_recoil` was already True while the panel was up, so the state
-        # line printed nothing and the log held no timestamp for the press that
-        # closed it -- which is exactly the number needed to work out how much
-        # panel was left by the time anything looked. It had to be inferred
-        # from the game's 77-128 ms instead of read off.
-        # ⚠ GRAB AND SAVE FIRST, DECIDE AFTER. Every edge, both directions.
-        # ⚠ AND THE TAG IN THE FILENAME IS THE EVENT, NEVER A VERDICT. It used
-        # to be `opening`/`closing`, i.e. what this object BELIEVED -- and on 8
-        # of 38 saved frames that belief was wrong, bare grass filed as a
-        # close. A name that carries a belief turns every later reader into a
-        # victim of it; `press`/`release` is a fact about the keyboard.
-        frame = self.snap(event)
+        # ⚠ LOGGED ON EVERY PRESS, BOTH THE OPENING ONE AND THE CLOSING ONE,
+        # because the closing press was invisible. `stop_recoil` was already
+        # True while the panel was up, so the state line printed nothing and
+        # the log held no timestamp for the press that closed it -- which is
+        # exactly the number needed to work out how much panel was left by the
+        # time anything looked. It had to be inferred from the game's 77-128 ms
+        # instead of read off.
+        # ⚠ GRAB AND SAVE FIRST, DECIDE AFTER. Every press.
+        frame = self.snap('press')
         up = None if frame is None else self.measure_open(frame)
-        self._log(f'Tab {event}: panel {"UP" if up else "not up"}'
+        self._log(f'Tab press: panel {"UP" if up else "not up"}'
                   + ('' if up is not None else ' (unreadable)'))
         if up:
             got = self.read_loadout(frame)

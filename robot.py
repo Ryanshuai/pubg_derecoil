@@ -42,7 +42,6 @@ from detector.fire_mode_detector import FireModeDetector
 from detector.gun_tag_detector import GunTagDetector
 from detector.posture_detector import PostureDetector
 from detector.highlight_detector import HighlightDetector
-from detector.tab_detector import TabTypeDetector
 from detector.weapon_template_detector import TabWeaponDetector
 from detector.attachment_detector import AttachmentDetector
 from capture.screen_capture import ScreenCapture
@@ -102,15 +101,19 @@ class Robot:
         self.dispatcher.register('fire_mode', FireModeDetector())
         self.dispatcher.register('posture', PostureDetector())
         self.dispatcher.register('highlight', HighlightDetector())
-        self.dispatcher.register('tab_type', TabTypeDetector())
         self.dispatcher.register('tab_weapon', TabWeaponDetector())
         self.dispatcher.register('tab_attachment', AttachmentDetector())
-        # ⚠ THIS IS WHAT DECIDES `tab_open` NOW, not `tab_type`. The boxed slot
-        # number lives inside the weapon block TabWatch already grabs, so the
-        # openness judgement and the loadout come off one frame at one instant;
-        # `tab_type` is 1282 px away and was a second grab 4 ms later. It also
-        # answers the sharper question -- panel up AND a gun in that slot --
-        # which is the actual precondition for reading a loadout.
+        # ⚠ THIS IS WHAT DECIDES `tab_open`. The boxed slot number lives inside
+        # the weapon block TabWatch already grabs, so the openness judgement
+        # and the loadout come off one frame at one instant. It also answers
+        # the sharper question -- panel up AND a gun in that slot -- which is
+        # the actual precondition for reading a loadout.
+        #
+        # ⚠ `TabTypeDetector` was registered here as `tab_type` and is not any
+        # more: nothing in the live loop read it once the signal moved, and the
+        # 「类型」 anchor is 1282 px away, i.e. a second grab. The CLASS is very
+        # much alive -- control/gun.py, control/inventory.py, calibration/ and
+        # detector/tab_layout.py all build their own.
         self.dispatcher.register('gun_tag', GunTagDetector())
 
         # 边玩边观测。⚠ 它只**记**，一行压枪的行为都不改：没有它 robot 播的是

@@ -67,7 +67,6 @@ SHOT_DIR = os.path.join(ROOT, 'calibration', 'artifacts', 'robot',
 # detector, which only ever sees cut crops, can read the same stamp the
 # attachment detector reads off the whole frame.
 MY, MX = HUD_REGIONS['gun_name_1'][0], HUD_REGIONS['gun_name_1'][1]
-ay, ax, ah, aw = HUD_REGIONS['type']
 
 
 class FakeState:
@@ -123,7 +122,6 @@ class FakeScreen:
     def __init__(self):
         self.open = False
         self.painted = True
-        self.anchor_reads = 0
         self.grabs = 0            # looks at the WEAPON PANEL — the expensive one
         self.name_reads = 0
         self.att_reads = 0
@@ -143,15 +141,6 @@ class FakeScreen:
         self.guns[gen] = guns
         self.kit[gen] = kit if kit is not None else {1: {'muzzle': f'g{gen}'},
                                                     2: {'muzzle': ''}}
-
-    def type_det(self):
-        s = self
-
-        class D:
-            def classify(_self, crops):
-                s.anchor_reads += 1
-                return s.open
-        return D()
 
     def weapon_det(self):
         s = self
@@ -194,14 +183,13 @@ class FakeScreen:
                 return any(_self.drawn(frame, s_) for s_ in (1, 2))
         return D()
 
-    def grabber(self, counts=True):
-        """counts=False for the anchor grabber, which is a different question.
+    def grabber(self):
+        """The ONE grabber TabWatch has. `grabs` counts every look.
 
-        `grabs` is "how often did it look at the WEAPON PANEL", and several
-        cases assert it is zero. Letting the 41x18 anchor check add into the
-        same number would make those assertions unwritable — which is how an
-        earlier version of this file asserted "opening does not read the panel"
-        while it was reading it.
+        It took a `counts=False` flavour for the 「类型」 anchor, which was a
+        second grabber for a second rectangle. Both are gone: the openness
+        signal moved inside this block, so there is one rectangle, one grab per
+        press, and `grabs` is the whole cost.
         """
         s = self
 
@@ -216,19 +204,11 @@ class FakeScreen:
             _buf = np.zeros((SCREEN_H, SCREEN_W, 3), np.uint8)
 
             def grab(_self):
-                if counts:
-                    s.grabs += 1
+                s.grabs += 1
                 bits = 0 if not s.open else (
                     (1 if s.slots[0] else 0) | (2 if s.slots[1] else 0))
                 _self._buf[MY, MX] = (1 if s.painted else 0, s.gen, bits)
-                # ⚠ The anchor grabber returns a DICT, like the real
-                # RegionGrabber, because the saved frame now carries the
-                # anchor strip beside the panel and _compose has to cut it out
-                # of whatever comes back. A bare array here would have made
-                # _compose's dict branch untested and the real one the only
-                # one that runs.
-                return _self._buf if counts else {'type': _self._buf[
-                    ay:ay + ah, ax:ax + aw]}
+                return _self._buf
 
             def close(_self):
                 pass
@@ -238,12 +218,10 @@ class FakeScreen:
 def build(verbose=False):
     screen = FakeScreen()
     state = FakeState()
-    w = TabWatch(state, {'tab_type': screen.type_det(),
-                         'tab_weapon': screen.weapon_det(),
+    w = TabWatch(state, {'tab_weapon': screen.weapon_det(),
                          'tab_attachment': screen.att_det(),
                          'gun_tag': screen.tag_det()},
                  verbose=verbose, shot_dir=SHOT_DIR)
-    w._type_grab = screen.grabber(counts=False)
     w._panel_grab = screen.grabber()
     return w, state, screen
 
@@ -495,42 +473,47 @@ check('gun 1 is named by the HUD, so its kit publishes',
 check('gun 2 is still nameless, so its kit does not',
       2 in state8.attachments, False)
 
-print('\n=== the close leaves its frame on disk, in ITS OWN directory ===')
+print('\n=== BOTH presses of a session leave a frame, in their OWN directory ===')
 # The save is the operator's only way to ask "what did it look like", so a
 # broken save path has to fail HERE rather than during a match. Looking at the
 # directory before and after is also what pins it to a directory that is not
 # the one real play writes to.
+#
+# ⚠ SCRIPTED AS THE REAL TOGGLE, which is TWO TAPS and therefore two presses.
+# The opening press lands BEFORE the panel is drawn (28-38 ms) and the closing
+# press lands while it is still up (77-128 ms to go), so one frame of world
+# and one of panel — and the world one is not waste: an opening frame WITH a
+# panel in it is how "the previous close never registered" becomes visible.
 before = set(glob.glob(os.path.join(SHOT_DIR, '*.png')))
 w9, state9, screen9 = build()
-# ⚠ BOTH EDGES ARE FED HERE ON PURPOSE, even though the live path sends only
-# the press (control/match.py). TabWatch must not know which edge it is being
-# handed -- `event` names the file and nothing else -- and the keybind claim
-# has been wrong twice in one day without costing anything precisely because
-# of that. Feeding it only what production feeds it would let a version that
-# reads `event` and branches on it pass.
-#
-# Tab is a TOGGLE: the opening tap is press=world / release=PANEL and the
-# closing tap is press=PANEL / release=world. Scripted that way below.
 screen9.open = False
-w9.on_key(time.perf_counter(), 'press')
+w9.on_key(time.perf_counter())            # opening press: no panel yet
 screen9.open = True
-run(w9, 0.05, t0=time.perf_counter())
-w9.on_key(time.perf_counter(), 'release')
+run(w9, 0.05, t0=time.perf_counter())     # the game draws it
+w9.on_key(time.perf_counter())            # closing press: still up, READ
 screen9.open = False
 run(w9, 0.05, t0=time.perf_counter())
 after = set(glob.glob(os.path.join(SHOT_DIR, '*.png')))
 new = sorted(os.path.basename(f) for f in after - before)
-check('one frame per edge, both edges', len(new), 2)
-# ⚠ THE NAME CARRIES THE EDGE AND NOTHING ELSE. It used to carry a verdict
-# (`opening`/`closing`) and on 8 of 38 real saves that verdict was wrong --
-# bare grass filed as a close, off a stale flag. A filename that carries a
-# belief makes every later reader a victim of it; press/release is a fact
-# about the keyboard, and what the panel turned out to be is in the log line
-# beside it.
-check('and the name carries the edge, and only the edge',
-      [n.split('_')[-1] for n in new], ['press.png', 'release.png'])
+check('one frame per press, both presses', len(new), 2)
+# ⚠ THE NAME IS A FACT ABOUT THE KEYBOARD, NEVER A VERDICT. It used to carry
+# what this object BELIEVED (`opening`/`closing`) and on 8 of 38 real saves
+# that belief was wrong -- bare grass filed as a close, off a stale flag. A
+# filename that carries a belief makes every later reader a victim of it; what
+# the panel turned out to be is in the log line beside it.
+check('and both names say only `press`',
+      [n.split('_')[-1] for n in new], ['press.png', 'press.png'])
 check('and NOT into the directory real play writes to',
       os.path.abspath(SHOT_DIR) != os.path.abspath(REAL_SHOT_DIR), True)
+# ⚠ AND on_key TAKES NO EDGE. The parameter existed for one day and the claim
+# behind it was stated wrong twice in that day. Nothing may hand this function
+# an edge again, because the moment it can be told one, something can branch
+# on it -- and then the next wrong keybind claim is wrong in BEHAVIOUR rather
+# than in prose. inspect, not a try/except: a TypeError would also be raised
+# from anywhere inside the call.
+import inspect                                                 # noqa: E402
+check('on_key takes only a timestamp',
+      list(inspect.signature(TabWatch.on_key).parameters), ['self', 'now'])
 
 print('\n=== the dispatcher sends the PRESS and only the press ===')
 # ⚠ THIS IS THE ONE CLAIM THAT IS NOT TabWatch'S, so it is the one that needs
@@ -550,11 +533,18 @@ KeyEvent = namedtuple('KeyEvent', ['key', 'event', 'ts', 'held_keys'])
 
 
 class _CountingTab:
-    def __init__(self):
-        self.edges = []
+    """Records the fact of a call, since on_key no longer carries the edge.
 
-    def on_key(self, ts, event):
-        self.edges.append(event)
+    That is the point: TabWatch cannot be TOLD which edge it got, so what the
+    dispatcher does with the release has to be observed as a call that did not
+    happen, not as an argument that was not passed.
+    """
+
+    def __init__(self):
+        self.calls = 0
+
+    def on_key(self, ts):
+        self.calls += 1
 
 
 dsp = Dispatcher.__new__(Dispatcher)
@@ -566,12 +556,14 @@ dsp._apply_hw = lambda hw: None
 dsp.tab = _CountingTab()
 now = time.perf_counter()
 dsp._handle_key(KeyEvent('tab', 'press', now, frozenset()))
+check('the press reached TabWatch', dsp.tab.calls, 1)
+# ⚠ THE RELEASE IS STILL A KEY EVENT THAT ARRIVES -- capture/key_poller.py
+# emits both edges of every polled key and always has. What must not happen is
+# it reaching TabWatch, which is a SECOND grab and a SECOND read of the panel
+# on entry rather than on exit. If this ever fails because `tab` release
+# stopped being polled, the fix is the poller, not this line.
 dsp._handle_key(KeyEvent('tab', 'release', now + 0.097, frozenset()))
-check('the press reached TabWatch', dsp.tab.edges, ['press'])
-# ⚠ AND THE RELEASE STILL HAS TO BE A KEY EVENT THAT ARRIVES. The poller emits
-# it either way; if this ever fails because `tab` release stopped being polled,
-# the fix is the poller, not this line.
-check('the release did not', 'release' in dsp.tab.edges, False)
+check('the release did not', dsp.tab.calls, 1)
 
 print('\n=== the chatter goes to the FILE, the table to the TERMINAL ===')
 # ⚠ THIS IS A PROHIBITION ON A CHANNEL, not on content, and it is written that
@@ -592,9 +584,9 @@ term, fh = io.StringIO(), io.StringIO()
 saved, sys.stdout = sys.stdout, logbook._Tee(term, fh)
 try:
     screenA.open = False
-    wA.on_key(time.perf_counter(), 'press')      # opens it
+    wA.on_key(time.perf_counter())               # opening press: no panel yet
     screenA.open = True
-    wA.on_key(time.perf_counter(), 'release')    # reads it, then it closes
+    wA.on_key(time.perf_counter())               # closing press: up, READ
     screenA.open = False
 finally:
     sys.stdout = saved
@@ -613,13 +605,10 @@ check('and the file has the table too (a copy, not a move)',
 print('\n=== idle costs nothing but the drift check ===')
 w6, state6, screen6 = build()
 t = run(w6, 1.0, t0=time.perf_counter())
-expected = int(1.0 / TAB_DRIFT_S) + 1
-check(f'anchor reads in 1 idle second (<= {expected})',
-      screen6.anchor_reads <= expected, True)
-# ⚠ A CLOSED PANEL IS STILL POLLED, and the poll now grabs the weapon block
-# rather than the 41x18 anchor -- 8.7 ms against 6.0. That is the price of the
-# openness signal living inside the block, and it is bounded by the drift
-# period, not by the tick.
+# ⚠ A CLOSED PANEL IS STILL POLLED, and the poll grabs the weapon block -- 8.7
+# ms, the price of the openness signal living inside it. Bounded by the DRIFT
+# PERIOD, not by the tick: at the 10 ms dispatcher tick an unconditional grab
+# would be most of a core.
 idle_budget = int(1.0 / TAB_DRIFT_S) + 1
 check(f'panel grabs in 1 idle second (<= {idle_budget})',
       screen6.grabs <= idle_budget, True)

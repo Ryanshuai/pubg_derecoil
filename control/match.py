@@ -98,28 +98,33 @@ class Dispatcher(DaemonLoop):
         # does not touch tab_open, so every cond below still sees the screen as
         # it is right now.
         #
-        # ⚠ THE PRESS EDGE ONLY, AND THE FILTER LIVES HERE RATHER THAN IN
-        # TabWatch. Which key events matter is the dispatcher's question;
-        # TabWatch's is what the SCREEN says at whatever moment it is handed.
-        # Keeping it that way is what made a WRONG belief about this keybind
-        # cost nothing when it was held for a day (this comment used to say Tab
-        # was HELD and the release was what closed it -- retracted, with the
-        # measurement, in control/tab_watch.py's module docstring). Flipping
-        # back to both edges is this one line.
+        # ⚠ THE PRESS, AND ONLY THE PRESS. This line is the whole rule --
+        # TabWatch takes no edge at all, so there is nowhere else it could be
+        # decided and no second author of it.
         #
-        # Tab is a TOGGLE -- 66 saved tap pairs, key down 43..225 ms, median
-        # 97, against 2.1 s between taps -- so a session is two taps and the
-        # panel lands on the OPENING tap's release and the CLOSING tap's press.
-        # The press is the one that carries the FINAL state, which is what a
-        # loadout has to be. Measured on those same taps, by session:
+        # Tab is a TOGGLE: 66 saved tap pairs, key DOWN 43..225 ms (median 97)
+        # against 2.1 s between taps. So a session is two taps, and the panel
+        # falls on the opening tap's release and the CLOSING TAP'S PRESS --
+        # which is the one carrying the final state, which is what a loadout
+        # has to be. Priced on those same taps, by session:
         #
         #     30   sessions with a panel on some edge
         #     29   ... a PRESS caught it too
-        #      1   ... release-only, i.e. what this drops   (3.3%)
+        #      1   ... release-only, i.e. what press-only costs   3.3%
+        #                       grabs 4.4 per session -> 2.2
         #
-        # and it halves the grabs, 4.4 per session to 2.2.
+        # ⚠ AND THE ONE IT MISSES IS NOT A CLASS OF SESSION. It sits next to a
+        # 0.5 s double-tap, i.e. the swallowed-Tab quirk already written down
+        # in docs/game_quirks.md.
+        #
+        # ⚠ THIS KEYBIND WAS CLAIMED WRONG TWICE IN ONE DAY -- "Tab toggles so
+        # press-only sees the close", then "Tab is HELD so the release is what
+        # closes it" -- and neither cost anything, because TabWatch decides
+        # from what the SCREEN says rather than from which edge arrived. Keep
+        # it that way. A version that encoded an edge would be wrong in
+        # BEHAVIOUR the next time this claim moves.
         if ev.key == 'tab' and ev.event == 'press':
-            self.tab.on_key(ev.ts, ev.event)
+            self.tab.on_key(ev.ts)
 
         # DETECT_TABLE: schedule detections using CURRENT state
         for entry in DETECT_TABLE:
