@@ -2,7 +2,9 @@
  "weapon": "vss",
  "sight": "vss_pso1",
  "posture": "standing",
- "config": {},
+ "config": {
+  "stock": "cheek_pad"
+ },
  "shots": [
   {
    "delay_ms": 0,
@@ -676,7 +678,7 @@
   }
  ],
  "source": "MODEL.md time-domain fit",
- "n_magazines": 35,
+ "n_magazines": null,
  "n_total": 35,
  "grid_ms": 17.0,
  "total_counts": 1793.674322168639,
@@ -686,5 +688,7 @@
  "knots": 134,
  "centre": "iqm",
  "fire_mode": "full",
- "scaled_by": "NOTHING. Final mouse counts; set_seq emits them with no factors, because scope, scale, attachment and posture are already in the magazines this was fitted from."
+ "scaled_by": "NOTHING. Final mouse counts; set_seq emits them with no factors, because scope, scale, attachment and posture are already in the magazines this was fitted from.",
+ "seed": true,
+ "note": "ESTIMATE, not a measurement. Shape and amplitude taken from vss__bare (1794 counts) with a factor of 1.000, i.e. the cheek pad is assumed to change nothing about the recoil. WHY IT EXISTS: the VSS cannot borrow along any axis -- vss_pso1 has no RECOIL_SIGHT_RATIO entry, so _derive refuses at its first line and _compose is never reached -- so without this the first magazine of this cell fires at ZERO compensation against 1794 counts of recoil, and a view that climbs into blank sky is where phase correlation returns 0 confidently and the magazine is lost with every gate green. It also makes --scale-sweep meaningful: two arms multiplying an empty curve are both zero. FIRE IT AND THE FIT REPLACES IT."
 }

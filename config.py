@@ -1644,6 +1644,23 @@ RECOIL_SIGHT_RATIO = {
     '2x': 1.879, '3x': 2.803, '4x': 3.973,     # measured, mp5k bare, n=8 each
     '6x': 5.76, '8x': 7.68,                    # 0.96 x mag, EXTRAPOLATED
     'hipfire': 3.083,
+    # ⚠ THE INTEGRAL OPTICS ARE HERE TO OPEN A GATE, NOT TO SCALE ANYTHING, and
+    # the difference is why these two numbers are allowed to be extrapolated.
+    # `_derive` reads this table on its FIRST line and returns immediately when
+    # the sight has no entry -- so vss_pso1 and p90_integral could not derive
+    # along ANY axis: not posture, not kit, not fire mode. The VSS ships in
+    # SINGLE fire (play log 2026-08-10: `fire=single __fire-single`) and the
+    # ordinary-mode fallback added the same day sits BELOW that first line, so a
+    # VSS in its default state was uncompensated with a measured 1794-count
+    # curve sitting on disk.
+    #
+    # ⚠ THE VALUE CANNOT AFFECT A LOOKUP, WHICH IS THE POINT. Both guns carry
+    # exactly one optic and can never wear another, so every derivation is
+    # `want_r / have_r` with the same name on both sides = 1.000 exactly. These
+    # numbers scale nothing; they only decide whether the door is open.
+    # Extrapolated from magnification via today's measured law (ratio ~= mag):
+    # the PSO-1 is 4x, the p90's integral sight is 1x.
+    'vss_pso1': 3.973, 'p90_integral': 1.0,
 }
 KIT_FACTORS_PATH    = os.path.join(DATA_DIR, 'kit_factors.json')
 KIT_RECORDS_PATH    = os.path.join(DATA_DIR, 'kit_records.jsonl')

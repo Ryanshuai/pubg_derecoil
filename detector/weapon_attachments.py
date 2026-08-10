@@ -49,7 +49,7 @@ import os
 import config
 
 from detector.attachment_catalog import (ATTACHMENTS, SLOTS as CATALOG_SLOTS,
-                                         compatible, has_slot)
+                                         compatible, has_slot, weapon_class)
 
 # Muzzle vertical recoil multipliers
 MUZZLE_FACTOR = {
@@ -197,16 +197,45 @@ _ASSET_TO_KEY = {v['asset']: k for k, v in ATTACHMENTS.items() if v.get('asset')
 def worn_keys(muzzle, grip, stock):
     """{slot: catalogue key} for what is fitted, or None if a part is unknown.
 
-    ⚠ AN UNRECOGNISED ASSET POISONS THE WHOLE ANSWER, on purpose. A part this
+    Takes EITHER namespace: an asset class name as the detector read it off the
+    tile ('Stock_SniperRifle_CheekPad_C'), or a catalogue key as the experiment
+    asked for it ('cheek_pad'). Assets are translated; keys pass through.
+
+    ⚠ AN UNRECOGNISED PART POISONS THE WHOLE ANSWER, on purpose. A part this
     build cannot name is a part whose contribution is unknown, and answering
     with the factor for "the kit minus that part" would be a confident wrong
     number -- exactly the failure these tables exist to end.
+
+    ⚠ ACCEPTING BOTH IS NOT LENIENCY, IT IS THE BUG THIS FUNCTION CAUSED. It was
+    added for the RUNTIME, where `Weapon.muzzle` holds an asset, and the
+    calibration path feeds the same field from `read_config`, whose docstring
+    says "as catalog keys". So every collection run on a gun wearing a muzzle,
+    grip or stock started answering None -- NOT compensating, on the one path
+    that exists to measure the compensation.
+
+    Measured 2026-08-10, a vss cheek-pad run: `[attach] gun1.stock=
+    Stock_SniperRifle_CheekPad_C` (the drag, in assets) then `fitted: {'stock':
+    'cheek_pad'}` (the readback, in keys) then `a fitted part has no catalogue
+    name (stock='cheek_pad')` -- and ZERO magazines fired, because the firmware
+    had no pattern and collect_timed refuses to store a magazine whose y_comp is
+    unknown. That refusal is the only reason this cost a run and not a corpus.
+
+    It hid because today's other runs were all deliberately stripped to bare,
+    where every field is '' and the loop never looks anything up. m416's 56
+    kitted magazines predate the function.
+
+    ⚠ THE TWO NAMESPACES CANNOT COLLIDE, which is what makes this safe rather
+    than a guess: assets are `Upper_/Lower_/Muzzle_/Stock_/Magazine_`-prefixed
+    class names ending `_C`, keys are lower_snake ('comp_ar', 'cheek_pad').
+    Anything in neither table still returns None.
     """
     worn = {}
-    for slot, asset in (('muzzle', muzzle), ('grip', grip), ('stock', stock)):
-        if not asset:
+    for slot, part in (('muzzle', muzzle), ('grip', grip), ('stock', stock)):
+        if not part:
             continue
-        key = _ASSET_TO_KEY.get(asset)
+        key = _ASSET_TO_KEY.get(part)
+        if key is None and part in ATTACHMENTS:
+            key = part                      # already a catalogue key
         if key is None:
             return None
         worn[slot] = key
@@ -234,6 +263,146 @@ def _row(per_weapon, posture, key):
     if not row or row.get('src') not in (None, 'measured'):
         return None
     return row
+
+
+# ── the SMG grip+muzzle floor on the 'parts' tier ─────────────────────────
+# Multiplying single-slot factors assumes the slots do not interact. On the two
+# measured SMGs that fails in ONE DIRECTION -- the product is always too small,
+# worst on the fullest kit -- and it fails on ONE EDGE. Modelling grip and
+# muzzle as acting on the REDUCIBLE recoil only, with a floor nothing gets
+# under, while the stock keeps multiplying:
+#
+#   R = [R_min + (R_bare - R_min) * PROD_{grip,muzzle} (R_j - R_min)
+#                                 / (R_bare - R_min)] * PROD_{other} f_j
+#
+# WHICH SLOTS, fitted per subset on the 8 measured SMG cells, one parameter
+# each. The three single-slot rows come out EXACTLY equal to pure
+# multiplication, which is the arithmetic self-check: a lone slot inside the
+# floor collapses to its own factor.
+#
+#   floor acts on          chi2   chi2/dof   R_min    mean|err|   worst
+#   grip+muzzle           133.5     19.07    346.1      3.30%     6.81%
+#   grip+muzzle+stock     162.1     23.16    240.4      3.19%     6.15%
+#   grip+stock            367.7     52.53    531.4      5.27%    12.00%
+#   muzzle+stock          494.1     70.58    251.1      6.19%    10.11%
+#   any single slot       581.8     83.11       -       6.73%    14.50%
+#   none (multiplied)     581.8     72.72       -       6.73%    14.50%
+#
+# ⚠ grip+muzzle IS ALSO WHAT A SEPARATE MEASUREMENT SAYS, and that is the only
+# reason this is a slot list rather than a fitted knob: the per-edge coupling
+# computed straight from the residuals has mp5k's grip x muzzle at +4.4 sigma
+# while grip x stock is -2.0 and muzzle x stock is -0.7. The stock does not
+# couple there, and that was known before this fit existed.
+#
+# ⚠ SMG ONLY. All 8 fitted cells are SMG. The AR side has exactly one two-slot
+# cell (aug grip+muzzle) and on it the floor LOSES: 2.90% multiplied against
+# 4.74% floored, and that is the SMG fit applied cold. R_min is a count, so it is
+# not even the same claim across families -- 346 counts is 34% of the vector's
+# bare recoil and 19% of the aug's.
+#
+# ⚠ AND THE TWO SMGs DO NOT AGREE ON THE SLOT LIST. Fitted alone, mp5k picks
+# grip+muzzle (chi2 34.0) and vector picks grip+muzzle+stock (chi2 36.0). The
+# shipped list is the better of the two POOLED, not a settled fact. Nor has
+# anything converged: chi2/dof 19 against a noise floor of ~1, and the two
+# criteria disagree (chi2 prefers grip+muzzle, mean |err| prefers all three by
+# 0.11 points). 8 cells on 2 guns cannot resolve this, so treat the slot list
+# as one fit with no reproduction behind it.
+#
+# ⚠ ONE ATTACHMENT DOES NOT CARRY ONE PROPERTY ACROSS GUNS, and it was checked
+# rather than assumed. For each part, the R_min that would make both guns agree
+# on the fraction of reducible recoil it removes: muzzle 647.2, grip 528.0,
+# stock 535.2 -- all three ABOVE the smallest measured kit (426 counts), where
+# the reducible part goes negative, and three different values besides. So
+# comp_smg reading 0.5907 on the mp5k and 0.7197 on the vector is not one
+# property against two baselines.
+#
+# ⚠ WHAT IT IS WORTH TODAY: NOTHING, AND THAT IS MEASURED, NOT ARGUED.
+#   1. Zero reach. Both measured SMGs have exactly three single-slot parts and
+#      all 2^3 combinations are already FIRED rows in `kits`, so tier 1 answers
+#      first every time. `pixi run kit-floor` prints the count; it goes
+#      non-zero the first time an SMG gets a 4th measured part -- which is also
+#      the measurement that would settle the slot list above.
+#   2. Even reached, it never touches the firmware: explain_factor is not on
+#      the compensation path (see its docstring). Its live caller prices
+#      imported Kava4 seeds.
+#
+# Reproduce every number above, including the subset scan and the
+# cross-validation:  pixi run kit-floor
+_SMG_FLOOR_COUNTS = 346.1
+# Fitted jointly with the constant; changing one without refitting the other is
+# meaningless. `pixi run kit-floor` refits and fails if they drift apart.
+_FLOOR_SLOTS = ('grip', 'muzzle')
+# Slot factors are relative, so the product path never needs a bare. The floor
+# does -- it is an absolute count -- and the only bare available is the one
+# implied by each single-slot row (counts / f). Rows from different runs imply
+# different bares, and averaging across them would silently mix two baselines.
+_BARE_AGREE = 0.02
+
+
+def _bare_counts(gun_name, posture, worn):
+    """Bare counts this gun's own single-slot rows agree on, or None.
+
+    None when the rows disagree by more than `_BARE_AGREE`: that means they are
+    not measurements against a common baseline, and an absolute-count model has
+    nothing to anchor to. The product path does not care and stays available --
+    CLAUDE.md's second law, two readings that disagree means one is wrong, so
+    refuse rather than average.
+    """
+    per_weapon = _part_factors.get(gun_name)
+    if not per_weapon:
+        return None
+    bares = []
+    for slot, key in worn.items():
+        row = _row(per_weapon, posture, f'{slot}={key}')
+        if not row or not row.get('f') or row.get('counts') is None:
+            return None
+        bares.append(row['counts'] / row['f'])
+    if not bares:
+        return None
+    lo, hi = min(bares), max(bares)
+    if lo <= 0 or (hi - lo) / lo > _BARE_AGREE:
+        return None
+    return sum(bares) / len(bares)
+
+
+def _floor_factor(gun_name, posture, worn, per_slot):
+    """The kit factor with grip+muzzle floored, or None if this does not apply.
+
+    None -- meaning "use the plain product" -- unless every condition holds:
+    the gun is an SMG, BOTH floor slots are filled (one alone collapses to its
+    own factor, so there would be nothing to gain and a bare to get wrong),
+    every filled slot is measured ON THIS GUN (a wiki number carries no counts,
+    so there is nothing to subtract a floor from), and the single-slot rows
+    agree on a bare. Slots outside `_FLOOR_SLOTS` multiply, untouched.
+    """
+    if weapon_class(gun_name) != 'SMG':
+        return None
+    if not all(s in per_slot for s in _FLOOR_SLOTS):
+        return None
+    # ⚠ THIS ONE CANNOT BE MADE TO FAIL, and that is why it says so here.
+    # `f is None` holds exactly when that slot has no row, which is exactly
+    # when _bare_counts returns None -- both go through _row on the same key.
+    # Mutation-tested: deleting this line leaves every case green. It stays as
+    # a TYPE guard, not a policy one: without it a None would reach the
+    # arithmetic below as a TypeError if the two ever stop agreeing.
+    if any(f is None for f in per_slot.values()):
+        return None
+    bare = _bare_counts(gun_name, posture, worn)
+    if bare is None:
+        return None
+    span = bare - _SMG_FLOOR_COUNTS
+    if span <= 0:
+        return None
+    floored, rest = 1.0, 1.0
+    for slot, f in per_slot.items():
+        if slot in _FLOOR_SLOTS:
+            share = (bare * f - _SMG_FLOOR_COUNTS) / span
+            if share <= 0:
+                return None      # a part at or under the floor: outside the model
+            floored *= share
+        else:
+            rest *= f
+    return (_SMG_FLOOR_COUNTS + span * floored) / bare * rest
 
 
 def part_factor(gun_name, slot, part_key, posture='standing'):
@@ -289,11 +458,28 @@ def explain_factor(gun_name, muzzle='', grip='', stock='',
                    posture='standing'):
     """-> (factor, source, detail). Same number, plus WHERE it came from.
 
-    THREE TIERS, best evidence first, and each one is a strictly weaker claim
+    ⚠ THIS IS NOT HOW A KITTED GUN GETS COMPENSATED. Under plan A the firmware
+    curve is looked up by the EXACT configuration and emitted with no factor
+    applied at all ('scaled_by: NOTHING') -- detector/weapon.set_seq says so,
+    and the ten-line factor path that used to follow it was deleted on
+    2026-08-09 for being unreachable code that read like policy. The live
+    caller of this function is tools/import_kava4.py, which prices an IMPORTED
+    community pattern for a gun nobody has measured yet; `pixi run kit-factors`
+    is the other. Read the tiers below as "how good is this seed", not as the
+    compensation path.
+
+    FOUR TIERS, best evidence first, and each one is a strictly weaker claim
     than the one above it:
 
       'kit'    this exact kit was fired on this gun in this posture. Coupling
                included, because the parts were all on the gun at the time.
+      'parts_floor'
+               SMG only, and only with BOTH grip and muzzle fitted: this gun's
+               own single-part measurements, with those two combined through a
+               floor instead of multiplied (the stock still multiplies).
+               chi2 133.5 against 581.8 for the plain product over the 8
+               measured SMG cells. See _SMG_FLOOR_COUNTS for which slots, why
+               only SMGs, and the three things it is NOT allowed to claim.
       'parts'  each part measured on THIS gun, multiplied. Assumes the slots
                do not interact -- which is false, measurably: on the mp5k the
                product of the measured singles lands 7.9% off the measured
@@ -331,6 +517,13 @@ def explain_factor(gun_name, muzzle='', grip='', stock='',
             else:
                 per_slot[slot], any_measured = f, True
         if any_measured:
+            # SMG with both grip and muzzle on -- see _SMG_FLOOR_COUNTS for
+            # what it buys and what it cannot claim. A separate `source`
+            # because a recorded number has to say which path produced it, not
+            # just how good it is.
+            floored = _floor_factor(gun_name, posture, worn, per_slot)
+            if floored is not None:
+                return floored, 'parts_floor', per_slot
             # Mixed on purpose when only some slots are measured: this gun's
             # own comp_smg at 0.5907 beside a wiki grip beats falling all the
             # way back to a wiki muzzle at 0.85, which is 44% off on that part
