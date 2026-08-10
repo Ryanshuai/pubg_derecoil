@@ -775,9 +775,24 @@ def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
     # and samples.fire_tag files them apart; fitting across them would average
     # a fast gun with a slow one and fire the result at both.
     # (`want_mode` is computed above, next to build_weapon, which needs it too.)
+    #
+    # ⚠ AND THE SAME OPTIC'S POOL, for the same reason and a bigger factor. One
+    # sample FILE holds every optic the cell was fired through (path_for keys on
+    # weapon+config+fire_mode, not on the sight) while the CURVE store keys on
+    # the sight -- so the two disagree about what one cell is, and the file is
+    # the looser. samples.load grew a `sight` selector on 2026-08-09 whose
+    # docstring ends "the refusal was right and it had no exit; this is the
+    # exit", and not one of the three call sites walked through it.
+    #
+    # Measured today: mp5k bare at 2x reads y_true ~1750 counts against the red
+    # dot's 932, and the mixed pool fitted 459 -- a number belonging to neither,
+    # written into a file named `__2x`. Same shape as Kitter.session(), a door
+    # opened with no caller.
     try:
         from calibration.fit_time_curve import fit as _fit
-        prev = [m for m in S.load(weapon, config, fire_mode=want_mode)
+        from detector.weapon import _sight_of
+        prev = [m for m in S.load(weapon, config, fire_mode=want_mode,
+                                  sight=_sight_of(scope_asset, weapon))
                 if m.comp_enabled]
         if prev:
             r = _fit(prev)
@@ -1309,8 +1324,11 @@ def main():
             # bare" -- which then loads the wrong file, or none at all, and
             # reports it as "nothing stored". The refusal now lives at the
             # readback itself (return 4), which is strictly earlier.
+            # `worn` is read_sight's answer -- the optic the GUN is wearing,
+            # already cross-checked against --sight above. See the note at the
+            # --from-fit site for why the pool has to be narrowed to it.
             prev = [m for m in S.load(a.weapon, config,
-                                      fire_mode=want_mode)
+                                      fire_mode=want_mode, sight=worn)
                     if a.fit_all or m.comp_enabled]
             if not prev:
                 print('  [!] --from-fit with nothing stored for this config')
@@ -1526,7 +1544,7 @@ def main():
 
     if written:
         from calibration.fit_time_curve import fit
-        mags = S.load(a.weapon, config, fire_mode=want_mode)
+        mags = S.load(a.weapon, config, fire_mode=want_mode, sight=worn)
         r = fit(mags)
         if r['ok']:
             print(f'\n  fit over {r["n_kept"]}/{r["n_total"]} stored '
