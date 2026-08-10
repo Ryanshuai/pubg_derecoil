@@ -139,18 +139,21 @@ import psutil
 
 from config import (LOBBY_ERROR_OK_XY, LOBBY_EXIT_XY, LOBBY_LEAVE_CONFIRM_XY,
                     LOBBY_MENU_LEAVE_XY, LOBBY_PARK_XY, LOBBY_PLAY_XY,
-                    LOBBY_RECONNECT_XY)
+                    LOBBY_POPUP_CLOSE_XY, LOBBY_RECONNECT_XY,
+                    POPUP_CLOSE_SETTLE_S)
 from detector.lobby_detector import (LobbyDetector, LobbyState,
                                      error_dialog_visible, reconnect_visible,
                                      leave_confirm_visible,
-                                     leave_entry_confirmed, is_results_screen)
+                                     leave_entry_confirmed, is_results_screen,
+                                     popup_open)
 from detector.lobby_nav import (SAFE_MODE, SUB_TABS, confident, read_mode,
                                 read_page, tab_xy)
 from capture.cropper import capture_screen
 from press.pointer import move_cursor
 from control.driver import Driver
 from control.focus import (ensure_focus, focus_keeper, game_hwnd,
-                           game_minimized, game_pids, raise_game)
+                           game_minimized, game_off_capture,
+                           game_pids, raise_game)
 
 POLL = 0.5              # how often the screen is sampled
 
@@ -217,6 +220,17 @@ NOT_RUNNING_IS_FATAL = {
     LobbyState.NOT_RUNNING: 'the game is not running — nothing on screen can '
                             'be clicked into a match. ensure_running(), or '
                             'ensure_in_match(launch=True)',
+    # ⚠ FATAL RATHER THAN A RETRY, and that is the point of naming it. Every
+    # pixel this repository reads comes from a rectangle the game is not in, so
+    # clicking is not merely useless -- it lands on another window, and the
+    # read-back that would catch a bad click is taken from the same dead frame
+    # and agrees. The recovery is a RESTART (operator's call, 2026-08-10: the
+    # game re-asserts its own display, so moving the window buys seconds), and
+    # a restart is not something a poll loop should start on its own.
+    LobbyState.OFF_CAPTURE: 'the game window does not cover the rectangle this '
+                            'repository screenshots, so every pixel read is of '
+                            'some other window — restart the game '
+                            '(quit_game() then ensure_running())',
 }
 
 PARK_SETTLE = 0.35      # hover highlights fade; see LOBBY_PARK_XY in config
@@ -357,6 +371,16 @@ class LobbyControl(Driver):
                     else LobbyState.NOT_RUNNING)
         if game_minimized():
             return LobbyState.MINIMIZED
+        # ⚠ AND ONE MORE QUESTION BEFORE THE PIXELS, for the same reason as
+        # MINIMIZED and costing more: a window that is UP and not iconified can
+        # still be somewhere other than the rectangle we grab, and what the
+        # grab then returns is whatever was last drawn there. On 2026-08-10
+        # that was a frozen ERROR dialog on an abandoned monitor while the game
+        # sat healthy in the lobby on another one; `dismiss_error` clicked OK
+        # four times and reported success each time, because it verifies by
+        # re-reading the same dead frame. See focus.game_off_capture.
+        if game_off_capture():
+            return LobbyState.OFF_CAPTURE
         return self.det.state()
 
     # ── Actions ──
@@ -469,8 +493,52 @@ class LobbyControl(Driver):
                 print(f'      [lobby] REFUSED to click PLAY: wanted '
                       f'{require_mode}, {rec["error"]}', flush=True)
                 return None
+        # ⚠ CLEAR THE POPUP FIRST, and this is a step rather than a state
+        # because it changes nothing else on the screen. The daily-mission
+        # popup leaves every readback GREEN -- `read_page` PLAY, `read_mode`
+        # TRAINING at margin 898 -- and eats the click. Measured 2026-08-10:
+        # three clicks at (749, 1287), the button, with the lobby not moving.
+        #
+        # It is the fourth thing to sit over the lobby and swallow the one
+        # click that matters, after ERROR, RECONNECT and the ESC menu. Those
+        # three are cleared by name in ensure_in_match; so is this, one level
+        # lower, because unlike them it does not stop the lobby being the
+        # lobby -- there is nothing to recover from, only something to close.
+        if self.dismiss_popup():
+            return 'closed the event popup — PLAY on the next pass'
         self.pointer.click_at(*LOBBY_PLAY_XY)
         return f'click PLAY {LOBBY_PLAY_XY}'
+
+    def dismiss_popup(self):
+        """Close an event popup drawn over the lobby. -> True if one was closed.
+
+        Observe, act, verify: `popup_open` is POSITIVE evidence taken before
+        anything is pressed, the click goes to that popup's own CLOSE button,
+        and the readback afterwards decides what is reported.
+
+        ⚠ IT RETURNS RATHER THAN FALLING THROUGH TO THE CLICK IT JUST UNBLOCKED.
+        Closing the popup is a UI transition, and `_pump` is already a loop
+        that re-reads and comes back — clicking PLAY in the same breath would
+        be betting on an animation this has not measured, which is the shape
+        `ensure_ads` paid a whole magazine for.
+
+        ⚠ AND IT REPORTS A FAILED CLOSE INSTEAD OF LOOPING ON IT. A popup that
+        will not close is not a click that needs repeating; it is a screen
+        nobody here has seen, and the next pass says so with the score.
+        """
+        if not popup_open():
+            return False
+        self.pointer.click_at(*LOBBY_POPUP_CLOSE_XY)
+        time.sleep(POPUP_CLOSE_SETTLE_S)
+        if popup_open():
+            print(f'      [lobby] the event popup did not close — clicked its '
+                  f'CLOSE at {LOBBY_POPUP_CLOSE_XY} and it is still there. '
+                  f'PLAY would be swallowed, so this is not a timing problem '
+                  f'to wait out.', flush=True)
+            return False
+        print('      [lobby] closed the event popup that was eating the PLAY '
+              'click', flush=True)
+        return True
 
     def click_exit(self):
         self.pointer.click_at(*LOBBY_EXIT_XY)

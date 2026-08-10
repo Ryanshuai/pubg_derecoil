@@ -39,6 +39,7 @@ from config import (LOBBY_BAR_MAX, LOBBY_BAR_ROI, LOBBY_ERROR_MIN_SCORE,
                     LOBBY_MENU_MIN_SCORE, LOBBY_MENU_SEARCH,
                     LOBBY_MENU_THRESH, LOBBY_MENU_TITLE_ROI,
                     LOBBY_MENU_TITLE_ROI_IN_LOBBY,
+                    LOBBY_POPUP_CLOSE_ROI,
                     LOBBY_PING_MIN_FRAC, LOBBY_PING_ROI, LOBBY_PING_THRESH)
 from capture.cropper import RegionGrabber, win32_cap
 from detector.geometry import cut
@@ -51,6 +52,7 @@ LEAVE_TMPL_PATH = os.path.join(_TMPL_DIR, 'leave_training_mask.png')
 LEAVE_CONFIRM_TMPL_PATH = os.path.join(_TMPL_DIR, 'leave_confirm_mask.png')
 ERROR_TMPL_PATH = os.path.join(_TMPL_DIR, 'error_title_mask.png')
 RECONNECT_TMPL_PATH = os.path.join(_TMPL_DIR, 'reconnect_mask.png')
+POPUP_TMPL_PATH = os.path.join(_TMPL_DIR, 'mission_popup_mask.png')
 
 BAR = 'lobby_bar'
 PING = 'lobby_ping'
@@ -86,6 +88,38 @@ class LobbyState(enum.Enum):
     # member rather than NO_WINDOW because the recoveries are opposite — this
     # one is fixed by raise_game() in a second, that one by waiting.
     MINIMIZED = 'minimized'         # window exists, iconified, screen is not it
+    # ...and a fourth, which is the SAME lesson one step further along and cost
+    # an evening on 2026-08-10. The window is up, healthy, NOT iconified, and
+    # sitting somewhere other than the rectangle this repository captures.
+    #
+    # ⚠ WHAT THAT LOOKS LIKE IS NOT A BLANK SCREEN. It looks like whatever was
+    # last drawn there. Measured that night: `capture_screen()` returned a
+    # pixel-perfect ERROR dialog ("You have been logged off due to inactivity")
+    # while the game was ALIVE AND IN THE LOBBY on another monitor, PLAY button
+    # and all. The window rect was (-688, 0, 2064, 1152); the grab is
+    # (0, 0, SCREEN_W, SCREEN_H). classify() read the ghost and said ERROR --
+    # correctly, about a rectangle the game had left.
+    #
+    #     hover over the OK button      0.00 gray levels changed
+    #     whole grab, over 40 s         0.00
+    #     the desktop over the same 1.5 s   2.41   (it was alive)
+    #
+    # Four OK clicks went to an empty screen and `dismiss_error` reported
+    # success each time, because it verifies by re-reading the same frozen
+    # rectangle. THE FROZEN GRAB IS THE TELL, and it is the only one: every
+    # pixel probe agrees with every other pixel probe, because they are all
+    # describing the same photograph. This is the root CLAUDE.md law in its
+    # purest form -- the record described an object that was not the one being
+    # measured -- and no gate built out of pixels can catch it.
+    #
+    # Its own member rather than MINIMIZED because the recovery differs again,
+    # and it is the EXPENSIVE one: the operator's call, 2026-08-10, is that
+    # this is a game-side display bug and the game must be RESTARTED
+    # (`quit_game()` then `ensure_running()`). ⚠ Moving the window with
+    # SetWindowPos was the obvious repair and it is the wrong one -- the game
+    # re-asserts its own display, so the window goes back and the only thing
+    # the move buys is a few seconds during which the grab looks right.
+    OFF_CAPTURE = 'off_capture'     # window is not over the rectangle we grab
 
     @property
     def playable(self):
@@ -222,6 +256,7 @@ _LEAVE_TMPL = _load_template(LEAVE_TMPL_PATH)
 _LEAVE_CONFIRM_TMPL = _load_template(LEAVE_CONFIRM_TMPL_PATH)
 _ERROR_TMPL = _load_template(ERROR_TMPL_PATH)
 _RECONNECT_TMPL = _load_template(RECONNECT_TMPL_PATH)
+_POPUP_TMPL = _load_template(POPUP_TMPL_PATH)
 
 
 def _score(crop, tmpls, thresh):
@@ -328,6 +363,29 @@ def leave_entry_confirmed(frame=None):
     """
     roi = _search_roi(LOBBY_LEAVE_TEXT_ROI, LOBBY_MENU_SEARCH)
     return leave_entry_score(_grab(roi, frame)) >= LOBBY_LEAVE_MIN_SCORE
+
+
+def popup_close_score(crop):
+    """Match the daily-mission popup's CLOSE button in a search-window crop."""
+    return _score(crop, _POPUP_TMPL, LOBBY_MENU_THRESH)
+
+
+def popup_open(frame=None):
+    """Is an event popup drawn over the lobby, eating the PLAY click. -> bool
+
+    ⚠ THE BUTTON, NOT THE TITLE. "BEGINNER TRAINING" belongs to one event and
+    the next one will be called something else; every one of these popups has
+    a CLOSE. Matching what has to be CLICKED also makes the detector unable to
+    report a popup at a place the click would miss.
+
+    ⚠ AND IT IS POSITIVE EVIDENCE, WHICH IS THE POINT. The alternative on the
+    table was to press ESC on every lobby entry and read back -- but ESC with
+    no popup OPENS the lobby menu, so that is a blind toggle landing wrong half
+    the time, which control/CLAUDE.md's first trap is exactly about. This says
+    "the popup is there" before anything is pressed.
+    """
+    roi = _search_roi(LOBBY_POPUP_CLOSE_ROI, LOBBY_MENU_SEARCH)
+    return popup_close_score(_grab(roi, frame)) >= LOBBY_MENU_MIN_SCORE
 
 
 def reconnect_score(crop):

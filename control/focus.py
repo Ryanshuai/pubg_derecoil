@@ -9,11 +9,19 @@ key while the game is not frontmost types into whatever *is* frontmost, so
 `ensure_focus()` comes before anything that drives the game, and
 `focus_keeper()` re-checks during a long run.
 """
+import os
+import sys
 import time
+
+# Running this file directly (`--selftest` below) puts control/ on the path,
+# not the repo root, so the absolute `config` import would not resolve.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import psutil
 import win32gui
 import win32process
+
+from config import SCREEN_W, SCREEN_H
 
 GAME_EXES = ('tslgame',)     # PUBG ships as TslGame.exe
 
@@ -153,6 +161,47 @@ def game_minimized():
     # Belt and braces: Windows parks minimized windows near -32000, and a
     # window whose rect is off every monitor cannot be captured either way.
     return l < -30000 or t < -30000
+
+
+def game_off_capture():
+    """Does the game window fail to cover the rectangle we screenshot?
+
+    -> True / False / None (no window to ask about).
+
+    ⚠ THIS IS THE ONLY QUESTION ON THIS SCREEN A PIXEL CANNOT ANSWER, and
+    2026-08-10 is what it cost. The game came back on the WRONG MONITOR --
+    rect (-688, 0, 2064, 1152) against a grab of (0, 0, 3440, 1440) -- and the
+    monitor we do grab still held the last thing drawn there: a pixel-perfect
+    ERROR dialog, "You have been logged off due to inactivity". So:
+
+        classify()                    ERROR, and correct about that rectangle
+        dismiss_error()               clicked OK four times, reported success
+                                      each time, verifying by re-reading the
+                                      same frozen frame
+        hover over the OK button      0.00 gray levels
+        the whole grab over 40 s      0.00
+        the desktop over 1.5 s        2.41      <- it was alive all along
+
+    Every pixel probe agreed with every other pixel probe because they were
+    all describing one photograph. That is the root CLAUDE.md law -- the record
+    described an object that was not the one being measured -- and no gate
+    built out of pixels can catch it. Ask the WINDOW MANAGER instead: it is a
+    second, independent source about the same object.
+
+    COVER, NOT EQUAL. A window larger than the grab, or offset so the grab
+    still lands inside it, is fine -- what is being asked is whether every
+    pixel we are about to read belongs to the game. Equality would refuse a
+    borderless window a pixel wider than the mode and send the caller into a
+    restart loop over nothing.
+    """
+    hwnd = game_hwnd()
+    if not hwnd:
+        return None
+    try:
+        l, t, r, b = win32gui.GetWindowRect(hwnd)
+    except Exception:
+        return None
+    return not (l <= 0 and t <= 0 and r >= SCREEN_W and b >= SCREEN_H)
 
 
 def game_pids():
@@ -363,3 +412,49 @@ def focus_keeper():
     if _KEEPER is None:
         _KEEPER = FocusKeeper()
     return _KEEPER
+
+
+def _selftest():
+    """`game_off_capture` against measured rects. OFFLINE, no game, no Pico.
+
+    ⚠ IT IS THE ONE CHECK ON THIS SCREEN THAT PIXELS CANNOT MAKE, so it has to
+    be able to go red on its own. The 2026-08-10 rect is in here by value: that
+    is the one that read as a perfectly ordinary ERROR dialog while the game
+    was healthy on another monitor, and a fixture without it would only ever
+    confirm the days when nothing was wrong.
+    """
+    import win32gui as _w
+    real = _w.GetWindowRect
+    cases = [
+        ((0, 0, SCREEN_W, SCREEN_H), False, 'exactly the grab rect'),
+        ((0, 0, SCREEN_W + 400, SCREEN_H + 160), False,
+         'larger than the grab, still covers it -- COVER, not equal'),
+        ((-1, -1, SCREEN_W, SCREEN_H), False, 'origin outside, still covers'),
+        ((-688, 0, 2064, 1152), True, '2026-08-10: the game on another monitor'),
+        ((0, 0, SCREEN_W, SCREEN_H - 1), True, 'one pixel short at the bottom'),
+        ((1, 0, SCREEN_W + 1, SCREEN_H), True, 'shifted right by one'),
+        ((0, 0, SCREEN_W // 2, SCREEN_H), True, 'half width -- windowed'),
+    ]
+    fails = []
+    try:
+        for rect, want, why in cases:
+            _w.GetWindowRect = lambda h, r=rect: r
+            got = game_off_capture()
+            ok = got == want
+            print(f'  {"ok  " if ok else "FAIL"}  off_capture={str(got):5} '
+                  f'want={str(want):5}  {rect}  {why}')
+            if not ok:
+                fails.append(why)
+    finally:
+        _w.GetWindowRect = real
+    print()
+    if fails:
+        print(f'{len(fails)} FAILED: {", ".join(fails)}')
+        return 1
+    print(f'all ok ({len(cases)} cases)')
+    return 0
+
+
+if __name__ == '__main__':
+    import sys as _sys
+    raise SystemExit(_selftest() if '--selftest' in _sys.argv else 0)
