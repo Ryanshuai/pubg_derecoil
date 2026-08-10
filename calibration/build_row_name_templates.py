@@ -4,7 +4,7 @@
     pixi run row-templates --write    # install to data/templates/ocr_white/rows/
     pixi run row-templates --score    # score whatever is installed
 
-NO GAME. It reads the four frames `pixi run rows-batch` already captured and
+NO GAME. It reads the frames the row-batch collector already captured and
 the reading in `tools/record_row_names.py`, both of which are on disk.
 
 WHERE THE LABELS COME FROM. Each frame holds one batch of parts whose keys
@@ -21,6 +21,7 @@ is the worst of those gaps. That is the number to watch when the game restyles
 its font.
 """
 import argparse
+import glob
 import os
 import sys
 
@@ -35,6 +36,10 @@ from tools.record_row_names import BATCHES, NEARBY, READING
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHOTS = os.path.join(ROOT, 'calibration', 'artifacts', 'rows_vlm')
+# How far down a live frame `--from-icons` looks. 13 is what the list draws
+# occupied (measured, see collect_inventory_vlm); past that icon_box runs off a
+# 1440 screen.
+MAX_SCAN_ROWS = 13
 
 
 def cut_all():
@@ -68,6 +73,79 @@ def cut_all():
                 # frames is the same rendering twice, and a second copy only
                 # costs match time.
                 out.setdefault(f'{key}{suffix}', (m, stamp, row))
+    return out
+
+
+def cut_scrolled(pattern, existing):
+    """Labels cut from frames where a SCROLLBAR narrows the text column.
+
+    -> {'<key>.scroll': (mask, path, row)}
+
+    ⚠ A LONG NAME WRAPS AT TWO WIDTHS AND THE BANK ONLY HAD ONE. When the list
+    holds more rows than the window draws, the game puts a scrollbar down the
+    right edge and the label column loses ~50 px, so a two-line name re-wraps:
+
+        no scrollbar    Compensator (AR, DMR,  /  O12, S12K)      ink 47x198
+        scrollbar       Compensator (AR,       /  DMR, O12, S12K) ink 47x150
+
+    Every template in this bank was cut from UNSCROLLED frames, so the reader
+    was systematically weakest exactly when the list is full -- which is the
+    state the night harness spends most of its time in, and the one whose
+    unreadable rows saturated the pack and halted four cells on 2026-08-10.
+    Measured over 148 icon-named rows of 13 live frames, three parts rendered
+    at a width no template held: brake_ar, comp_ar, tactical_stock. It read
+    comp_ar as `comp_smg` 22 times out of 22 -- the shared prefix
+    `Compensator (` is all that survives the narrower window.
+
+    ⚠ THE LABELLER IS THE ICON READER, AND THAT IS THE WHOLE POINT. This file
+    normally takes its identities from a spawner record plus a vision model.
+    Here the row is named by matching its ICON -- a different rectangle, a
+    different bank, a different failure mode -- and the pixels cut are the
+    NAME beside it. Two independent statements about one row, which is the
+    same licence `cut_all` runs on, with a different second source.
+
+    ⚠ THE BAR IS THE ICON READER'S OWN GATES, NOT BYTE-EXACTNESS, and the
+    first version of this got that wrong. Requiring `mse == 0` dropped
+    `brake_ar` entirely: all eight of its scrolled rows score 113..323 because
+    of the 2 px row-pitch drift, so the strictest filter silently threw away a
+    third of the parts this function exists for. The gates are the right bar
+    because they are the ones with a measurement behind them -- 882 emitted
+    reads over the 1050-crop corpus, of which ZERO carried a wrong name, and
+    that corpus is drifted throughout. Byte-exactness is a stronger signal
+    about the CROP, not about the name.
+    """
+    from detector.tab_items import TabItemDetector
+    det = TabItemDetector()
+    out, seen = {}, {}
+    for path in sorted(glob.glob(pattern)):
+        frame = cv2.imread(path)
+        if frame is None or frame.shape[0] < 1400:
+            continue
+        for row in range(MAX_SCAN_ROWS):
+            item, occupied = det._read_row(frame, 'inventory', row)
+            # source='icon' is the one hard requirement: cutting a NAME
+            # template from a row the NAME reader identified is circular, and
+            # would let one bad template breed more of itself.
+            if not occupied or item is None or item.source != 'icon':
+                continue
+            if not item.key:
+                continue
+            x0, y0, x1, y1 = label_box(row, 'inventory')
+            m = tight(text_mask(frame[y0:y1, x0:x1]))
+            if m is None:
+                continue
+            # Only a shape NO installed template already holds is new. An
+            # identical re-cut is the same rendering twice and only costs
+            # match time -- `cut_all` says the same about the floor list.
+            if m.shape in existing.get(item.key, ()):
+                continue
+            prev = seen.get(item.key)
+            if prev is not None and prev != m.shape:
+                print(f'[!] {item.key}: two unseen widths {prev} and '
+                      f'{m.shape} -- only the first is cut')
+                continue
+            seen[item.key] = m.shape
+            out.setdefault(f'{item.key}.scroll', (m, path, row))
     return out
 
 
@@ -157,7 +235,32 @@ def main():
     ap.add_argument('--write', action='store_true')
     ap.add_argument('--score', action='store_true',
                     help='score what is installed, do not cut')
+    ap.add_argument('--from-icons', metavar='GLOB', default=None,
+                    help='cut the SCROLLED rendering of each label out of live '
+                         'frames, naming each row by its icon. See '
+                         'cut_scrolled: a scrollbar narrows the column and a '
+                         'long name re-wraps, and the whole bank was cut '
+                         'without one.')
     args = ap.parse_args()
+
+    if args.from_icons:
+        det = RowNameDetector()
+        have = {k: {t.shape for t in v} for k, v in det._templates.items()}
+        cuts = cut_scrolled(args.from_icons, have)
+        if not cuts:
+            print('no label rendering found that the bank does not already '
+                  'hold -- nothing to cut')
+            return 0
+        for stem, (m, path, row) in sorted(cuts.items()):
+            key = stem.split('.')[0]
+            print(f'  {stem:24} {m.shape[1]}x{m.shape[0]}   '
+                  f'(bank holds {sorted(have.get(key, ()))})   '
+                  f'row {row} of {os.path.basename(os.path.dirname(path))}')
+        if args.write:
+            write(cuts)
+        else:
+            print('(--write to install)')
+        return 0
 
     cuts = cut_all()
     sources = {stem: (st, 'nearby' if stem.endswith('.nearby') else 'inventory',

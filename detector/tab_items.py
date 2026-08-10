@@ -255,20 +255,31 @@ class TabItemDetector:
         # NOT composited). It fails where the icon reader cannot -- a part
         # whose icon rendering drifted still prints its name.
         #
-        # ⚠ IT IS A FALLBACK AND NEVER AN OVERRIDE, and that is measured, not
-        # cautious. Over 13 live frames of 2026-08-10 the two readers both
-        # spoke on 129 rows and DISAGREED on 22 -- every one of them a
-        # compensator, and every one of them the name reader's fault:
+        # ⚠ IT IS A FALLBACK AND NEVER AN OVERRIDE. That is a standing policy
+        # now rather than a live defect -- and the defect it was written for is
+        # kept because it is what a second reader looks like when it is quietly
+        # wrong. On 2026-08-10 the two both spoke on 129 rows and DISAGREED on
+        # 22, every one a compensator:
         #
         #     icon  comp_ar   mse 0.00   margin 646879x   <- byte-exact
-        #     name  comp_smg  iou 0.669  and it ranks the truth THIRD (0.447)
+        #     name  comp_smg  iou 0.669  and it ranked the truth THIRD (0.447)
         #
-        # `Compensator (` is a prefix shared by three parts and the windowed
-        # IoU's tie-break is not separating them here. So a plain "take
-        # whichever reader speaks" would have bought 2 rows and introduced 22
-        # wrong muzzles -- and a wrong muzzle is a whole cell of recoil data
-        # filed under the wrong config. The OCR bank needs those three names
-        # re-cut; until then it does not get a vote against an icon.
+        # ⚠ AND THE CAUSE WAS NOT THE COMPENSATOR TEMPLATES -- they were
+        # correct, and eyeballing them is what showed it. A SCROLLBAR takes
+        # ~50 px off the label column when the list overflows, so a two-line
+        # name re-wraps: "Compensator (AR, DMR," / "O12, S12K)" becomes
+        # "Compensator (AR," / "DMR, O12, S12K)". The whole bank had been cut
+        # from unscrolled frames, so the name reader was systematically weakest
+        # exactly when the list is FULL -- the state that saturated the pack
+        # and halted four cells that night. Three parts are long enough to
+        # re-wrap (brake_ar, comp_ar, tactical_stock); `.scroll` variants cover
+        # them (build_row_name_templates --from-icons) and the 22 disagreements
+        # went to ZERO, with the name reader 78.0% -> 93.5%.
+        #
+        # The policy stays regardless: "take whichever reader speaks" would
+        # have shipped those 22 wrong muzzles, and a wrong muzzle is a whole
+        # cell of recoil data filed under the wrong config. Where the icon
+        # answers it is byte-exact; nothing outranks that.
         #
         # ⚠ THE BANK IS ENGLISH-ONLY, AND THAT IS A SCOPE, NOT A RISK. It
         # scores 0/12 on calibration/artifacts/tab_inventory.png -- not a bad
@@ -285,12 +296,16 @@ class TabItemDetector:
         # stalled behind a dialog nothing could read). ⚠ If the language ever
         # moves, this fallback goes to zero and the icon reader does not.
         #
-        # What it is worth today is 2 rows of 168 (half_grip, supp_ar), with
-        # the compensator family excluded. It is kept because its failure modes
-        # are uncorrelated with the icon's -- a part whose ICON drifts still
-        # prints its name -- which is the only reason a second reader is worth
-        # having. Re-cutting the three compensator names is what would turn it
-        # from a fallback into a real second opinion.
+        # What it is worth, over the same 168 live rows:
+        #
+        #     icon alone   148   88.1%
+        #     name alone   157   93.5%      <- it now reads MORE than the icon
+        #     fused        157   93.5%      148 by icon + 9 recovered by name
+        #     they disagree on                0
+        #
+        # The 9 it recovers are rows the icon reader loses to the row-pitch
+        # drift -- which is the point of a second reader: its failure modes are
+        # uncorrelated with the first's. Correcting ROW_PITCH would lift both.
         key, iou = self._names.read(frame, i, panel)
         asset = ATTACHMENTS.get(key, {}).get('asset') if key else None
         if asset:
