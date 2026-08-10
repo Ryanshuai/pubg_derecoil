@@ -91,6 +91,49 @@ DRAG_DROP_WAIT = 0.25   # after release, before the screen is read back
 DRAG_HOLD_MS = 400      # Pico hold per arm; must exceed DRAG_REARM_S by a lot
 DRAG_REARM_S = 0.15     # so a dropped CDC packet still leaves 250 ms of hold
 
+# ── A recorded hand, replayed ─────────────────────────────────────────────
+#
+# (ms since press, x, y) from one real drag, 库存 -> 附近, recorded at 1 kHz by
+# tools/record_drag.py on 2026-08-09 and kept whole. Eight were recorded; this
+# is the quickest (376 px in 114 ms, 3.3 px/ms) and its release sits on the
+# median of the eight.
+#
+# WHY A PATH AND NOT THREE MORE CONSTANTS. The interpolated gesture is
+# uniform: every step the same size, the same 8 ms apart. A hand is not — this
+# one accelerates 1, 4, 8, 14, 24, 32, 41, 49, 53 px per update and then brakes
+# 51, 45, 33, 21 into the drop. ⚠ ITS PEAK STEP IS 53 px, which is past the
+# "52 px -> 1/3" cliff that DRAG_STEP_PX = 32 was set to stay under, and it
+# lands anyway. So that cliff was measured on UNIFORM steps and does not
+# describe a step arriving inside a ramp; do not read the two as the same
+# number.
+#
+# WHAT IT IS AND IS NOT EVIDENCE FOR, because the temptation is to read the
+# 12/12 as a win: replaying this scored 12/12 with zero retries on 库存 ->
+# 附近, and the shipped interpolated gesture at the shipped release point
+# scored 12/12 with zero retries on the same path minutes earlier. THE TWO ARE
+# TIED. What actually moved between those runs is the release point, which the
+# recording is the evidence for (see NEARBY_DROP_X). This path is here because
+# it is the gesture that was run when the release point was validated, not
+# because it beat anything.
+HUMAN_DRAG_PATH = [
+    (0.00, 1058, 200), (3.07, 1058, 199), (11.04, 1057, 198),
+    (19.93, 1053, 198), (27.07, 1045, 198), (34.83, 1031, 198),
+    (42.90, 1007, 198), (50.88, 975, 199), (58.86, 934, 200),
+    (66.99, 885, 200), (75.13, 832, 201), (82.92, 781, 203),
+    (90.92, 736, 205), (100.17, 703, 206), (107.87, 682, 208),
+]
+
+# Past this, the recording is not replayed and drag() interpolates instead.
+#
+# ⚠ THIS BOUND IS THE WHOLE REASON THE PATH IS SAFE AS A DEFAULT. Replaying is
+# an affine SCALING onto the actual endpoints, so a 15-update recording
+# stretched over the 1122 px slot -> 库存 crossing puts 158 px between
+# positions — five times DRAG_STEP_PX and past the 104 px spacing that measured
+# 0/3. The recording is 376 px long; anything near that replays, anything
+# longer gets the uniform gesture, which is the one with 224/225 behind it on
+# exactly those long edges.
+PATH_MAX_TRAVEL_PX = 450
+
 # ── Making a placement stick ──────────────────────────────────────────────
 #
 # SetCursorPos wins against nothing else touching the mouse. It loses against
@@ -413,12 +456,24 @@ class Pointer:
     def drag(self, src, dst, settle=MOVE_WAIT, steps=None,
              grab=DRAG_GRAB_WAIT, hover=DRAG_HOVER_WAIT,
              drop=DRAG_DROP_WAIT, buttons=0x01,
-             nudge=DRAG_NUDGE_COUNTS):
+             nudge=DRAG_NUDGE_COUNTS, path=HUMAN_DRAG_PATH):
         """Press at `src`, travel to `dst`, release there.
 
         `steps` defaults to one interpolated position every DRAG_STEP_PX, so a
         long drag is not a sequence of jumps — see that constant, which was
         measured off a human hand rather than chosen.
+
+        `path` REPLAYS a recorded gesture instead of interpolating one, and
+        DEFAULTS TO ONE — HUMAN_DRAG_PATH, a real hand at 1 kHz. It is scaled
+        onto `src` and `dst`, so the release point stays this call's parameter
+        rather than whatever the recording ended on; `steps` is then ignored
+        and the waits come from the recording rather than DRAG_STEP_WAIT.
+        Travels longer than PATH_MAX_TRAVEL_PX fall back to interpolation —
+        see that constant, it is what keeps this default from putting 158 px
+        between positions on the long crossings.
+
+        Pass path=None for the uniform gesture. `steps` only means anything
+        then.
 
         False means the cursor did not go where it was told — another process
         moved it, or the coordinate is off-screen. The button is always
@@ -430,7 +485,30 @@ class Pointer:
         """
         sx, sy = int(src[0]), int(src[1])
         tx, ty = int(dst[0]), int(dst[1])
-        if steps is None:
+        if path and ((tx - sx) ** 2 + (ty - sy) ** 2) ** 0.5 > PATH_MAX_TRAVEL_PX:
+            path = None     # too long to scale a 15-update recording onto
+        if path:
+            # (ms, x, y) -> (wait_s, x, y), affinely mapped so the recording's
+            # first sample lands on src and its last on dst. SCALED, not
+            # translated: translating pins the start and leaves the end
+            # wherever the hand finished, so the final position has to jump to
+            # dst — which is the one part of the gesture this is trying to
+            # reproduce faithfully. Scaling keeps the shape and the timing and
+            # gives up only the absolute travel.
+            t0, x0, y0 = float(path[0][0]), int(path[0][1]), int(path[0][2])
+            x1, y1 = int(path[-1][1]), int(path[-1][2])
+            fx = (tx - sx) / (x1 - x0) if x1 != x0 else 0.0
+            fy = (ty - sy) / (y1 - y0) if y1 != y0 else 0.0
+            plan, prev = [], t0
+            for ms, x, y in path[1:]:
+                plan.append((max(0.0, (float(ms) - prev) / 1000.0),
+                             round(sx + (int(x) - x0) * fx),
+                             round(sy + (int(y) - y0) * fy)))
+                prev = float(ms)
+            if plan:
+                plan[-1] = (plan[-1][0], tx, ty)
+            steps = len(plan)
+        elif steps is None:
             dist = ((tx - sx) ** 2 + (ty - sy) ** 2) ** 0.5
             steps = int(min(DRAG_STEPS_MAX,
                             max(DRAG_STEPS_MIN, dist / DRAG_STEP_PX)))
@@ -461,16 +539,21 @@ class Pointer:
         try:
             time.sleep(grab)
             for i in range(1, steps + 1):
-                f = i / steps
-                self.move_to(round(sx + (tx - sx) * f),
-                             round(sy + (ty - sy) * f))
+                if path:
+                    wait, px_, py_ = plan[i - 1]
+                else:
+                    f = i / steps
+                    wait = DRAG_STEP_WAIT
+                    px_ = round(sx + (tx - sx) * f)
+                    py_ = round(sy + (ty - sy) * f)
+                self.move_to(px_, py_)
                 # A raw report so the game's input layer sees motion while the
                 # button is down. See DRAG_NUDGE_COUNTS — without it the whole
                 # travel is invisible to raw input and the gesture reads as a
                 # click. Alternating sign keeps the net displacement at zero.
                 if nudge:
                     self.pico.move(nudge if i % 2 else -nudge, 0)
-                time.sleep(DRAG_STEP_WAIT)
+                time.sleep(wait)
                 now = time.perf_counter()
                 if now - last_arm >= DRAG_REARM_S:
                     self.pico.click(buttons, DRAG_HOLD_MS)

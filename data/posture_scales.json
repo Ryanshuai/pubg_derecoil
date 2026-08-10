@@ -2,12 +2,29 @@
   "_note": "Per-weapon posture overrides, written by ↑↓ in game. A weapon named here wins over config.POSTURE_FACTOR for that posture. Keys starting with _ are not weapons and are never looked up.",
   "_retired": {
     "_why": "Tuned by hand before 2026-08-09, when the posture factor multiplied the pre-plan-A curve. Those curves were deleted with the bullet-bucket coordinate, so these are corrections to a baseline this repository can no longer produce -- not weaker numbers, numbers about something else. Kept rather than deleted because they are the operator's own work and cost real magazines to arrive at; out of the lookup because applying them would silently override the one measured pair on 7 of 11 fired weapons. ⚠ p90 crouching 1.00 reads more like 'never adjusted' than 'measured as 1'.",
-    "vss": {"crouching": 0.75, "prone": 0.58},
-    "vector": {"prone": 0.72, "crouching": 0.8},
-    "aug": {"prone": 0.55},
-    "mp5k": {"prone": 0.71, "crouching": 0.84},
-    "mg3": {"crouching": 0.42},
-    "js9": {"crouching": 0.79},
-    "p90": {"crouching": 1.0}
+    "vss": {
+      "crouching": 0.75,
+      "prone": 0.58
+    },
+    "vector": {
+      "prone": 0.72,
+      "crouching": 0.8
+    },
+    "aug": {
+      "prone": 0.55
+    },
+    "mp5k": {
+      "prone": 0.71,
+      "crouching": 0.84
+    },
+    "mg3": {
+      "crouching": 0.42
+    },
+    "js9": {
+      "crouching": 0.79
+    },
+    "p90": {
+      "crouching": 1.0
+    }
   }
 }
