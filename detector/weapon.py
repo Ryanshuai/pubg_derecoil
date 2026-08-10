@@ -692,6 +692,32 @@ class Weapon():
         eight numbers is fitting 8 points of a 41-dimensional model, which is
         the root CLAUDE.md's first law.
 
+        ⚠ THE TABLE ABOVE IS A TOTAL, AND A TOTAL CANNOT SEE THE SHAPE -- which
+        is the one thing this method assumes and the one thing that would make
+        it fail at the START of a burst, where a player notices. Measured
+        2026-08-09 on the aug's eight cells (200 magazines): the fraction of the
+        burst total delivered by time t, which is the shape with the size
+        divided out.
+
+            t (ms)        50    100    200    400    800   1200   1600
+            bare       0.004  0.010  0.027  0.091  0.264  0.484  0.739
+            worst cell  +0.3   +0.3   +0.3   +1.1   +1.8   +0.9   +0.5
+                                          (percentage points off bare)
+
+        Every part on every cell is within 1.8 points of bare, and the head --
+        the first 200 ms -- within 0.3. So the parts SCALE this gun's curve and
+        do not re-time it, which is exactly the assumption, and using the bare
+        shape is not where a head-of-burst error would come from.
+
+        ⚠ AND THE HEAD IS 0.4% OF THE BURST AT 50 ms. Whatever "the first shot
+        is not held down" is, it is not a large number of counts: aug bare is
+        1782 counts and 0.004 of it is 7. The same magazines put the head's
+        under-compensation at 1.6 counts at t=51 ms (y_true 4.1 against y_comp
+        2.5), peak excursion inside the first 300 ms at 1.5..6.2 counts. At
+        K=1.54 that is single-digit pixels, so a visible first-shot jump is NOT
+        explained by anything measured here, and this note is the record that it
+        was looked for in the size, in the shape and in the peak.
+
         That is the honest reason it may fire and the honest reason it is
         labelled a prior: 9% off is worth ~800 counts of held recoil, and 100%
         off is what "no curve" delivers.
