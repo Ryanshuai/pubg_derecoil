@@ -133,9 +133,9 @@ GROUPS = {
 # CARRIED. One trip loads as many as the list holds and the waves then draw
 # from it, so the panel opens ~8 times over a full run instead of ~26.
 #
-# 12 not 13: the list draws 13 rows (measured, see collect_rows_vlm) and every
-# part is loaded in PAIRS -- one copy for each rack -- so the usable figure is
-# the largest even number under it.
+# 12 not 13: the list draws 13 rows (measured, see collect_inventory_vlm) and
+# every part is loaded in PAIRS -- one copy for each rack -- so the usable
+# figure is the largest even number under it.
 LOAD_ROWS = 12
 
 # Ground, then level. Relative counts, applied and then undone, so `level` is

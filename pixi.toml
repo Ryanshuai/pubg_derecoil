@@ -58,7 +58,14 @@ collect = "python calibration/legacy_collect_templates.py"
 collect-intersect = "python calibration/collect_intersect.py"
 intersect-test = "python tools/test_intersect.py"
 intersect-order = "python tools/intersect_order.py"
-rows-batch = "python calibration/collect_rows_vlm.py"
+# Photograph 库存 row ICONS through four pitches and intersect them. The
+# runtime names rows by ICON and every row read `unknown` on 2026-08-10 --
+# top-1 mostly CORRECT (mse 206/226/340) and rejected by gates of 150 and
+# 1.25, because the stored templates carry a background the panel composites
+# fresh every frame. `--selftest` is the offline half: the intersection and
+# its five refusals on synthetic crops, no game and no hardware.
+inventory-batch = "python calibration/collect_inventory_vlm.py"
+inventory-test = "python calibration/collect_inventory_vlm.py --selftest"
 row-names = "python tools/record_row_names.py"
 row-templates = "python calibration/build_row_name_templates.py"
 mine-tiles = "python calibration/mine_slot_tiles.py"
