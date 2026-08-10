@@ -551,7 +551,10 @@ ESCAPE_DEBT = {
     'calibration/capture_ads.py':
         Reason('`while len(out) < n` collecting frames — bound it or ask '
                'focus_keeper', INFERRED),
-    'calibration/collect_templates.py':
+    # Renamed 2026-08-09 when the intersection flow replaced it. The debt is
+    # the same two loops; only the path moved. It is NOT paid off, so the
+    # entry follows the file rather than being deleted.
+    'calibration/legacy_collect_templates.py':
         Reason('`while remaining` over the spawn list — one pass that spawns '
                'nothing must end it', INFERRED),
     'tools/fit_pitch_level.py':

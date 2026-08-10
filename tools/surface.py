@@ -253,7 +253,7 @@ INTENTS = {
         # while it was painted -- so there is no public callable to tag. A
         # method that let anyone read "now" would be the old race with a new
         # name.
-        R: ['control/inventory.py:InventoryControl.tab_open',
+        R: ['control/inventory.py:InventoryControl.is_tab_open',
             'control/inventory.py:InventoryControl.await_tab',
             'control/tab_watch.py:TabWatch.measure_open',
             'control/tab_watch.py:TabWatch.tick',
@@ -416,11 +416,11 @@ INTENTS = {
         # only moment they reliably know it is now.
         R: ['control/gun.py:GunDriver.blocking_screen',
             # dump() writes the crops behind a failed decision and drives
-            # nothing; tab_open() reads the anchor. Both are what you reach
+            # nothing; is_tab_open() reads the anchor. Both are what you reach
             # for AFTER something refused, which is when a caller is least
             # able to afford a surprise.
             'control/gun.py:GunDriver.dump',
-            'control/gun.py:GunDriver.tab_open',
+            'control/gun.py:GunDriver.is_tab_open',
             'control/gun.py:GunDriver.read_posture',
             'control/gun.py:GunDriver.in_ads',
             'control/gun.py:GunDriver.ads_signals',
@@ -1271,7 +1271,7 @@ def _driving(bodies):
 
     # ⚠ A NAME MANY CLASSES DEFINE RESOLVES TO NONE OF THEM. `classify` has
     # eleven owners and `read` has several, so `self.tab.classify(...)` linked
-    # InventoryControl.tab_open to AmmoDetector.classify, then to
+    # InventoryControl.is_tab_open to AmmoDetector.classify, then to
     # ScopeVerifier.read, then to ensure_tab -- four hops of pure homonym, and
     # a 41x18 screenshot was reported as driving the mouse.
     #
@@ -1418,7 +1418,7 @@ SELFTEST = (
     # ⚠ THESE TWO PIN THE HOMONYM RULE, and they are a matched pair on
     # purpose: one must come back R and the other must NOT, and the naive
     # classifier got them the same way round for the same wrong reason.
-    ('control/inventory.py:InventoryControl.tab_open', False,
+    ('control/inventory.py:InventoryControl.is_tab_open', False,
      'is one 41x18 crop and a classify(). `classify` has eleven owners, so '
      'linking it to any single one of them is a homonym, not a call'),
     ('control/stock.py:read_stock', True,

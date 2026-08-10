@@ -1,5 +1,21 @@
 """Every attachment template against every ground-truth crop. Offline.
 
+⚠ LEGACY (2026-08-09). Superseded by calibration/collect_intersect.py, which
+photographs a part on TWO RACKED GUNS AT ONCE and intersects the crops instead
+of solving `c = a*icon + (1-a)*backdrop` from equip/unequip pairs. Kept running
+only until the new flow is accepted; then this file goes.
+
+WHY IT IS BEING REPLACED, in the order the failures were found:
+  - the alpha solve has no handle on the part of a scope crop that is the
+    HOST GUN's rail: that hardware does not move with the view, so db = 0 and
+    nothing computed from one gun's captures can separate it
+  - unequip-per-background is the single largest source of lost rounds --
+    "could not get it off the gun", "went to 库存 instead", 0-crop sweeps
+  - `bank()` keeps ONE solve per part, ranked by reconstruction error, which
+    measures how well a solve rebuilds its own captures and says nothing about
+    the gun it will be matched against
+
+
     pixi run attachments                 # score what the detector loads today
     pixi run attachments --holdout       # score with the run under test excluded
     pixi run attachments --write         # rebuild the .solved templates, then score
@@ -102,7 +118,7 @@ from detector.attachment_catalog import ATTACHMENTS, canonical
 import detector.attachment_detector as ad
 from detector.tab_items import ROW_MSE_MAX, ROW_MARGIN_MIN
 from detector.tab_layout import icon_box
-from calibration.solve_template import solve
+from calibration.legacy_solve_template import solve
 
 RUNS = os.path.join(ROOT, 'calibration', 'artifacts', 'attachments', 'runs')
 TMPL_DIR = os.path.join(ROOT, 'data', 'templates', 'pubg_assets', 'Item',
@@ -291,6 +307,131 @@ def bank(exclude=()):
     return best
 
 
+def bank_all(exclude=()):
+    """Every solve of every key, not just the winner. -> {key: [(bgra, err, stamp)]}"""
+    per = defaultdict(list)
+    for d in sorted(glob.glob(os.path.join(RUNS, '*'))):
+        stamp = os.path.basename(d)
+        if stamp in exclude or not os.path.exists(
+                os.path.join(d, 'manifest.json')):
+            continue
+        for key, (bgra, err) in solved_icons(d).items():
+            if err < RECON_MAX:
+                per[key].append((bgra, err, stamp))
+    return per
+
+
+# How far apart the hosts may be on a pixel's COLOUR before it is dropped.
+#
+# ⚠ THE ALPHA INTERSECTION ALONE DOES NOT REMOVE THE RAIL, and the reason is
+# almost too simple: the rail is not transparent. It is metal. Every host
+# solves it as opaque, `min` keeps it, and what differs between hosts is only
+# its COLOUR. Measured over the intersection's own surviving pixels:
+#
+#     part          hosts   kept    colour spread   p90     max
+#     vert_grip       7     45.1%       0.9         2.7     9.7
+#     heavy_stock     2     59.1%       0.4         1.3     7.0
+#     holo            4     57.9%       4.5        13.0   140.3
+#     scope_2x        4     61.6%       4.5         6.7   141.0
+#     scope_6x        4     61.5%       6.2        17.5   168.7
+#
+# The parts drawn inside a tile agree to under 10 grey levels EVERYWHERE. The
+# sights agree at the p90 and then have a tail to 140-168 -- a small set of
+# pixels the hosts flatly disagree about, which is the hardware.
+#
+# ⚠ ZERO. EXACT AGREEMENT, and it is FREE -- that is measured, not assumed.
+# Swept against the whole 2080-crop corpus:
+#
+#     tolerance      hits    scope    kept: holo / scope_6x / vert_grip
+#         0      2063/2080  520/525      40%   45%   27%
+#         1      2063/2080  520/525      42%   48%   33%
+#         8      2063/2080  520/525      47%   54%   45%
+#        30      2063/2080  520/525      55%   57%   45%
+#
+# Every tolerance scores IDENTICALLY, down to which crops miss. So the pixels
+# a loose tolerance keeps contribute nothing to recognition: they are the rail
+# and the scene. Exact agreement throws away more than half of vert_grip's
+# template and costs nothing at all, which is the strongest statement
+# available about what those pixels were.
+#
+# ⚠ Do not read "0 is as good as 30" as "the threshold does not matter".
+# It matters in the direction not measured here: a template carrying pixels
+# no host agrees on is a template that can match something it should not, and
+# this corpus has no such impostor in it to catch. 0 is the only value that
+# cannot carry one.
+COLOUR_AGREE = 0.0
+
+
+def bank_intersect(exclude=(), mode='min', colour_max=COLOUR_AGREE):
+    """Per key, KEEP ONLY WHAT EVERY HOST AGREES ON. -> same shape as bank()
+
+    WHY NOT `bank()`. That one keeps the single solve with the lowest
+    reconstruction error and throws the rest away. Two things are wrong with
+    it, and the second is the one that matters:
+
+      it uses ONE gun          every other host's captures are discarded
+      it ranks by RECON        which measures "can this solve rebuild the
+                               captures it came from" -- a question about one
+                               sweep, asked of a template whose whole job is to
+                               be recognised on OTHER guns. The criterion
+                               cannot see the dimension it is selecting for.
+
+    `scope` is where that bites: the sight is composited onto the gun's own
+    rail, so part of every scope solve is HARDWARE BELONGING TO THE HOST.
+    Measured 2026-08-09, cross-gun alpha disagreement by slot -- scope 32.4,
+    magazine 6.3, muzzle 1.6, grip 1.0, stock 0.9. The rail is stable within
+    one gun, so nothing computed from one gun's captures can find it, and
+    recon error is perfectly happy with it.
+
+    ACROSS guns it is not stable, and that is the whole handle:
+
+        a pixel every host agrees is opaque    the attachment
+        a pixel they disagree about            the rail, or noise
+
+    `min` over the alphas keeps the first and drops the second -- the
+    intersection. The colour is the alpha-weighted mean, so a host whose solve
+    is nearly transparent at a pixel barely votes on its colour.
+
+    ⚠ THE INTERSECTION CAN ONLY SHRINK A TEMPLATE, so it can also eat a real
+    edge that one bad sweep happened to solve as transparent. That is why this
+    is scored rather than trusted: `--intersect` reports the hit rate against
+    the whole corpus beside the current bank's, and `--write-intersect` is a
+    separate flag from `--write`.
+    """
+    out = {}
+    for key, solves in bank_all(exclude).items():
+        if len(solves) == 1:
+            out[key] = solves[0]
+            continue
+        shapes = {s[0].shape for s in solves}
+        if len(shapes) > 1:
+            # Two renderings at two sizes are not two views of one thing --
+            # see the module docstring on .solved vs .row. Fall back rather
+            # than resize: a resize here is the scale error this file has
+            # already made twice, in both directions.
+            out[key] = min(solves, key=lambda s: s[1])
+            continue
+        a = np.stack([s[0][:, :, 3].astype(np.float32) for s in solves])
+        c = np.stack([s[0][:, :, :3].astype(np.float32) for s in solves])
+        alpha = a.min(0) if mode == 'min' else np.median(a, axis=0)
+        w = (a / 255.0)[..., None]
+        icon = (c * w).sum(0) / np.maximum(w.sum(0), 1e-6)
+        # THE COLOUR HALF OF THE INTERSECTION. The worst channel, not the mean
+        # of the three: a pixel the hosts agree on in blue and disagree on in
+        # red is a pixel they disagree about. Where they do, BOTH the colour
+        # and the alpha go to zero -- the template must not carry a value
+        # nobody agrees on, and an alpha of zero is how it declines to.
+        spread = (c.max(0) - c.min(0)).max(axis=2)
+        drop = spread > colour_max
+        alpha[drop] = 0.0
+        icon[drop] = 0.0
+        out[key] = (np.dstack([icon.astype(np.uint8),
+                               alpha.astype(np.uint8)]),
+                    float(np.mean([s[1] for s in solves])),
+                    f'intersect({len(solves)})')
+    return out
+
+
 def detector_with(icons):
     """A detector holding the shipped art plus these solved icons.
 
@@ -309,7 +450,14 @@ def detector_with(icons):
         if name not in det._templates:
             slot = ATTACHMENTS[key]['slot']
             det._slot_index.setdefault(slot, []).append(name)
-        det._templates.setdefault(name, []).append((vals, ys, xs))
+        # ⚠ FOUR FIELDS. AttachmentDetector._variant unpacks
+        # `tmpl_vals, ys, xs, (th, tw)`, and this appended three -- so every
+        # path through here raised ValueError on the first score. That is
+        # `--holdout` and every experiment built on detector_with, dead for as
+        # long as the shape has been four. Nothing caught it because the
+        # default path builds its detector from disk and never comes here.
+        det._templates.setdefault(name, []).append(
+            (vals, ys, xs, bgra.shape[:2]))
     return det
 
 
@@ -619,7 +767,85 @@ COUNTED = ('slots', 'reference rows', 'rows')
 # ones that survive drawn() start at 1605 -- so 25 tiles with a part plainly in
 # them were being reported empty. The numbers are in
 # detector/attachment_detector.MSE_EMPTY_TH.
-BASELINE = {'slots': (1710, 1727), 'reference rows': (10, 12),
+# ⚠ slots 1710/1727 -> 1830/1847 on 2026-08-09: the FIRST 120 crops in this
+# corpus taken on a host gun chosen at random rather than by greedy set cover
+# (collect_templates --spread, run 20260809_175746, 13 guns never photographed
+# before). The miss count did not move -- 17 before, 17 after -- and the old
+# crops are untouched and the scoring deterministic, so all 120 hit. Counted
+# directly per (gun, part) as a second reading: 120/120.
+#
+# WHAT THAT DOES AND DOES NOT SETTLE. It is the first measurement in this repo
+# of whether the HOST GUN changes the crop -- the tile is translucent and
+# blend_attachment carries 0.37*blur(background) through from a different
+# weapon's silhouette. But a slot is read against a bank narrowed by the gun,
+# so a narrower candidate set is a cheaper way to be right, and the widths are
+# mixed. Three tiers, and only the first is evidence:
+#
+#   as wide or wider than sks   mk14 quick_ar 6, mk14 quick_sr 6, qbz
+#                               light_grip 6, vss quickext_sr 6, mp9
+#                               uzi_stock 3 vs 1, m16/m416 stock 2 vs 1
+#   narrower than sks           ace32 ext_ar 3 vs 6, mk47 quickext_ar 3 vs 6,
+#                               o12 red_dot 6 vs 9, s1897 choke/duckbill 2 vs 7
+#   ⚠ one candidate            dragunov cheek_pad, s1897 bullet_loops. A
+#                               forced choice. 10/10 there carries NO
+#                               information and must not be quoted as if it did
+#
+# 1830/1847 -> 1840/1857: mp5k red_dot, 10 more on a third host, from the run
+# that aborted on FocusLost after one round (20260809_182713). All 10 hit and
+# the miss count is still 17.
+#
+# 1840/1857 -> 1888/1907, and ⚠ THE MISS COUNT MOVED FOR THE FIRST TIME: 17 to
+# 19. Run 20260809_184835 put the last five lonely parts on a second gun, and
+# 48 of its 50 crops hit. The two that did not are `aug/holo` read as
+# `variable` (p4 and p9), and they are not noise -- they are the first
+# cross-gun MISREAD in this corpus and they have a measured cause:
+#
+#   cross-gun alpha disagreement, by slot, THIN solves excluded
+#     scope     7 parts   mean 32.4   edge 61.2   mid 36.5   ALL SEVEN over 10
+#     magazine  5          mean  6.3
+#     muzzle   11          mean  1.6
+#     grip      4          mean  1.0
+#     stock     5          mean  0.9
+#
+# `scope` is the one slot that draws NO TILE -- the sight is composited onto
+# the gun's own rail, so part of every scope crop is hardware that changes
+# with the host. 20-36x the disagreement of every other slot, and `bank()`
+# keeps ONE solve per part (lowest recon error), so holo ships as solved on
+# sks and is then matched against an aug. `pixi run cross-gun` reproduces the
+# table.
+#
+# ⚠ Do not "fix" this by raising a threshold. The right repair is either a
+# per-gun scope template or a solve that uses both guns to cancel the rail,
+# and neither exists yet. 19 is the honest number until one does.
+#
+# 1888/1907 -> 2060/2080. Three scope sweeps on hosts chosen to be as unlike
+# the DMR the bank was solved on as the roster allows: mp5k (SMG, 7 sights),
+# kar98k (bolt SR, 6) and awm (bolt SR, 5 before the run lost the foreground).
+# 172 of their 173 crops hit; the one miss is kar98k/scope_2x, whose solve
+# stands on 5 pairs.
+#
+# ⚠ AND THE alpha DISAGREEMENT DOES NOT PREDICT THE MISREADS. holo's worst
+# host pair is now mp5k vs sks at 51.4 -- and mp5k reads 10/10, while aug, at
+# 50.0, is the one that misreads twice. Same magnitude, opposite outcome. So
+# "scope templates carry the host's rail" (measured, 20-36x every other slot)
+# and "aug/holo misreads" are two findings, not one; whatever links them is
+# about WHICH pixels differ, not how many grey levels. Do not quote the second
+# as caused by the first.
+#
+# ⚠⚠ THE 2063 THAT BRIEFLY STOOD HERE WAS MEASURED WRONG, and the way it was
+# wrong is worth more than the number was. `detector_with` APPENDS its icons
+# as extra variants beside the ones already loaded from disk, and `best_two`
+# takes the best variant -- so scoring "the intersection bank" that way scored
+# THE OLD BANK AND THE NEW ONE TOGETHER. Adding a variant can only improve a
+# read or leave it alone, which is exactly why the result looked so clean:
+# "three fixed, zero gained" was not evidence about the intersection, it was
+# arithmetic about unions. Written to disk on its own the same bank scores
+# 1881/2080 -- a 182-crop regression. The templates were restored with
+# `git checkout` and the shipped bank is the recon-picked one, unchanged.
+#
+# Any future experiment through detector_with must REPLACE the variant list
+# for a key, not extend it, or it is measuring the union again.
+BASELINE = {'slots': (2060, 2080), 'reference rows': (10, 12),
             'rows': (930, 1050)}
 
 
@@ -715,7 +941,16 @@ def main():
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--write', action='store_true',
-                    help='rebuild the .solved templates from every run first')
+                    help='rebuild the .solved templates from every run first: '
+                         'per part, the ONE solve with the lowest recon error')
+    ap.add_argument('--write-intersect', action='store_true',
+                    help='rebuild them as the INTERSECTION of every host gun '
+                         "instead — keep only what all of them agree is "
+                         'opaque, which drops the part of a scope crop that is '
+                         "the host's own rail. See bank_intersect")
+    ap.add_argument('--intersect', action='store_true',
+                    help='score the intersection bank beside the shipped one, '
+                         'writing nothing')
     ap.add_argument('--no-template', action='store_true',
                     help='drop each part from the bank and report what its '
                          'own crops read as. Answers what an UNRECOGNISED '
@@ -733,9 +968,16 @@ def main():
     except (AttributeError, OSError):
         pass
 
+    if args.write and args.write_intersect:
+        ap.error('--write and --write-intersect build the bank two different '
+                 'ways; pick one')
     if args.write:
-        print('rebuilding solved templates')
+        print('rebuilding solved templates (lowest recon error per part)')
         write_bank(bank())
+        print()
+    if args.write_intersect:
+        print('rebuilding solved templates (intersection over every host gun)')
+        write_bank(bank_intersect())
         print()
 
     corpus = samples()

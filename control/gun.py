@@ -656,12 +656,12 @@ class GunDriver:
     #
     # What is still legitimately different is the CAPTURE path, not the
     # judgement: this gets 'type' out of the banded grabber's dict, already in
-    # hand from the frame the loop is on, while InventoryControl.tab_open()
+    # hand from the frame the loop is on, while InventoryControl.is_tab_open()
     # win32_cap's the region on demand. Passing the crop straight through is
     # what keeps that true — building a detector that grabs its own frame would
     # cost a second capture per call inside the fire loop.
 
-    def tab_open(self, frame):
+    def is_tab_open(self, frame):
         # Indexed, not .get(): classify() reads a missing crop as "shut", and
         # a grabber that is not carrying 'type' would then report the
         # inventory closed forever -- ensure_inventory_closed() would return
@@ -720,12 +720,12 @@ class GunDriver:
         which looks exactly like a broken detector."""
         for _ in range(tries):
             self.flush(2)
-            if not self.tab_open(self.grab()):
+            if not self.is_tab_open(self.grab()):
                 return True
             self.mouse.key(HID_KEY_TAB, 60)
             time.sleep(TAB_CLOSE_S)
         self.flush(2)
-        if not self.tab_open(self.grab()):
+        if not self.is_tab_open(self.grab()):
             return True
         # Every press was sent and the screen never changed. Name the eater
         # rather than leaving the next gate to blame its own detector.
@@ -748,12 +748,12 @@ class GunDriver:
         the time. Watch instead."""
         for _ in range(tries):
             self.flush(2)
-            if self.tab_open(self.grab()):
+            if self.is_tab_open(self.grab()):
                 return True
             self.mouse.key(HID_KEY_TAB, 60)
             time.sleep(TAB_OPEN_S)
         self.flush(2)
-        return self.tab_open(self.grab())
+        return self.is_tab_open(self.grab())
 
     def read_loadout(self, slot=1):
         """L1 — One forced Tab cycle -> (gun name, attachments) for `slot`. DESPITE
@@ -801,10 +801,10 @@ class GunDriver:
         # coordinate, and grab() returns {region_name: crop} -- indexing that
         # with a pair of slices raises KeyError, which is what killed the first
         # unattended night run three minutes after this method was last
-        # "fixed". tab_open() wants the named dict, so it keeps getting one.
+        # "fixed". is_tab_open() wants the named dict, so it keeps getting one.
         cropped = self.grab()
         frame = self.full(cropped)
-        ok = self.tab_open(cropped)
+        ok = self.is_tab_open(cropped)
         gun = att = None
         if ok:
             crops = {}

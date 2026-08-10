@@ -144,13 +144,13 @@ def open_tab(ac, label='the backpack'):
         # run whose other three weapons kitted normally.
         print(f"      [!] inventory would not open for {label}: "
               f"focused={game_focused()}, "
-              f"screen reads tab_open={ac.tab_open()}, "
+              f"screen reads tab_open={ac.is_tab_open()}, "
               f"pico={'yes' if ac.pointer.pico else 'NO — Tab cannot be sent'}")
         return False
     if not ac.sync():
         print(f"      [!] the Tab screen would not sync: "
               f"focused={game_focused()}, "
-              f"inventory sees tab_open={ac.tab_open()}")
+              f"inventory sees tab_open={ac.is_tab_open()}")
         return False
     return True
 
@@ -252,7 +252,7 @@ class Stock:
 def read_stock(ac, close=True):
     """L1 — Open the Tab screen, read the pack and the two guns, shut it.
     -> Stock | None. `read` in the name is half the story: it PRESSES Tab,
-    takes the foreground and parks the cursor. tab_open() is the R.
+    takes the foreground and parks the cursor. is_tab_open() is the R.
 
     ⚠ close=True SHUTS THE SCREEN EVEN IF IT WAS ALREADY OPEN — it is not
     tab_up()'s as-found contract. Inside a held session pass close=False, or

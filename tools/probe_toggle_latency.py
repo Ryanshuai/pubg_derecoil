@@ -87,7 +87,7 @@ class TabScreen:
         self._scratch = np.zeros((SCREEN_H, SCREEN_W, 3), np.uint8)
 
     def is_open(self):
-        return bool(self.ac.tab_open())
+        return bool(self.ac.is_tab_open())
 
     def snap(self):
         """Just the pixels — no detection. This is the shot being raced."""

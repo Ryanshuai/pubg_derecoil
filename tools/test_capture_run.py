@@ -370,7 +370,7 @@ def t_scope_label():
 def t_label_for():
     """collect_templates: which targets can claim ground truth."""
     print('\ncollect_templates.label_for()')
-    from calibration.collect_templates import label_for
+    from calibration.legacy_collect_templates import label_for
     cases = [
         ('slots', 'vert_grip', 'grip', LABEL_REQUESTED, 'grip'),
         ('rows', 'comp_ar', None, LABEL_REQUESTED, 'inventory'),
@@ -402,7 +402,7 @@ def t_label_for():
     # a floor alone would believe scenery, and no floor at all would believe a
     # gun that was already sitting there.
     print('\ncollect_templates.plate_arrived()')
-    from calibration.collect_templates import plate_arrived, PLATE_INK_MIN, PLATE_INK_MAX
+    from calibration.legacy_collect_templates import plate_arrived, PLATE_INK_MIN, PLATE_INK_MAX
     check('cleared rack -> a real plate (0 -> 682, measured)',
           plate_arrived(0, 682) is True)
     check('the two extremes of the occupied samples',

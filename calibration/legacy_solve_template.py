@@ -1,5 +1,21 @@
 """Solve an attachment's icon and alpha out of paired captures. Offline.
 
+⚠ LEGACY (2026-08-09). Superseded by calibration/collect_intersect.py, which
+photographs a part on TWO RACKED GUNS AT ONCE and intersects the crops instead
+of solving `c = a*icon + (1-a)*backdrop` from equip/unequip pairs. Kept running
+only until the new flow is accepted; then this file goes.
+
+WHY IT IS BEING REPLACED, in the order the failures were found:
+  - the alpha solve has no handle on the part of a scope crop that is the
+    HOST GUN's rail: that hardware does not move with the view, so db = 0 and
+    nothing computed from one gun's captures can separate it
+  - unequip-per-background is the single largest source of lost rounds --
+    "could not get it off the gun", "went to 库存 instead", 0-crop sweeps
+  - `bank()` keeps ONE solve per part, ranked by reconstruction error, which
+    measures how well a solve rebuilds its own captures and says nothing about
+    the gun it will be matched against
+
+
     pixi run python calibration/solve_template.py calibration/artifacts/attachments/runs/<stamp>
     pixi run python calibration/solve_template.py <run> --write
 

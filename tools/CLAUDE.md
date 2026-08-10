@@ -232,12 +232,16 @@ while prev is None:
 | `smoke_check.py` (`pixi run smoke`) | 冷启动：编译全部、建全部检测器、抓帧、找 Pico | 📄 |
 | `regression_check.py --compare` | 检测器全量回归，扫 `docs/**/*.png` 里的全屏图 | 📄 |
 | `verify_pico.py` (`pixi run verify-pico`) | 固件验收。**每次刷完固件、每次标定之前跑** | 🔌 |
-| `snap_on_key.py` | 按键存全屏 + 光标 sidecar，不用 alt-tab | 🎮 |
+| `snap_on_key.py` (`pixi run snap` / `snap-att`) | 按键存全屏 + 光标 sidecar，不用 alt-tab。⚠ **快门键默认从 `C` 换成了 `V`**：`C` 是游戏的**蹲**，每拍一张都会顺便蹲一下（动镜头、动武器、动姿势图标），**存下来的是按键之后那一帧**。传游戏在用的键（`B` `C` `X` `F9`）现在直接拒绝。⚠ 它**不查焦点**，所以一批里可能混进桌面截图——`solve_tiles` 靠「名牌读得出」把它们挡掉 | 🎮 |
 | `focus_trace.py` | 谁在占前台；`--windows` 列游戏的所有窗口 | 🎮 |
 
 **离线回归**（改完代码就跑）
 
-`analysis` · `abs-offset` · `attachments` · `drag-log` · `fire` · `frames` · `gestures` · `harness` · `highlight` · `kit` · `locations` · `lobby-detector` · `one-gun` · `panel-state` · `placement` · `pointers` · `recenter` · `runs` · `snaps` · `spawner-plan` · `stocktake-test` · `tab-open` · `tab-watch`
+`analysis` · `abs-offset` · `att-coverage` · `attachments` · `drag-log` · `fire` · `frames` · `gestures` · `harness` · `highlight` · `kit` · `kit-floor` · `locations` · `lobby-detector` · `one-gun` · `panel-state` · `placement` · `pointers` · `recenter` · `runs` · `snaps` · `spawner-plan` · `spread-hosts` · `stocktake-test` · `tab-open` · `tab-watch`
+
+⚠ **`att-coverage` 是仪表不是闸**（`pixi run att-coverage`）：每个配件模板拍在**几把不同的枪**上，以及有几把枪**能**戴它。今天是 41 个件落在 40 把枪里的 9 把，**20 个件只站在一把枪上**（16 个是 sks，因为 `hosts_for` 的贪心集合覆盖每次都选它）。而「宿主枪不影响这张图」从没被验过——槽位瓦片半透明，背景是另一把枪的剪影。扩充用 `collect_templates --spread N`，规矩和它的四条变异在 `calibration/CLAUDE.md`。
+
+⚠ **`spread-hosts` 是那条路的闸**，两条最该记住的性质都是**变异补出来的、不是想出来的**：fixture 必须让宿主池**比要的长**（用只有 3 个宿主的 `choke`，「忽略已有覆盖」这个变异抽的是同一把枪，闸全绿），以及**宿主必须是 ROSTER 里的枪**（库存行图第三段是 `r1`，混进来覆盖从 9 把涨到 19 把，其余每条闸照样绿）。
 
 ⚠ **`pixi run one-gun` 是 2026-08-08 加的,因为「架子上冒出第二把枪」在两天里咬了两次,而第一次只修了代码没配闸。** 它锁两条独立的路:`ensure_weapon_in_hand` 在枪**已经在架上但拿不到手**时必须拒绝(以前落进刷新分支,还把矛盾打印在同一行——`no mp5k in the rack (holds {1: 'mp5k'})`);`collect_timed.read_config` 在架上**有第二把枪**时必须拒绝(它读 1 号槽,扳机打手里那把,两把枪时屏幕上没有东西能证明是同一把)。
 
@@ -250,6 +254,19 @@ while prev is None:
 | 脚本 | 干什么 |
 |---|---|
 | `probe_mp5k_cube.py` (`pixi run cube`) | mp5k 2×2×2 八格,**在同一个 t 上**读,并逐格对 `data/kit_factors.json` 那套已退场的弹桶坐标。正交性带 bootstrap CI。隔离掉的样本单列 |
+| `probe_kick_recovery.py` (`pixi run kick-recovery`) | 配件到底改「每发踢多大」还是「发间怎么收」——**答案是问不出来**,见下 |
+
+⚠ **`kick-recovery` 是一次答不出来的调查,留着是因为它的两个否定都花钱买过。** `period` 那半是**成立**的:每条曲线用频谱说出自己的射击周期,跟弹药计数器的 `interval_ms` 独立吻合到 0.0–0.5 ms(12 把枪里 11 把,snr 27–778)——两个互不相看的见证。但**折叠后每个相位 bin 都是正的**,梭内根本没有反向段,所以「recovery 把视角拉回来」这个分量在观测里没有指称对象。
+
+⚠ **`ratio` 那半没通过它自己的 null,而那个 null 是它自带的**:拿 `f≈1` 的配件当对照(比值恒为 1,任何「形状变了」都是假的),**22% 在 p<0.01 触发,名义 1%**。所以那张表的 p 值不能读,脚本自己每次都把这句打出来。**唯一可读的是 aug**(4.89 knots/shot、不跟 17 ms 网格锁相、24–35 梭、null 通过 p=0.62),而它的 brake / vert_grip / comp_ar 全读 pure scale。
+
+⚠ **而最需要它的两把枪结构上测不了**:形状要 ≥4–5 knots/shot,mp5k 是 **3.83**、vector 是 **3.12**——正好是偏离相乘最远的那两把。够格的 m416/m762/vss 又**锁相**(射击周期是 17 ms 的整数倍),折出来的形状分不出是不是采样伪影。**换更细的网格才有下一步,那是重新采集。**
+
+⚠ 还剩一条没查的:所有 76 条曲线的 `dx` **恒等于 0.000**,横向从来没被测过。引擎若是逐轴相乘,它只可能藏在那里。
+
+| `test_kit_floor.py` (`pixi run kit-floor`) | SMG 的 grip×muzzle floor:子集全扫 + 重拟常量 + 覆盖计数 + 9 条种表用例。**变异 7/7 咬中** |
+
+⚠ **`kit-floor` 每次跑都打印「今天覆盖为 0」,这不是缺陷是仪表。** 两把实测 SMG 各只有 3 个单槽件、2³ 组合全部已是打过的行,所以 tier 1 永远先答。**某把 SMG 量了第 4 个单槽件那天它自己变成非零**,不需要有人记得——而那恰好也是能定下那张槽表的测量(现在两把枪对枪托参不参与的答案不一样)。全部数字和三条它**不许**声称的话在 `detector/CLAUDE.md`。
 
 ⚠ **`cube` 里那一列 08-05 的旧值不是装饰。** 它是**另一套代码、另一天、另一个坐标系**测的同样八格,所以是这个仓库拿得到的最强的第二独立来源——而它已经赚回本钱了:`grip-vert_grip` 读出 0.482 而旧表说 0.747,差 55%,查下去是**五梭打的是另一把枪**。八格里七格两条线差 ≤3.7%,那种一致性要两边同时朝一个方向错才伪造得出来。
 

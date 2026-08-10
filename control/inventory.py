@@ -277,9 +277,36 @@ def batch(steps, error=None, ok=None, **extra):
 # point stays. The distance was never the problem; the missing readback was.
 DROP_WAIT = 0.25
 
-# 附近 ends at x=880 and 库存 starts at 907, so this is the first column
-# inside the target panel: crossing the divider is the whole requirement.
-NEARBY_DROP_X = 870
+# WHERE A HAND LETS GO, measured 2026-08-09: eight drags recorded at 1 kHz
+# (tools/record_drag.py, kept in calibration/artifacts/drag/human/) released at
+#
+#     604  664  682  686  689  736  769  800        median 689
+#
+# 附近 spans 565..880, so a hand lands in the middle of it and NOT ONE of the
+# eight came within 80 px of the right edge.
+#
+# ⚠ THIS REPLACES 870, WHICH WAS OUTSIDE THAT DISTRIBUTION. The reasoning for
+# 870 was "附近 ends at x=880 and 库存 starts at 907, so this is the first
+# column inside the target panel: crossing the divider is the whole
+# requirement" — true as stated, and it bought a 104 px gesture instead of the
+# 437 px one from DROP_XY. What it never checked is whether the first column
+# inside a panel is as good as the middle of it, and the answer is that no
+# hand ever tries. 682 is the release of the replayed recording
+# (press/pointer.py HUMAN_DRAG_PATH); the median of all eight is 689 and the
+# 7 px between them is not a claim.
+#
+# ⚠ IT IS NOT SUPPORTED BY A WIN. Back to back on the same path minutes apart,
+# 12/12 with zero retries at 870 and 12/12 with zero retries at 682 — a tie,
+# because the per-drag readback that makes each drag visible also puts ~123 ms
+# between them, and that gap is itself known to fix drags (see DROP_WAIT).
+# What 682 has is that it is where a hand goes and 870 is not, which is a
+# different kind of evidence from a scoreline and worth less than one.
+#
+# ⚠ WHAT WOULD ACTUALLY SEPARATE THEM has not been run: bursts of twelve with
+# NO read in between, which is the shape clear_inventory has and the shape the
+# unexplained ~20% of non-landings live in. tools/show_drag.py has burst() for
+# it. Until that runs, this is a better-motivated guess, not a fix.
+NEARBY_DROP_X = 682
 
 # Gesture timing handed to Pointer.drag. Defaults are press/pointer.py's, i.e.
 # what shipped before anyone measured them. Whether they can come down is a
@@ -332,7 +359,7 @@ DRAG_LOG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 # Measured 2026-08-02 (tools/probe_toggle_latency.py, 8 cycles): the weapon
 # panel is fully readable 33-38 ms after the key, and the 类型 anchor is gone
 # 77-128 ms after it. So 0.45 was 4-13x what the game needs, and both waits
-# are now polls -- tab_open() costs 3-6 ms a pass, which is cheaper than
+# are now polls -- is_tab_open() costs 3-6 ms a pass, which is cheaper than
 # oversleeping by a single frame.
 #
 # Worth knowing when reading these: open and "done drawing" came out IDENTICAL
@@ -594,9 +621,15 @@ class InventoryControl(Driver):
         if inventory is not None:
             self.rows['inventory'] = int(inventory)
 
-    def tab_open(self):
+    def is_tab_open(self):
         """R — Is the Tab inventory drawn? One 41x18 crop, 3-6 ms, and NOT a
         keypress: this reads the answer, ensure_tab() acts on it.
+
+        ⚠ THE `is_` IS LOAD-BEARING. Named `tab_open()` it read as an
+        imperative, and two collectors called it where they meant
+        ensure_inventory_open() -- correct-and-useless, so each aborted before
+        doing anything with a message about a panel that was never asked to
+        open. Every R on this class that answers yes/no carries the prefix.
 
         ⚠ False is not "Tab is closed". The item-spawner panel hides the
         inventory AND swallows Tab, so False there means pressing cannot
@@ -620,7 +653,7 @@ class InventoryControl(Driver):
         often already on screen -- two collectors did exactly that, and both
         are gone with the modules that held them.
 
-        There is nothing to force. tab_open() answers the same question in
+        There is nothing to force. is_tab_open() answers the same question in
         3-6 ms, so this opens the screen only if it is shut and undoes only
         what it did. Already open is the free case, which is what makes it
         safe to wrap every read in.
@@ -629,7 +662,7 @@ class InventoryControl(Driver):
         "nothing equipped": an empty slot is a legitimate answer, and the two
         would be indistinguishable downstream.
         """
-        was_open = bool(self.tab_open())
+        was_open = bool(self.is_tab_open())
         ok = was_open or self.ensure_tab(True)
         if not ok:
             self._log('Tab would not open')
@@ -775,7 +808,7 @@ class InventoryControl(Driver):
             self._log('game is not the foreground window')
             return False
         self.park()
-        if not self.tab_open():
+        if not self.is_tab_open():
             self._log('Tab inventory is not open')
             return False
         return True
@@ -1408,9 +1441,31 @@ class InventoryControl(Driver):
                          weapon=weapon)
 
     def right_click_equip(self, gun, slot, src, want=ANY_ITEM, retries=1,
-                          att=None):
+                          att=None, verify=True):
         """L0 — Fit `src` by right-clicking it, reading the slot back.
         equip() is the entry point; it takes the gun in hand and passes att.
+
+        ⚠ `verify=False` DROPS TO L0-WITHOUT-A-READBACK, and the reason it
+        exists is the oldest circle in this repo. The readback is
+        `_slot_states` -> SlotDetector, and SlotDetector decides `filled` by
+        RECOGNISING AN ATTACHMENT -- so a part whose template is missing or
+        stale reads as `empty`, this reports "did not land", and the caller
+        records a compatibility fact about a part that is sitting on the gun.
+        The parts that need collecting are exactly the parts with no template,
+        so a template collector cannot use the readback that presumes one.
+        Same shape as `unequip(known_filled=)` and `drag(verify=False)`.
+
+        It does NOT skip the refusals: `held != gun` still refuses, and the
+        name plate is still read either side, because "the click emptied the
+        rack" must never be silent. It skips only the question the collector
+        can answer better than SlotDetector can.
+
+        ⚠ AND THE CALLER THEN OWES ITS OWN EVIDENCE. `collect_intersect` pays
+        with two template-free readings: the row's NAME left 库存, and the
+        tile of some slot on this gun changed. Neither consults an attachment
+        template. A caller that cannot say something of that kind must not
+        pass this -- an unverified equip returns ok=True for a click that went
+        nowhere.
 
         ⚠ PASS `att=`. `src` is a ROW, and the first click evicts the
         incumbent into 库存, renumbering rows — without `att` the retry
@@ -1498,8 +1553,14 @@ class InventoryControl(Driver):
                 x, y = self.point_of(hits[0])
             rec['attempts'] = attempt + 1
             self.pointer.right_click_at(x, y)
-            rec['checks'] = self._await(checks, before)
-            landed = all(r['ok'] for r in rec['checks'])
+            if not verify:
+                # The click went out and the plate is still read below. What is
+                # NOT claimed is that anything landed -- `verified` False says
+                # so, and the caller's own evidence is what decides.
+                rec['checks'], rec['verified'], landed = [], False, True
+            else:
+                rec['checks'] = self._await(checks, before)
+                landed = all(r['ok'] for r in rec['checks'])
             # The plate is re-read whatever the verdict: this click is aimed at
             # a PANEL row, so it should not be able to touch the weapon at all,
             # and an equip that quietly emptied the rack is exactly the kind of
@@ -1523,13 +1584,13 @@ class InventoryControl(Driver):
         ⚠ The bound is short on purpose — a swallowed key is not cured by
         waiting, so the answer to False is another press, not a longer wait.
 
-        No sleep in the loop: one pass IS the pace. tab_open() grabs a 41x18
+        No sleep in the loop: one pass IS the pace. is_tab_open() grabs a 41x18
         crop, and win32_cap is ~3-6 ms of fixed GDI overhead almost regardless
         of size, so the poll runs at roughly the monitor's own rate.
         """
         deadline = time.perf_counter() + timeout
         while True:
-            if bool(self.tab_open()) == want:
+            if bool(self.is_tab_open()) == want:
                 return True
             if time.perf_counter() >= deadline:
                 return False
@@ -1567,7 +1628,7 @@ class InventoryControl(Driver):
         pressed = 0
         # ⚠ ASK WHAT IS ON SCREEN BEFORE PRESSING, not after the tries are
         # spent. The item-spawner panel is a menu: while it is up the game does
-        # not act on Tab at all, AND tab_open() reads False because the
+        # not act on Tab at all, AND is_tab_open() reads False because the
         # inventory is not drawn -- so this loop used to press (swallowed),
         # wait out await_tab, press again, and only then ask _blocking_screen.
         # Two wasted presses and two timeouts per occurrence, and it happens
@@ -1582,7 +1643,7 @@ class InventoryControl(Driver):
         # full-screen grab on the commonest path there is, the one where the
         # screen is already in the wanted state and nothing needs doing.
         for _ in range(tries):
-            if bool(self.tab_open()) == want:
+            if bool(self.is_tab_open()) == want:
                 if pressed:
                     self._stamp('tab', None, None, gesture=True, moved=True,
                                 want=want, presses=pressed)
@@ -1615,7 +1676,7 @@ class InventoryControl(Driver):
                                       presses=pressed)
                 return False
             self._log(f'Tab press swallowed; retrying')
-        ok = bool(self.tab_open()) == want
+        ok = bool(self.is_tab_open()) == want
         self._stamp('tab', None, None, gesture=True, moved=ok, want=want,
                     presses=pressed,
                     failed_at=None if ok else 'presses swallowed')
@@ -1690,7 +1751,7 @@ class InventoryControl(Driver):
             self._journal_refusal('refused', None, at_gun(gun),
                                   'no Pico: 1/2 cannot be pressed', by='hold')
             return False
-        was_open = bool(self.tab_open())
+        was_open = bool(self.is_tab_open())
         if was_open and not self.ensure_tab(False):
             self._log('Tab would not close; 1/2 would be swallowed')
             self._journal_refusal('refused', None, at_gun(gun),
@@ -1717,7 +1778,8 @@ class InventoryControl(Driver):
         self.held = gun
         return True
 
-    def unequip(self, gun, slot, to=None, retries=1, gesture='auto'):
+    def unequip(self, gun, slot, to=None, retries=1, gesture='auto',
+                known_filled=False):
         """L1 — Pull weapon `gun`'s `slot` off, into 库存 by default. Proves
         the SLOT emptied, never that the part arrived — see panel_counts().
 
@@ -1771,10 +1833,52 @@ class InventoryControl(Driver):
         Only a positive "there is nothing there" blocks, because the `scope`
         position draws no tile and reads `unknown` forever -- refusing that
         would make every sight unremovable.
+
+        ⚠ THAT LAST SENTENCE STOPPED BEING TRUE AND THE PREDICTED THING
+        HAPPENED. slot_detector moved the scope position off `unknown` onto
+        fill_match, so an unrecognised sight now reads `empty` and lands in the
+        refusal above -- "every sight unremovable", exactly as written, and
+        nobody came back here when that change was made. Measured 2026-08-09:
+        aug/holo, g36c/scope_2x and k2/variable each went ON the gun and then
+        could not be taken off, `slot moved 0.0, 库存 0->0`, and a whole
+        collection run returned 0 crops.
+
+        `known_filled=True` is the caller saying it put the part there itself
+        and has TEMPLATE-FREE evidence of it. It skips the two refusals that
+        rest on matching a template -- `empty` and AMBIGUOUS -- and skips
+        NOTHING else. In particular `absent` still refuses: that one comes from
+        ring_grad on the tile geometry, it does not consult a template, and it
+        means this weapon has no such slot.
+
+        ⚠ The hazard the refusals exist for is real and unchanged: a gesture at
+        a slot with nothing in it reaches the weapon row and throws the gun on
+        the floor, 74 parts lost across 11 runs. So `known_filled` is not "I am
+        in a hurry", it is "I have a second, non-template reading". The one
+        caller that passes it (collect_templates.take_off) has two: 库存 did
+        not grow when the part spawned, and the tile moved. A caller that
+        cannot say that must not pass it.
         """
         dst = as_loc(to) if to is not None else at_inv()
+        # ⚠ SLOT -> FLOOR IN ONE MOVE IS GONE, and this refusal is the whole
+        # reason `shed()` exists. That move aims a DRAG at the slot, and an
+        # empty slot is not an inert target: the drag takes the WEAPON ROW
+        # underneath and throws the gun out wearing everything. 74 measured
+        # losses, and then again on 2026-08-09 when a collector used it to
+        # "make sure the slots were empty" -- both guns on the floor, logged as
+        # `emptied to the floor` because the tile did change by 25 grey levels.
+        #
+        # `shed()` does it in two moves that cannot: a right click (the game
+        # picks the destination, nothing is aimed) then a drag off a 库存 ROW
+        # (no weapon underneath a list row).
+        if dst[0] == 'ground':
+            why = ('slot -> floor in one move is forbidden: the drag reaches '
+                   'the weapon row when the slot is empty and drops the gun. '
+                   'Use shed(gun, slot) — right click, then drag the 库存 row.')
+            self._log(f'gun{gun}.{slot}: {why}')
+            return step(at_slot(gun, slot), dst, ok=False, verified=True,
+                        error=why)
         state = self.slot_state(gun, slot)
-        if state in (SLOT_EMPTY, SLOT_ABSENT):
+        if state == SLOT_ABSENT or (state == SLOT_EMPTY and not known_filled):
             self._log(f'gun{gun}.{slot}: reads {state}, not clicking or '
                       f'dragging it — that gesture reaches the weapon row and '
                       f'drops the gun')
@@ -1813,7 +1917,7 @@ class InventoryControl(Driver):
         #                                 nothing knows what; a gesture aimed
         #                                 by that belief costs the weapon.
         worn = self.read_slots(gun)
-        if worn.get(slot) == AMBIGUOUS:
+        if worn.get(slot) == AMBIGUOUS and not known_filled:
             self._log(f'gun{gun}.{slot}: the tile says filled but the '
                       f'templates cannot name what is in it — not gesturing. '
                       f'That is the state that drops the gun.')
@@ -2098,6 +2202,55 @@ class InventoryControl(Driver):
         if item is None:
             return False
         return self.auto_equip(item.where)
+
+    def shed(self, gun, slot, retries=1):
+        """L2 — A part off a gun and onto the floor, in TWO moves. -> record
+
+            1. RIGHT CLICK the slot   the game decides where it goes, and it
+                                      always chooses 库存. Nothing is aimed at
+                                      a destination, so nothing can be aimed
+                                      wrong.
+            2. DRAG the 库存 row      onto the floor. The source is a list row;
+                                      there is no weapon underneath a list row.
+
+        ⚠ THE ONE-MOVE VERSION IS FORBIDDEN AND unequip() NOW REFUSES IT.
+        Dragging from a weapon slot to the floor aims the drag AT THE SLOT, and
+        an empty slot is not an inert target -- the drag takes hold of the
+        WEAPON ROW under it and throws the whole gun out, wearing everything.
+        That is 74 measured losses, and it happened again on 2026-08-09 when a
+        collector cleared its slots that way "to be sure they were empty": the
+        guns went on the floor, the tiles changed by 25 grey levels, and the
+        change was logged as `emptied to the floor`. A move that cannot tell
+        success from losing the gun is not a move.
+
+        ⚠ AND THIS DOES NOT MAKE AN EMPTY SLOT SAFE TO CLICK. A right click on
+        an empty slot reaches the weapon row too -- that is the same measured
+        hazard, stated in unequip() and in control/CLAUDE.md. What the two-move
+        shape removes is the AIMED 1621 px drag and its release point, not the
+        first gesture's exposure.
+
+        So the caller still owes the same thing it always did: EVIDENCE that
+        the slot is occupied, obtained without a template. The one this repo
+        has is the autofit rule -- spawn a copy and watch 库存. If the list
+        grew, the slot was full, and only then is this safe to call.
+
+        -> {'ok', 'row', 'error'} — `row` is where it passed through 库存.
+        """
+        rec = self.right_click_unequip(gun, slot, retries=retries)
+        # ⚠ ROW 0, NOT "the row it landed in". clear_inventory documents why
+        # the top row is the only stable address -- the panel is a 12-row
+        # WINDOW and rows scroll up as ones above them leave. The callers of
+        # this method clear 库存 before they start, so the part just clicked
+        # off is the only thing in the list and row 0 IS it.
+        #
+        # And if it is not -- if something else was in the list -- the cost is
+        # that the other thing goes on the floor too. That is a wasted item,
+        # not a lost gun, which is the whole reason this shape was chosen over
+        # the one-move drag.
+        out = self.discard(at_inv(0), retries=retries)
+        return step(at_slot(gun, slot), at_ground(),
+                    ok=bool(out.get('ok')), verified=True,
+                    clicked=bool(rec.get('ok')), error=out.get('error'))
 
     def drop_weapon(self, gun, retries=1, gesture='auto'):
         """L2 — Throw the gun in rack slot `gun` on the floor WEARING its
@@ -2804,7 +2957,7 @@ class InventoryControl(Driver):
         #
         # The Tab toggle is the cost, and it is paid only here, on a path that
         # otherwise loses a whole cell.
-        was_up = bool(self.tab_open())
+        was_up = bool(self.is_tab_open())
         if was_up and not self.ensure_tab(False):
             self._log('could not lower the Tab screen to move the backdrop')
             return False
@@ -2889,11 +3042,14 @@ class InventoryControl(Driver):
             # twice, cleanly reproduced -- and DROP_XY exists because of it.
             #
             # 附近 IS DIFFERENT AND THE DIFFERENCE IS ONLY IN X. The panel is
-            # the floor, so anywhere past the divider is the request; a release
-            # only has to CROSS it. 附近 ends at 880 and 库存 starts at 907, so
-            # 870 is the first column inside, and the gesture from 库存 row 0
-            # is 104 px instead of DROP_XY's 437 — a quarter of the travel on a
-            # drag clear_inventory performs twelve times in a row.
+            # the floor, so anywhere past the divider is the request.
+            #
+            # ⚠ "A RELEASE ONLY HAS TO CROSS IT" STOOD HERE AND IS WITHDRAWN.
+            # It is true about the panel and false as a design rule: it put the
+            # release on 870, the first column inside 附近, which no hand ever
+            # goes near — eight recorded drags released at 604..800, median
+            # 689. See NEARBY_DROP_X for the distribution and for how weak the
+            # evidence separating the two points still is.
             #
             # Y IS FREE, which took three wrong answers to establish. Measured
             # in game 2026-08-04, always reading back after every single drag:
@@ -2901,6 +3057,9 @@ class InventoryControl(Driver):
             #   (870, y of the grabbed row) onto an OCCUPIED 附近 row   5/5
             #   (870, y of the first EMPTY row)                        6/6
             #   (744, 570) the old fixed point                        21/21
+            #
+            # Those three are about y and they survive the move to 682 — x is
+            # the only thing that changed and all three held x fixed.
             #
             # An earlier sweep had "release on an occupied row" failing 1 in 3
             # and a whole theory was built on it. The theory was an artefact of
@@ -3143,7 +3302,7 @@ class InventoryControl(Driver):
             drift=(None if not (d.get('held') and d.get('release')) else
                    [d['release'][0] - d['held'][0],
                     d['release'][1] - d['held'][1]]),
-            tab_open=bool(self.tab_open()),
+            tab_open=bool(self.is_tab_open()),
             gesture=bool(gesture), failed_at=d.get('failed_at'),
             rows_before=list(rows0) if rows0 else None,
             src_key=src_key,

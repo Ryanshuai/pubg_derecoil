@@ -1,5 +1,21 @@
 """Spawn known items, turn on the spot, photograph what the Tab screen draws.
 
+⚠ LEGACY (2026-08-09). Superseded by calibration/collect_intersect.py, which
+photographs a part on TWO RACKED GUNS AT ONCE and intersects the crops instead
+of solving `c = a*icon + (1-a)*backdrop` from equip/unequip pairs. Kept running
+only until the new flow is accepted; then this file goes.
+
+WHY IT IS BEING REPLACED, in the order the failures were found:
+  - the alpha solve has no handle on the part of a scope crop that is the
+    HOST GUN's rail: that hardware does not move with the view, so db = 0 and
+    nothing computed from one gun's captures can separate it
+  - unequip-per-background is the single largest source of lost rounds --
+    "could not get it off the gun", "went to 库存 instead", 0-crop sweeps
+  - `bank()` keeps ONE solve per part, ranked by reconstruction error, which
+    measures how well a solve rebuilds its own captures and says nothing about
+    the gun it will be matched against
+
+
 One Tab frame carries four things a detector must read, all behind the same
 translucent panel and all changing with whatever is behind it:
 
@@ -81,7 +97,8 @@ import cv2
 import numpy as np
 
 from calibration.capture_run import CaptureRun, LABEL_REQUESTED
-from config import HUD_REGIONS, TAB_COUNT_MIN, TAB_COUNT_MAX
+from config import (HUD_REGIONS, TAB_COUNT_MIN, TAB_COUNT_MAX,
+                    TAB_SLOT_NO_TILE)
 from detector.attachment_catalog import ATTACHMENTS, ROSTER, SLOTS, fits
 from capture.cropper import capture_screen, win32_cap
 from detector.geometry import detail
@@ -114,7 +131,29 @@ TARGETS = ('slots', 'rows', 'plate', 'type')
 BACKDROP = 'backdrop'
 
 TURN_COUNTS = 900               # yaw per step; lands on unrelated scenery
-PITCH_STEPS = (0, -260, 260)    # sky, level, ground — the three that differ most
+# SKY, GROUND, SKY, GROUND — a SAWTOOTH, and the level step is gone on purpose.
+#
+# These are not decoration, they are the conditioning of the solve. Per pixel
+# solve_template does
+#
+#     (1-a) = SUM(dc . db) / SUM(db . db)
+#
+# so a pixel the scene never moved behind carries NO information about
+# transparency, and one the scene barely moved behind carries noise. The old
+# (0, -260, 260) spent a third of every sweep on `level`, whose backdrop sits
+# between the other two and adds the least to `db` of the three.
+#
+# ⚠ The failure is not "a weaker solve", it is a WRONG one that looks fine.
+# `den > 1e-3` is the only thing standing between a low-information pixel and
+# a garbage alpha, and antialiasing jitter on an edge clears 1e-3 easily. Those
+# pixels then get an alpha solved out of noise-over-noise and it goes into the
+# template. Sky against yellow ground is the widest `db` this map can produce.
+#
+# ⚠ WHAT THIS CANNOT FIX, and why --spread is the other half: the part of the
+# crop that is the GUN's own hardware does not move with the view at all. Its
+# db is zero at every pitch, so no amount of背景 variety separates it. Only a
+# different host gun changes it.
+PITCH_STEPS = (-260, 260)       # sky, ground — the two extremes of the range
 SETTLE_S = 0.45
 SPAWN_SETTLE_S = 0.7
 FIT_TIMEOUT_S = 0.8             # the part animates into the slot
@@ -211,6 +250,93 @@ def hosts_for(keys):
     return plan, []
 
 
+def gun_of(entry):
+    """Which weapon's rack a `slots` crop was drawn in, or None.
+
+    Reads the `weapon` field, and falls back to the third segment of
+    `{key}__{slot}__{weapon}__{tag}.png` for every crop taken before that
+    field existed (2026-08-09). The fallback is not a second source — this
+    module wrote both the name and the label in the same breath — it is the
+    only source those runs have.
+    """
+    if entry.get('target') != 'slots':
+        return None              # a row has no host gun; see _shot
+    gun = entry.get('weapon')
+    if gun:
+        return gun
+    parts = os.path.basename(entry.get('capture', '')).rsplit('.', 1)[0].split('__')
+    if len(parts) < 4 or parts[2] == 'none':
+        return None
+    return parts[2]
+
+
+def slot_coverage():
+    """-> {asset: {gun: n_crops}} over every run on disk. Ground truth only.
+
+    `CaptureRun.labelled()`, so a detector's own reading never counts toward
+    the coverage of the template it would be judging.
+
+    ⚠ KEYED BY `canonical()`, NOT BY THE STORED LABEL. 41.1 replaced the
+    Angled Foregrip with the Tilted Grip in place, so a stored `angled_grip`
+    is a picture of today's tilted_grip under yesterday's name -- the manifests
+    are deliberately never rewritten. Reading the raw label instead reported
+    tilted_grip as having ZERO slot crops next to 76 in the scorer, and a
+    spread plan built on that asked for a gun it already had.
+    """
+    from calibration.capture_run import _run_dirs
+    from detector.attachment_catalog import canonical
+    out = {}
+    for _kind, _stamp, d in _run_dirs():
+        for entry, lab, _p in CaptureRun.load_dir(d).labelled():
+            asset, gun = canonical(lab.get('asset') or ''), gun_of(entry)
+            if not asset or not gun:
+                continue         # '' is a confirmed-empty slot, not a part
+            out.setdefault(asset, {})
+            out[asset][gun] = out[asset].get(gun, 0) + 1
+    return out
+
+
+def hosts_spread(keys, want, seed, have=None):
+    """Cover `keys` on `want` DIFFERENT guns each, hosts drawn at random.
+
+    The opposite trade from hosts_for. Greedy set cover answers "photograph
+    every part in as few rounds as possible" and answers it the same way every
+    time, so the same handful of hosts win forever: on the corpus this was
+    written for, sks alone carried 16 of the 20 parts standing on a single gun.
+    Nothing in the repo had ever compared one part's tile across two racks, so
+    "the host gun does not change the crop" was an assumption with no
+    measurement under it -- and the tile is translucent, with `blend_attachment`
+    carrying 0.37*blur(background) through from whatever sits behind it.
+
+    `have` is {asset: {gun: n}} already on disk (slot_coverage()); guns already
+    holding a part are counted toward `want` and are not drawn again. So this
+    EXTENDS a corpus rather than resampling it, and re-running it after a
+    collection asks for less, not the same again.
+
+    ⚠ The draw is seeded and the seed goes in the run's facts. An unseeded
+    random host list is unreproducible: a crop that reads wrong could not be
+    re-shot on the same gun, which is the one thing a failure needs.
+    """
+    import random
+    rng = random.Random(seed)
+    have = have or {}
+    plan, short = {}, {}
+    for key in sorted(keys):
+        already = set(have.get(key, {}))
+        pool = [w for w in sorted(ROSTER) if fits(w, key) and w not in already]
+        # A guessed slot list loses ties for the same reason it does in
+        # hosts_for: it fails by dropping the part on the floor and leaving a
+        # crop of an empty slot labelled as a part. Shuffle within each rank.
+        rng.shuffle(pool)
+        pool.sort(key=lambda w: SLOTS.get(w, {}).get('conf') == 'guess')
+        need = max(0, want - len(already))
+        for w in pool[:need]:
+            plan.setdefault(w, []).append(key)
+        if len(already) + len(pool) < want:
+            short[key] = len(already) + len(pool)
+    return ([(w, sorted(ks)) for w, ks in sorted(plan.items())], short)
+
+
 def by_slot(keys):
     """Split into rounds wearable at once — one part per slot."""
     slots = {}
@@ -220,7 +346,7 @@ def by_slot(keys):
     return [[v[i] for v in slots.values() if i < len(v)] for i in range(n)]
 
 
-def plan_rounds(targets, keys, weapons, plates):
+def plan_rounds(targets, keys, weapons, plates, spread=0, seed=0):
     """[(weapon|None, [key, ...], fit), ...] plus the keys nothing can wear.
 
     Three shapes, decided by what the targets need:
@@ -238,6 +364,12 @@ def plan_rounds(targets, keys, weapons, plates):
         return [(list(weapons[i:i + 2]), [], False)
                 for i in range(0, len(weapons), 2)], []
     if 'slots' in targets:
+        if spread:
+            # --spread and --weapon are refused together by the CLI: naming the
+            # hosts and drawing them at random are two answers to one question.
+            plan, short = hosts_spread(keys, spread, seed, slot_coverage())
+            return ([(w, lo, True) for w, ks in plan for lo in by_slot(ks)],
+                    sorted(short))
         if weapons:
             plan, left = [], set(keys)
             for w in weapons:
@@ -375,7 +507,7 @@ def label_for(target, key, slot, by, arrived=False):
 
     `type` gets no label either, for two reasons that each suffice. There is no
     asset to name — it is an ink count, not an icon. And "the Tab screen is up"
-    is established by tab_open(), which reads THIS VERY REGION; labelling the
+    is established by is_tab_open(), which reads THIS VERY REGION; labelling the
     crop from that would be the circularity this format exists to prevent.
 
     `by` records who established it, and `--as-is` is the interesting value.
@@ -528,7 +660,15 @@ class Collector:
             return None
         before, n0 = self.crop(f0, slot).copy(), inv_rows(f0)
         rows0 = row_icons(f0, n0)
-        rec = self.ac.unequip(self.gun, slot)
+        # ⚠ FORWARDED, which it was not until 2026-08-09. This flag existed
+        # here and was used for one thing only: skipping the error print below.
+        # `unequip` never saw it -- it had no such parameter -- so the refusal
+        # that reads the slot with a TEMPLATE still fired, and the part this
+        # collector had just fitted could not be taken back off. Three sights
+        # and a whole 0-crop run. slot_detector's own docstring called
+        # known_filled "the channel calibration/collect_templates.py already
+        # used", and the channel did not exist.
+        rec = self.ac.unequip(self.gun, slot, known_filled=known_filled)
         if rec.get('slot_state') and not known_filled:
             if not quiet:
                 print(f'    {slot}: {rec["error"]} — nothing was clicked')
@@ -887,7 +1027,16 @@ class Collector:
                     cell, f'{key}__{slot}__{wname}__{tag}.png',
                     'slots', key, region,
                     BY_ASSET.get(read.get(slot, ''), ''), self._has(key),
-                    slot=slot))
+                    # WHICH GUN'S RACK THIS TILE WAS DRAWN IN, as a field.
+                    # It was in the filename and nowhere else for the whole
+                    # life of this collector, so "is this part standing on one
+                    # gun or three?" could only be answered by parsing a path
+                    # — and CLAUDE.md's second law is that a value living in
+                    # one place cannot be checked against a second. Rows do
+                    # NOT get this: a 库存 row is the part lying in a backpack
+                    # with no weapon involved, and writing the host gun onto it
+                    # would describe an object that was not measured.
+                    slot=slot, weapon=weapon))
 
         if 'rows' in self.targets and rows:
             found = self.ac.look(frame).inventory
@@ -1197,7 +1346,7 @@ class Collector:
                     f = self.frame(flush=2)
                     both = {g: self.ac.plate_ink(g, f) for g in (1, 2)}
                     try:
-                        tab = bool(self.ac.tab_open())
+                        tab = bool(self.ac.is_tab_open())
                     except Exception as e:
                         tab = f'unreadable: {e}'
                     self.miss(key,
@@ -1276,49 +1425,117 @@ class Collector:
                 frame=f0, slot=slot, state=state,
                 scores=self.slots.scores(f0, self.gun)[slot])
 
-        n0 = inv_rows(f0)
-        slots0 = self.slot_crops(f0)
-        states0 = self.slots.classify(f0, self.gun)
+        # Retried at most once, and only for a no-tile slot -- see the
+        # eviction below for what the first attempt measures.
+        evicted = False
+        while True:
+            n0 = inv_rows(f0)
+            slots0 = self.slot_crops(f0)
+            states0 = self.slots.classify(f0, self.gun)
 
-        if not self.spawn(None, [key], False) or not self.tab():
-            return self.miss(key, 'the spawner would not produce it, or Tab '
-                                  'would not open afterwards')
-        # WHICH SLOT WENT FROM NOT-FILLED TO FILLED. Not "does read_slots name
-        # something there": that matches the part's ICON TEMPLATE, and for
-        # brake_ar, heavy_stock and variable the catalogue has no asset at all,
-        # so it could only ever answer "empty" and those three would never be
-        # collectable. Same circularity, one method along.
-        #
-        # The tile transition is ABSOLUTE -- each end read on its own frame --
-        # where the frame difference below is RELATIVE, and the difference is
-        # not academic. A thumb_grip landed in the grip slot with the tile
-        # reading filled at 411 edges, while the muzzle crop had moved 49.6
-        # against the grip's 17.1 (the previous part leaving it), so the
-        # difference-based winner called it a muzzle and threw the part away.
-        # Scenery, a tooltip, or the slot next door emptying all move pixels;
-        # none of them make a tile read filled.
-        #
-        # The difference survives as the FALLBACK, for `scope` alone. That
-        # position draws no tile, so its state is `unknown` at both ends and no
-        # transition can ever be seen there.
-        f1 = self.frame()
-        moved = {s: change(slots0[s], self.crop(f1, s)) for s in SLOT_NAMES}
-        states1 = self.slots.classify(f1, self.gun)
-        gained = [s for s in SLOT_NAMES
-                  if states1[s] == 'filled' and states0[s] != 'filled']
-        if gained:
-            landed = gained if len(gained) == 1 else []
-        elif states1.get(slot) == 'unknown':
-            landed = [winner(moved)] if winner(moved) else []
-        else:
-            landed = []
-        if landed != [slot]:
+            if not self.spawn(None, [key], False) or not self.tab():
+                return self.miss(key, 'the spawner would not produce it, or Tab '
+                                      'would not open afterwards')
+            # WHICH SLOT WENT FROM NOT-FILLED TO FILLED. Not "does read_slots name
+            # something there": that matches the part's ICON TEMPLATE, and for
+            # brake_ar, heavy_stock and variable the catalogue has no asset at all,
+            # so it could only ever answer "empty" and those three would never be
+            # collectable. Same circularity, one method along.
+            #
+            # The tile transition is ABSOLUTE -- each end read on its own frame --
+            # where the frame difference below is RELATIVE, and the difference is
+            # not academic. A thumb_grip landed in the grip slot with the tile
+            # reading filled at 411 edges, while the muzzle crop had moved 49.6
+            # against the grip's 17.1 (the previous part leaving it), so the
+            # difference-based winner called it a muzzle and threw the part away.
+            # Scenery, a tooltip, or the slot next door emptying all move pixels;
+            # none of them make a tile read filled.
+            #
+            # The difference survives as the FALLBACK, for `scope` alone. That
+            # position draws no tile, so its state is `unknown` at both ends and no
+            # transition can ever be seen there.
+            f1 = self.frame()
+            moved = {s: change(slots0[s], self.crop(f1, s)) for s in SLOT_NAMES}
+            states1 = self.slots.classify(f1, self.gun)
+            # READ BEFORE IT IS NEEDED, because it is now a witness and not only a
+            # line in a failure message. `inv_rows` is a bare Laplacian over the
+            # 库存 rows: it counts occupied rows and never asks what is in them.
+            n1 = inv_rows(f1)
+            gained = [s for s in SLOT_NAMES
+                      if states1[s] == 'filled' and states0[s] != 'filled']
+
+            # ⚠ A SLOT THAT DRAWS NO TILE IS JUDGED WITHOUT A TEMPLATE. THE SAME
+            # CIRCLE THAT ATE THE ROW CORPUS GREW BACK HERE, one slot along.
+            #
+            # slot_detector used to answer `unknown` for `scope` and this branch
+            # keyed on that word. It no longer does: occupancy there was moved onto
+            # fill_match, so an unfitted sight reads `empty` and a fitted one reads
+            # `filled` ONLY IF ITS TEMPLATE ALREADY MATCHES -- which is exactly the
+            # thing being collected. Measured, 2026-08-09: mp5k + holo went on the
+            # gun (scope moved 17.2 against 0.1 everywhere else, 库存 0->0, the
+            # detector even named Upper_Holosight_C) and was thrown away because
+            # mse 716 missed the fill gate and the state read `empty`, not
+            # `unknown`. Three sights died that way in one run -- aug holo, aug
+            # variable, s12k scope_2x -- and the comment above this line still
+            # said scope reads `unknown` forever.
+            #
+            # So for those positions the two witnesses are both TEMPLATE-FREE, and
+            # both are required:
+            #
+            #   库存 did not grow   the spawn did not go to the list, and by the
+            #                       measured autofit rule an empty slot takes it
+            #   the position moved  something is drawn there now that was not
+            #
+            # Either alone is weak in a way the other covers: a spawn that never
+            # arrived also leaves 库存 flat, and a tooltip or the neighbouring
+            # slot emptying also moves pixels. `winner` already demands the mover
+            # beat its runner-up, so the pair is what says "this part, this slot".
+            if gained:
+                landed = gained if len(gained) == 1 else []
+            elif slot in TAB_SLOT_NO_TILE or states1.get(slot) == 'unknown':
+                landed = [slot] if (n1 == n0 and winner(moved) == slot) else []
+            else:
+                landed = []
+            if landed == [slot]:
+                break
+
+            # ⚠ THE PART LANDING IN 库存 IS A TEMPLATE-FREE READING OF
+            # THE SLOT, and on `scope` it is the ONLY one there is. By the
+            # measured autofit rule a spawn goes onto the gun when the slot is
+            # empty and into 库存 when it is not, so 库存 growing by one says
+            # the position was occupied -- whatever is in it, named or not.
+            #
+            # THAT IS THE EVIDENCE `unequip` NEEDS. Blind-clearing a slot is
+            # what threw 74 host guns on the floor, which is why the refusals
+            # exist; this is not blind. `strip` could not see the occupant
+            # either (it reads the same fill_match) and said so -- "still
+            # wearing ['scope'] after the strip" -- and then every sight
+            # spawned onto a kar98k fell into 库存 and a nine-round sweep
+            # returned 0 crops. Measured 2026-08-09: the gun spawns wearing a
+            # 6x whose mse is 280 against a fill gate it cannot pass.
+            #
+            # ONCE. A second eviction would mean the first one did not take,
+            # and repeating a gesture at a slot whose state is not understood
+            # is the other half of how the guns were lost.
+            if (not evicted and slot in TAB_SLOT_NO_TILE
+                    and n1 == n0 + 1 and not gained):
+                evicted = True
+                print(f'    {slot} was occupied by something no template can '
+                      f'name — evicting it and retrying')
+                if self.take_off(slot, known_filled=True) is not None:
+                    if self.tab():
+                        self.ac.clear_inventory()
+                    f0 = self.frame()
+                    # Both copies gone: the evicted occupant and the one that
+                    # fell in beside it. Anything left means the drops are not
+                    # landing and the retry would index the wrong row.
+                    if inv_rows(f0) == 0:
+                        continue
             # REPORT, do not assert. "it did not arrive" and "the catalogue has
             # the wrong slot" and "it went to 库存 instead" are three different
             # repairs, and the difference is visible right here: the row count
             # says whether anything spawned at all, and the other slots say
             # whether it landed somewhere else.
-            n1 = inv_rows(f1)
             after = states1.get(slot)
             if len(gained) > 1:
                 # Two tiles filled from one spawn. Nothing here can say which
@@ -1645,6 +1862,15 @@ def main():
                                       f'or plate with --plates)')
     ap.add_argument('--weapon', help='host weapon(s), comma separated. '
                                      'Default: the smallest covering set')
+    ap.add_argument('--spread', type=int, default=0, metavar='N',
+                    help='put every part on N DIFFERENT guns, hosts drawn at '
+                         'random from everything in ROSTER that can wear it. '
+                         'Counts what is already on disk, so it asks for less '
+                         'each time. Slots only; refuses --weapon')
+    ap.add_argument('--seed', type=int, default=0,
+                    help='--spread draw seed. Stored in the run facts, because '
+                         'a crop that reads wrong has to be re-shootable on '
+                         'the same gun')
     ap.add_argument('--gun', type=int, default=2, choices=(1, 2),
                     help='which weapon slot to kit (default 2)')
     ap.add_argument('--angles', type=int, default=10,
@@ -1671,6 +1897,16 @@ def main():
     unknown = [t for t in targets if t not in TARGETS]
     if unknown:
         ap.error(f'not a target: {", ".join(unknown)} (have {", ".join(TARGETS)})')
+
+    if args.spread:
+        if args.weapon:
+            ap.error('--spread draws its hosts at random; --weapon names them. '
+                     'Pick one')
+        if 'slots' not in targets:
+            ap.error('--spread is about which GUN wears the part, and only '
+                     '`slots` is photographed on a gun')
+        if args.spread < 1:
+            ap.error('--spread N needs N >= 1')
 
     weapons = [w.strip() for w in (args.weapon or '').split(',') if w.strip()]
     if args.plates and not weapons:
@@ -1701,14 +1937,21 @@ def main():
     if args.as_is:
         rounds, unreachable = [(weapons[0] if weapons else None, keys, False)], []
     else:
-        rounds, unreachable = plan_rounds(targets, keys, weapons, args.plates)
+        rounds, unreachable = plan_rounds(targets, keys, weapons, args.plates,
+                                          args.spread, args.seed)
     passes = 2 if ('rows' in targets and 'slots' in targets) else 1
     print(f'targets  : {", ".join(targets)}')
     print(f'rounds   : {len(rounds)} x {args.angles} backgrounds'
           + (f' x {passes} passes' if passes > 1 else ''))
+    if args.spread:
+        print(f'hosts    : drawn at random, {args.spread} gun(s) per part, '
+              f'seed {args.seed}; what is already on disk counts')
     if unreachable:
         print(f'skipped  : {", ".join(unreachable)} — '
-              + ('none of the hosts you named can wear them' if weapons
+              + (f'fewer than {args.spread} guns in ROSTER can wear them, so '
+                 f'every one that can is already planned or already shot'
+                 if args.spread else
+                 'none of the hosts you named can wear them' if weapons
                  else 'no live weapon in ROSTER can wear them'))
     if args.plan:
         for i, (w, ks, _) in enumerate(rounds, 1):
@@ -1727,7 +1970,12 @@ def main():
                                   else ''),
                             facts={'gun': args.gun, 'angles': args.angles,
                                    'targets': list(targets),
-                                   'unreachable': unreachable})
+                                   'unreachable': unreachable,
+                                   # The draw is only reproducible if the seed
+                                   # travels with the crops it produced.
+                                   **({} if not args.spread else
+                                      {'spread': args.spread,
+                                       'seed': args.seed})})
     out_dir = run.path
     print(f'out      : {os.path.relpath(out_dir, ROOT)}\n')
 

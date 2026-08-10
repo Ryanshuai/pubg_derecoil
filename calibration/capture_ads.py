@@ -712,7 +712,7 @@ class AttachEquip:
         sent right after the previous toggle is sometimes SWALLOWED
         (docs/game_quirks.md), and the old loop here read that as "the screen
         would not open" and gave up on the scope. It re-presses instead, and
-        it decides with tab_open() — a 41x18 pixel check with an offline
+        it decides with is_tab_open() — a 41x18 pixel check with an offline
         regression behind it (pixi run tab-open) — rather than by sleeping a
         fixed 0.55 s and hoping.
 
@@ -891,7 +891,7 @@ class ScopeVerifier:
         frame, thresholded at 12.0 — which answers "did the picture change",
         not "is the inventory up". The training range is not a still life, and
         a Tab the game swallowed left the run reading a slot off the world.
-        ensure_tab() re-presses a swallowed key and decides on tab_open()'s
+        ensure_tab() re-presses a swallowed key and decides on is_tab_open()'s
         pixel check instead.
         """
         if not self.inv.ensure_tab(True):

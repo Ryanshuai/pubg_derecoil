@@ -46,8 +46,17 @@ def _white_text_mask(img_bgr):
     return cv2.morphologyEx(out, cv2.MORPH_OPEN, _OPEN_KERNEL)
 
 
-def _template_match(crop, templates):
+def _template_match(crop, templates, mask_fn=None):
     """[(iou, code), ...] best first, over the white text in `crop`.
+
+    ⚠ `mask_fn` EXISTS SO THERE IS ONE SCORER, NOT TWO. The 库存 row labels
+    need the same windowed IoU and the same prefix tie-break as the weapon
+    plates -- "Suppressor (DMR, SR)" against "Suppressor (Handgun, SMG)" is
+    the m24/m249 problem again -- but they cannot use `_white_text_mask`,
+    whose MORPH_OPEN 3x3 is wider than a row label's strokes and erases them
+    (measured: 908 ink pixels before the open, 0 after). Forking the scorer to
+    change one line is how two implementations drift; `row_name_detector`
+    passes its own mask instead. Default is unchanged.
 
     The IoU is taken inside the matched window, not over the whole crop. A
     plate can hold more text than its template covers — the game prints
@@ -82,7 +91,7 @@ def _template_match(crop, templates):
     shaped the scoring intact — 'Micro UZI' has no near-scoring rival to be
     compared against, and k2 is 0.23 behind sks, far outside the margin.
     """
-    binary = _white_text_mask(crop)
+    binary = (mask_fn or _white_text_mask)(crop)
     if np.count_nonzero(binary) == 0:
         return []
     results = []

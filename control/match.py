@@ -20,6 +20,7 @@ from collections import deque
 from config import KEY_ACTION_TABLE, DETECT_TABLE, MISMATCH_TABLE
 from logbook import note
 from calibration.mismatch import MismatchCollector
+from calibration.tile_harvest import TileHarvester
 from control.tab_watch import TabWatch
 from detector.weapon import Weapon
 from press.pico_mouse import get_mouse
@@ -41,6 +42,14 @@ class Dispatcher(DaemonLoop):
         # Both share the detector registry by reference: register() mutates
         # the dict in place, so detectors added later are visible to them too.
         self.mismatch = MismatchCollector(state, capture, self._detectors)
+        # ⚠ RIDES ALONG, OWNS NOTHING. Same argument as MismatchCollector: the
+        # Tab reading is the only place a frame and a part name meet without
+        # anyone driving the game for it, so the corpus is free here and
+        # nowhere else. It writes only for (part, rack) pairs the template
+        # bank has no picture of, stops at a quota, and marks every crop
+        # `source: detected` -- these are the loop's own readings, not
+        # something an operator fitted and confirmed.
+        self.tiles = TileHarvester(self._detectors.get("tab_attachment"))
         # The Tab screen is not in the per-frame capture, so it reads its own
         # regions on demand. It owns state.tab_open and the guns' loadout.
         #
@@ -528,6 +537,7 @@ class Dispatcher(DaemonLoop):
             elif result_field == 'attachments':
                 for gun_id, att in result.items():
                     self.mismatch.check_attachment(gun_id, att, crops)
+                    self.tiles.offer(gun_id, att, crops)
                     self.state.set_attachments(gun_id, att)
                 self._apply_hw(['upload_pattern'])
         return None
