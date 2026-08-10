@@ -75,6 +75,10 @@ attach = "python control/inventory.py"
 capture-ads = "python calibration/capture_ads.py"
 fit-ads = "python calibration/fit_ads_detector.py"
 smoke = "python tools/smoke_check.py"
+# Re-verify tab_layout.ROW_PITCH against a LIVE frame: stock the inventory,
+# then report the (dy, dx) at which each row's icon reproduces its crop.
+# DRIVES THE GAME. Run it after any client update that restyles the panel.
+row-pitch = "python tools/probe_row_pitch.py"
 off-capture = "python control/focus.py --selftest"
 layering = "python tools/check_layering.py"
 surface = "python tools/surface.py"
