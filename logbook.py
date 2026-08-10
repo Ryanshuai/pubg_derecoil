@@ -141,7 +141,54 @@ def start_log(root=None):
     sys.stdout = _Tee(sys.stdout, fh)
     sys.stderr = _Tee(sys.stderr, fh)
     print(f'[log] {path}', flush=True)
+    note_constants()
     return path
+
+
+def note_constants():
+    """Stamp the tuning constants this process is running. FILE ONLY.
+
+    ⚠ WITHOUT IT, TWO RUNS AT DIFFERENT SETTINGS LEAVE IDENTICAL-LOOKING LOGS.
+    On 2026-08-09 the compensation offset was moved five times in one session --
+    -20, -30, -60, -80, -90, each followed by a play test -- and all five logs
+    opened with the same four lines. The question asked afterwards was "which
+    value was the one that felt right", and no log could answer it.
+
+    That is this module's own premise turned on the independent variable: a
+    session cannot be replayed, so its evidence must not be thrown away. A
+    record of what HAPPENED without what the process was CONFIGURED TO DO is
+    half a record, and the missing half is the thing being varied.
+
+    `note` and not `print`: the terminal's budget is the status table, and these
+    lines are read afterwards, which is exactly the split this module exists for.
+
+    ⚠ READ OUT OF config AT RUNTIME, NEVER WRITTEN AS LITERALS. A prose copy of a
+    live constant is a second author of it -- `pixi run params` counts it as one
+    and is right to. This prints what the process actually loaded, which is also
+    what makes it evidence instead of a claim.
+
+    ⚠ AND IT DOES NOT IMPORT press. The offset reaches the firmware through
+    PicoMouse.RECOIL_FIRE_DELAY_MS, which IS config's value, so reading it here
+    would only make a logging module depend on the hardware layer.
+    """
+    try:
+        import config as c
+        note(f'[config] compensation offset {c.RECOIL_FIRE_DELAY_MS} ms '
+             f'= -(comp_lag {c.RECOIL_COMP_LAG_MS} '
+             f'+ head_lead {c.RECOIL_HEAD_LEAD_MS})')
+        ks = ', '.join(f'{k}={(v or {}).get("K")}'
+                       for k, v in sorted(c.RECOIL_SIGHT_PROFILES.items())
+                       if (v or {}).get('K'))
+        note(f'[config] K per optic: {ks}')
+        note(f'[config] curve scaling per optic: '
+             f'{dict(sorted(c.RECOIL_SIGHT_RATIO.items()))}')
+        note(f'[config] hot reload {c.DEBUG_HOT_RELOAD}, '
+             f'play observing {c.PLAY_OBSERVE}')
+    except Exception as e:
+        # ⚠ NEVER FATAL. Same rule as the log file itself: a broken record must
+        # not take down a session that is otherwise fine, least of all one
+        # driving hardware.
+        note(f'[config] could not be stamped: {e!r}')
 
 
 def _selftest():
