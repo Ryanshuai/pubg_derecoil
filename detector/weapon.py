@@ -523,6 +523,32 @@ class Weapon():
         self.muzzle = ''
         self.grip = ''
         self.butt = ''
+        # ⚠ `muzzle == ''` HAS TWO MEANINGS AND THEY NEED DIFFERENT ANSWERS:
+        # "Tab read this gun and it wears nothing" and "nobody has looked yet".
+        # Both produce config_key 'bare', so without this flag a gun whose kit
+        # has never been observed is compensated AS a bare gun.
+        #
+        # ⚠ IT IS CURRENTLY MASKED BY A SECOND FAULT, WHICH IS WHY IT HAS NEVER
+        # BILLED. An unobserved gun also has scope '' -> `iron`, which has no
+        # entry in RECOIL_SIGHT_RATIO, so the lookup refuses for THAT reason and
+        # the bare-curve question is never reached. Measured 2026-08-09 across
+        # eight consecutive play logs: every one opens with `no fitted curve for
+        # <gun> bare standing iron`, and every one starts compensating within
+        # 0.1 s of the FIRST Tab read. The window is short only because the
+        # operator opens Tab early; log 0809_173417 ran 3.7 s unarmed.
+        #
+        # So the day someone gives `iron` a K -- which looks like a pure
+        # improvement, and was proposed in this session -- a freshly restarted
+        # process would fire a BARE curve at a gun wearing a compensator, a
+        # foregrip and a stock. That is 1782 counts against 1058 on the aug, and
+        # it is the same failure load_final_curves already records at 1521
+        # against 895. This flag is what stops that from being a live bug then.
+        #
+        # False until something SAYS what the gun wears. `set()` on any kit slot
+        # is such a statement, including a statement of '': `build_weapon` passes
+        # `att.get('muzzle', '')` and means it. The automatic clear inside
+        # `set('name')` is NOT -- it means "different gun, ask Tab".
+        self.kit_seen = False
 
         self.type = 'ar'
 
@@ -551,6 +577,7 @@ class Weapon():
                 self.butt = ''
                 self.scope_factor = 1
                 self.scale = 1.0
+                self.kit_seen = False      # empty hands wear nothing observed
                 return
             self.scale = _weapon_scales.get(state, 1.0)
             rpm = WEAPON_RPM.get(state, 600)
@@ -593,10 +620,13 @@ class Weapon():
             self.scope_factor = SCOPE_MAGNIFICATION.get(nominal, nominal)
         elif pos == 'muzzle':
             self.muzzle = state
+            self.kit_seen = True
         elif pos == 'grip':
             self.grip = state
+            self.kit_seen = True
         elif pos == 'butt':
             self.butt = state
+            self.kit_seen = True
 
     def adjust_scale(self, delta):
         """Adjust per-weapon scale or posture factor depending on posture.
@@ -985,6 +1015,21 @@ class Weapon():
             # would look up the kit MINUS that part and fire a curve fitted
             # without it, which is the 1521-against-895 failure below wearing
             # a different hat.
+            # ⚠ BEFORE THE KEY IS BUILT, because an unobserved kit does not have
+            # a wrong key -- it has no key. See `kit_seen` in __init__ for what
+            # this costs when it is missing and why nothing has noticed.
+            if not self.kit_seen:
+                said = ('unseen', self.name)
+                if not _MISSING_SAID.get(said):
+                    _MISSING_SAID[said] = True
+                    print(f'[curves] {self.name or "(empty hands)"}: nobody has '
+                          f'read this gun\'s attachments yet -- NOT '
+                          f'compensating. `bare` and `not looked at` are the '
+                          f'same four empty strings, and firing the bare curve '
+                          f'at a kitted gun over-compensates by up to 68%. '
+                          f'Open Tab once.', flush=True)
+                self.dx_s, self.dy_s, self.t_s = [], [], []
+                return
             cfg = worn_keys(self.muzzle, self.grip, self.butt)
             sight = _sight_of(self.scope, self.name)
             if cfg is None:

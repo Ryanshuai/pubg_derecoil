@@ -159,6 +159,15 @@ class GameState:
         for w in guns:
             for attr in ('scope', 'muzzle', 'grip', 'butt'):
                 w.set(attr, '')
+            # ⚠ AFTER THE LOOP, BECAUSE `set()` MEANS "I AM TELLING YOU" AND
+            # THIS MEANS "I NO LONGER KNOW". Weapon.set marks kit_seen on every
+            # kit slot -- `build_weapon` passing '' is a statement that the gun
+            # is bare and must be believed -- so clearing through set() would
+            # leave the gun claiming an OBSERVED bare kit. That is the state
+            # Weapon.kit_seen exists to keep distinguishable: sync_weapons calls
+            # this the moment a gun becomes a different gun, which is precisely
+            # when nobody has looked at the new one yet.
+            w.kit_seen = False
             w.set_seq()
 
     # ════════════════════════════════════════════════════════════
