@@ -1,6 +1,12 @@
-"""A pickup must not disarm the tool. Offline: no game, no screen, no Pico.
+"""Nothing may leave the tool silently disarmed. Offline: no game, no Pico.
 
     pixi run kit-persist
+
+Two instances of one shape, a year apart in the table and identical in kind:
+a KEYPRESS turns compensation off and nothing observable turns it back on.
+
+    the F key    wiped both guns' kit, so the curve key fell to `bare`
+    the win key  set stop_recoil, and nothing reliably cleared it
 
 ⚠ THIS IS THE GATE FOR THE BIGGEST SINGLE REASON THE TOOL STOPPED
 COMPENSATING MID-FIGHT. `('clear_attachments',)` hung off the F key, so every
@@ -105,6 +111,59 @@ check('scope forgotten', s2.weapon_1.scope, '')
 check('grip forgotten', s2.weapon_1.grip, '')
 check('stock forgotten', s2.weapon_1.butt, '')
 check('and it is not still firing the m416 curve', armed(s2), 0)
+
+print('\n=== the right button re-arms, on the PRESS ===')
+# ⚠ SAME FAMILY AS THE F KEY ABOVE: a key silently leaves the tool disarmed
+# and nothing brings it back. `win` sets stop_recoil and clears nothing. Play
+# log 2026-08-09 17:09:58 -- `win` press, then THIRTY-SIX SECONDS disarmed,
+# until a Tab happened to be opened and closed.
+#
+# Every other re-arm in the table hangs off a key the player may simply not
+# press (1, 2, a shift release). The right button is the one they cannot
+# avoid: it is the key that means "I am about to shoot".
+rights = [e for e in KEY_ACTION_TABLE if e['key'] == 'right']
+check('exactly one right-button entry', len(rights), 1)
+check('and it is on the PRESS', rights[0].get('event'), 'press')
+check('it clears stop_recoil', ('stop_recoil', False) in rights[0]['state'],
+      True)
+check('and re-arms the firmware', rights[0].get('hw'),
+      ['recoil_on', 'upload_pattern'])
+# ⚠ THE PRESS EDGE IS THE POINT, NOT A DETAIL. Under release-only the whole
+# HOLD ran disarmed, and a held right button is shoulder aim -- one of the
+# three aiming states, not an edge case. With toggle ADS the two edges are
+# ~50 ms apart; with a held one it is the entire engagement.
+check('nothing re-arms on the right RELEASE (that was the bug)',
+      any(e['key'] == 'right' and e.get('event') == 'release'
+          for e in KEY_ACTION_TABLE), False)
+
+print('\n=== win disarms, and the next right-click undoes it ===')
+# End to end through the real dispatcher, because the assertions above are
+# about a table and the failure was about a SEQUENCE. Dispatcher.__new__ skips
+# the poller, the threads and the hardware.
+from collections import deque, namedtuple                      # noqa: E402
+from control.match import Dispatcher                           # noqa: E402
+
+KeyEvent = namedtuple('KeyEvent', ['key', 'event', 'ts', 'held_keys'])
+
+
+class _Tab:
+    def on_key(self, ts):
+        pass
+
+
+d = Dispatcher.__new__(Dispatcher)
+d.state = GameState()
+d._detectors = {}
+d._pending = deque()
+d._hw = []
+d._apply_hw = d._hw.append
+d.tab = _Tab()
+d._handle_key(KeyEvent('win', 'press', 0.0, frozenset()))
+check('win disarmed it', d.state.stop_recoil, True)
+d._handle_key(KeyEvent('right', 'press', 0.1, frozenset()))
+check('the right-click press re-armed it', d.state.stop_recoil, False)
+check('and pushed the curve with it', d._hw[-1], ['recoil_on',
+                                                  'upload_pattern'])
 
 print('\n=== clearing gun 1 does not touch gun 2 ===')
 s3 = GameState()
