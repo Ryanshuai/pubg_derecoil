@@ -2169,13 +2169,58 @@ RECOIL_COMP_LAG_MS = 20
 # operator's instruction because the observation is direct and the model is not
 # trusted here; recorded as such rather than as a measured optimum.
 #
-# What the offline sweep predicts for it, so the prediction is on the record
-# BEFORE it is fired: t=51 about -7 counts (over-compensated, sign REVERSED),
-# t=300 about -15, whole-burst RMS ~86 against 79 now. If the burst instead
-# feels right, this model is wrong in a way worth chasing -- see the folding
-# investigation in press/pico_mouse.upload_pattern and the ONE knot the firmware
-# spreads it over.
-RECOIL_HEAD_LEAD_MS = 70
+# ⚠ 70 (offset -90) WAS FIRED AND FELT RIGHT. Settled at 40 (offset -60)
+# afterwards, which is where THREE independent things point:
+#
+#   the first sweep ever run          ~ -60   (discarded -- see below)
+#   the fold vs the measured need       -60   (5.99 counts at t=0 against
+#                                              y_true(51 ms) = 4.1 needed)
+#   the screen                         -90 felt right, -60 is the same side
+#
+# The fold column is what makes -60 preferable to the -90 that was tried: the
+# step it delivers at the click is 1.46x the first shot's measured recoil, where
+# -90 is 2.1x and -30 is a sixth of it.
+#
+#     offset    knots folded into t=0    t=0 step
+#      -30                2               0.69 counts
+#      -60                4               5.99
+#      -90                6               8.55
+#     -120                8              15.39
+#
+# ⚠ AND THE FIRST SWEEP HAD SAID -60 ALL ALONG. The passage below records it
+# being thrown away: "the first sweep that put the optimum near -60". The reason
+# was CORRECT -- it compared arms across runs, and a -46 arm read 30 counts from
+# its own interleaved neighbours -- but what replaced it was chosen on
+# WHOLE-BURST RMS, the aggregate that cannot see the first shot. Of three
+# readings of this constant, the only one pointing at a small lead is the one the
+# blind criterion picked:
+#
+#     first sweep, across runs      ~ -60   discarded, method faulty
+#     interleaved sweep, whole RMS    -19   method sound, criterion blind
+#     the screen, first shot          -90   direct, not a measurement
+#
+# Root CLAUDE.md, "判据必须能看见它要管的那个维度" -- and this time the blind
+# criterion did not merely hide a fault, it discarded an answer.
+#
+# ⚠ THE MECHANISM IS THE FOLD, NOT THE PHASE, and that distinction is why this
+# is a separate constant. upload_pattern folds every knot before t=0 into a step
+# at t=0; the fitted curve's head is ~0, so a small lead folds ~nothing and a
+# large one folds real counts. That is how a lead acts on the FIRST shot
+# specifically. It also explains why 10 ms was invisible: 0.02 -> 0.69 counts,
+# one pixel at K=1.54.
+#
+# ⚠ SO IT IS NOT EVIDENCE THAT L IS 60, AND RECOIL_COMP_LAG_MS MUST NOT MOVE ON
+# THE STRENGTH OF IT. L appears in the ANALYSIS as y_true(t) = y_obs(t) + C(t-L);
+# changing it re-derives every fitted curve in the store. Its three readings
+# (18.3..21.7, 24.3, 18.9) are untouched by anything here.
+#
+# ⚠ AND 40..70 IS STILL NOT SWEPT. -60 comes from a faulty comparison plus a
+# fold argument, -90 from an eye. The verdict run is the one described above --
+# interleaved arms, reporting the t=51 ms residual AND whole-burst RMS AND
+# magazine-to-magazine spread per arm -- and it should bracket -40, -60, -90
+# rather than the -20, -30, -40 that was proposed when the head was thought to
+# need single-digit milliseconds.
+RECOIL_HEAD_LEAD_MS = 40
 
 # ⚠ DERIVED, NOT CHOSEN. The derivation is the block above RECOIL_COMP_LAG_MS;
 # the one-line version is that a count emitted at t appears at t + L, so
