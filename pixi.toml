@@ -125,6 +125,15 @@ plan-order = "python tools/test_plan_order.py"
 # 20 pointers on the old layout while layering/surface/params stayed green —
 # a step written in Markdown is invisible to every import graph.
 pointers = "python tools/check_pointers.py"
+# MODEL.md's 「常数现值」 table is a SECOND AUTHOR for numbers config.py holds,
+# and c196aa0 -- the commit before this gate -- is titled "MODEL.md carried
+# D = -19 after it became -90". The spec is the 主法则, so a reader taking a
+# number from it is doing the right thing with a stale value. Reads every value
+# from config at run time and carries no copy of its own. ⚠ Its first run
+# failed on the WRONG row: a second table in the same section also opens with
+# `D`, so it read that one's `0`. 3/3 mutations bite (perturb MODEL.md, perturb
+# config, delete a paired row).
+model-consts = "python tools/check_model_constants.py"
 fit-time = "python calibration/fit_time_curve.py --selftest"
 # What is measured, what is guessed, what has never been fired. A REPORT, not
 # a gate — it exits 0 by construction. It earns a task because its answer is a
