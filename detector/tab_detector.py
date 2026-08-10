@@ -102,7 +102,7 @@ class TabTypeDetector:
 
         The number `classify` thresholds, exposed because callers were
         recomputing it and getting a DIFFERENT number. calibration/
-        collect_templates.py measured it with `cvtColor(BGR2GRAY)` -- a luma
+        legacy_collect_templates.py measured it with `cvtColor(BGR2GRAY)` -- a luma
         average -- and then compared the result against TAB_COUNT_MIN/MAX,
         which were measured on the channel maximum. Averaging three channels
         to find white ink dilutes it, so every count came out low against

@@ -363,7 +363,7 @@
 | 后果 | 点击穿到下面那一行武器上，等价于右键点枪械行 —— **整枪连配件掉地上**（上一节那条） |
 | 怎么检测 | 枪名牌墨迹 `plate_ink` 从 679–901 掉到 **0**，武器面板整块不再绘制；地面多一行 |
 | 怎么避免 | **点之前先确认槽里有东西**，而且不能用模板确认（要采模板的那些件本来就读不出来）。用 tile 几何：`SlotDetector` 的 `filled`（内部 Canny 202–885 vs 空槽 0–71） |
-| 置信度 | 实测（2026-08-03，`calibration/collect_templates.py` 连续三轮 × 6 件，`facts.misses` 里 `step=take_off`） |
+| 置信度 | 实测（2026-08-03，`calibration/legacy_collect_templates.py` 连续三轮 × 6 件，`facts.misses` 里 `step=take_off`） |
 
 **它长得跟成功一模一样。** 右键卸配件在**槽里有东西**时是实测 3/3 进库存的，所以调用方拿到的是同一个手势、同一个返回；区别只有屏幕。三轮 18 次全部收零，日志每一行都正常：`gun_slot()` 说枪在 slot 1、`read_slots()` 说它穿着四个配件、`SlotDetector` 把面板后面模糊的地形读成 `empty`——**三个读数在一个没有枪的机架上各说各的**，只有名牌墨迹是 0。
 
@@ -459,7 +459,7 @@ DROP_XY = {'inventory': (1128, 611), 'nearby': (744, 570)}
 
 ### 对采集的意义
 
-`calibration/collect_templates.py` 靠这条规则**安排**落点，而不是绕开它：
+`calibration/legacy_collect_templates.py` 靠这条规则**安排**落点，而不是绕开它：
 同一个件刷两次——第一次槽位空、自动上枪，拍 `slots`；第二次槽位被它自己占着、进库存唯一一行，拍 `rows`。
 两张图都是同一个件，身份由「只刷了这一个」保证，不问检测器也不依赖库存的排序。
 

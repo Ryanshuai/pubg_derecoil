@@ -192,7 +192,7 @@ git checkout d761d6c~1 -- data/templates/pubg_assets/Item/Attachment
 | `pixi run tab-open` 970 张 0 误开 | 面朝一棵树时**误判面板开着** | 970 张里没有一张的那个窗口里有树 |
 | `magazine_fault` 全部通过 | 残差 **+117.6%**（比补偿还大） | 没有一条闸问「隐含后坐力合不合理」 |
 
-**推论一：闸门绿了不等于出货路径对。** 库存行那次，`score_attachments.py` 的 `samples()` docstring 还写着「the detector's own reader resizes them to the slot size, so they arrive here the same way」——**那句话在它被改的那天就成了假的，而它正是让缺口看不见的东西**。改了取样几何就必须同时改（或删掉）那句声称两边一致的话。
+**推论一：闸门绿了不等于出货路径对。** 库存行那次，`legacy_score_attachments.py` 的 `samples()` docstring 还写着「the detector's own reader resizes them to the slot size, so they arrive here the same way」——**那句话在它被改的那天就成了假的，而它正是让缺口看不见的东西**。改了取样几何就必须同时改（或删掉）那句声称两边一致的话。
 
 **推论二：新语料要含那个把它打破的样本。** 树的那一对（`docs/tab_tree_*.png`）和 12 个背景的开/关配对（`calibration/artifacts/tab_type/bg*`）现在都在语料里。**一个只装着已通过样本的语料，永远只会说通过。**
 
@@ -683,7 +683,7 @@ det.scores(crop)    # {枪: 余弦}，问「是不是某把枪」时用这个
   **现在的落地率是 93%（204 次验证过，14 次真没动）。** 剩下那些为什么不落，见 `control/CLAUDE.md` 的「手势干净但游戏不接」——**日志里所有能切的维度都是平的**，别再从这条记录出发去猜。
 - ✅ **~~库存行（`rows`）的真值集是坏的，930 条没一条能用~~ —— 已重采（2026-08-05），现在 930/1040 = 0.894。**
   坏的那两个原因都已修在采集端：文件名不含轮次导致互相覆盖（`CaptureRun.add()` 现在遇到重名直接抛，不再静默覆盖）、行号错位（游戏把新件插进自己的排序，采集器假设最新的在最后）。旧图没删，`labelled()` 不再把它们当真值发出去。
-  **行采集现在不需要枪也不需要模板**：`collect_templates.py --targets rows` 走 `rows_only`——清空架子和库存 → 刷**一个**件 → `inv_rows`（纯 Laplacian）确认库存正好一行 → 那一行就是它。身份来自「只刷了一样东西」。
+  **行采集现在不需要枪也不需要模板**：`legacy_collect_templates.py --targets rows` 走 `rows_only`——清空架子和库存 → 刷**一个**件 → `inv_rows`（纯 Laplacian）确认库存正好一行 → 那一行就是它。身份来自「只刷了一样东西」。
   ⚠ 这条路以前是**寄生在装配流程里**的（装上→拆下→拍行），所以要过 `SlotDetector`，而缺模板的件正好卡死在那里——**要采模板的件恰好是采不了的件**。`--targets rows` 单独跑因此永远返回 0 crops（`rows` 列表是空的，喂给 `sweep` 什么都拍不到）。
   还缺 `uzi_stock` / `variable` / `scope_8x`，命令见上面「两种渲染」那一节。
 - **不画 tile 的槽，`SlotDetector` 答 `empty`，不是 `unknown`** —— 这一行原来写反了，而反的方向正好是危险的那个：`empty` 是「来拖我」，`absent` 是「别拖」。2026-08-09 在 p90 上实测，两张独立帧：整条槽带**一个 tile 都不画**（枪自带集成镜），而它对 scope / grip / magazine 全答 `empty`。存在性判据是 tile **边框环**的梯度，没有 tile 时它读到的是背后的枪身渲染。

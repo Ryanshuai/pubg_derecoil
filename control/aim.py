@@ -413,7 +413,7 @@ class ViewDriver:
         The first of the module's two named exceptions (see the header for
         what earns the name). Everything else here moves in order to ARRIVE
         somewhere and proves it against the screen. This one moves in order to
-        CHANGE WHAT IS BEHIND THE PANEL: calibration/collect_templates.py
+        CHANGE WHAT IS BEHIND THE PANEL: calibration/legacy_collect_templates.py
         photographs the translucent Tab screen against a dozen different
         backdrops, and where the view lands is not merely unchecked, it is
         irrelevant — different is the whole requirement.

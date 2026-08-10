@@ -76,7 +76,7 @@ self.ac.pointer.drag(src, dst)       # ✗ 绕过了 _reject()
 
 | | 干什么 |
 |---|---|
-| **实验设计** | `collect_timed.py`（打进样本库；`--kit` 装配、自己刷枪，**读不出或对不上就拒绝**，见下）· `sweep.py`（只剩 `Rig` 装配壳）· `scan_compat.py` / `scan_fits.py`（槽位/配件兼容性）· `collect_templates.py` · `capture_ads.py` |
+| **实验设计** | `collect_timed.py`（打进样本库；`--kit` 装配、自己刷枪，**读不出或对不上就拒绝**，见下）· `sweep.py`（只剩 `Rig` 装配壳）· `scan_compat.py` / `scan_fits.py`（槽位/配件兼容性）· `legacy_collect_templates.py` · `capture_ads.py` |
 | **分析** | `samples.py`（样本库，**永不删除**）· `fit_time_curve.py`（聚类 + 一次性全量拟合，`--selftest` 离线）· `bullet_detect.py` |
 | **落盘 / 事实存储** | `capture_run.py`（`CaptureRun` 格式）· `rpm_store.py` · `kit_facts.py` |
 | **模板构建 / 审计** | `mine_slot_tiles.py`（从历史裁图挖，零游戏）· `solve_tiles.py`（手拍帧，按内容分堆）· `tile_harvest.py`（边玩边攒）· `build_row_name_templates.py`（库存行的**文字**模板）· `legacy_solve_template.py` · `legacy_score_attachments.py` · `build_name_templates.py` · `build_lobby_tab_templates.py` · `build_weapon_hud_bank.py` |
@@ -277,7 +277,7 @@ AKM 自己的弹匣画在它的 magazine 贴片框里，裸枪也有 395 个 Can
 
 ## 库存行采集不碰模板，也不碰枪（`rows_only`）
 
-`collect_templates.py --targets rows` 现在走一条独立的路：**清空架子和库存 → 刷一个件 → `inv_rows`（纯 Laplacian）确认库存正好一行 → 拍 10 个背景 → 下一个**。身份来自「只刷了一样东西」，跟 `one_part` 是同一条规则，去掉了那把逼出检测器依赖的枪。
+`legacy_collect_templates.py --targets rows` 现在走一条独立的路：**清空架子和库存 → 刷一个件 → `inv_rows`（纯 Laplacian）确认库存正好一行 → 拍 10 个背景 → 下一个**。身份来自「只刷了一样东西」，跟 `one_part` 是同一条规则，去掉了那把逼出检测器依赖的枪。
 
 **为什么必须独立。** 行采集原来寄生在 `one_part` 里：装上件 → 拆下来 → 拍那一行。于是每一张行图都要过 `SlotDetector`，而它的占用判据是**模板识别**——**要采模板的件恰好是采不了的件**。2026-08-05 那轮 12 个件死了 11 个，一行日志就是整个循环：
 
@@ -345,7 +345,7 @@ collect_intersect   自己驱动游戏跑完一组                     ⚠ 装�
 
 ```bash
 pixi run att-coverage                                      # 现状，谁站在一把枪上
-pixi run python calibration/collect_templates.py --all --spread 2 --seed 1 --plan
+pixi run python calibration/legacy_collect_templates.py --all --spread 2 --seed 1 --plan
 ```
 
 三条它必须做到的事，都在 `pixi run spread-hosts` 里钉着：

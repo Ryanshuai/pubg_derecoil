@@ -7,7 +7,7 @@ the weapon that was spawned into that rack row.
 
 WHY THE LABELS CAN BE TRUSTED, which is the only thing that makes this a test
 rather than a tautology. The corpus comes from
-`collect_templates.py --plates`, and each crop is labelled by WHAT WAS
+`legacy_collect_templates.py --plates`, and each crop is labelled by WHAT WAS
 REQUESTED FROM THE SPAWNER, confirmed by an addressing chain that never reads a
 plate:
 
@@ -83,7 +83,7 @@ def main():
     print(f'{total} labelled plates, {len(n)} weapons')
     if total < MIN_CROPS:
         print(f'\n[!] only {total} crops under {os.path.relpath(RUNS, ROOT)} — '
-              f'run `collect_templates.py --plates` before trusting this')
+              f'run `legacy_collect_templates.py --plates` before trusting this')
         return 1
     if not bad:
         print(f'\nall {right} read as the weapon that was spawned')

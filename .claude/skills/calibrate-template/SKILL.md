@@ -101,7 +101,7 @@ screen or it does not exist yet.
 
 The cost is real and was accepted: an asset holding only `.solved` has no
 row-scale picture, so `scope_6x` and `uzi_stock` lost their 库存 rows outright.
-Collect `.row` for them (see `calibration/score_attachments.py: BASELINE`).
+Collect `.row` for them (see `calibration/legacy_score_attachments.py: BASELINE`).
 
 ## Step 0 — check what is known
 
@@ -139,15 +139,15 @@ which is the same batch this step would otherwise collect at full price.
 `labelled()` returns 0 for them, because those weapons wear whatever PUBG
 auto-fitted and only the detector under test can name it.
 
-`calibration/collect_templates.py` spawns known items and photographs the Tab
+`calibration/legacy_collect_templates.py` spawns known items and photographs the Tab
 screen against many backgrounds. Ground truth is self-specified, so it can
 label a target whose template is the broken thing — which hand-cropping cannot.
 
 ```bash
-pixi run python calibration/collect_templates.py --plan --all      # no game needed
-pixi run python calibration/collect_templates.py --all --targets slots,plate,type
-pixi run python calibration/collect_templates.py --slot grip --targets rows
-pixi run python calibration/collect_templates.py --plates          # every weapon's plate
+pixi run python calibration/legacy_collect_templates.py --plan --all      # no game needed
+pixi run python calibration/legacy_collect_templates.py --all --targets slots,plate,type
+pixi run python calibration/legacy_collect_templates.py --slot grip --targets rows
+pixi run python calibration/legacy_collect_templates.py --plates          # every weapon's plate
 pixi run python tools/collect_ammo_digits.py --write               # the ten ammo digits
 ```
 
@@ -295,7 +295,7 @@ Detectors that count ink rather than match shape need new bounds when their
 target changes. Measure across several frames (the string may animate in),
 min/max, widen, and put the measured range in the config comment. Bounds too
 tight fail *open*: the screen reads "not up" and the caller silently does
-nothing. `collect_templates.py --targets type` measures this as a by-product —
+nothing. `legacy_collect_templates.py --targets type` measures this as a by-product —
 add `type` to whatever run is happening anyway rather than doing a separate one.
 
 Then list every text-keyed detector in its module docstring, so the next

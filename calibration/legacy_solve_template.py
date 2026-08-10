@@ -16,10 +16,10 @@ WHY IT IS BEING REPLACED, in the order the failures were found:
     the gun it will be matched against
 
 
-    pixi run python calibration/solve_template.py calibration/artifacts/attachments/runs/<stamp>
-    pixi run python calibration/solve_template.py <run> --write
+    pixi run python calibration/legacy_solve_template.py calibration/artifacts/attachments/runs/<stamp>
+    pixi run python calibration/legacy_solve_template.py <run> --write
 
-Reads the (backdrop, filled) pairs calibration/collect_templates.py's
+Reads the (backdrop, filled) pairs calibration/legacy_collect_templates.py's
 paired_sweep produces, recovers the icon and its alpha per pixel, and reports
 how well the result reconstructs the captures it came from.
 

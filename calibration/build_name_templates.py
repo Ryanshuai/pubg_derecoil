@@ -17,7 +17,7 @@ background and the glyphs are the same in all of them, so a PER-PIXEL VOTE
 across backgrounds keeps the text and drops the scenery. Ten backgrounds, a
 pixel kept when at least VOTE_FRAC of them agree.
 
-This is the same idea as the icon solve (calibration/solve_template.py) reached by a
+This is the same idea as the icon solve (calibration/legacy_solve_template.py) reached by a
 different route. Icons are alpha-blended, so they need the backdrop measured
 and the blend inverted. Plates are thresholded, so the scene is already mostly
 gone and what is left is noise that averages out. Neither can be done from one
@@ -29,7 +29,7 @@ template would be graded on the pixels it was made of. `--holdout k` builds
 from N-k backgrounds and scores on the k it never saw, which is the only
 number here worth quoting.
 
-The corpus is calibration/collect_templates.py --plates. Every crop is labelled
+The corpus is calibration/legacy_collect_templates.py --plates. Every crop is labelled
 by WHICH GUN WAS SPAWNED INTO THAT RACK ROW, watched arriving on an emptied
 rack -- never by reading the plate. Grading a plate reader on labels the plate
 reader produced would be circular, and that is exactly the trap this whole

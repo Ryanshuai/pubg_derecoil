@@ -167,7 +167,7 @@ class TabWeaponDetector:
         cannot be settled by the OCR, because the OCR is the thing under test:
         a spawn that silently produced nothing leaves the PREVIOUS gun in
         front of the camera, and the plate reads fine and names the wrong
-        weapon. calibration/collect_templates.py records that hole, and one
+        weapon. calibration/legacy_collect_templates.py records that hole, and one
         run of 40 frames was captured through it.
 
         With the rack emptied first, an empty slot draws no plate at all, so

@@ -27,11 +27,11 @@ translucent panel and all changing with whatever is behind it:
 Turning and cycling Tab is what a run costs; cutting one more region out of a
 frame already grabbed is free, so all four come from the same pass.
 
-    pixi run python calibration/collect_templates.py --plan --all
-    pixi run python calibration/collect_templates.py --all --targets slots,plate,type
-    pixi run python calibration/collect_templates.py --slot grip --targets rows
-    pixi run python calibration/collect_templates.py --plates
-    pixi run python calibration/collect_templates.py --as-is --label muzzle=comp_ar
+    pixi run python calibration/legacy_collect_templates.py --plan --all
+    pixi run python calibration/legacy_collect_templates.py --all --targets slots,plate,type
+    pixi run python calibration/legacy_collect_templates.py --slot grip --targets rows
+    pixi run python calibration/legacy_collect_templates.py --plates
+    pixi run python calibration/legacy_collect_templates.py --as-is --label muzzle=comp_ar
 
 GROUND TRUTH IS SELF-SPECIFIED, AND NO TEMPLATE ESTABLISHES IT — the items
 worth collecting are exactly the ones no template can name. Spawning the host
@@ -666,7 +666,7 @@ class Collector:
         # that reads the slot with a TEMPLATE still fired, and the part this
         # collector had just fitted could not be taken back off. Three sights
         # and a whole 0-crop run. slot_detector's own docstring called
-        # known_filled "the channel calibration/collect_templates.py already
+        # known_filled "the channel calibration/legacy_collect_templates.py already
         # used", and the channel did not exist.
         rec = self.ac.unequip(self.gun, slot, known_filled=known_filled)
         if rec.get('slot_state') and not known_filled:
@@ -1875,7 +1875,7 @@ def main():
                     help='which weapon slot to kit (default 2)')
     ap.add_argument('--angles', type=int, default=10,
                     help='how many backgrounds. MEASURED, not guessed: '
-                         'calibration/solve_template.py --stability holds one '
+                         'calibration/legacy_solve_template.py --stability holds one '
                          'capture out of the solve and reconstructs it, and '
                          'on comp_ar over 16 backgrounds the error plateaus '
                          'at k>=9 (0.27-0.41 grey levels) after falling from '

@@ -10,7 +10,7 @@ weapons' racks nothing in this repo has ever checked it. The tile is
 translucent: `blend_attachment` carries 0.37*blur(background) through from
 whatever sits behind it, and behind it is a different weapon silhouette.
 
-The parsing lives in `calibration/collect_templates.py` (`gun_of`,
+The parsing lives in `calibration/legacy_collect_templates.py` (`gun_of`,
 `slot_coverage`) because that is the module that WRITES the name and the field.
 This file only reports; a second copy of the naming convention here is exactly
 the drift that would make the two disagree silently.
@@ -69,7 +69,7 @@ def main():
                     and sum(1 for w in ROSTER if fits(w, a)) > 1)
     print(f'\n{len(lonely)} parts stand on ONE gun while more than one could '
           f'host them:\n  {" ".join(lonely)}')
-    print('\nextend with:  pixi run python calibration/collect_templates.py '
+    print('\nextend with:  pixi run python calibration/legacy_collect_templates.py '
           '--all --spread 2 --plan')
     return 0
 

@@ -163,7 +163,7 @@ ROSTER = {
 # A FEW STEMS ARE OURS, NOT THE GAME'S, and they are marked `# recovered`. The
 # game added these attachments after the art dump this repo unpacked, so there
 # is no shipped file to name them after — the only picture of them is the one
-# calibration/solve_template.py recovers off the screen. The stem still has to start
+# calibration/legacy_solve_template.py recovers off the screen. The stem still has to start
 # with the slot's prefix, because AttachmentDetector.SLOT_PREFIXES routes on it.
 #
 # THE ALTERNATIVE WAS LEAVING THEM None, AND None IS NOT NEUTRAL. A key with no

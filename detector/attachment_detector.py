@@ -33,7 +33,7 @@ convention as the weapon name plates, for a different reason: there the
 variants are languages, here they are where the picture came from. The shipped
 files are the game's own art, and the game does not draw its art unchanged —
 it scales it, outlines it and blends it into a translucent panel. A picture
-recovered FROM THE SCREEN (calibration/solve_template.py) is what the screen
+recovered FROM THE SCREEN (calibration/legacy_solve_template.py) is what the screen
 actually shows, and it beats the art it was drawn from. The art stays because
 it covers parts no capture run has reached yet.
 """
@@ -134,7 +134,7 @@ TMPL_OFFSETS = {48: (OFFSET_Y, OFFSET_X), 80: (0, 0)}
 # `absent`.
 #
 # THE FLOOR, and what it costs, measured over 1387 ground-truth crops with the
-# bank complete (calibration/score_attachments.py --margin-gate):
+# bank complete (calibration/legacy_score_attachments.py --margin-gate):
 #
 #     floor   correct kept    impostors refused
 #      1.05   100.0%            6.6%

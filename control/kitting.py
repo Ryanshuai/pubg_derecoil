@@ -15,7 +15,7 @@ what a bullet bucket was: it answers "is this gun wearing what the cell says",
 which is the same question under any model of recoil.
 
 The split is why the deletion was possible at all. `Kitter` and `BACKPACK` had
-six importers, and two of them — calibration/collect_templates.py and
+six importers, and two of them — calibration/legacy_collect_templates.py and
 tools/verify_kit.py — have nothing to do with recoil. Deleting harvest.py
 wholesale would have broken the template-collection chain, which is what the
 calibrate-template skill is built on.

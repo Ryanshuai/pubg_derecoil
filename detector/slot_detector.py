@@ -74,7 +74,7 @@ not comparable -- an unrecognised part reads `empty`, so a gesture is REFUSED
 and the part stays on the gun, while the old reader's failure put a gesture on
 an empty slot and lost the weapon. A caller that has just fitted something
 itself and knows better says so (`known_filled`), which is the channel
-calibration/collect_templates.py already used.
+calibration/legacy_collect_templates.py already used.
 
 ⚠ The scope slot draws NO TILE, so its PRESENCE is unanswerable and always
 was. It used to report 'unknown' for that reason and nothing could improve on

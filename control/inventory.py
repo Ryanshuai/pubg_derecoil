@@ -832,7 +832,7 @@ class InventoryControl(Driver):
         Public because callers need it and were taking it anyway: a collector
         that photographs the screen and then wants it READ has to hand the
         same pixels to both, or it is describing one frame with another
-        frame's answer. calibration/collect_templates.py reached through to
+        frame's answer. calibration/legacy_collect_templates.py reached through to
         `ac.grabber.grab()` for exactly this, which skips park() — and a
         hovered slot draws a tooltip over itself.
         """
@@ -983,7 +983,7 @@ class InventoryControl(Driver):
                  mouse moves — an attachment released over a slot that is not
                  drawn goes back where it came from, or onto the floor.
         verify   False to send the gesture and read nothing back. Exists for
-                 exactly one caller — calibration/collect_templates.py, which
+                 exactly one caller — calibration/legacy_collect_templates.py, which
                  is fitting a part in order to PHOTOGRAPH it, and whose slot
                  has no template yet by definition. Reading it back would
                  refuse every new attachment for lacking the very thing the
@@ -2113,7 +2113,7 @@ class InventoryControl(Driver):
         that a named part reaches a named slot. Here the destination is the
         ANSWER — the caller is asking the game where this part belongs.
 
-        The one caller is calibration/collect_templates.py, and its reason is
+        The one caller is calibration/legacy_collect_templates.py, and its reason is
         the reason this cannot be equip(): it is photographing parts whose
         templates do not exist yet, so it cannot name what it is holding, and
         naming a slot for it would mean trusting the row order. The game knows
@@ -2195,7 +2195,7 @@ class InventoryControl(Driver):
 
         The lookup DOES read a template, and that is a real limitation rather
         than an oversight: a part with no icon in the catalogue cannot be found
-        this way. calibration/collect_templates.py uses it only to re-stage a
+        this way. calibration/legacy_collect_templates.py uses it only to re-stage a
         part it has just watched arrive, never to decide what a crop is.
         """
         item = self.look(frame).find(att)

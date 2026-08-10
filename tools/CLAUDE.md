@@ -521,7 +521,7 @@ control/match.py（还原后）                  11:16:41.613     ← 晚 171 ms
 | 压枪偏了但看起来正常 | `pixi run python calibration/fit_time_curve.py --weapon <w>`，读 `dropped[]` 和 `agree_spread`。**先看臂之间对不对得上**——只有一条曲线臂的池子从来没被验过 |
 | 弹药数读不出来或读错 | `tools/probe_ammo_ocr.py` + `--confusion`；重建模板 `tools/collect_ammo_digits.py --write` |
 | 枪名认不出来（中文客户端） | `tools/probe_gun_name_ocr.py --variants` |
-| 配件认不出来或认错 | `pixi run attachments`（全量真值 + margin）；重建模板 `calibration/score_attachments.py --write`，单个 run 看解算质量 `calibration/solve_template.py <run>` |
+| 配件认不出来或认错 | `pixi run attachments`（全量真值 + margin）；重建模板 `calibration/legacy_score_attachments.py --write`，单个 run 看解算质量 `calibration/legacy_solve_template.py <run>` |
 | 槽位反复报「templates cannot separate」 | 面板半透明，槽位图标合成在世界之上，暗背景会把相邻件的余量压塌——修法是 `_nudge_backdrop` 换个背景再读。⚠ 那段代码 **2026-08-07 之前一直在空转**（Tab 开着发 raw counts 全打在光标上，0.29 对噪声底 0.32）。要再验一次就**必须带一条 `still` 对照臂**，否则只答得出「变了没有」，答不了「到底动没动」。数字在 `control/CLAUDE.md` |
 | 一整批 invocation 全报 `[0/N cells landed]` | **先看有没有 Traceback，别看实验。** 多 agent 共用这个仓库，`control/` 里一瞬间的语法错会让每个 invocation 死在 import 上，而干跑闸只数落地格子、区分不出「实验失败」和「代码 import 不进来」。2026-08-07 撞过一次：`control/fire.py` 的一个 docstring 收尾吞掉了整行 `g = cv2.cvtColor(`，等去修的时候另一个 agent 已经修回去了 |
 | 某把枪的槽位跟 catalogue 对不上 | `calibration/scan_compat.py`（30 把枪 268 秒）。⚠ **刷出来的枪不是裸枪**——PUBG 会把背包里能装的自动装上，要先 strip |

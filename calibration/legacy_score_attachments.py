@@ -32,9 +32,9 @@ that were fitted on purpose and confirmed without consulting a template. A
 detector's own reading cannot judge the detector, so nothing else is eligible;
 see calibration/capture_run.py.
 
-WHAT --write BUILDS. calibration/collect_templates.py photographs each part
+WHAT --write BUILDS. calibration/legacy_collect_templates.py photographs each part
 over ten backgrounds AND photographs the empty slot behind it, and
-calibration/solve_template.py inverts the compositing to recover the icon and its
+calibration/legacy_solve_template.py inverts the compositing to recover the icon and its
 alpha. That recovered picture is what the screen actually draws, which the
 shipped game art was not: the art is scaled, outlined and blended into a
 translucent panel before a single pixel of it reaches the screen. Every
@@ -49,7 +49,7 @@ TWO RENDERINGS, TWO GEOMETRIES, AND NO RESIZING BETWEEN THEM. The tile draws
 the icon edge to edge; the list draws it inside padding. Each variant is kept
 at the size it was photographed at and is skipped against a crop it does not
 fit, so the picture that reaches the comparison is the picture the screen
-drew. `solve_template.py --rows --install` produces and installs the row half.
+drew. `legacy_solve_template.py --rows --install` produces and installs the row half.
 
 TWO WAYS TO FLATTER A TEMPLATE, both refused here:
 
@@ -81,7 +81,7 @@ which was true and was also hiding two different problems behind one excuse.
                       the reference rows at a margin of 1.44 and still failed,
                       because its MSE was 175 against a gate of 150. Being
                       right and failing an absolute threshold is what a scale
-                      error looks like. solve_template.py --rows recovers the
+                      error looks like. legacy_solve_template.py --rows recovers the
                       row rendering; those are the `.row` variants.
 
 Neither could be seen past the other. With no template able to read a row, a
@@ -689,7 +689,7 @@ COUNTED = ('slots', 'reference rows', 'rows')
 #                        confident wrong answer left in the slot corpus.
 #   thumb_grip           2 reference rows, and supp_ar 12. The solved icons
 #                        are SLOT-scale pictures and a list row renders the
-#                        art smaller; solve_template.py --rows recovers
+#                        art smaller; legacy_solve_template.py --rows recovers
 #                        row-scale icons now but nothing consumes them yet.
 #
 # WHAT CAME OFF THIS LIST, and it is worth keeping the correction visible:

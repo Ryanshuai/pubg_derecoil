@@ -116,7 +116,7 @@ def extract(spec, write=False, force=False):
         print(f'cannot read {path}')
         return 1
     y, x, h, w = HUD_REGIONS[f'gun_name_{int(gun)}']
-    # An image already the size of a plate IS one — collect_templates.py writes
+    # An image already the size of a plate IS one — legacy_collect_templates.py writes
     # plate__<weapon>__bgN.png at exactly that size, and indexing into it would
     # run off the end. `gun` is then only there to satisfy the spec format.
     plate = frame if frame.shape[:2] == (h, w) else frame[y:y + h, x:x + w]
