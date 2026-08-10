@@ -6,6 +6,35 @@
 
 ---
 
+## ⚠ 2026-08-10 夜跑：三把枪**每一格**都失败，等你回来看
+
+`m249` 3/3、`mg3` 1/1、`vss` 1/1 —— 全灭。同一轮里 mp5k 8/8、js9/tommy/ump45 14/14，所以**不是管道坏了**。
+
+```
+123 格起跑   100 usable   23 FAILED   1 次 HALT
+失败分类     18 agree     5 state
+```
+
+**它们是这一批里后坐力最大的三把**（两挺机枪 + 一把 DMR），视角走得最远。但这只是形状，不是结论——我**没有**把 23 次失败按 agree/state 逐条对上，只有分类总数。
+
+要看的证据都在：
+
+```
+calibration/artifacts/nights/night_20260810_*/fail_m249_*
+calibration/artifacts/nights/night_20260810_*/fail_mg3_*
+calibration/artifacts/nights/night_20260810_*/fail_vss_*
+pixi run night --rejudge calibration/artifacts/nights/<ts>      # 离线重判，不用再开枪
+```
+
+⚠ **样本一梭没丢**（库永不删除），所以这三把可以纯离线查完再决定要不要补打。
+
+两个已知的、可能相关的东西：
+
+- `mg3` 有**两个自动档，cyclic 差 1.50 倍**，而 `ensure_fire_mode` 存在但采集路径曾经一次都没调过。这一轮调没调、存的是哪一档，`fail_mg3_*` 里能看出来。
+- `vss` 用集成镜 `vss_pso1`，而它是 `ads_end=False` 比例最高的枪之一（83.7%）。它的 `agree` 失败可能跟开镜读数不可信是同一件事。
+
+---
+
 ## 顺序
 
 | 序 | 事 | 你要花 | 解锁什么 |

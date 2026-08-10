@@ -17,13 +17,13 @@ already covers all three failure modes:
 | symptom | field |
 |---|---|
 | the gun has no such slot; a drag there lands nothing | `SLOTS[weapon]['slots']` |
-| the slot exists but rejects this part (Tommy Gun: suppressor only) | `EXCLUDE`, `GRIP_ONLY` |
+| the slot exists but rejects this part (Tommy Gun: suppressor only) | `EXCLUDE`, `SLOT_ONLY` |
 | the part fits but the table never listed it, so it is never fitted | *nothing detects this — only a scan does* |
 
 Each entry carries `conf`. `SLOTS` is now **30/30 measured** (scanned
 2026-08-02, `calibration/artifacts/compat/runs/20260802_155222/`) — but only for four of the
 five slots, since `scope` is unreadable, and `EXCLUDE` / `ONLY` /
-`GRIP_ONLY` are **still entirely inferred**. That is the remaining work.
+`SLOT_ONLY` are **almost entirely inferred** -- two entries are measured. That is the remaining work.
 
 The first scan overturned two entries, both of the dangerous kind — a slot the
 table claimed and the weapon does not have, so a drag drops the part on the
@@ -202,7 +202,7 @@ trustworthy.
 
 ## Step 5 — write it back with its confidence
 
-Update `SLOTS` / `EXCLUDE` / `GRIP_ONLY` / `ONLY` and set `conf='measured'`.
+Update `SLOTS` / `EXCLUDE` / `SLOT_ONLY` / `ONLY` and set `conf='measured'`.
 Keep the comment that says what was seen, in the style already there.
 
 Record the negatives too. "Nothing of this class fits" is a measurement, and

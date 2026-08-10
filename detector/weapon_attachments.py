@@ -105,7 +105,7 @@ def takes_vertical_grip(gun):
     """Can this gun hold the vertical foregrip the calibration assumed?
 
     Not `has_slot(gun, 'grip')`: tommy has a grip slot that takes only the
-    vertical, and GRIP_ONLY in the catalogue is what encodes that. Asking for
+    vertical, and SLOT_ONLY in the catalogue is what encodes that. Asking for
     the specific attachment gets both facts in one question.
     """
     return 'vert_grip' in compatible(gun).get('grip', ())

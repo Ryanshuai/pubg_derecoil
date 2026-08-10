@@ -68,7 +68,7 @@ different confidence:
       for a rifle with an integrated 2.7x.
 
   EXCLUDE / ONLY /      — inferred, still. Which attachments a PRESENT slot
-  GRIP_ONLY               accepts cannot be read off a tile: Tommy Gun's
+  SLOT_ONLY               accepts cannot be read off a tile: Tommy Gun's
       muzzle takes a suppressor and refuses a compensator, and both leave an
       identical empty tile. These need drags, one per part.
 
@@ -668,9 +668,27 @@ ONLY = {
     'uzi_stock': {'uzi', 'mp9'},   # 折叠式枪托 (蝎式手枪, Micro UZI 冲锋枪, MP9)
 }
 
-# Grips a weapon can take when it does not take all of them.
-GRIP_ONLY = {
-    'tommy': {'vert_grip'},        # vertical foregrip is the only one it fits
+# ⚠ A SLOT THAT ACCEPTS ONLY SOME OF ITS PARTS, keyed by (weapon, slot).
+#
+# It was `GRIP_ONLY`, keyed by weapon and hard-wired to the grip slot, and the
+# mp9 entry below is why that had to go: the same shape turned up on a STOCK,
+# and a second parallel table for one fact is how two encodings of the same
+# thing drift apart. One table, the slot is data.
+#
+# ⚠ POSITIVE, NOT NEGATIVE, and that is the point of this table existing
+# beside EXCLUDE. Saying "mp9 refuses heavy_stock and tactical_stock" is true
+# today and silently WRONG the day a fourth stock is added to the catalogue --
+# it would be allowed on mp9 by default. "mp9's stock slot takes uzi_stock and
+# nothing else" stays correct across that.
+SLOT_ONLY = {
+    ('tommy', 'grip'): {'vert_grip'},   # the only foregrip it fits
+    # MEASURED 2026-08-10, operator, after the night run lost both mp9 stock
+    # cells: 「mp9 只能撞 uzi 枪托，heavy_stock 不接受」. The harness saw it as
+    # `kit: stock reads ''` on the first attempt (the part never seated) and
+    # `Stock_UZI_C` on the second. Those two readings look like an assembly
+    # failure and like a compatibility fact, and nothing in the log separates
+    # them -- which is why this line comes from a human and not from the run.
+    ('mp9', 'stock'): {'uzi_stock'},
 }
 
 
@@ -706,8 +724,9 @@ def fits(weapon, att_key):
         return False
     if att_key in ONLY and weapon not in ONLY[att_key]:
         return False
-    if att['slot'] == 'grip' and weapon in GRIP_ONLY:
-        return att_key in GRIP_ONLY[weapon]
+    only = SLOT_ONLY.get((weapon, att['slot']))
+    if only is not None:
+        return att_key in only
     return True
 
 
