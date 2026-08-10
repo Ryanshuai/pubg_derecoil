@@ -2159,7 +2159,23 @@ RECOIL_COMP_LAG_MS = 20
 # EVERY offset above -- flat, because it is AMPLITUDE, not phase: aug bare's
 # curve is ~6% short of its own y_true. The first shot and the last are two
 # different problems and this constant only touches the first.
-RECOIL_HEAD_LEAD_MS = 10
+# ⚠ 10 WAS TRIED AND REPORTED NO CHANGE, WHICH THE TABLE ABOVE CANNOT EXPLAIN.
+# It predicts t=51 going +1.5 -> -0.4, i.e. nulled. From the chair, twice:
+# "还是不行" and then, asked what the rest of the burst does, "只有第一发/头几发,
+# 之后就稳了". A head-only symptom that a head-only correction did not move.
+#
+# So the offline model is missing something between the curve and the photons,
+# and 70 is EXTRAPOLATION ON A MODEL THAT ALREADY MISSED ONCE. Set at the
+# operator's instruction because the observation is direct and the model is not
+# trusted here; recorded as such rather than as a measured optimum.
+#
+# What the offline sweep predicts for it, so the prediction is on the record
+# BEFORE it is fired: t=51 about -7 counts (over-compensated, sign REVERSED),
+# t=300 about -15, whole-burst RMS ~86 against 79 now. If the burst instead
+# feels right, this model is wrong in a way worth chasing -- see the folding
+# investigation in press/pico_mouse.upload_pattern and the ONE knot the firmware
+# spreads it over.
+RECOIL_HEAD_LEAD_MS = 70
 
 # ⚠ DERIVED, NOT CHOSEN. The derivation is the block above RECOIL_COMP_LAG_MS;
 # the one-line version is that a count emitted at t appears at t + L, so
