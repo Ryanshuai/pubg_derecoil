@@ -34,8 +34,46 @@ from config import (HUD_REGIONS, SCREEN_W, SCREEN_H,
 # x ranges (checked against calibration/artifacts/tab_inventory.png, where 附近 is empty).
 # ════════════════════════════════════════════════════════════
 
-ROW_Y_FIRST = 199               # centre of row 0, both panels
-ROW_PITCH = 81.55
+# ⚠ REFITTED 2026-08-10 (199 / 81.55 -> 200 / 81.4201), and the old pair was
+# not wrong by a constant -- it was wrong by a SLOPE, which is why nothing
+# caught it. `_SHIFTS` searches +-1 px, and a pitch a few hundredths too large
+# walks out of that window by the bottom of the list while row 0 sits inside
+# it. So the top of every list read fine and the middle did not, which reads
+# as "some templates are bad" rather than "the ruler is stretched".
+#
+# THE MEASUREMENT: for each occupied row of 56 full-screen frames, the (dy, dx)
+# at which the row's icon template reproduces the crop with MSE < 1.0 -- 550
+# rows, and the icon bank is byte-exact where it matches, so this locates the
+# row rather than estimating it.
+#
+#     dx        0 on all 550 rows            the column was always exact
+#     dy(row)   +1.115 - 0.1299*row          resid sd 0.61 px (rounding)
+#
+# What it buys, on LIVE frames, with no gate touched and no impostor cost:
+#
+#     rows landing inside the +-1 search   87.5% -> 99.0%  (302 rows, 56 frames)
+#     icon reader on 13 night frames        88.1% -> 93.5%
+#     fused reader                          93.5% -> 93.5%, now 157 icon + 0 name
+#
+# ⚠ IT DOES NOT MOVE `pixi run attachments`' `rows` NUMBER, AND I WROTE THAT
+# IT WOULD. That corpus is 1050 stored 80x80 PNGs cut in 2026-08-03..05 with
+# whatever this constant was then; re-fitting it today cannot re-cut them, so
+# the number stays at 882 by construction. The 988 I quoted was the same stored
+# crops re-scored with +-3 shifts -- a statement that THE TEMPLATES are exact,
+# which is what pointed at the ruler, not a prediction about this change. Two
+# arithmetically correct numbers answering different questions, which is the
+# error this repository keeps paying for.
+#
+# What it costs `row_point`, which is where control/ presses the mouse to start
+# a drag: at most 1 px on any row, inside an 80 px icon. That is the whole
+# reason this could be changed at all.
+#
+# ⚠ DO NOT "FIX" A FUTURE DRIFT BY WIDENING _SHIFTS. 9 -> 49 shifts on a path
+# already costing ~123 ms buys the same reads and hides the cause; the corpus
+# said MSE 113..323 at +-1 and 0.0 at +-3, which is a ruler problem stated in
+# template units. Re-fit here instead.
+ROW_Y_FIRST = 200               # centre of row 0, both panels
+ROW_PITCH = 81.4201
 ROW_H = 82
 
 # Icon box, calibrated against AttachmentDetector's own metric rather than
