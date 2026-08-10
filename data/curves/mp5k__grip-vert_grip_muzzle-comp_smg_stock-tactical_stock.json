@@ -1,6 +1,6 @@
 {
  "weapon": "mp5k",
- "sight": "2x",
+ "sight": "red_dot",
  "posture": "standing",
  "config": {
   "muzzle": "comp_smg",
@@ -904,11 +904,12 @@
  "seed": true,
  "estimated_from": "mp5k__bare",
  "derivation": [
-  "shape  mp5k__bare — bare, because no cell with this kit has been fired",
+  "shape  mp5k__bare \u2014 bare, because no cell with this kit has been fired",
   "kit    f(vert_grip) = 0.7220  measured, this gun, red_dot",
   "kit    f(comp_smg) = 0.5579  measured, this gun, red_dot",
-  "kit    f(tactical_stock) = 0.9775  ⚠ BORROWED — mp5k has never worn it. Median of ace32 0.9183, m416 0.9906, vector 0.9775 (spread 7.4% of the value, and that spread IS the error bar)",
-  "couple 1.1695 (+16.9%) — this gun's cube in data/kit_factors.json, which is the RETIRED bullet-bucket coordinate. ⚠ Its stock may differ from the one asked for.",
+  "kit    f(tactical_stock) = 0.9775  \u26a0 BORROWED \u2014 mp5k has never worn it. Median of ace32 0.9183, m416 0.9906, vector 0.9775 (spread 7.4% of the value, and that spread IS the error bar)",
+  "couple 1.1695 (+16.9%) \u2014 this gun's cube in data/kit_factors.json, which is the RETIRED bullet-bucket coordinate. \u26a0 Its stock may differ from the one asked for.",
   "optic  r(2x) = 0.8875  MEASURED on this gun (828/932 counts, bare)"
- ]
+ ],
+ "note": "ESTIMATE, not a measurement. Shape borrowed from mp5k__bare and scaled by 0.4087. RELABELLED 2026-08-09: it was filed as sight=2x, and it is not -- mp5k__bare is the RED DOT curve and 0.4087 is a pure kit factor (the measured comp+vert+heavy sibling is 0.4256 at the red dot). Nothing scoped ever entered it. The mislabel was harmless while every magnified optic shared one ratio; once the ratios were measured (2x = 1.879) it started deriving a red-dot answer of 203 counts from a number that already WAS the red dot."
 }
