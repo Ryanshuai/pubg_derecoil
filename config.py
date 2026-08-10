@@ -1606,9 +1606,43 @@ POSTURE_FACTOR = {'standing': 1.0, 'crouching': 0.80, 'prone': 0.56}
 # cannot arbitrate between 0.88 and 1.76. The next magazine through a 4x can:
 # detector/weapon.py prints the derived total, so "it now pushes DOWN" means
 # this number is too high and "it still climbs like a bare gun" means too low.
+# ⚠ 2026-08-09: MEASURED, AND THE OLD TABLE WAS INVERTED. Every magnified optic
+# read 0.88 -- LESS compensation than a red dot -- and the truth is nearly the
+# magnification itself. mp5k bare, 8 magazines per optic, two interleaved arms
+# (x0.9 / x1.0) whose y_true must agree and cannot be faked by the fitter, with
+# the optic VERIFIED on the gun by read_sight (the first 2x attempt was refused
+# for still wearing a red dot):
+#
+#     optic   y_true counts   ratio    ratio/mag    what the table gave
+#     red_dot        932      1.000       --              100%
+#     2x            1752      1.879      0.939             47%
+#     3x            2614      2.803      0.934             31%
+#     4x            3704      3.973      0.993             22%
+#
+# So a 4x was being handed 22% of the counts it needs. That is the "the high
+# magnification is simply unusable, it feels like the 1x coefficient" report
+# from earlier in the day -- which this file dismissed at the time, correctly,
+# because that build had NO curve for a magnified optic at all. It has one now,
+# and the second report ("2x/3x/4x don't hold the gun down") is this.
+#
+# ⚠ THE OLD 0.88 WAS ONE CELL, FOUR MAGAZINES, AND OF UNVERIFIED VINTAGE. Its
+# provenance argument -- a nulling measurement, K divided out by ~400 -- was
+# sound, but the pairing between `--sight` and the part on the gun only landed
+# on 2026-08-04 and nothing says those four were fired after it. When today's
+# eight are pooled with them the clustering separates the two populations at
+# 33.5x against a gate of 8.0 and drops the old four, 570 counts from the
+# centre. They were not noise; they were a different measurement.
+#
+# ⚠ 6x AND 8x ARE EXTRAPOLATED AND SAID SO. Three points give ratio/mag =
+# 0.939 / 0.934 / 0.993, which is flat to within 6% but not flat enough to call
+# a law -- the 4x sits 6% above the other two and nothing here explains it. They
+# are set to 0.96 x magnification, the mean of the three. Fire one and replace
+# them; the failure direction is under-compensation, which is what the player
+# already lives with.
 RECOIL_SIGHT_RATIO = {
     'red_dot': 1.0,
-    '2x': 0.88, '3x': 0.88, '4x': 0.88, '6x': 0.88, '8x': 0.88,
+    '2x': 1.879, '3x': 2.803, '4x': 3.973,     # measured, mp5k bare, n=8 each
+    '6x': 5.76, '8x': 7.68,                    # 0.96 x mag, EXTRAPOLATED
     'hipfire': 3.083,
 }
 KIT_FACTORS_PATH    = os.path.join(DATA_DIR, 'kit_factors.json')
