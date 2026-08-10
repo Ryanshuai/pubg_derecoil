@@ -134,8 +134,20 @@ class TabWatch:
     'tab_attachment'; missing ones just disable their part.
     """
 
-    def __init__(self, state, detectors, verbose=True, shot_dir=SHOT_DIR):
+    def __init__(self, state, detectors, verbose=True, shot_dir=SHOT_DIR,
+                 on_change=None):
         """shot_dir: where the close's frame is kept. None to keep none.
+
+        `on_change` is called AFTER a reading has been written through to
+        GameState, with no arguments. It exists because writing the record and
+        telling the DEVICE are two different things, and until 2026-08-09 only
+        the first happened here: the upload hung off the dispatcher noticing
+        the panel disappear, which is a second event that may not arrive.
+
+        Measured over every play log on disk: 166 Tab reads, and 69 of them --
+        42% -- had no observed close within three seconds of the read. In each
+        of those the Weapon object held the new curve and the Pico held the old
+        one, with nothing anywhere saying so.
 
         ⚠ IT IS A PARAMETER BECAUSE THE OFFLINE GATE WROTE INTO THE EVIDENCE
         DIRECTORY, and that is a worse failure than it sounds. `pixi run
@@ -155,6 +167,7 @@ class TabWatch:
         self._detectors = detectors
         self.verbose = verbose
         self._shot_dir = shot_dir
+        self._on_change = on_change
         self.open = False
         self.loadout = None          # {'weapons':..., 'attachments':..., 'ts':}
         self._panel_grab = None
@@ -567,14 +580,33 @@ class TabWatch:
         so a gun already identified from the HUD keeps its kit even when the
         Tab plate is unreadable.
 
-        ⚠ AND IT PRINTS THE STATUS TABLE AT THE END, which it did not until
-        2026-08-09. `print_status` hung off `_process_pending` alone, so a Tab
-        read reached the screen only when some UNRELATED detection happened to
-        run next -- 24 Tab reads produced 8 tables in one play log, and each of
-        those 8 described the state at whatever moment the next posture or
-        highlight read landed. The panel is where a loadout actually changes;
-        it is the one place the table must not lag. It is deduped on content,
-        so a Tab that changed nothing costs nothing.
+        ⚠ AND IT TELLS BOTH CONSUMERS AT THE END: the SCREEN (print_status)
+        and the DEVICE (on_change). Neither did until 2026-08-09, and both had
+        the same shape of bug -- the reading was written into GameState and
+        then everything downstream waited for some OTHER event to notice.
+
+        the screen   `print_status` hung off the dispatcher's detection queue,
+                     so a Tab read reached the operator only when an unrelated
+                     posture or highlight read happened to run next. 24 Tab
+                     reads produced 8 tables in one play log, each describing
+                     the state at whatever moment that other read landed.
+
+        the device   the upload hung off the dispatcher seeing the panel
+                     DISAPPEAR. Over every play log on disk: 166 Tab reads,
+                     69 with no observed close within 3 s. In each of those
+                     the Weapon object held the new curve and the Pico held
+                     the old one -- 「压枪还是老的」 -- with nothing saying so.
+
+        Both are deduped downstream (print_status on content, _said_pattern on
+        the armed line), so a Tab that changed nothing costs nothing.
+
+        ⚠ on_change IS CALLED EVEN WHEN NOTHING IN THE READING CHANGED, and
+        that is deliberate. "Did it change" is a comparison this class would
+        have to author a second time -- against what the Weapon already held,
+        for four slots plus the name plus the optic -- and the two authors
+        would drift. The one place that comparison exists is the dedup on the
+        printed line, where being wrong costs a duplicate line rather than a
+        missed upload.
         """
         self.loadout = got
         if got['weapons'] is not None:
@@ -598,6 +630,14 @@ class TabWatch:
         show = getattr(self.state, 'print_status', None)
         if callable(show):
             show()
+        # ⚠ THE DEVICE LAST, AFTER GameState IS WHOLE. Every set_ above runs
+        # Weapon.set_seq, so the curve the upload reads is only correct once
+        # all of them have run. Calling this per-slot would upload three
+        # intermediate curves, and the last one would still be right -- but
+        # the FIRST two would be a gun wearing half a kit, which is precisely
+        # the "the record describes an object nobody measured" failure.
+        if self._on_change is not None:
+            self._on_change()
 
 
 def _crop(frame, key):

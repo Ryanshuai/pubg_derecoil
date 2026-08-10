@@ -43,7 +43,11 @@ class Dispatcher(DaemonLoop):
         self.mismatch = MismatchCollector(state, capture, self._detectors)
         # The Tab screen is not in the per-frame capture, so it reads its own
         # regions on demand. It owns state.tab_open and the guns' loadout.
-        self.tab = TabWatch(state, self._detectors)
+        #
+        # ⚠ `on_change` IS THE WIRE FROM THE READING TO THE DEVICE, and it is
+        # explicit rather than implied by the close: see _loadout_changed.
+        self.tab = TabWatch(state, self._detectors,
+                            on_change=self._loadout_changed)
 
     def register(self, name, detector):
         """Register a detector instance by name."""
@@ -293,22 +297,50 @@ class Dispatcher(DaemonLoop):
         ⚠ IT ONLY EVER CLEARS ON A CLOSE, never sets on an open. The key entry
         already disarms on the way in, and re-deriving that here would be a
         second author of it -- while missing the clear costs a whole fight.
+
+        ⚠ AND THE UPLOAD IS NO LONGER CONDITIONAL ON `stop_recoil` HAVING BEEN
+        SET. It was, so a close observed while the flag happened to be False --
+        anything cleared it during the panel -- skipped the whole body,
+        including the upload, and the Pico kept the pattern from before the
+        read. Clearing a flag that is already clear is free; not uploading is
+        a magazine.
         """
         now = bool(self.state.tab_open)
-        if self._tab_was and not now and self.state.stop_recoil:
-            self.state.stop_recoil = False
+        if self._tab_was and not now:
             self._cause = 'tab seen to close'
-            # ⚠ IT IS RECORDED, because the key path records it and this one
-            # did not -- so a log showed `stop_recoil False -> True` on every
-            # Tab press and never once showed it coming back. Reading it, the
-            # tool looked permanently disarmed after the first inventory, which
-            # is exactly the bug this function fixed. One direction of a
-            # two-directional flag is worse than neither: it reads as evidence.
-            # Both directions go to the FILE now; see _apply_state.
-            note(f'[state] stop_recoil True -> False   '
-                 f'(after {self._cause})')
+            if self.state.stop_recoil:
+                self.state.stop_recoil = False
+                # ⚠ IT IS RECORDED, because the key path records it and this
+                # one did not -- so a log showed `stop_recoil False -> True` on
+                # every Tab press and never once showed it coming back. Reading
+                # it, the tool looked permanently disarmed after the first
+                # inventory, which is exactly the bug this function fixed. One
+                # direction of a two-directional flag is worse than neither: it
+                # reads as evidence. Both directions go to the FILE now.
+                note(f'[state] stop_recoil True -> False   '
+                     f'(after {self._cause})')
             self._apply_hw(['recoil_on', 'upload_pattern'])
         self._tab_was = now
+
+    def _loadout_changed(self):
+        """TabWatch has written a reading through. Tell the DEVICE, now.
+
+        ⚠ WRITING THE RECORD AND ARMING THE DEVICE ARE TWO THINGS, and until
+        2026-08-09 only the first happened when a panel was read. The upload
+        hung off `_follow_tab` seeing the panel disappear -- a SECOND event,
+        which over every play log on disk failed to arrive within three
+        seconds of 69 of 166 reads. In each of those the Weapon object held
+        the new curve and the Pico held the old one.
+
+        While the panel is up this CLEARS rather than uploads, because
+        `stop_recoil` is set and _apply_hw refuses to arm through it. That is
+        the right answer -- nobody fires out of an open inventory -- and it is
+        not the point. The point is that `_curve_dirty` and the armed line now
+        move when the READING moves, so the close has one job left (recoil_on)
+        instead of being the only thing that could ever push a curve.
+        """
+        self._cause = 'tab read'
+        self._apply_hw(['upload_pattern'])
 
     def _said_pattern(self, msg):
         """Print what is armed, once per distinct answer, WITH ITS CAUSE.

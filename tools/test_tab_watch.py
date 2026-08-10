@@ -565,6 +565,46 @@ check('the press reached TabWatch', dsp.tab.calls, 1)
 dsp._handle_key(KeyEvent('tab', 'release', now + 0.097, frozenset()))
 check('the release did not', dsp.tab.calls, 1)
 
+print('\n=== a reading reaches the DEVICE, not just GameState ===')
+# ⚠ THE BUG THIS PINS IS "压枪还是老的": the reading was written through to
+# GameState and the upload hung off the dispatcher SEEING THE PANEL DISAPPEAR,
+# a second event that over every play log on disk failed to arrive within 3 s
+# of 69 of 166 reads. In each of those the Weapon held the new curve and the
+# Pico held the old one, with nothing anywhere saying so.
+#
+# Two halves, and the second is the one that stayed broken longest:
+#   a read must push          -- on_change fires from _publish
+#   a close must push TOO     -- even if stop_recoil was already False, which
+#                                used to skip _follow_tab's whole body
+wB, stateB, screenB = build()
+pushes = []
+wB._on_change = lambda: pushes.append(len(stateB.attachments))
+screenB.open = True
+screenB.show(7, ('aug', 'm416'))
+wB.on_key(time.perf_counter())
+check('the read pushed to the device', len(pushes), 1)
+check('and it pushed AFTER GameState was whole', pushes, [2])
+
+dsp2 = Dispatcher.__new__(Dispatcher)
+dsp2.state = FakeState()
+dsp2._hw = []
+dsp2._apply_hw = dsp2._hw.append
+dsp2._tab_was = True
+# ⚠ THE FLAG IS ALREADY CLEAR. Anything during the panel can clear it, and the
+# old guard `and self.state.stop_recoil` then skipped the upload with it.
+dsp2.state.stop_recoil = False
+dsp2.state.tab_open = False
+dsp2._follow_tab()
+check('a close uploads even with stop_recoil already clear',
+      dsp2._hw, [['recoil_on', 'upload_pattern']])
+# ⚠ AND THE DISPATCHER HAS TO ACTUALLY WIRE IT. The case above sets
+# `_on_change` by hand, so on its own it proves TabWatch calls whatever it was
+# given -- not that anything ever gives it one. A real __init__, which is
+# offline: it builds a MismatchCollector and a TabWatch and touches no device.
+dsp3 = Dispatcher(FakeState(), None, None)
+check('Dispatcher wires on_change to itself',
+      dsp3.tab._on_change == dsp3._loadout_changed, True)
+
 print('\n=== the chatter goes to the FILE, the table to the TERMINAL ===')
 # ⚠ THIS IS A PROHIBITION ON A CHANNEL, not on content, and it is written that
 # way because the content is fine — every line here is worth keeping. What was
