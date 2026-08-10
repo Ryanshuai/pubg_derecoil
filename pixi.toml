@@ -79,6 +79,10 @@ smoke = "python tools/smoke_check.py"
 # then report the (dy, dx) at which each row's icon reproduces its crop.
 # DRIVES THE GAME. Run it after any client update that restyles the panel.
 row-pitch = "python tools/probe_row_pitch.py"
+# ADS by the ZEROING readout being drawn -- a PRESENCE criterion, second and
+# independent to ads_detector's crosshair ABSENCE. Re-derives its own box
+# from the corpus and checks the two readings against each other, no labels.
+zeroing = "python detector/zeroing_detector.py --selftest"
 off-capture = "python control/focus.py --selftest"
 layering = "python tools/check_layering.py"
 surface = "python tools/surface.py"
