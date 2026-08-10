@@ -3,6 +3,7 @@ import numpy as np
 import json
 
 import config
+from logbook import note
 
 # ⚠ UNDER calibration/, NOT under docs/, AND THAT IS THE POINT.
 #
@@ -44,8 +45,7 @@ WEAPON_RPM = {
 # lands in the tail where the curve is steepest. The AUG's curve had grown a
 # 164-count final bullet against a 93-count plateau: that spike was four rounds
 # of accumulated phase, not recoil.
-MEASURED_RPM_PATH = os.path.join(os.path.dirname(__file__), '..',
-                                 'calibration', 'artifacts', 'recoil', 'weapon_rpm.json')
+MEASURED_RPM_PATH = config.MEASURED_RPM_PATH
 
 
 def load_measured_rpm(path=MEASURED_RPM_PATH):
@@ -119,11 +119,11 @@ def load_curves():
     # Happened 2026-08-08. Returning {} is not a silent fallback: every caller
     # then gets an empty pattern, and arm() has always refused that.
     if not os.path.isdir(CURVE_DIR):
-        print(f'[curves] {CURVE_DIR} does not exist — no compensation curve '
-              f'for any weapon. docs/ is gitignored, so this directory has no '
-              f'history to restore from; the imported curves come from the '
-              f'upstream pattern repo named in each file\'s `source` field, '
-              f'and anything fitted here is gone.', flush=True)
+        note(f'[curves] {CURVE_DIR} does not exist — no compensation curve '
+             f'for any weapon. docs/ is gitignored, so this directory has no '
+             f'history to restore from; the imported curves come from the '
+             f'upstream pattern repo named in each file\'s `source` field, '
+             f'and anything fitted here is gone.')
         return out
     for fname in os.listdir(CURVE_DIR):
         if not fname.endswith('.json'):
@@ -284,6 +284,17 @@ _MISSING_SAID = {}
 # per burst and a per-magazine line would train the operator to skim past it.
 _SEED_SAID = {}
 
+# ⚠ 这一族 `[curves]` 行 2026-08-10 起全部走 `note` —— 进日志文件，不上屏。
+#
+# **换掉的不是「说不说」，是「谁来说屏幕那一半」。** 「这把枪没在压枪」这个
+# 事实现在由状态表自己印（`GameState._curve` 那一列，`无曲线`），而它是终端
+# 上唯一剩下的东西 —— 所以那个事实**比以前更显眼**，不是更隐蔽：以前它是一段
+# 六行的英文段落，夹在 `[armed]` / `[tab]` / `[state]` 中间往上滚。
+#
+# 留在文件里的是**出处**：没测过、还是配件没读过、还是火力模式把整个 store
+# 过滤掉了、以及该跑哪条 `collect-timed`。那三条永远是事后问的问题，而这个
+# 仓库为「事后没得查」付过账（robot.py 顶部那段）。**状态归屏幕，出处归文件。**
+
 
 def load_final_curves():
     """{(weapon, config_key, posture): shots} for MODEL.md's fitted curves.
@@ -366,10 +377,10 @@ def load_final_curves():
             origin = ('derived from ' + data['estimated_from']
                       if data.get('estimated_from') else
                       'imported from a community script')
-            print(f'[curves] {key[0]} {key[1]} {key[2]} {key[3]} is a SEED, '
-                  f'not a measurement -- {data.get("total_counts", 0):.0f} '
-                  f'counts {origin}, to keep the view on screen. Fire it, fit '
-                  f'it, and the fit replaces it.', flush=True)
+            note(f'[curves] {key[0]} {key[1]} {key[2]} {key[3]} is a SEED, '
+                 f'not a measurement -- {data.get("total_counts", 0):.0f} '
+                 f'counts {origin}, to keep the view on screen. Fire it, fit '
+                 f'it, and the fit replaces it.')
         out[key] = data['shots']
     return out
 
@@ -1022,12 +1033,12 @@ class Weapon():
                 said = ('unseen', self.name)
                 if not _MISSING_SAID.get(said):
                     _MISSING_SAID[said] = True
-                    print(f'[curves] {self.name or "(empty hands)"}: nobody has '
-                          f'read this gun\'s attachments yet -- NOT '
-                          f'compensating. `bare` and `not looked at` are the '
-                          f'same four empty strings, and firing the bare curve '
-                          f'at a kitted gun over-compensates by up to 68%. '
-                          f'Open Tab once.', flush=True)
+                    note(f'[curves] {self.name or "(empty hands)"}: nobody has '
+                         f'read this gun\'s attachments yet -- NOT '
+                         f'compensating. `bare` and `not looked at` are the '
+                         f'same four empty strings, and firing the bare curve '
+                         f'at a kitted gun over-compensates by up to 68%. '
+                         f'Open Tab once.')
                 self.dx_s, self.dy_s, self.t_s = [], [], []
                 return
             cfg = worn_keys(self.muzzle, self.grip, self.butt)
@@ -1037,11 +1048,11 @@ class Weapon():
                         self.butt)
                 if not _MISSING_SAID.get(said):
                     _MISSING_SAID[said] = True
-                    print(f'[curves] {self.name}: a fitted part has no '
-                          f'catalogue name (muzzle={self.muzzle!r} '
-                          f'grip={self.grip!r} stock={self.butt!r}) -- NOT '
-                          f'compensating, because the kit it belongs to '
-                          f'cannot be named either.', flush=True)
+                    note(f'[curves] {self.name}: a fitted part has no '
+                         f'catalogue name (muzzle={self.muzzle!r} '
+                         f'grip={self.grip!r} stock={self.butt!r}) -- NOT '
+                         f'compensating, because the kit it belongs to '
+                         f'cannot be named either.')
                 self.dx_s, self.dy_s, self.t_s = [], [], []
                 return
             fmode = fire_tag(self.name, self.fire_mode)
@@ -1052,9 +1063,9 @@ class Weapon():
                 shots, scale, why = self._derive(config_key(cfg), sight, fmode)
                 if shots and not _MISSING_SAID.get(('derived', *key)):
                     _MISSING_SAID[('derived', *key)] = True
-                    print(f'[curves] {self.name} {config_key(cfg)} '
-                          f'{self.posture} {sight}: no curve of its own, '
-                          f'DERIVED — {why}', flush=True)
+                    note(f'[curves] {self.name} {config_key(cfg)} '
+                         f'{self.posture} {sight}: no curve of its own, '
+                         f'DERIVED — {why}')
             if shots:
                 t = 0.0
                 self.t_s, self.dx_s, self.dy_s = [], [], []
@@ -1097,12 +1108,12 @@ class Weapon():
                              f'changes the SHAPE, so nothing can be scaled '
                              f'into it. Switch back to '
                              f'{fire_mode_for(self.name)} to be compensated')
-                print(f'[curves] no fitted curve for {self.name} '
-                      f'{config_key(cfg)} {self.posture} {sight} '
-                      f'fire={self.fire_mode or "-"}{fmode and " " + fmode} '
-                      f'-- NOT compensating{extra}. Measure it with `pixi run '
-                      f'collect-timed --weapon {self.name} '
-                      f'--sight {sight}`.', flush=True)
+                note(f'[curves] no fitted curve for {self.name} '
+                     f'{config_key(cfg)} {self.posture} {sight} '
+                     f'fire={self.fire_mode or "-"}{fmode and " " + fmode} '
+                     f'-- NOT compensating{extra}. Measure it with `pixi run '
+                     f'collect-timed --weapon {self.name} '
+                     f'--sight {sight}`.')
             self.dx_s, self.dy_s, self.t_s = [], [], []
             return
         # ⚠ TEN LINES OF THE PRE-PLAN-A FACTOR PATH STOOD HERE, AFTER THAT

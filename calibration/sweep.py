@@ -54,7 +54,9 @@ FAIL_DIR = os.path.join(os.path.dirname(HERE), 'calibration', 'artifacts', 'fail
 # the aim. Past it the burst is finishing where tracking is already only
 # required to recover half the motion, so the recoil reads low.
 HEADROOM_WARN_FRAC = 0.6
-POSTURES = ('standing', 'crouching', 'prone')
+# Re-exported, not redefined -- tools/probe_pitch_range.py imports it from
+# here. The author is config.POSTURES.
+from config import POSTURES                                 # noqa: E402,F401
 
 # Re-exported for the tools that reach them through this module. Re-checked
 # 2026-08-06, after the openers moved to control.session.ensure_ready:

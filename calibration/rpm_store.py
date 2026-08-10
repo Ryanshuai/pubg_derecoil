@@ -23,11 +23,20 @@ transition -- both bias it the same way and both look like a clean number.
 """
 import json
 import os
+import sys
 from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-PATH = os.path.join(ROOT, 'calibration', 'artifacts', 'recoil', 'weapon_rpm.json')
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+import config                                              # noqa: E402
+
+# The writer's spelling of the file detector/weapon.py reads at import. Both
+# now take it from config, which is the one module either layer may reach --
+# see config.MEASURED_RPM_PATH for why the two could not see each other.
+PATH = config.MEASURED_RPM_PATH
 
 # A fitted interval is believed only if the fit itself is tight. The poll runs
 # every few frames, so a transition is located to within ~25 ms; over 40 rounds

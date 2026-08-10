@@ -610,7 +610,8 @@ POLL_VK_MAP = {
     0x28: 'down',       # VK_DOWN
     0x5B: 'win',        # VK_LWIN
     0x78: 'f9',         # VK_F9
-    0x13: 'pause',      # VK_PAUSE
+    # ⚠ `0x13: 'pause'` 走了 (2026-08-10)，跟它那条 KEY_ACTION_TABLE 一起。
+    # 退出这个进程只有 Ctrl-C 一条路。
     ord('1'): '1', ord('2'): '2', ord('5'): '5',
     ord('B'): 'b', ord('C'): 'c', ord('F'): 'f',
     ord('G'): 'g', ord('X'): 'x', ord('Z'): 'z',
@@ -625,7 +626,7 @@ POLL_VK_MAP = {
 #        'toggle_X' = toggle boolean X
 #        callable = call method on GameState
 # hw:    list of hardware actions (Pico)
-#        'recoil_off', 'recoil_on', 'upload_pattern', 'shutdown'
+#        'recoil_off', 'recoil_on', 'upload_pattern'
 # ════════════════════════════════════════════════════════════
 
 KEY_ACTION_TABLE = [
@@ -743,9 +744,13 @@ KEY_ACTION_TABLE = [
     {'key': 'f9', 'event': 'press',
      'state': [('toggle_aim',)]},
 
-    # ── Shutdown ──
-    {'key': 'pause', 'event': 'press',
-     'hw': ['shutdown']},
+    # ── 没有关闭键 (2026-08-10) ──
+    #
+    # ⚠ 这里原来是 `{'key': 'pause', 'hw': ['shutdown']}`，而 `control/match.py`
+    # 另有一条写死的 `f13` 分支 —— **`f13` 从来没进过 POLL_VK_MAP，那条分支自始
+    # 至终是死的**。所以「关闭」这件事有两个作者、其中一个印在注释和文档里、而它
+    # 一次都没执行过。两个都删了：唯一的出口是 Ctrl-C，`robot.py` 的 `finally`
+    # 接住它并 `shutdown()`（停线程 → 解除固件武装 → 存 scales）。
 ]
 
 # ════════════════════════════════════════════════════════════
@@ -1521,6 +1526,18 @@ POSTURE_SCALES_PATH = os.path.join(DATA_DIR, 'posture_scales.json')
 # asked of them. Measuring one gun crouching answers it.
 POSTURE_FACTOR = {'standing': 1.0, 'crouching': 0.80, 'prone': 0.56}
 
+# The three postures, in the order the classifier scores them and the order a
+# grid enumerates them. `standing` is first because it is the reference every
+# factor above is relative to.
+#
+# Written out here rather than derived from POSTURE_FACTOR's keys: this is the
+# VOCABULARY and that is a TABLE OF NUMBERS, and a posture with no measured
+# factor yet would have to be in the first and out of the second. It was
+# spelled out three times (detector/posture_detector.POSTURE_CLASSES,
+# calibration/sweep.POSTURES, calibration/build_kit_grid.POSTURES) before this
+# line existed.
+POSTURES = ('standing', 'crouching', 'prone')
+
 # How many counts a burst needs through this optic, relative to the RED DOT.
 # ONE NUMBER PER SIGHT. That is the whole design of this table.
 #
@@ -1664,6 +1681,21 @@ RECOIL_SIGHT_RATIO = {
 }
 KIT_FACTORS_PATH    = os.path.join(DATA_DIR, 'kit_factors.json')
 KIT_RECORDS_PATH    = os.path.join(DATA_DIR, 'kit_records.jsonl')
+
+# Measured fire rates. NOT under DATA_DIR -- it is a measurement, so it lives
+# with the rest of them under the gitignored artifacts tree, and a fresh clone
+# simply falls back to detector/weapon.WEAPON_RPM's wiki figures.
+#
+# ⚠ IT IS HERE BECAUSE ITS WRITER AND ITS READER CANNOT SEE EACH OTHER. The
+# writer is calibration/rpm_store.py and the reader is detector/weapon.py, and
+# layering rule 6 forbids the second from importing the first, so each spelled
+# the path out again. Exactly the arrangement that let KIT_FACTORS_PATH move
+# in one place and not the other on 2026-08-08 -- _load_kit_factors() catches
+# OSError and returns {}, so every gun quietly fell back to the wiki
+# coefficients, median 34.7% off, with no error anywhere.
+MEASURED_RPM_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    'calibration', 'artifacts', 'recoil', 'weapon_rpm.json')
 
 # The compensation curves the runtime loads on every weapon/attachment/posture
 # change, and the templates the detectors load at import.

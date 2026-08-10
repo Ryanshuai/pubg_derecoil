@@ -51,10 +51,10 @@ from detector.attachment_catalog import SLOTS, compatible  # noqa: E402
 
 OUT = os.path.join(config.DATA_DIR, 'kit_grid.json')
 
-# Postures the grid covers. standing is the reference every factor is relative
-# to; the other two are here because posture x kit was measured to interact,
-# so a posture is part of a cell's identity rather than a multiplier on it.
-POSTURES = ('standing', 'crouching', 'prone')
+# Postures the grid covers -- all of them, from config.POSTURES. They are here
+# because posture x kit was measured to interact, so a posture is part of a
+# cell's identity rather than a multiplier on it.
+from config import POSTURES                                  # noqa: E402,F401
 
 
 def load_measured(path=None):

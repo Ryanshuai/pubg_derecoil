@@ -2,7 +2,7 @@
 
 Four things, and the last two are why this is a file rather than a docstring:
 
-  1. WHICH SLOTS. Every subset of (muzzle, grip, stock) refitted, one parameter
+  1. WHICH SLOTS. Every subset of RECOIL_SLOTS refitted, one parameter
      each, so the shipped `_FLOOR_SLOTS` has to win rather than be asserted.
      The three single-slot rows must come out EXACTLY equal to pure
      multiplication -- that is the arithmetic self-check, not a coincidence.
@@ -38,10 +38,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from detector import weapon_attachments as wa           # noqa: E402
-from detector.attachment_catalog import ATTACHMENTS, weapon_class   # noqa: E402
+from detector.attachment_catalog import (ATTACHMENTS, RECOIL_SLOTS,  # noqa: E402
+                                         weapon_class)
+
+try:            # this gate prints box-drawing rules; a cp1252 console dies
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+except (AttributeError, OSError):
+    pass
 
 KIT_PATH = ROOT / 'data' / 'kit_factors.json'
-SLOTS = ('muzzle', 'grip', 'stock')
 
 
 def _asset(key):
@@ -123,7 +128,7 @@ def report_subsets(cells):
     smg = [c for c in cells if c['cls'] == 'SMG']
     rows = []
     for r in range(4):
-        for sub in itertools.combinations(SLOTS, r):
+        for sub in itertools.combinations(RECOIL_SLOTS, r):
             sub = frozenset(sub)
             r0 = fit(smg, sub)
             e = [abs(predict(c, r0 or 0, sub) / c['R'] - 1) * 100 for c in smg]
@@ -171,7 +176,7 @@ def report_disagreement(cells):
         sub_cells = [c for c in smg if c['w'] == w]
         best = []
         for r in range(1, 4):
-            for s in itertools.combinations(SLOTS, r):
+            for s in itertools.combinations(RECOIL_SLOTS, r):
                 s = frozenset(s)
                 r0 = fit(sub_cells, s)
                 best.append(('+'.join(sorted(s)), chi2(sub_cells, r0, s), r0))

@@ -38,7 +38,7 @@ import numpy as np
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'templates',
                           'pubg_assets', 'posture')
-POSTURE_CLASSES = ['standing', 'crouching', 'prone']
+from config import POSTURES                       # noqa: E402,F401
 
 MIN_IOU = 0.32
 MIN_AREA = 200
@@ -53,7 +53,7 @@ SOBEL_DILATE_KSIZE = 3
 
 def _load_templates():
     templates = {}
-    for cls in POSTURE_CLASSES:
+    for cls in POSTURES:
         path = os.path.join(ASSETS_DIR, f'posture_{cls}_icon_bgra.png')
         bgra = cv2.imread(path, cv2.IMREAD_UNCHANGED)
         if bgra is None or bgra.shape[-1] != 4:
