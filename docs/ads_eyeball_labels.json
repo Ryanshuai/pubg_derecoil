@@ -1,0 +1,605 @@
+{
+ "note": "ADS vs not-ADS read off the frames BY EYE, 2026-08-10. NO DETECTOR PRODUCED ANY OF THESE, which is the whole point: every automatic label for this question comes from one of the detectors under test (the capture program stores what ensure_ads/ensure_hip believed, and those ask AdsDetector). Operator instruction: \"this one -- scoped or not -- you label by eye yourself\".\n\nTHE FRAMES ARE NOT TRACKED (calibration/artifacts is gitignored) and are re-capturable with `pixi run sight-intersect`; THIS FILE IS NOT re-capturable by anything. That asymmetry is why it lives in docs/ and not beside the pixels it describes.",
+ "frames": [
+  {
+   "sight": "2x",
+   "state": "ads",
+   "v": 0,
+   "file": "20260810_160922__2x__ads__v0.png",
+   "n": 0,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "2x",
+   "state": "ads",
+   "v": 1,
+   "file": "20260810_160922__2x__ads__v1.png",
+   "n": 1,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "2x",
+   "state": "ads",
+   "v": 2,
+   "file": "20260810_160922__2x__ads__v2.png",
+   "n": 2,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "2x",
+   "state": "ads",
+   "v": 3,
+   "file": "20260810_160922__2x__ads__v3.png",
+   "n": 3,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "2x",
+   "state": "ads",
+   "v": 4,
+   "file": "20260810_160922__2x__ads__v4.png",
+   "n": 4,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "2x",
+   "state": "ads",
+   "v": 5,
+   "file": "20260810_160922__2x__ads__v5.png",
+   "n": 5,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "2x",
+   "state": "hip",
+   "v": 0,
+   "file": "20260810_160922__2x__hip__v0.png",
+   "n": 6,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "2x",
+   "state": "hip",
+   "v": 1,
+   "file": "20260810_160922__2x__hip__v1.png",
+   "n": 7,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "2x",
+   "state": "hip",
+   "v": 2,
+   "file": "20260810_160922__2x__hip__v2.png",
+   "n": 8,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "2x",
+   "state": "hip",
+   "v": 3,
+   "file": "20260810_160922__2x__hip__v3.png",
+   "n": 9,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "2x",
+   "state": "hip",
+   "v": 4,
+   "file": "20260810_160922__2x__hip__v4.png",
+   "n": 10,
+   "label_eyeball": "ads",
+   "agrees_with_capture": false,
+   "void_reason": null
+  },
+  {
+   "sight": "2x",
+   "state": "hip",
+   "v": 5,
+   "file": "20260810_160922__2x__hip__v5.png",
+   "n": 11,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "3x",
+   "state": "ads",
+   "v": 0,
+   "file": "20260810_160922__3x__ads__v0.png",
+   "n": 12,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "3x",
+   "state": "ads",
+   "v": 1,
+   "file": "20260810_160922__3x__ads__v1.png",
+   "n": 13,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "3x",
+   "state": "ads",
+   "v": 2,
+   "file": "20260810_160922__3x__ads__v2.png",
+   "n": 14,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "3x",
+   "state": "ads",
+   "v": 3,
+   "file": "20260810_160922__3x__ads__v3.png",
+   "n": 15,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "3x",
+   "state": "ads",
+   "v": 4,
+   "file": "20260810_160922__3x__ads__v4.png",
+   "n": 16,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "3x",
+   "state": "ads",
+   "v": 5,
+   "file": "20260810_160922__3x__ads__v5.png",
+   "n": 17,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "3x",
+   "state": "hip",
+   "v": 0,
+   "file": "20260810_160922__3x__hip__v0.png",
+   "n": 18,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "3x",
+   "state": "hip",
+   "v": 1,
+   "file": "20260810_160922__3x__hip__v1.png",
+   "n": 19,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "3x",
+   "state": "hip",
+   "v": 2,
+   "file": "20260810_160922__3x__hip__v2.png",
+   "n": 20,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "3x",
+   "state": "hip",
+   "v": 3,
+   "file": "20260810_160922__3x__hip__v3.png",
+   "n": 21,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "3x",
+   "state": "hip",
+   "v": 4,
+   "file": "20260810_160922__3x__hip__v4.png",
+   "n": 22,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "3x",
+   "state": "hip",
+   "v": 5,
+   "file": "20260810_160922__3x__hip__v5.png",
+   "n": 23,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "4x",
+   "state": "ads",
+   "v": 0,
+   "file": "20260810_160922__4x__ads__v0.png",
+   "n": 24,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "4x",
+   "state": "ads",
+   "v": 1,
+   "file": "20260810_160922__4x__ads__v1.png",
+   "n": 25,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "4x",
+   "state": "ads",
+   "v": 2,
+   "file": "20260810_160922__4x__ads__v2.png",
+   "n": 26,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "4x",
+   "state": "ads",
+   "v": 3,
+   "file": "20260810_160922__4x__ads__v3.png",
+   "n": 27,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "4x",
+   "state": "ads",
+   "v": 4,
+   "file": "20260810_160922__4x__ads__v4.png",
+   "n": 28,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "4x",
+   "state": "ads",
+   "v": 5,
+   "file": "20260810_160922__4x__ads__v5.png",
+   "n": 29,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "4x",
+   "state": "hip",
+   "v": 0,
+   "file": "20260810_160922__4x__hip__v0.png",
+   "n": 30,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "4x",
+   "state": "hip",
+   "v": 1,
+   "file": "20260810_160922__4x__hip__v1.png",
+   "n": 31,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "4x",
+   "state": "hip",
+   "v": 2,
+   "file": "20260810_160922__4x__hip__v2.png",
+   "n": 32,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "4x",
+   "state": "hip",
+   "v": 3,
+   "file": "20260810_160922__4x__hip__v3.png",
+   "n": 33,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "4x",
+   "state": "hip",
+   "v": 4,
+   "file": "20260810_160922__4x__hip__v4.png",
+   "n": 34,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "4x",
+   "state": "hip",
+   "v": 5,
+   "file": "20260810_160922__4x__hip__v5.png",
+   "n": 35,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "red_dot",
+   "state": "ads",
+   "v": 0,
+   "file": "20260810_160557__red_dot__ads__v0.png",
+   "n": 36,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "red_dot",
+   "state": "ads",
+   "v": 1,
+   "file": "20260810_160557__red_dot__ads__v1.png",
+   "n": 37,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "red_dot",
+   "state": "ads",
+   "v": 2,
+   "file": "20260810_160557__red_dot__ads__v2.png",
+   "n": 38,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "red_dot",
+   "state": "ads",
+   "v": 3,
+   "file": "20260810_160557__red_dot__ads__v3.png",
+   "n": 39,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "red_dot",
+   "state": "ads",
+   "v": 4,
+   "file": "20260810_160557__red_dot__ads__v4.png",
+   "n": 40,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "red_dot",
+   "state": "ads",
+   "v": 5,
+   "file": "20260810_160557__red_dot__ads__v5.png",
+   "n": 41,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "red_dot",
+   "state": "hip",
+   "v": 0,
+   "file": "20260810_160557__red_dot__hip__v0.png",
+   "n": 42,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "red_dot",
+   "state": "hip",
+   "v": 1,
+   "file": "20260810_160557__red_dot__hip__v1.png",
+   "n": 43,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "red_dot",
+   "state": "hip",
+   "v": 2,
+   "file": "20260810_160557__red_dot__hip__v2.png",
+   "n": 44,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "red_dot",
+   "state": "hip",
+   "v": 3,
+   "file": "20260810_160557__red_dot__hip__v3.png",
+   "n": 45,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "red_dot",
+   "state": "hip",
+   "v": 4,
+   "file": "20260810_160557__red_dot__hip__v4.png",
+   "n": 46,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "red_dot",
+   "state": "hip",
+   "v": 5,
+   "file": "20260810_160557__red_dot__hip__v5.png",
+   "n": 47,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": null
+  },
+  {
+   "sight": "vss_pso1",
+   "state": "ads",
+   "v": 0,
+   "file": "20260810_160557__vss_pso1__ads__v0.png",
+   "n": 48,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": "held weapon was m416 (ammo 40), not vss"
+  },
+  {
+   "sight": "vss_pso1",
+   "state": "ads",
+   "v": 1,
+   "file": "20260810_160557__vss_pso1__ads__v1.png",
+   "n": 49,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": "held weapon was m416 (ammo 40), not vss"
+  },
+  {
+   "sight": "vss_pso1",
+   "state": "ads",
+   "v": 2,
+   "file": "20260810_160557__vss_pso1__ads__v2.png",
+   "n": 50,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": "held weapon was m416 (ammo 40), not vss"
+  },
+  {
+   "sight": "vss_pso1",
+   "state": "ads",
+   "v": 3,
+   "file": "20260810_160557__vss_pso1__ads__v3.png",
+   "n": 51,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": "held weapon was m416 (ammo 40), not vss"
+  },
+  {
+   "sight": "vss_pso1",
+   "state": "ads",
+   "v": 4,
+   "file": "20260810_160557__vss_pso1__ads__v4.png",
+   "n": 52,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": "held weapon was m416 (ammo 40), not vss"
+  },
+  {
+   "sight": "vss_pso1",
+   "state": "ads",
+   "v": 5,
+   "file": "20260810_160557__vss_pso1__ads__v5.png",
+   "n": 53,
+   "label_eyeball": "ads",
+   "agrees_with_capture": true,
+   "void_reason": "held weapon was m416 (ammo 40), not vss"
+  },
+  {
+   "sight": "vss_pso1",
+   "state": "hip",
+   "v": 0,
+   "file": "20260810_160557__vss_pso1__hip__v0.png",
+   "n": 54,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": "held weapon was m416 (ammo 40), not vss"
+  },
+  {
+   "sight": "vss_pso1",
+   "state": "hip",
+   "v": 1,
+   "file": "20260810_160557__vss_pso1__hip__v1.png",
+   "n": 55,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": "held weapon was m416 (ammo 40), not vss"
+  },
+  {
+   "sight": "vss_pso1",
+   "state": "hip",
+   "v": 2,
+   "file": "20260810_160557__vss_pso1__hip__v2.png",
+   "n": 56,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": "held weapon was m416 (ammo 40), not vss"
+  },
+  {
+   "sight": "vss_pso1",
+   "state": "hip",
+   "v": 3,
+   "file": "20260810_160557__vss_pso1__hip__v3.png",
+   "n": 57,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": "held weapon was m416 (ammo 40), not vss"
+  },
+  {
+   "sight": "vss_pso1",
+   "state": "hip",
+   "v": 4,
+   "file": "20260810_160557__vss_pso1__hip__v4.png",
+   "n": 58,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": "held weapon was m416 (ammo 40), not vss"
+  },
+  {
+   "sight": "vss_pso1",
+   "state": "hip",
+   "v": 5,
+   "file": "20260810_160557__vss_pso1__hip__v5.png",
+   "n": 59,
+   "label_eyeball": "hip",
+   "agrees_with_capture": true,
+   "void_reason": "held weapon was m416 (ammo 40), not vss"
+  }
+ ]
+}

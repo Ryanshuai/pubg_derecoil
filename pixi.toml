@@ -82,6 +82,10 @@ row-pitch = "python tools/probe_row_pitch.py"
 # ADS by the ZEROING readout being drawn -- a PRESENCE criterion, second and
 # independent to ads_detector's crosshair ABSENCE. Re-derives its own box
 # from the corpus and checks the two readings against each other, no labels.
+# Photograph each SIGHT PICTURE through several view angles and intersect:
+# a POSITIVE template per sight, against ads_detector's crosshair ABSENCE.
+# DRIVES THE GAME. --plan is offline.
+sight-intersect = "python calibration/collect_sight_intersect.py"
 zeroing = "python detector/zeroing_detector.py --selftest"
 off-capture = "python control/focus.py --selftest"
 layering = "python tools/check_layering.py"
