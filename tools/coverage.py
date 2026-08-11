@@ -62,10 +62,12 @@ from detector.attachment_catalog import ATTACHMENTS, fits, has_slot  # noqa: E40
 from harness.adapter import _agreement                     # noqa: E402
 from harness.verdict import AGREE_ARMS_MIN, AGREE_SPREAD_MAX  # noqa: E402
 
-# The classes a recoil curve is FOR. A bolt-action's "recoil" is one kick per
-# click with a re-chamber in between, which is not the quantity this repo
-# fits, so an empty row for a Kar98k is not a gap.
-SPRAY_CLASSES = ('AR', 'SMG', 'LMG')
+# ⚠ "IS A CURVE THE RIGHT SHAPE FOR THIS GUN" IS NOT A CLASS QUESTION, and
+# this file asked it as one until 2026-08-10. `SPRAY_CLASSES = ('AR','SMG',
+# 'LMG')` put the M16A4 and the Mk47 -- both burst-and-single, no full auto --
+# in the "never fired, and a curve is right for it" list, i.e. it reported two
+# gaps that are not gaps. Seventeen curve files were seeded off that report
+# before anyone noticed. config.sprays() is the one author now.
 
 # Parts the campaign does not fire. THE OPERATOR'S CALL, 2026-08-09, taken on
 # the gap list this file printed: these three grips are not worth a cell.
@@ -250,7 +252,7 @@ def main():
 
     print()
     missing = [(w, c) for w, (c, _) in sorted(ROSTER.items())
-               if w not in seen and c in SPRAY_CLASSES]
+               if w not in seen and cfg.sprays(w, c)]
     print(f'NEVER FIRED, and a spray weapon so a curve is the right shape '
           f'for it ({len(missing)}):')
     for w, c in missing:
@@ -258,7 +260,7 @@ def main():
         print(f'  {w:<10} {c:<4} slots: {", ".join(slots) or "none"}')
 
     other = [w for w, (c, _) in sorted(ROSTER.items())
-             if w not in seen and c not in SPRAY_CLASSES]
+             if w not in seen and not cfg.sprays(w, c)]
     print(f'\nNo curve, and NOT a spray weapon -- one kick per click, which is '
           f'not what this repo fits ({len(other)}):')
     print('  ' + ' '.join(other))

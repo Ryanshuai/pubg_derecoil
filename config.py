@@ -1283,6 +1283,32 @@ LOBBY_MENU_MIN_SCORE = 0.55
 # a screen that sits OVER the lobby and eats the one click the pump retries.
 LOBBY_MENU_TITLE_ROI_IN_LOBBY = Rect(465, 570, 66, 402)   # (y, x, h, w)
 
+# ── the daily-mission popup, which SWALLOWS THE PLAY CLICK ──────────────────
+#
+# ⚠ IT IS THE FOURTH INSTANCE OF ONE SHAPE, and control/CLAUDE.md already
+# names the other three: something is drawn over the lobby, `classify` still
+# reads LOBBY because the frame is still letterboxed, and the one click that
+# matters is eaten. ERROR, RECONNECT and LOBBY_MENU each got their own state
+# for exactly this; this is the same answer for the same reason.
+#
+# Measured 2026-08-10 on a run that could not start: `read_page` PLAY,
+# `read_mode` TRAINING at margin 898 -- every readback green -- and three
+# clicks at the PLAY button (749, 1287) with nothing happening. The popup is
+# BEGINNER TRAINING / DAY 10, top right, with a CLOSE button.
+#
+# ⚠ THE TITLE IS NOT THE ANCHOR, THE BUTTON IS. "BEGINNER TRAINING" is one
+# event's name and the next event will carry another; every one of these
+# popups has a CLOSE. Matching the thing that must be CLICKED also means the
+# detector cannot report the popup at a place the click would miss.
+LOBBY_POPUP_CLOSE_ROI = Rect(547, 2053, 47, 213)   # (y, x, h, w)
+LOBBY_POPUP_CLOSE_XY = (2159, 570)
+# ⚠ NOT MEASURED, and it is a GIVE-UP interval rather than an expected one --
+# the same distinction control/fire.py draws for its reload timeouts. The
+# readback after it decides; this only has to be long enough that a popup which
+# DID close has stopped being drawn. If a real close ever takes longer, the
+# symptom is one wasted pass through _pump, not a wrong answer.
+POPUP_CLOSE_SETTLE_S = 0.6
+
 # ⚠ EXIT TO DESKTOP EXISTS ON BOTH MENUS, at two different y, and it is the
 # only entry that does. LEAVE TRAINING / RESTART LOBBY are at least unique to
 # their own screen; this one is the same word at 634 in a match and 949 in the
@@ -1738,6 +1764,32 @@ FIRE_MODE_FOR = {'mg3': 'high'}
 def fire_mode_for(weapon):
     """The fire mode this weapon's untagged curve and samples describe."""
     return FIRE_MODE_FOR.get(weapon, 'full')
+
+
+# ⚠ GUNS WITH NO FULL-AUTO MODE AT ALL. Two-round burst and single, nothing
+# else, so there is no continuous spray for a time-domain recoil curve to be
+# ABOUT -- the same reason a Kar98k has no row.
+#
+# ⚠ AND CLASS DOES NOT ANSWER THIS, which is how they got fired. tools/
+# coverage.py asked `weapon_class(w) in ('AR','SMG','LMG')`, both of these are
+# ARs, so it listed them as "NEVER FIRED, and a spray weapon so a curve is the
+# right shape for it" -- a gap report that INVENTED two gaps. On 2026-08-10
+# that cost 17 seeded curve files and the first batch of a queue before the
+# operator said 「不是连发枪，不要了」.
+#
+# The fact is per WEAPON and it lives beside fire_mode_for because that is
+# already the author of "what mode does this gun's curve describe"; the
+# default there is 'full', and for these two that default is simply false.
+NO_FULL_AUTO = frozenset({'m16', 'mk47'})
+
+
+def sprays(weapon, weapon_class):
+    """Is a continuous recoil curve the right shape for this weapon? -> bool
+
+    Class first because it separates the bolt-actions and DMRs in one move,
+    then the per-weapon exceptions that class cannot see.
+    """
+    return weapon_class in ('AR', 'SMG', 'LMG') and weapon not in NO_FULL_AUTO
 
 
 # ════════════════════════════════════════════════════════════
