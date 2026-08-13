@@ -1,6 +1,10 @@
 # tools/ — 脚本层
 
-一次性的调查、离线回归、实机探针。**这里没有别人 import 的东西**，所以门槛最低——也因此最容易长出第五份「按键→等→读回」。
+一次性的调查、离线回归、实机探针。门槛最低——也因此最容易长出第五份「按键→等→读回」。
+
+⚠ **门槛低的理由曾经写成「这里没有别人 import 的东西」，而那句话是假的**，数一遍就知道：`calibration/build_row_name_templates.py` 拿 `tools.record_row_names`，`calibration/scan_compat.py` 和 `scan_fits.py` 各拿 `tools.drive_screen`，`test_snapshot.py` 拿 `tools.regression_check`，本文件自己在下面还记着 `test_spawner_plan` 拿 `classify` 那一次——**当时把它当成「唯一的反例」处理，而它是第五个。** 门槛仍然低，但理由只能是「这一层不被生产回路依赖」，不是「没人 import」；写成后者会让人以为改一个 `tools/` 里的名字不会波及别人。
+
+下划线开头的模块（`_ledger.py`、`_probe_texture.py`）是**故意**给这一层内部共用的，按 `from tools._x import y` 取。
 
 **这一层的唯一纪律：先找，再写。** 下面第一张表就是「先找」的清单。
 
