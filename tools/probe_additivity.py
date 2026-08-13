@@ -59,6 +59,7 @@ sys.path.insert(0, ROOT)
 import numpy as np
 
 from control.session import ensure_ready
+from tools._probe_texture import texture
 from calibration.sweep import Rig
 from calibration.collect_timed import aim_and_scope
 
@@ -116,24 +117,6 @@ def one_trial(rig, grabber, comp):
     t = np.asarray(ts)
     y = np.concatenate([[0.0], np.nancumsum(np.asarray(dys))]) / rig.K
     return t, y[:len(t)]
-
-
-def texture(rig, grabber):
-    import cv2
-    for _ in range(3):
-        grabber.grab_timed()
-    _t, f = grabber.grab_timed()
-    p = rig.tracker.slice_frame(f) if f is not None else None
-    if p is None:
-        return 0.0
-    arrs = p if isinstance(p, (list, tuple)) else [p]
-    vs = []
-    for a in arrs:
-        a = np.asarray(a)
-        if a.ndim == 3:
-            a = cv2.cvtColor(a, cv2.COLOR_BGR2GRAY)
-        vs.append(float(cv2.Laplacian(a.astype(np.uint8), cv2.CV_64F).var()))
-    return float(np.median(vs))
 
 
 def main():

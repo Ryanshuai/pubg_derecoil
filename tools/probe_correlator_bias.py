@@ -87,6 +87,7 @@ sys.path.insert(0, ROOT)
 import numpy as np
 
 from control.session import ensure_ready
+from tools._probe_texture import texture
 from calibration.sweep import Rig
 # ⚠ READ, NOT COPIED. This file used to compute `k_true/<literal> - 1` against
 # a hardcoded red-dot K, which is a SECOND author for a value config owns --
@@ -121,24 +122,6 @@ GRID_CELLS = [
     (35, 0.20),           # same delta as (70, 0.40), 0.5x the pairs
     (0, 1.50),            # STILL
 ]
-
-
-def texture(rig, grabber):
-    import cv2
-    for _ in range(3):
-        grabber.grab_timed()
-    _t, f = grabber.grab_timed()
-    p = rig.tracker.slice_frame(f) if f is not None else None
-    if p is None:
-        return 0.0
-    arrs = p if isinstance(p, (list, tuple)) else [p]
-    out = []
-    for a in arrs:
-        a = np.asarray(a)
-        if a.ndim == 3:
-            a = cv2.cvtColor(a, cv2.COLOR_BGR2GRAY)
-        out.append(float(cv2.Laplacian(a.astype(np.uint8), cv2.CV_64F).var()))
-    return float(np.median(out))
 
 
 def _first_patch(rig, grabber):
