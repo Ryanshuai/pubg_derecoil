@@ -56,6 +56,39 @@ a/b 已落地 2026-08-03：`detector/snapshot.py` 的 `snap()` + sidecar，回�
 量出来好就把 `evidence` 改成 `measured` 并让 `transfer` 走直拖；**量出来坏同样
 值钱**，记进 `game_quirks.md`。
 
+## B2. `Rig.no_comp` 那道闸从来没响过，而它护的是「这一梭到底压没压枪」
+
+`calibration/sweep.py:281`，2026-08-12 发现，**没有动它**——判它是修 bug 还是删
+死码，需要人。
+
+```python
+if getattr(self, 'no_comp', False):        # ← 这个属性没有任何写者
+    n = self.fire.arm(weapon)
+    if not self.fire.disarm():
+        raise RuntimeError('--no-comp asked for compensation OFF and '
+                           'the firmware would not confirm it; ...')
+    return n
+```
+
+`Rig.__init__(self, sight, prefer_dxgi=True)` 不设 `no_comp`，全仓库（含未跟踪
+文件）grep 也没有任何 `rig.no_comp = `。所以 `getattr` 恒取默认 `False`，**整段
+分支和那句 RuntimeError 从写下来那天起就到不了**。
+
+`--no-comp` 这个功能本身是活的，走的是另一条路：`collect_timed.py:1642` 传
+`[] if a.no_comp else curve`，也就是**上传一条空曲线**。两条路的差别正是那句
+RuntimeError 在防的东西——空曲线没有向固件要过确认，而这段代码的论证（上面
+六行注释）说的恰恰是「固件不确认就不许继续，否则后面每一梭都是压过枪的却被标成
+没压」。
+
+**这跟同一个文件上面十行记着的 `ammo_debug_dir` 是同一个形状**：「注释说有个开关，
+而没有任何东西拨它，于是分支从写下来那天起不可达」。第二次了。
+
+三条路，选哪条要人定：**接上**（`collect_timed` 建 Rig 之后设 `rig.no_comp =
+a.no_comp`，那是行为变更）· **删掉**（承认空曲线就是这个功能的全部，那句
+RuntimeError 的论证跟着删）· **补一道闸**（`check_params.py` 已经在查「函数收了
+没人读的参数」，缺的是它的兄弟：`getattr(self, 'x', ...)` 而 `x` 全仓库没有写者
+——这一条能同时抓住 `ammo_debug_dir` 那次和这次）。
+
 ## C. 死代码 ✅ 已执行一轮（2026-08-07）
 
 删掉 **13 个 import + 13 个常量 + 1 个函数**，14 道离线闸全绿
