@@ -176,6 +176,10 @@ from config import (config_key, parse_config_key,          # noqa: E402,F401
 # speaks catalogue keys; weapon_attachments imports only config and the
 # catalogue, so this is not a cycle.
 from detector.weapon_attachments import worn_keys          # noqa: E402
+# ⚠ THE LOOKUP SIDE OF `RECOIL_NEUTRAL`, AND THE ONLY SIDE. The catalogue's own
+# note says why collect_timed must NOT import it: recording and looking up are
+# different questions about the same gun.
+from detector.attachment_catalog import RECOIL_NEUTRAL     # noqa: E402
 
 
 # Guns whose optic is part of the WEAPON, not of the scope slot. An empty
@@ -1042,6 +1046,15 @@ class Weapon():
                 self.dx_s, self.dy_s, self.t_s = [], [], []
                 return
             cfg = worn_keys(self.muzzle, self.grip, self.butt)
+            # ⚠ AFTER worn_keys, NOT INSTEAD OF IT. The part still has to be
+            # NAMED -- an unreadable one poisons the key above and must keep
+            # doing so. This only drops parts the catalogue knows AND has a
+            # measurement saying they do not move the curve (laser: 1.0058 on
+            # m762, +-1%, n=6). Without it a gun wearing a laser looks up
+            # `grip-laser`, which no run has ever fitted and `_compose` cannot
+            # build either, so it got nothing at all.
+            if cfg:
+                cfg = {s: p for s, p in cfg.items() if p not in RECOIL_NEUTRAL}
             sight = _sight_of(self.scope, self.name)
             if cfg is None:
                 said = ('unnamed', self.name, self.muzzle, self.grip,

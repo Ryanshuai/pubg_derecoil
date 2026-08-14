@@ -361,6 +361,37 @@ SLOT_NAMES = ('scope', 'muzzle', 'grip', 'magazine', 'stock')
 # recorded per magazine as `magazine_size`.
 RECOIL_SLOTS = ('muzzle', 'grip', 'stock')
 
+# Parts that OCCUPY one of those slots and do not change the recoil curve.
+#
+# A curve is looked up by exact kit, so a part in a RECOIL_SLOT normally has to
+# appear in the key. These do not: they take the rail without touching what the
+# gun does when it fires, so a gun wearing one should play the curve fitted
+# without it rather than fall off the table.
+#
+# ⚠ MEMBERSHIP IS A MEASUREMENT, NOT A CATEGORY JUDGEMENT, and today there is
+# exactly one number to point at. data/kit_factors.json, parts.m762.standing:
+#
+#     grip=laser   f = 1.0058   rel = 0.0099   n = 6   src = measured
+#
+# 0.58% off 1.0 against its own +-1%: this measurement cannot tell the laser
+# apart from nothing. Adding a part here without a line like that turns the set
+# into an opinion about what "should" affect recoil, and every other grip in
+# that file measures 0.77-0.86 -- the slot is not neutral, this part is.
+#
+# ⚠ IT IS READ ON THE LOOKUP SIDE ONLY, AND THAT ASYMMETRY IS DELIBERATE.
+# `detector.weapon.set_seq` drops these before building the key ("which curve
+# applies"); `calibration.collect_timed.read_config` does NOT ("what was on the
+# gun"). A measurement that silently recorded a lasered gun as `bare` would be
+# root CLAUDE.md's second law -- the record naming an object other than the one
+# measured -- so the two sides answer different questions on purpose.
+#
+# ⚠ NOT THE SAME DOOR AS `worn_keys` RETURNING None. That refuses to name a kit
+# holding a part the catalogue does not know, precisely so nothing looks up the
+# kit MINUS that part. This set is the opposite case: the part is known, and
+# measured not to matter. Dropping an unreadable part would still be the bug
+# that note describes.
+RECOIL_NEUTRAL = frozenset({'laser'})
+
 SLOTS = {
     # ── AR ──
     'akm':      {'slots': ('scope', 'muzzle', 'magazine'), 'conf': 'measured'},
