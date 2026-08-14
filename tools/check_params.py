@@ -99,6 +99,18 @@ def _owned_constants():
     sys.path.insert(0, str(ROOT))
     import config                                            # noqa: E402
     for sight, prof in config.RECOIL_SIGHT_PROFILES.items():
+        # ⚠ AN ALIAS IS NOT A SECOND AUTHOR, AND THIS DICT IS KEYED BY VALUE, so
+        # without this line the LAST profile holding a number wins the author
+        # slot and the report cites it. `iron` was added 2026-08-12 carrying the
+        # red dot's K by assignment (config.py says why), and the report
+        # immediately started naming iron as the author of that K -- a number
+        # measured on a red dot, with its provenance under `red_dot`. Nothing
+        # failed: the count stayed right, the copies stayed right, only the
+        # sentence telling you where to go changed, and its own fix advice
+        # ("name the constant instead of the number") would then have written
+        # the wrong name into a caller.
+        if prof.get('alias_of'):
+            continue
         k = prof.get('K')
         # A value that rounds the same at 2dp as at 4dp (the hip-fire 0.50) is
         # too round to police -- it collides with unrelated arithmetic, and a
