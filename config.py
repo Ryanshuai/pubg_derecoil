@@ -594,6 +594,45 @@ RECOIL_SIGHT_PROFILES = {
                      'patch_xs': RECOIL_PATCH_XS},
 }
 
+# ⚠ `iron` HAS NEVER BEEN MEASURED, AND IT IS DERIVED HERE RATHER THAN TYPED SO
+# THAT STAYS TRUE ON THE PAGE (2026-08-12). It is not a second reading of K; it
+# is RECOIL_SIGHT_RATIO['iron'] = 1.0 -- "iron sights sit in the red dot's ADS
+# sensitivity tier" -- written out in the one place a K is looked up. Typing the
+# red dot's K out here would have made it look like an independent measurement
+# agreeing with red_dot, which is the worst kind of copy: one that says
+# everything checks out. Assigning it means the day red_dot's K moves, this
+# moves with it, and the
+# day someone measures iron the assignment is what gets deleted.
+#
+# ⚠ THIS OPENS THE COLLECTION PATH, WHICH IS WHY IT IS A BIGGER STEP THAN THE
+# RATIO ENTRY. Until now `collect_timed` and `calibrate_scope` refused a sight
+# with no profile, so no magazine could be stored labelled `iron`. They will
+# accept one now, and every count in it will be divided by a number nobody has
+# measured -- root CLAUDE.md's second law, in the one direction the machine
+# cannot check, because a K has no second reading to disagree with.
+#
+# The measurement that retires this is one command, and calibration/CLAUDE.md
+# ("K 按比例测，不按绝对值") says to read it as a RATIO against a red-dot run of
+# the same command taken minutes earlier, not as an absolute:
+#
+#     pixi run python calibration/calibrate_k.py --weapon m416 --sight iron \
+#         --ads --inject-s 1.0
+#
+# A ratio that comes back 1.00 confirms the tier argument; anything else retires
+# both this line and RECOIL_SIGHT_RATIO['iron'] together.
+# ⚠ `alias_of` IS NOT DECORATION -- WITHOUT IT THIS LINE BREAKS A GATE, AND IT
+# BREAKS IT IN THE DIRECTION THAT IS HARDEST TO NOTICE (found 2026-08-12 by
+# running `pixi run params` after adding the entry, not by reasoning about it).
+# tools/check_params.py._owned_constants builds {value: author} by walking these
+# profiles, so a second entry holding the same K OVERWRITES the first and the
+# gate starts naming THIS entry as the author of 1.5413. Its own advice is "name
+# the constant instead of the number", so the next person to obey it would write
+# RECOIL_SIGHT_PROFILES['iron']['K'] into a file about a RED DOT measurement --
+# pointed away from the hundred lines of provenance above. The gate would still
+# be arithmetically right and still be citing the wrong author, which is the
+# shape this repo pays the most for.
+RECOIL_SIGHT_PROFILES['iron'] = dict(RECOIL_SIGHT_PROFILES['red_dot'],
+                                     alias_of='red_dot')
 # Untested sights fall back to the magnified-scope group.
 RECOIL_K_DEFAULT_SCOPED = 1.86
 
@@ -1687,6 +1726,31 @@ RECOIL_SIGHT_RATIO = {
     '2x': 1.879, '3x': 2.803, '4x': 3.973,     # measured, mp5k bare, n=8 each
     '6x': 5.76, '8x': 7.68,                    # 0.96 x mag, EXTRAPOLATED
     'hipfire': 3.083,
+    # ⚠ `iron` IS THE THIRD GATE-OPENER, ADDED 2026-08-12 FOR THE SAME REASON AS
+    # THE TWO BELOW, AND ITS ABSENCE WAS THE MOST EXPENSIVE OF THE THREE.
+    # `_sight_of` answers `iron` for EVERY gun with an empty scope slot -- which
+    # is the default state of every gun the spawner hands out -- and `_derive`
+    # returns on its first line when the sight has no entry here. So an empty
+    # scope slot did not merely fail to scale: it shut off posture substitution,
+    # kit composition and the ordinary-mode fallback as well. Observed on the
+    # live status table: `aug | full  - | - | 半截 | - | crouching | 无曲线`
+    # with data/curves/aug__grip-half_grip.json sitting on disk.
+    #
+    # ⚠ 1.0 IS NOT "1x MAGNIFICATION", IT IS "THE SAME ADS SENSITIVITY TIER AS
+    # THE RED DOT", and only the second claim is what this table means. PUBG
+    # groups iron sight / red dot / holo under one ADS sensitivity setting, so a
+    # count buys the same angle through all three -- which is the same argument
+    # that gives p90_integral its 1.0 below.
+    #
+    # ⚠ AND `detector/weapon._sight_of` SAYS SOMETHING THAT READS LIKE A
+    # CONTRADICTION: "a count rotates the view about a third as far". That
+    # sentence is about HIP FIRE -- a third is 1/3.083, the entry two lines up --
+    # and it puts iron sights and hip fire in one clause. They are not one thing:
+    # iron sights ARE aiming down sights, at 1x. The runtime cannot tell which of
+    # the two the player is in right now, but that is equally true of the red dot
+    # and of every scope in this table, so `iron` is not a special case -- it was
+    # just the only one being refused for it.
+    'iron': 1.0,
     # ⚠ THE INTEGRAL OPTICS ARE HERE TO OPEN A GATE, NOT TO SCALE ANYTHING, and
     # the difference is why these two numbers are allowed to be extrapolated.
     # `_derive` reads this table on its FIRST line and returns immediately when
