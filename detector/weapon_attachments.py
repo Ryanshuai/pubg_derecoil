@@ -424,6 +424,48 @@ def part_factor(gun_name, slot, part_key, posture='standing'):
     return row['f'] if row else None
 
 
+def slot_factor(gun_name, slot, part_key, posture='standing'):
+    """One slot priced from the best source there is. -> (factor, tier) | None.
+
+    Tiers, strongest first, and the caller is expected to PRINT which one it
+    got: 'parts' (this gun's own measurement of this part) then 'wiki' (one
+    global number for the part, on every gun).
+
+    ⚠ None MEANS "NO SOURCE", AND THAT IS THE ENTIRE REASON THIS EXISTS
+    ALONGSIDE `_wiki_slot`, WHICH RETURNS 1.0 INSTEAD. 1.0 is a claim -- "this
+    part does nothing" -- and measured_kit_factor's own note says why answering
+    with it is the failure these tables exist to end. A caller has to be able to
+    tell "nobody knows" from "known to be neutral", and today the difference is
+    live: laser measures 1.0058 (n=6, m762) and is in RECOIL_NEUTRAL, while
+    uzi_stock has no number from any source at all.
+
+    ⚠ NO WIKI NUMBER FOR `stock`, EVER, and that is deliberate upstream rather
+    than missing here: explain_factor tier 3 records that tactical_stock states
+    -20% and measures 1.00 +- 0.01 (~25 sigma), so the stated stock figures have
+    no demonstrated relationship to what this project measures. A stock with no
+    per-gun measurement therefore has no price, and the caller must refuse.
+
+    ⚠ IT DOES NOT REPEAT `_wiki_slot`'s SLOT GATING (`slots['muzzle'] == 'comp'`,
+    `slots['grip']`). That gating asks "could this gun wear such a part", which
+    is the right question when you are pricing a HYPOTHETICAL kit. Here the part
+    is being read off a gun that is wearing it, so the question is already
+    answered, and re-asking it refuses real kits -- `takes_vertical_grip` is
+    False for a gun whose grip rail only accepts a laser, and that gun can still
+    be wearing one.
+    """
+    f = part_factor(gun_name, slot, part_key, posture)
+    if f is not None:
+        return f, 'parts'
+    if slot == 'stock':
+        return None
+    table = MUZZLE_FACTOR if slot == 'muzzle' else GRIP_FACTOR if slot == 'grip' else {}
+    asset = (ATTACHMENTS.get(part_key) or {}).get('asset') or ''
+    for key, factor in table.items():
+        if key in asset:
+            return factor, 'wiki'
+    return None
+
+
 def measured_kit_factor(gun_name, posture, muzzle='', grip='', stock=''):
     """The measured factor for this exact kit, or None if nobody measured it.
 

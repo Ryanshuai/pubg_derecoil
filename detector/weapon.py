@@ -175,7 +175,7 @@ from config import (config_key, parse_config_key,          # noqa: E402,F401
 # set_seq needs it because the detector speaks assets and the curve store
 # speaks catalogue keys; weapon_attachments imports only config and the
 # catalogue, so this is not a cycle.
-from detector.weapon_attachments import worn_keys          # noqa: E402
+from detector.weapon_attachments import worn_keys, slot_factor   # noqa: E402
 # ⚠ THE LOOKUP SIDE OF `RECOIL_NEUTRAL`, AND THE ONLY SIDE. The catalogue's own
 # note says why collect_timed must NOT import it: recording and looking up are
 # different questions about the same gun.
@@ -787,9 +787,19 @@ class Weapon():
         """
         cfg = parse_config_key(ck)
         # The round trip is the proof that ck is a key at all; parse_config_key
-        # asks callers for it by name. len < 2 means the exact lookup already
-        # asked for this same cell and missed, so there is nothing to build.
-        if cfg is None or config_key(cfg) != ck or len(cfg) < 2:
+        # asks callers for it by name.
+        #
+        # ⚠ THE FLOOR WAS `len < 2` AND IT STOPPED BEING RIGHT THE DAY A SLOT
+        # COULD BE PRICED WITHOUT A CELL. Its reason was "the exact lookup
+        # already asked for this same cell and missed, so there is nothing to
+        # build" -- true while the only ingredient was this gun's own cell for
+        # that one part, since a one-slot kit's composition WAS the cell just
+        # looked up. With slot_factor below, a one-slot kit composes as bare x
+        # that part's price, which is a different thing and the only thing
+        # available. Measured: it is 22 of the 28 configurations still without a
+        # curve, all of them `grip-light_grip` or `grip-thumb_grip` standing
+        # alone on eleven guns.
+        if cfg is None or config_key(cfg) != ck or len(cfg) < 1:
             return {}
         out = {}
         for (w, c, posture, sight, fm), bare in self._final.items():
@@ -801,16 +811,29 @@ class Weapon():
             # Donors are taken at the SAME (posture, sight) as the bare cell,
             # so a coefficient is never a ratio between two optics wearing one
             # part -- that would fold the optic's K into the part's number.
-            f, why, ok = 1.0, [], True
+            f, why, ok, weakest = 1.0, [], True, 'cell'
             for slot, part in sorted(cfg.items()):
                 one = self._final.get(
                     (self.name, config_key({slot: part}), posture, sight, fm))
-                if not one:
+                if one:
+                    r = sum(float(s['dy']) for s in one) / base
+                    f *= r
+                    why.append(f'x{r:.3f} ({slot}-{part})')
+                    continue
+                # ⚠ THE SLOT IS PRICED FROM A WEAKER SOURCE, NOT DROPPED. The
+                # note above ("ALL-OR-NOTHING PER SLOT") argued against dropping
+                # it, and that argument still stands -- composing the rest would
+                # fire a curve fitted WITHOUT this part. Naming a price for it
+                # is the third option that note did not consider, and it is what
+                # the store's own tiers are for.
+                priced = slot_factor(self.name, slot, part, posture)
+                if priced is None:
                     ok = False
                     break
-                r = sum(float(s['dy']) for s in one) / base
+                r, tier = priced
                 f *= r
-                why.append(f'x{r:.3f} ({slot}-{part})')
+                weakest = tier
+                why.append(f'x{r:.3f} ({slot}-{part}, {tier})')
             if not ok:
                 continue
             out[(self.name, ck, posture, sight, fm)] = ([
@@ -820,7 +843,13 @@ class Weapon():
                f'({base:.0f} counts) ' + ' '.join(why) +
                f' -> {base * f:.0f} counts, slot coupling ASSUMED AWAY '
                f'(hold-out on 8 measured kits: median 9.1%, '
-               f'-23.1%..+11.6%).')
+               f'-23.1%..+11.6%)' + ('' if weakest == 'cell' else
+               f'. ⚠ WEAKEST SLOT IS {weakest!r}: not this gun\'s own curve for '
+               f'that part. `wiki` is ONE number for the part on every gun, and '
+               f'this project has measured that to be wrong by 5.5 sigma in at '
+               f'least one case (comp_smg: 0.5907 mp5k / 0.7197 vector, one '
+               f'wiki number of 0.85 for both). Fire this cell to replace it.')
+               + '')
         return out
 
     def _derive(self, ck, sight, fmode):
@@ -1068,7 +1097,47 @@ class Weapon():
                          f'cannot be named either.')
                 self.dx_s, self.dy_s, self.t_s = [], [], []
                 return
-            fmode = fire_tag(self.name, self.fire_mode)
+            # ⚠ THE FIRE-MODE READBACK IS NOT TRUSTED FOR THE LOOKUP, and the
+            # store decides where it still is. Asked for from the chair
+            # 2026-08-13: 「full 这个不要检测，默认是压枪。因为不准。」
+            #
+            # It enters the key ONLY for a gun whose own cells actually
+            # distinguish modes -- which today is the mg3 and nothing else. That
+            # is the exact case `_derive` argues the axis was kept for: two
+            # AUTOMATIC modes 1.5x apart in cyclic rate, `mg3__bare` (high, 644
+            # counts) and `mg3__bare__fire-full` (slow, 774), both measured.
+            # Dropping the axis outright would make those two look up one curve
+            # and be wrong by 1.5x in one of them, silently.
+            #
+            # For every other gun the tag can only ever be '' or a mode nothing
+            # was fitted in, so a misread turns into a filter that empties the
+            # store -- a vector armed at 506 counts and CLEARED 15 ms later with
+            # nothing but the fire mode different (play log 0809_163710). The
+            # ordinary-mode fallback in `_derive` recovers that, but only after
+            # the exact lookup has already missed, and it cannot recover the mg3
+            # case at all because there the wrong lookup HITS.
+            #
+            # ⚠ RECORDING STILL USES THE READBACK. samples.append passes what
+            # the HUD said, on purpose -- fire_tag's own note says this project
+            # has paid twice for a record that described the REQUEST. Same
+            # asymmetry as RECOIL_NEUTRAL: what was true of the gun is recorded,
+            # what curve to fire is decided.
+            # ⚠ AND WHEN THE STORE HAS ONE TAG, USE THAT TAG -- NOT ''. The m249
+            # is why, and it is a bug this rule inherited rather than made: all
+            # three of its cells sit under `__fire-high` and NONE under '',
+            # because `fire_mode_for` defaults it to 'full' so its measured
+            # `high` filed itself tagged. Nothing at runtime produces
+            # `__fire-high` unless the HUD happens to read 'high', and
+            # `_derive`'s ordinary-mode fallback recurses to '' -- which m249
+            # has no cell at either. The gun was unreachable at every fire mode
+            # but one, with three curves on disk. Taking the store's own tag
+            # makes "which tag is this gun's ordinary one" a fact about the data
+            # instead of a second opinion about the weapon.
+            tags = {k[4] for k in self._final if k[0] == self.name}
+            if len(tags) > 1:
+                fmode = fire_tag(self.name, self.fire_mode)
+            else:
+                fmode = next(iter(tags)) if tags else ''
             key = (self.name, config_key(cfg), self.posture, sight, fmode)
             shots = self._final.get(key)
             scale = 1.0

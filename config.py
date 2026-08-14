@@ -1751,6 +1751,26 @@ RECOIL_SIGHT_RATIO = {
     # and of every scope in this table, so `iron` is not a special case -- it was
     # just the only one being refused for it.
     'iron': 1.0,
+    # ⚠ `unknown` MEANS THE SCOPE TILE HELD SOMETHING THE TEMPLATES COULD NOT
+    # SEPARATE, AND 1.0 IS THE CONSERVATIVE ANSWER RATHER THAN THE LIKELY ONE.
+    # It is not a magnification and it never will be; what it buys is the same
+    # gate `iron` buys, and the choice of number is a choice of which way to be
+    # wrong. Every entry in this table is >= 1.0, so 1.0 is the FLOOR: assume it
+    # and a gun actually wearing a 4x gets 1/3.973 of the counts it needs --
+    # under-compensated, which is the same direction as today's answer of no
+    # curve at all, only less of it. Assume anything higher and a gun wearing a
+    # red dot gets pushed DOWN through the target, which is the direction a
+    # player cannot shoot through.
+    #
+    # ⚠ AND IT DELIBERATELY DOES NOT GET A RECOIL_SIGHT_PROFILES ENTRY, unlike
+    # `iron` below. detector/weapon._sight_of records that `unknown` is kept out
+    # of that dict so collect_timed and calibrate_scope refuse to MEASURE
+    # through an optic nobody identified -- an mp5k wearing a 4x read '?' at
+    # margin 1.14 on 2026-08-09 and would have had a whole run scaled by the
+    # wrong constant. Firing a floor-scaled curve at an unidentified optic and
+    # recording a magazine against one are different risks: the first is
+    # recoverable by the player, the second poisons the store.
+    'unknown': 1.0,
     # ⚠ THE INTEGRAL OPTICS ARE HERE TO OPEN A GATE, NOT TO SCALE ANYTHING, and
     # the difference is why these two numbers are allowed to be extrapolated.
     # `_derive` reads this table on its FIRST line and returns immediately when
