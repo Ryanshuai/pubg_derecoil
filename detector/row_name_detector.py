@@ -60,16 +60,17 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from detector.tab_layout import PANELS, icon_box
-from detector.weapon_template_detector import _template_match
+from detector.weapon_template_detector import (_template_match,
+                                              _white_text_mask)
 
 TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'templates',
                         'ocr_white', 'rows')
 
-# Same threshold pair as `_white_text_mask`, and measured to be right here too:
-# on a row label the panel behind the text reads gray p90 = 92 while the glyphs
-# are 255, so 180 sits in open country.
-GRAY_MIN = 180
-SPREAD_MAX = 30
+# ⚠ THE THRESHOLD PAIR IS NOT HERE ANY MORE. `GRAY_MIN = 180` / `SPREAD_MAX =
+# 30` used to sit at this spot under the comment "Same threshold pair as
+# `_white_text_mask`" -- a sentence declaring that one fact had two authors,
+# with nothing checking it. Both now live at their single author, and this
+# reader gets them by CALLING that function rather than by agreeing with it.
 # ⚠ NO MORPHOLOGY, AND THAT IS THE DIFFERENCE FROM THE PLATE READER. Row labels
 # are drawn several sizes smaller than a weapon plate, and MORPH_OPEN with a
 # 3x3 kernel is wider than their strokes. Measured over batch 0's thirteen
@@ -104,21 +105,12 @@ def label_box(row, panel='inventory'):
 def text_mask(bgr):
     """White glyphs on the panel, 255/0. -> uint8
 
-    Achromatic AND bright: either alone lets the panel through. The panel is
-    a blurred, darkened photograph of the world, so it holds plenty of bright
-    pixels (sky) and plenty of grey ones (concrete) -- just not both at once
-    in the same pixel, which is what the pair tests.
+    The plate reader's mask with the morphology turned off; the criterion, its
+    thresholds and why they are what they are live at `_white_text_mask`, and
+    what belongs HERE is the one thing this reader does differently and the
+    measurement behind it (`OPEN_KERNEL` above).
     """
-    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-    f = bgr.astype(np.float32)
-    spread = np.max(np.abs(np.stack([f[:, :, 0] - f[:, :, 1],
-                                     f[:, :, 1] - f[:, :, 2],
-                                     f[:, :, 2] - f[:, :, 0]], axis=2)), axis=2)
-    out = np.zeros_like(gray)
-    out[(gray > GRAY_MIN) & (spread < SPREAD_MAX)] = 255
-    if OPEN_KERNEL is not None:
-        out = cv2.morphologyEx(out, cv2.MORPH_OPEN, OPEN_KERNEL)
-    return out
+    return _white_text_mask(bgr, OPEN_KERNEL)
 
 
 def tight(mask):

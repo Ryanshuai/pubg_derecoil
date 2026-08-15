@@ -35,15 +35,44 @@ TIE_MARGIN = 0.05
 TMPL_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'templates', 'ocr_white')
 _OPEN_KERNEL = np.ones((3, 3), np.uint8)
 
+# The criterion is ACHROMATIC AND BRIGHT, and either half alone lets the panel
+# through: the panel is a blurred darkened photograph of the world, so it holds
+# plenty of bright pixels (sky) and plenty of grey ones (concrete) -- just not
+# both at once in the same pixel. On a name plate the panel behind the text
+# reads gray p90 = 92 against 255 for the glyphs, so 180 sits in open country.
+#
+# ⚠ THIS PAIR HAD TWO AUTHORS UNTIL 2026-08-15, and one of them said so:
+# row_name_detector carried `GRAY_MIN = 180` / `SPREAD_MAX = 30` under the
+# comment "Same threshold pair as `_white_text_mask`" -- a declaration that one
+# fact lived in two places, with nothing checking it, while THIS file wrote the
+# same pair as bare literals inside the expression. Two copies of a number and
+# a sentence claiming they agree is the shape `pixi run params` exists to
+# refuse; it could not see this one, because a literal inside an `if` is not a
+# parameter.
+GRAY_MIN = 180
+SPREAD_MAX = 30
 
-def _white_text_mask(img_bgr):
+
+def _white_text_mask(img_bgr, open_kernel=_OPEN_KERNEL):
+    """White glyphs on the panel, 255/0. -> uint8
+
+    ⚠ `open_kernel=None` IS THE ROW READER, AND THE DIFFERENCE IS MEASURED,
+    not stylistic. Row labels are drawn several sizes smaller than a weapon
+    plate and MORPH_OPEN with a 3x3 is wider than their strokes; the numbers
+    are at row_name_detector.text_mask, which is the caller that needs it. The
+    kernel is therefore the ONLY thing the two readers disagree about -- which
+    is why they are one function with one parameter rather than two functions
+    that happen to contain the same arithmetic.
+    """
     f = img_bgr.astype(np.float32)
     spread = np.max(np.abs(np.stack([f[:,:,0]-f[:,:,1], f[:,:,1]-f[:,:,2],
                                      f[:,:,2]-f[:,:,0]], axis=2)), axis=2)
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     out = np.zeros_like(gray)
-    out[(gray > 180) & (spread < 30)] = 255
-    return cv2.morphologyEx(out, cv2.MORPH_OPEN, _OPEN_KERNEL)
+    out[(gray > GRAY_MIN) & (spread < SPREAD_MAX)] = 255
+    if open_kernel is None:
+        return out
+    return cv2.morphologyEx(out, cv2.MORPH_OPEN, open_kernel)
 
 
 def _template_match(crop, templates, mask_fn=None):
