@@ -78,7 +78,8 @@ BANK_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'templates',
 MARGIN_MIN = 0.08
 
 # Laplacian variance below which the plate has NOTHING drawn in it. See
-# WeaponHudDetector.drawn() for both sides of the measurement.
+# WeaponHudDetector.drawn() for both sides of the measurement -- and for the
+# 2026-08-15 measurement that says it does NOT answer "is this slot empty".
 PLATE_INK_MIN = 12.0
 
 
@@ -129,7 +130,40 @@ class WeaponHudDetector:
 
     @staticmethod
     def drawn(crop, floor=PLATE_INK_MIN):
-        """Is ANYTHING drawn in this plate? Nearest-neighbour cannot ask this.
+        """Is there any signal in this crop at all? NOT "is this slot empty".
+
+        ⚠ THE SECOND QUESTION IS THE ONE EVERYONE WANTS AND THIS CANNOT ANSWER
+        IT, measured 2026-08-15. An empty weapon slot does not draw a dim
+        plate -- it draws NOTHING, so the crop is the open world showing
+        through, and grass carries more high-frequency detail than an icon
+        does. On the 867 frames in calibration/artifacts/ads/runs (meta.json
+        `slot: 1`, a kar98k in slot 1, slot 2 empty in every frame -- crop
+        HUD_REGIONS['weapon_1'] and ['weapon_2'] out of the full-screen jpgs
+        to redo it):
+
+            slot 1, occupied   laplacian p1 380  median 1141   below floor 0.0%
+            slot 2, EMPTY      laplacian p1 0.5  median  317   below floor 24.5%
+
+        So this passes 75.5% of empty slots, and the ranking behind it then
+        returns a confident name on 47% of them (aug 347, kar98k 40, mg3 6,
+        m762 3 ...). Slot 1 nearly always holds a gun and slot 2 often does
+        not, which is why the phantom is always the SECOND gun -- the shape
+        the operator reported as 「总是倾向于第二个枪」.
+
+        ⚠ NO THRESHOLD ON THIS QUANTITY FIXES IT, and neither does the obvious
+        successor: white-and-desaturated pixel counts (the criterion that
+        works for the rack tag) do not separate either -- overexposed ground
+        puts 1266 near-white pixels in an empty plate, and the 1st percentile
+        of OCCUPIED plates is 0. The rack tag works because the glyph sits on
+        a DARK BOX; the HUD icon has no box.
+
+        WHO DOES ANSWER IT: detector/gun_tag_detector.py, through
+        control/tab_watch.py -> GameState.set_rack. That is the only source
+        allowed to say a slot is empty. This one stays because `read` still
+        needs a cheap "there is no signal here at all" (a black frame, a
+        capture that came back empty), which is what it actually measures.
+
+        The original measurement, which is still the reason for the number:
 
         A ranking always has a winner. With no "nothing here" class in the
         bank -- and the corpus has 42 classes, not one of them an empty slot --
@@ -151,6 +185,16 @@ class WeaponHudDetector:
             those 5590 fall below 10.
           * unlabelled HUD plates from calibration/artifacts/ads/runs: 12% sit at <=10, which
             the line above proves cannot be occupied plates.
+
+        ⚠ AND THAT SECOND BULLET IS WHERE IT WENT WRONG, which is worth more
+        than the number it produced. "12% of unlabelled plates are dark, and
+        those must be the empty ones" reads like a measurement of empty
+        plates. It is not: it bounds them from ONE SIDE. Labelling that same
+        directory by which slot the run put the gun in -- the meta.json was
+        there the whole time -- turns the 12% into 24.5%, and the missing
+        three quarters is the bug at the top of this docstring. A gate fitted
+        on the class it is meant to reject, without ever labelling that class,
+        can only be measured on the side it already passes.
 
         12 sits in the gap. Raising it costs real reads fast (50 -> 1.32%,
         80 -> 2.72%) because a STOWED weapon is drawn at alpha 0.405 against

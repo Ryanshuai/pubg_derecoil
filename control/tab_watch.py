@@ -135,7 +135,7 @@ class TabWatch:
     """
 
     def __init__(self, state, detectors, verbose=True, shot_dir=SHOT_DIR,
-                 on_change=None):
+                 on_change=None, on_read=None):
         """shot_dir: where the close's frame is kept. None to keep none.
 
         `on_change` is called AFTER a reading has been written through to
@@ -168,6 +168,14 @@ class TabWatch:
         self.verbose = verbose
         self._shot_dir = shot_dir
         self._on_change = on_change
+        # ⚠ A SINK FOR THE FRAME AND THE READING, and it is a parameter rather
+        # than an import for the same reason `on_change` is: this class is the
+        # READ half of the Tab screen and owes the real-time loop a fixed cost.
+        # A corpus collector reaching in here directly would make the reader
+        # own a disk write. `on_read(frame, got)` is called once per Tab
+        # reading, after the state has been published, and a sink that throws
+        # must not take the loop down with it.
+        self._on_read = on_read
         self.open = False
         self.loadout = None          # {'weapons':..., 'attachments':..., 'ts':}
         self._panel_grab = None
@@ -511,6 +519,11 @@ class TabWatch:
             got = self.read_loadout(frame)
             if got is not None:
                 self._publish(got)
+                if self._on_read is not None:
+                    try:
+                        self._on_read(frame, got)
+                    except Exception as e:
+                        self._log(f'on_read sink raised, ignored: {e}')
         # ⚠ THIS FRAME IS A MEASUREMENT, so it settles `open` rather than being
         # filtered through it. The old shape read `self.open`, which could be
         # stale -- and was, on those same 8 frames.
@@ -610,6 +623,15 @@ class TabWatch:
         """
         self.loadout = got
         if got['weapons'] is not None:
+            # ⚠ THE PRESENCE READING FIRST, AND IT IS PUBLISHED AT ALL. It was
+            # computed here, printed in the log line, and then dropped -- so
+            # `gun2 (no gun in the rack slot)` and a status table naming a gun
+            # in slot 2 were one line apart (2026-08-15 13:06:50). It is the
+            # only source in the repository that may say a slot is EMPTY, and
+            # it is published from inside this `weapons is not None` branch on
+            # purpose: that branch means a tag WAS drawn somewhere, which is
+            # what proves the panel was up. See GameState.set_rack.
+            self.state.set_rack(got.get('present') or {})
             self.state.weapon_gt = got['weapons']
             self.state.sync_weapons()
         if got['attachments'] is not None:

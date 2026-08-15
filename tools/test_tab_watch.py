@@ -74,24 +74,43 @@ class FakeState:
         self.tab_open = False
         self.weapon_gt = ('', '')
         self.weapon_pred = ('', '')
+        self.weapon_present = {1: None, 2: None}
+        self.rack_seen = False
+        self.held = ['', '']            # what the Weapon objects would hold
         self.attachments = {}
         self.synced = 0
         self.statuses = 0
 
+    def set_rack(self, present):
+        self.weapon_present = {s: present.get(s) for s in (1, 2)}
+        self.rack_seen = True
+
     @property
     def weapon_name(self):
-        """Effective names: GT then pred, as the real GameState resolves them.
+        """Effective names, as the real GameState resolves them.
 
         Modelled rather than stubbed because a kit is only published for a gun
-        this answers for, and the fallback to `pred` is the half that matters:
-        a gun already named by the HUD detector keeps its kit even when the Tab
-        plate is unreadable. A stub returning weapon_gt alone would pass every
-        case here and drop the kit in the one that counts.
+        this answers for, and the FALLBACKS are the half that matters: a gun
+        already named keeps its kit even when the Tab plate is unreadable, and
+        a slot the rack says is EMPTY must resolve to '' however loudly some
+        older reading names it. A stub returning weapon_gt alone would pass
+        every case here and get both of those wrong.
         """
-        return tuple(g or p for g, p in zip(self.weapon_gt, self.weapon_pred))
+        return tuple(self._eff(s) for s in (1, 2))
+
+    def _eff(self, slot):
+        if self.weapon_present.get(slot) is False:
+            return ''
+        i = slot - 1
+        if self.weapon_gt[i]:
+            return self.weapon_gt[i]
+        if not self.rack_seen and self.weapon_pred[i]:
+            return self.weapon_pred[i]
+        return self.held[i]
 
     def sync_weapons(self):
         self.synced += 1
+        self.held = list(self.weapon_name)
 
     def set_attachments(self, slot, att):
         self.attachments[slot] = att
@@ -409,6 +428,15 @@ t = run(wS, 0.05, t0=time.perf_counter())
 check('slot 1 published', stateS.attachments.get(1), {'muzzle': 'supp_ar'})
 check('slot 2 not published at all', 2 in stateS.attachments, False)
 check('and its name never reached GameState', stateS.weapon_gt, ('sks', ''))
+# ⚠ AND THE EMPTINESS ITSELF IS PUBLISHED, which is the half that was missing
+# until 2026-08-15: the tag detector answered `no gun in slot 2`, the log line
+# printed it, and then it was dropped -- so GameState resolved the blank name
+# through `or` to whatever it last believed, and a dropped gun stayed on the
+# screen with its curve. `''` cannot carry this: it is also what an unreadable
+# plate returns. Only this dict says NOTHING IS THERE.
+check('the emptiness reached GameState too', stateS.weapon_present,
+      {1: True, 2: False})
+check('and it says the effective name is empty', stateS.weapon_name[1], '')
 
 print('\n=== a STALE open flag is corrected by the key\'s own frame ===')
 # ⚠ THE 8-OF-38 BUG, WRITTEN AS A CASE. TabWatch believed the panel was up,
@@ -460,8 +488,17 @@ check('nor for gun 2', 2 in state7.attachments, False)
 # ...and a gun the HUD already named keeps its kit, because the name it is
 # checked against is the EFFECTIVE one. Dropping the kit whenever the Tab
 # plate is unreadable would throw away a reading that was never in doubt.
+#
+# ⚠ THE `sync_weapons()` ON THE NEXT LINE IS THE LIVE SEQUENCE, NOT SETUP
+# NOISE. control/match.py syncs on every `weapon_pred` write, so by the time
+# any Tab is pressed the HUD's name is already ON the Weapon object -- and
+# that is what the effective name falls back to once the rack has been read
+# and the HUD stops being consulted (GameState.weapon_name). Writing the pred
+# without syncing models a state the dispatcher cannot produce, and it fails
+# this case for a reason that only exists in the fixture.
 w8, state8, screen8 = build()
 state8.weapon_pred = ('m416', '')
+state8.sync_weapons()
 screen8.open = True
 screen8.show(1, ('', ''), kit={1: {'muzzle': 'comp_ar'}, 2: {'stock': 'x'}})
 w8._set_open(True)
