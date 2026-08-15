@@ -125,6 +125,33 @@ static uint32_t cdc_len = 0;
 /* ── Razer polling rate state ──────────────────────────── */
 static volatile uint32_t fifo_drop_count = 0;
 
+/* ── Burst tick accounting (2026-08-11) ────────────────────
+ *
+ * WHY: get_recoil_delta pays out `spread_*_per_ms` ONCE PER CALL and calls
+ * itself one per millisecond -- but send_hid_output returns early when
+ * `tud_hid_ready()` is false, and it has ALREADY advanced `last_send`, so that
+ * millisecond is gone and never made up. The spread then takes longer in real
+ * time than the schedule says.
+ *
+ * Measured on the desktop 2026-08-11 (cursor as an oscilloscope): the folded
+ * head took 25 ms to come out where the schedule asked for 12, and from 25 ms
+ * on the delivery tracked the commanded curve to 1-2%. x1.85 at the head and
+ * nowhere else -- which is the shape of "只有第一发不好，其他都好".
+ *
+ * ⚠ THAT MEASUREMENT CANNOT BE EXTRAPOLATED INTO A FIREFIGHT. It was taken
+ * with the game NOT consuming the mouse exclusively, and how busy the HID pipe
+ * is depends entirely on that. These counters exist so the number can be read
+ * back from a REAL magazine instead of argued about.
+ *
+ * The verdict was fixed before the run: head_skipped ~0 means dropped ticks
+ * are not the cause; ~half the first 50 ms means they are.
+ */
+static volatile uint32_t burst_skipped_ms = 0;   /* ms with no payout, whole burst */
+static volatile uint32_t burst_head_skipped = 0; /* ...of those, within 50 ms of the click */
+static volatile uint16_t burst_worst_jump = 0;   /* largest single elapsed step */
+static volatile uint32_t burst_ticks = 0;        /* calls that DID run */
+static uint32_t burst_last_elapsed = 0;
+
 static uint8_t razer_dev = 0;
 static uint8_t razer_inst = 0;
 static volatile int razer_state = 0; /* 0=idle, 1=need cmd1, 2=need cmd2, 3=done */
@@ -406,17 +433,82 @@ static void get_recoil_delta(int16_t *out_dx, int16_t *out_dy) {
 
     uint32_t elapsed = board_millis() - fire_start_ms;
 
-    /* Advance to newly reached bullet points, compute spread rate */
+    /* Tick accounting, BEFORE anything is paid out. `jump` is how many
+     * milliseconds passed since this function last ran; one is the schedule,
+     * anything more is a millisecond that was dropped upstream. Counted here
+     * rather than at the tud_hid_ready() test because THIS is the payout
+     * point -- a millisecond in which send_hid_output ran but returned early
+     * for some other reason cost the curve just as much. */
+    {
+        uint32_t jump = elapsed - burst_last_elapsed;
+        if (jump > 1) {
+            burst_skipped_ms += (jump - 1);
+            if (elapsed <= 50) burst_head_skipped += (jump - 1);
+            if (jump > burst_worst_jump) burst_worst_jump = (uint16_t)jump;
+        }
+        burst_last_elapsed = elapsed;
+        burst_ticks++;
+    }
+
+    /* Advance to newly reached bullet points, PAYING OUT whatever each one's
+     * window already owes.
+     *
+     * ⚠ THIS LOOP USED TO OVERWRITE spread_*_per_ms PER KNOT, so any knot it
+     * stepped past in a single call contributed NOTHING -- its delta never
+     * reached recoil_accum and no counts for it were ever emitted. That is not
+     * a rounding loss, it is the whole knot.
+     *
+     * It bites because send_hid_output DROPS milliseconds: `last_send` is
+     * advanced before the `tud_hid_ready()` test, so a millisecond where the
+     * host has not collected the previous report never runs this function and
+     * is never made up. `elapsed` then jumps.
+     *
+     * And the knot it costs is knot[0]. upload_pattern folds everything owed
+     * before the click into that single knot, so it carries the entire head
+     * lead, while bullet_duration(0) is only the gap to knot[1] -- 12 ms at
+     * RECOIL_FIRE_DELAY_MS = -90 against 17 ms for every later knot. A burst
+     * begins at the instant USB is busiest (button change plus movement in one
+     * report), which is exactly when ticks get dropped. Reported from the
+     * chair as "第一发没压住" while every later round compensated correctly.
+     *
+     * ⚠ AND NOTHING WAS WATCHING. tools/test_comp_counts.py transcribed this
+     * loop faithfully, bug and all, and only ever ran it at a perfect 1 ms
+     * cadence -- the one cadence under which a tick cannot step past two
+     * knots. CMD_RECOIL_SIM never runs this function at all; run_recoil_sim
+     * walks the pattern calling jitter_bullet, so it measures the jitter and
+     * nothing about playback. The gate that fails on the old code is
+     * `pixi run comp-counts`, check 3b.
+     */
     while (fire_index < pattern_len && pattern[fire_index].t_ms <= elapsed) {
         float dx, dy;
         jitter_bullet(pattern[fire_index].dx, pattern[fire_index].dy, &dx, &dy);
 
-        /* Spread this bullet's delta evenly until the next bullet. */
         uint16_t dur = bullet_duration(fire_index);
+        uint32_t knot_t = pattern[fire_index].t_ms;
+        uint32_t end    = knot_t + dur;
 
-        spread_dx_per_ms = dx / (float)dur;
-        spread_dy_per_ms = dy / (float)dur;
-        spread_until_ms  = pattern[fire_index].t_ms + dur;
+        if (end <= elapsed) {
+            /* Window entirely in the past: the whole delta is owed NOW, or it
+             * is lost when the next knot replaces the spread rate. */
+            recoil_accum_x += dx;
+            recoil_accum_y += dy;
+            spread_dx_per_ms = 0.0f;
+            spread_dy_per_ms = 0.0f;
+            spread_until_ms  = 0;
+        } else {
+            /* Partly elapsed: pay the milliseconds already gone, then spread
+             * the remainder as before. `elapsed - knot_t` is 0 on the normal
+             * on-time path, which is why this is a superset of the old
+             * behaviour rather than a change to it. */
+            float per_ms_x = dx / (float)dur;
+            float per_ms_y = dy / (float)dur;
+            float gone = (float)(elapsed - knot_t);
+            recoil_accum_x += per_ms_x * gone;
+            recoil_accum_y += per_ms_y * gone;
+            spread_dx_per_ms = per_ms_x;
+            spread_dy_per_ms = per_ms_y;
+            spread_until_ms  = end;
+        }
 
         fire_index++;
     }
@@ -572,6 +664,13 @@ static void send_hid_output(void) {
         spread_dy_per_ms = 0.0f;
         spread_until_ms  = 0;
         rng_state ^= now;
+        /* Per BURST, not per session: the question is what one magazine's
+         * head costs, and a running total across magazines cannot answer it. */
+        burst_skipped_ms = 0;
+        burst_head_skipped = 0;
+        burst_worst_jump = 0;
+        burst_ticks = 0;
+        burst_last_elapsed = 0;
     } else if (!left_now && firing) {
         firing = false;
     }
@@ -668,8 +767,17 @@ static void service_reports(void) {
          * raise`) could never fire. Appended rather than given its own
          * command so an old host still parses this line: the token is extra,
          * and the host's end-of-dump test is a prefix match. */
-        len = snprintf(msg, sizeof(msg), "[pat] end %u\r\n",
-                       (unsigned)(recoil_enabled ? 1 : 0));
+        /* ⚠ APPENDED, not given its own command, for the reason the paragraph
+         * above already gives: the host's end-of-dump test is a PREFIX match
+         * and its per-knot parser wants exactly seven tokens, so extra tokens
+         * here are invisible to an older reader. The four are the last burst's
+         * tick accounting -- see burst_skipped_ms. */
+        len = snprintf(msg, sizeof(msg), "[pat] end %u %lu %lu %u %lu\r\n",
+                       (unsigned)(recoil_enabled ? 1 : 0),
+                       (unsigned long)burst_skipped_ms,
+                       (unsigned long)burst_head_skipped,
+                       (unsigned)burst_worst_jump,
+                       (unsigned long)burst_ticks);
         pat_dump_active = false;
     }
     tud_cdc_write(msg, len);

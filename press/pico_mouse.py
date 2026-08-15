@@ -22,6 +22,7 @@ import serial
 import serial.tools.list_ports
 
 import config
+from logbook import note
 
 # The wire contract with the firmware. These used to be typed out here AND in
 # press/firmware/src/main.c, kept in step by a comment; press/protocol/
@@ -206,7 +207,10 @@ class PicoMouse:
                 f"    Wait for it to finish rather than killing it — it is "
                 f"probably another agent mid-run.") from None
         self._port = port
-        print(f"[pico] connected on {port}", flush=True)
+        # ⚠ `note` 在**没有日志文件的时候就是 print** —— 标定 CLI 一条都不少，
+        # 只有 `robot.py`（唯一 tee 的进程）把它收进文件。**接不上**仍然是上面
+        # 那个带「谁占着串口」的异常，不是这一行的沉默。
+        note(f"[pico] connected on {port}")
 
     def _write(self, data, critical=False):
         """Write with non-blocking error handling.
@@ -450,6 +454,38 @@ class PicoMouse:
                             'dx': int(p[4]), 'dy': int(p[5]),
                             'dur_ms': int(p[6])})
         return out
+
+    def read_burst_ticks(self, timeout=2.0):
+        """How many milliseconds the LAST burst's payout loop missed. -> dict|None
+
+        {'skipped_ms', 'head_skipped', 'worst_jump', 'ticks'}
+
+        get_recoil_delta pays out one millisecond's worth of spread PER CALL,
+        and send_hid_output skips a call whenever `tud_hid_ready()` is false --
+        having already advanced `last_send`, so the millisecond is never made
+        up. The curve then plays SLOWER than its own schedule, and only where
+        the pipe is congested.
+
+        ⚠ THE NUMBER THAT MATTERS IS `head_skipped`, NOT `skipped_ms`. The
+        whole-magazine residual is measured at 0.1% of the climb, so the burst
+        as a whole clearly plays correctly; the open question is the first
+        50 ms, where the desktop measured x1.85 and where a firefight's HID
+        pipe is busiest (button edge plus movement in the same report). A large
+        total with a small head means the drops are late and harmless.
+
+        Rides on CMD_PATTERN_READ rather than a command of its own, because
+        the tokens are appended to a line the host already reads and an older
+        firmware simply returns the short form -- which is why the parse is
+        length-checked instead of assumed.
+        """
+        lines = self._ask(bytes([CMD_PATTERN_READ]),
+                          lambda ln: ln.startswith('[pat] end'), timeout)
+        for ln in lines:
+            p = ln.split()
+            if len(p) >= 7 and p[1] == 'end':
+                return {'skipped_ms': int(p[3]), 'head_skipped': int(p[4]),
+                        'worst_jump': int(p[5]), 'ticks': int(p[6])}
+        return None
 
     def simulate_recoil(self, iters=500, timeout=5.0):
         """Run the firmware's per-bullet jitter `iters` times over the stored

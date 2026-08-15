@@ -86,12 +86,19 @@ def _bullet_duration(tk, i):
     return 1 if dur < 1 else dur
 
 
-def _firmware_ticks(curve, upto_ms, jitter=None):
+def _firmware_ticks(curve, upto_ms, jitter=None, skip=None):
     """Cumulative counts EMITTED by the firmware after `upto_ms` 1 ms ticks.
 
     A transcription of main.c:402 get_recoil_delta, called once per ms from
     send_hid_output (main.c:910). `jitter` is a callable(i) -> multiplier so a
     caller can force the zero-mean terms on; None means the mean behaviour.
+
+    ⚠ `skip` IS NOT A HYPOTHETICAL. main.c:530 returns from send_hid_output
+    when `tud_hid_ready()` is false, and `last_send` has ALREADY been advanced
+    on the line above -- so that millisecond is dropped and never made up.
+    `skip` is a callable(elapsed) -> bool marking those dropped ticks, and it
+    exists because this transcription used to model only the perfect 1 ms
+    cadence, which is the one cadence under which the bug below cannot happen.
     """
     tk = [int(k['t_ms']) for k in curve]
     dy = [float(k.get('dy', 0.0)) for k in curve]
@@ -106,12 +113,29 @@ def _firmware_ticks(curve, upto_ms, jitter=None):
     emitted = 0
     out = np.zeros(upto_ms + 1)
     for elapsed in range(upto_ms + 1):
-        # main.c:410 -- advance to newly reached knots. The loop OVERWRITES the
-        # spread, so a knot whose window is skipped delivers nothing.
+        # main.c:530 -- tud_hid_ready() false: this millisecond never runs
+        # get_recoil_delta at all, and last_send has already moved past it.
+        if skip is not None and skip(elapsed):
+            out[elapsed] = emitted
+            continue
+        # main.c:410 -- advance to newly reached knots, PAYING OUT whatever
+        # their window already owes. It used to overwrite the spread rate per
+        # knot, which silently dropped every knot the loop stepped past.
         while fire_index < len(tk) and tk[fire_index] <= elapsed:
             d = dy[fire_index] * (jitter(fire_index) if jitter else 1.0)
-            spread_per_ms = d / durs[fire_index]
-            spread_until = tk[fire_index] + durs[fire_index]
+            dur = durs[fire_index]
+            end = tk[fire_index] + dur
+            if end <= elapsed:
+                # Window entirely in the past: the whole delta is owed now.
+                accum += d
+                spread_per_ms = 0.0
+                spread_until = 0
+            else:
+                # Partly elapsed: pay the ms already gone, spread the rest.
+                per_ms = d / dur
+                accum += per_ms * (elapsed - tk[fire_index])
+                spread_per_ms = per_ms
+                spread_until = end
             fire_index += 1
         # main.c:425 -- accumulate only while inside the current knot's window
         if elapsed < spread_until:
@@ -204,6 +228,42 @@ def main():
           f'lost {commanded - end:.3f} (the bound is ONE count: whatever is '
           f'truncated stays in the accumulator, so the only permanent loss is '
           f'the remainder still held when the curve stops)')
+
+    # ── 3b. A DROPPED TICK MUST NOT LOSE A KNOT ──
+    #
+    # ⚠ THE HEAD OF THE CURVE IS ONE KNOT AND IT IS THE ONE THAT GETS LOST.
+    # upload_pattern folds everything owed before the click into knot[0], so at
+    # RECOIL_FIRE_DELAY_MS = -90 that single knot carries the whole head lead --
+    # and `bullet_duration(0)` is the gap to knot[1], only 12 ms, where every
+    # later knot has 17. A burst starts at the instant USB is busiest (button
+    # state change + movement in the same report), so `tud_hid_ready()` false is
+    # most likely exactly there.
+    #
+    # get_recoil_delta's while-loop OVERWRITES spread_*_per_ms per knot instead
+    # of accumulating, so any knot the loop steps PAST in one tick contributes
+    # nothing at all -- it is never added to recoil_accum. Drop enough ticks at
+    # the start and knot[0]'s counts vanish silently.
+    #
+    # This is the shape of "只有第一发不压": the later knots have 17 ms windows
+    # and survive, the folded head has 12 and does not.
+    #
+    # ⚠ AND IT IS WHY EVERY OTHER GATE HERE STAYED GREEN. The transcription
+    # above modelled the perfect 1 ms cadence, which is the one cadence where a
+    # tick can never step past two knots. CMD_RECOIL_SIM cannot see it either:
+    # run_recoil_sim (main.c:690) walks the pattern array calling jitter_bullet
+    # and never runs the time advance at all, so it measures the jitter and
+    # nothing about playback, whatever its name suggests.
+    folded = [{'t_ms': 0, 'dy': 8.5}] + [
+        dict(k, t_ms=k['t_ms'] + 12) for k in synth_curve(900.0, 200)]
+    ideal = _firmware_ticks(folded, played_ms + 400)[-1]
+    dropped = _firmware_ticks(folded, played_ms + 400,
+                              skip=lambda e: e < 14)[-1]
+    check('a dropped tick does not silently discard a knot',
+          abs(ideal - dropped) <= 1.0 + 1e-9,
+          f'perfect cadence emits {ideal:.0f}, dropping the first 14 ticks '
+          f'emits {dropped:.0f} — a gap of {ideal - dropped:.0f} counts, which '
+          f'is knot[0] (the folded head) never reaching recoil_accum because '
+          f'the while-loop overwrote its spread rate instead of adding it')
 
     # ── 4. the zero-mean jitter really is zero-mean ──
     #
