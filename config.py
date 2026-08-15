@@ -235,6 +235,101 @@ RECOIL_GATE_MIN = 0.1
 RECOIL_MAD_K = 3.0
 RECOIL_MAD_FLOOR = 0.5
 
+# ── the reticle, i.e. WHERE THE BARREL POINTS ────────────────────────────
+# ⚠ THE PATCHES ABOVE MEASURE THE CAMERA. THE BULLETS FOLLOW THE BARREL, AND
+# UNTIL 2026-08-13 NOTHING IN THIS REPOSITORY HAD EVER RECORDED THE SECOND
+# ONE. RECOIL_KEEPOUT excludes x 1390..2050 so that the screen-fixed crosshair
+# cannot anchor a correlation at zero -- and the red dot lives at x~1718,
+# dead centre of that exclusion. The one feature on screen that shows the
+# barrel was cut out of every frame ever captured, by the rule that exists to
+# protect the correlation.
+#
+# WHAT THAT COST, measured off calibration/artifacts/holes/manual (mg3, comp
+# OFF, 3 rounds, operator-aimed). Three quantities in one coordinate system,
+# the after frame's screen y:
+#
+#                              g4        g3
+#     camera axis @ pre-fire   741.63    742.22
+#     barrel @ shot 1 (hole)   742.56    737.49     <- coincide, 0.93 / 4.73 px
+#     barrel @ shot 2 (hole)   698.75    690.61     <- 43.81 / 46.88 px in ONE round
+#     fitted curve, same gap    12.0                <- the camera, 3.65x less
+#
+# The first line is a CHECK, not a result: round 1 leaves before anything has
+# moved, so its hole must land on the pre-fire camera axis. It does, to 1-5 px,
+# with nothing tuned -- which is what makes the rest of the table readable.
+# The pre-fire offset is the ZEROING: the dot sits 26.26 px above the camera
+# axis and the bullet drops 27.19, so it lands 0.93 px below the axis.
+#
+# ⚠ AND THE DOT IS NOT DRAWN ON THE CAMERA. Between the same two frames it
+# moved 14.76 px (g4) and 22.95 px (g3) in SCREEN coordinates; a camera-fixed
+# overlay would have moved 0. That number IS the barrel-vs-camera divergence,
+# with no K, no clock and no fit in it.
+#
+# ⚠ THIS IS NOT AN EIGHTH CORRELATION PATCH AND MUST NEVER BECOME ONE. A patch
+# holding a screen-fixed feature reports "nothing moved" and reports it
+# confidently (see RECOIL_GATE_MIN above). The reticle is read by finding a
+# saturated-red blob -- a locate, not a correlate -- so it cannot contaminate
+# dy/dx.
+#
+# ⚠ THE BOX IS INSIDE THE PATCH BAND ON PURPOSE, so DXGI's single bounding box
+# does not grow by one pixel: patches span y 592..848, x 980..2748, and this
+# sits within both. detector\CLAUDE.md's "do not put a centre crop in
+# HUD_REGIONS" is about the HUD strip at y~1301, which would stretch the box
+# across half the screen; this is the same band as the patches.
+RECOIL_RETICLE_BOX = Rect(600, 1660, 200, 120)
+# The dot measured 21-24 px across five stored frames; muzzle smoke and fire
+# read 279 and 606, which is what the upper bound is for. A reading outside
+# the band is reported as "could not read", never as a position -- detector\
+# CLAUDE.md: "读不出" is a third answer, and folding it into a number is how a
+# frame with no dot gets filed next to one with a dot.
+RECOIL_RETICLE_AREA = (6, 200)
+RECOIL_RETICLE_MIN_R = 110     # absolute red, rejects dim red-brown scenery
+RECOIL_RETICLE_MARGIN = 40     # how far red must beat green AND blue
+
+# ── the sight TUBE, i.e. the same barrel, measured by its black ring ──────
+# ⚠ THE RED DOT ABOVE DOES NOT SURVIVE FIRING, and that is measured, not
+# feared. Two mg3 magazines through the live path (2026-08-13): the dot reads
+# beautifully at rest -- 17 pre-click frames, sd 0.05 px -- and during the
+# burst it jumps up to 113 and 194 px between consecutive frames, in sustained
+# runs (median 7 frames, longest 243). A barrel cannot do that at 144 fps.
+# Continuous muzzle fire is bright, red-ish and larger than the dot, so it
+# beats the dot on every test the dot is found by.
+#
+# THE RING CANNOT BE FAKED BY FIRE, because it is found by DARKNESS. The sight
+# tube is a thick black annulus ~250 px across, rigidly part of the weapon, and
+# no amount of muzzle flash creates black pixels.
+#
+# ⚠ VALIDATED AGAINST THE DOT, on settled frames where the dot is trustworthy.
+# A 250 px black ring and a 20 px red blob are independent features of the same
+# object, so they have to agree, and they do to sub-pixel:
+#
+#     group      ring mask     red dot     diff      world (7 patches)
+#     g3            22.83       22.95     -0.12         22.22
+#     g4            15.11       14.76     +0.35         21.63
+#     g1            14.39       15.11     -0.72         25.66
+#     g5            26.31          --       --          26.79   <- dot failed here
+#
+# ⚠ THE THRESHOLD IS NOT A TASTE, AND THE MASK IS NOT DECORATION. Same three
+# groups, same correlation, only the input changed:
+#
+#     min(BGR)<50   max err 0.72 px      green<70     max err 6.96 px
+#     green<50      max err 0.71 px      raw green    max err 6.90 px
+#
+# Single channel is free (the patches are already sliced that way) and costs
+# nothing against the three-channel version. 70 is ALREADY BROKEN, and the raw
+# grayscale row is the negative control: without the mask the correlation is
+# dragged by the wall seen THROUGH the ring, which moves with the camera --
+# exactly the quantity this box exists to not measure.
+#
+# ⚠ AND IT IS CORRELATED, NOT LOCATED -- the opposite of the reticle. The first
+# attempt here fitted the ring's TOP ARC and produced an apex at x=2047, i.e.
+# outside its own box: the arc sits at y~600 against the ceiling of the free
+# band, so "topmost dark pixel per column" found the wall's edge instead. The
+# mask was rendered and looked at before this line was written, which is the
+# step that was skipped.
+RECOIL_WEAPON_BOX = Rect(592, 1580, 256, 280)
+RECOIL_WEAPON_DARK = 50
+
 # ════════════════════════════════════════════════════════════
 # Per-sight calibration — measured 2026-08-01 with
 # calibration/calibrate_k.py, at general 30 / aim 50 / scope 50 and
@@ -633,6 +728,7 @@ RECOIL_SIGHT_PROFILES = {
 # shape this repo pays the most for.
 RECOIL_SIGHT_PROFILES['iron'] = dict(RECOIL_SIGHT_PROFILES['red_dot'],
                                      alias_of='red_dot')
+
 # Untested sights fall back to the magnified-scope group.
 RECOIL_K_DEFAULT_SCOPED = 1.86
 
@@ -647,6 +743,16 @@ POLL_VK_MAP = {
     0x1B: 'esc',        # VK_ESCAPE
     0x26: 'up',         # VK_UP
     0x28: 'down',       # VK_DOWN
+    # ⚠ NOT NAMED 'left'/'right', AND THAT IS THE WHOLE REASON THESE TWO LINES
+    # NEED A COMMENT. KEY_ACTION_TABLE already carries a `{'key': 'right'}`
+    # entry and it is the MOUSE's right button (ADS re-arm) -- fed in from
+    # elsewhere, which is why `right` never appears in this map. Naming the
+    # arrow key `right` would have made every lead nudge also fire
+    # `recoil_on` + `upload_pattern` for the ADS edge, silently, with both
+    # entries looking correct in isolation. Same shape as the slot vocabulary
+    # that had nine authors: one name, two meanings, nothing checking.
+    0x25: 'arrow_left',   # VK_LEFT
+    0x27: 'arrow_right',  # VK_RIGHT
     0x5B: 'win',        # VK_LWIN
     0x78: 'f9',         # VK_F9
     # ⚠ `0x13: 'pause'` 走了 (2026-08-10)，跟它那条 KEY_ACTION_TABLE 一起。
@@ -694,8 +800,15 @@ KEY_ACTION_TABLE = [
     # m416 bursts recorded as `bare`. The clear now hangs off
     # GameState.sync_weapons -- an OBSERVED name change -- which is the same
     # intent measured instead of guessed. Full reasoning there.
+    #
+    # ⚠ `('forget_rack',)` EXPIRES THE OCCUPANCY READING, and it is here rather
+    # than anywhere else because F is the one key that can put a gun into an
+    # empty slot. GameState.set_active_by_key refuses the 1/2 key for a slot
+    # the rack said is empty; a pickup makes that reading stale, and a stale
+    # refusal is worse than no refusal -- it would keep the OTHER gun's curve
+    # armed while the new gun is in the hands. Reasoning in forget_rack.
     {'key': 'f', 'event': 'press', 'cond': '!tab_open',
-     'state': [('weapon_gt', ('', '')), ('highlight_gt', 0)],
+     'state': [('weapon_gt', ('', '')), ('highlight_gt', 0), ('forget_rack',)],
      'hw': ['upload_pattern']},
 
     # ── Fire mode ──
@@ -779,6 +892,30 @@ KEY_ACTION_TABLE = [
     {'key': 'down', 'event': 'press', 'cond': '!tab_open',
      'state': [('adjust_counts', -0.01)]},
 
+    # ── Head-lead adjust (2026-08-10) ──
+    #
+    # ⚠ `'hw': ['upload_pattern']` IS NOT OPTIONAL HERE, and the two entries
+    # above are why it has to be said. The offset is applied inside
+    # `upload_pattern` (press/pico_mouse.py) -- it is not part of the curve's
+    # numbers -- so a lead changed without a re-upload changes NOTHING that is
+    # already in the firmware. From the chair: "改完以后马上就能加进去，不然
+    # 我那儿感觉感觉不出来."
+    #
+    # ⚠ AND ±1 ms IS A FINER STEP THAN THIS QUANTITY HAS. The curves are on a
+    # 17 ms grid and the lead only bites at a knot boundary, so ~16 of every 17
+    # presses change the folded step by EXACTLY ZERO. `adjust_lead` prints
+    # whether the press moved anything and how far the next boundary is,
+    # because a control that silently does nothing reads as "this parameter
+    # does not matter" -- the blind-criterion shape the root CLAUDE.md is
+    # about, in a key binding.
+    {'key': 'arrow_right', 'event': 'press', 'cond': '!tab_open',
+     'state': [('adjust_lead', +1)],
+     'hw': ['upload_pattern']},
+
+    {'key': 'arrow_left', 'event': 'press', 'cond': '!tab_open',
+     'state': [('adjust_lead', -1)],
+     'hw': ['upload_pattern']},
+
     # ── Aim toggle ──
     {'key': 'f9', 'event': 'press',
      'state': [('toggle_aim',)]},
@@ -831,14 +968,20 @@ DETECT_TABLE = [
      'regions': ['fire_mode'], 'delay': 500,
      'cond': '!tab_open', 'result': 'fire_mode'},
 
-    # ── Highlight (CV algorithm, no GT) ──
-    {'key': 'f', 'event': 'press', 'detect': 'highlight',
-     'regions': ['weapon_1', 'weapon_2'], 'delay': 500,
-     'cond': '!tab_open && !stop_recoil', 'result': 'highlight_pred'},
-
-    {'key': 'right', 'event': 'release', 'detect': 'highlight',
-     'regions': ['weapon_1', 'weapon_2'], 'delay': 350,
-     'cond': '!tab_open && !stop_recoil', 'result': 'highlight_pred'},
+    # ── Highlight: NOT SCHEDULED HERE ANY MORE ──
+    # Three entries lived here (f press, right release, tab press) and all
+    # three wrote `highlight_pred`, whose single consumer set the ACTIVE gun
+    # from the HUD highlight whenever no 1/2 key had been pressed since the
+    # last f/g/x/tab. It picked the wrong gun on the 2026-08-10 play log and
+    # the active weapon decides which curve the firmware plays -- full
+    # reasoning in detector/game_state.set_active_by_key.
+    #
+    # ⚠ THE DETECTOR IS NOT GONE, ONLY THIS DRIVING PATH. robot.py still
+    # registers it, MISMATCH_TABLE below still schedules it on the 1/2 keys
+    # (where a real GT exists to compare against), and `pixi run highlight`
+    # still scores it. Deleting the schedules rather than leaving them writing
+    # a field nobody reads is the point: a detector that runs on the real-time
+    # loop and feeds nothing is a cost with no claim attached to it.
 
     # ── Posture ──
     # THE POSTURE ICON IS ONLY PAINTED WHILE THE SIGHT IS UP, and all three of
@@ -894,10 +1037,7 @@ DETECT_TABLE = [
     {'key': 'tab', 'event': 'press', 'detect': 'fire_mode',
      'regions': ['fire_mode'], 'delay': 300,
      'cond': 'tab_open', 'result': 'fire_mode'},
-
-    {'key': 'tab', 'event': 'press', 'detect': 'highlight',
-     'regions': ['weapon_1', 'weapon_2'], 'delay': 300,
-     'cond': 'tab_open', 'result': 'highlight_pred'},
+    # (the tab/highlight entry that sat here is gone — see the block above)
 ]
 
 # ════════════════════════════════════════════════════════════
@@ -2330,6 +2470,36 @@ COUNTS_PER_PIXEL = 0.5
 # a magazine fired last week went through a different display chain.
 RECOIL_COMP_LAG_MS = 20
 
+# When round k's recoil is VISIBLE ON SCREEN, as a curve time since the click:
+#
+#     t_visible(k) = RECOIL_SHOT_VISIBLE_MS + k * interval_ms
+#
+# = S = W + P + C = 13 + 38, the number measured above off the AMMO COUNTER
+# (n=36, sd 8.1). It is stated in this file's prose and was NOT a constant, so
+# nothing could import it -- and on 2026-08-12 tools/apply_first_shot.py wrote
+# a first-shot correction into the window [0, interval] instead of
+# [S, S + interval]. On the mg3 those two barely overlap (interval 59.97 ms, so
+# 85% of [0, T] is before anything has appeared) and the correction came out
+# 15.3x where the right window asks for 2.5x. The operator felt it as 「压多了」.
+#
+# ⚠ THE CURVES THEMSELVES ARE THE EVIDENCE FOR THIS NUMBER, and they agree
+# without being asked to: every fitted curve on disk is flat until ~51 ms and
+# then rises. Cumulative counts since the click, five bare cells:
+#
+#       t ms     mg3    aug   m762   mp5k  vector
+#         34    0.04   0.05   0.04   0.00    0.04
+#         51    0.92   1.16   4.62   1.19    2.60
+#         73    4.50   5.13  12.76   5.28    5.18
+#
+# ⚠ AND IT IS NOT THE SAME QUESTION AS RECOIL_FIRE_DELAY_MS, which is where
+# this went wrong twice in one hour. That one aligns the FIRMWARE's emission
+# (`t_k = W + k*T`, where P and C cancel because both sides are pushed through
+# the same display chain). This one reads a SCREEN-TIME curve at the instant a
+# bullet left the barrel, and there nothing cancels: the bullet's direction is
+# the game's internal view at W + k*T, and that internal state does not appear
+# in a captured frame until L later.
+RECOIL_SHOT_VISIBLE_MS = 51.0
+
 # Extra lead ON TOP of -L, for the HEAD of the burst only.
 #
 # ⚠ IT EXISTS BECAUSE -L IS DERIVED FROM A STEADY STATE AND THE FIRST SHOT IS
@@ -2501,7 +2671,57 @@ RECOIL_COMP_LAG_MS = 20
 # far out as the -36 that produced that. The verdict run must report, per
 # interleaved arm: the t=51 ms residual AND whole-burst RMS AND the
 # magazine-to-magazine spread. Bracket -60, -80, -100.
-RECOIL_HEAD_LEAD_MS = 70
+# ════════════════════════════════════════════════════════════════════════
+# ⚠ 2026-08-11: THE BRACKET DEMANDED ABOVE WAS FIRED, AND 70 LOST.
+# ════════════════════════════════════════════════════════════════════════
+#
+# The paragraph directly above asks for exactly this run -- "40..70 IS STILL
+# NOT SWEPT AND THE EYE IS NOW THE ONLY CRITERION IN USE ... The verdict run
+# must report, per interleaved arm". aug, 16 magazines, four offsets ROTATED
+# PER MAGAZINE inside ONE run off one fit, n=4 each:
+#
+#     offset   lead   whole-magazine y_obs   head: y_obs at round 2
+#      -20       0            +1.3                   +2.30
+#      -45      25             -6.7                   +0.04
+#      -70      50             -6.6                   -0.85
+#      -90      70            -25.4                   +0.04
+#
+# The magazine asks for ~1000 counts of climb, so -20 leaves 0.1% of it and
+# -90 leaves 2.5% -- and the residual is MONOTONE in the lead, crossing from
+# under- to over-compensation. That is the drift-minimising optimum landing on
+# -L again, which is where mp5k's own sweep put it (-19.3) and what this file
+# already predicted: "with eps = 0 the drift-minimising offset and -L
+# COINCIDE".
+#
+# ⚠ THE TRADE IS REAL AND IT IS PRICED NOW, which is the only thing that
+# changed. This file has recorded since the bullet-bin days that "THE OFFSET
+# TRADES THE FIRST BULLET AGAINST THE LAST", and it does: at lead 0 the head
+# keeps +2.30 counts (~3.5 px at K=1.54) where the other three arms null it.
+# 2.3 counts of head against 25 counts of tail is what settles it, not a
+# principle.
+#
+# ⚠ AND THE HEAD HALF OF THAT TRADE IS THE SOFT HALF. The four arms read the
+# RAW head climb (y_true at round 2) as 4.4 / 5.0 / 5.2 / 9.0 counts -- the
+# same gun, the same run, a factor of two apart. At n=4 the head is noisy in a
+# way the whole-magazine number is not, so the +2.30 is directional and not a
+# measurement of how much is given up.
+#
+# ⚠ WHAT THIS DOES NOT FIX, and nothing in this run touches it: the operator's
+# report that the FIRST BULLET HOLE sits ~2x further from the group than the
+# rest. Eight statistics were tried against it on 2026-08-10 and none survived
+# -- including one built for it (calibration/first_gap.py), which returns NOT
+# SHOWN on these very magazines because the ratio is not monotone in the lead.
+# In this data the first gap is the SMALLEST at the shipped lead. Either the
+# tracker under-reads the head (14 of these 16 magazines also carry
+# ENDED OUT OF ADS), or what the holes show is not in y_obs at all. The one
+# measurement that separates those is bullet holes against a wall with the
+# compensation OFF, and it has never been taken.
+#
+# ⚠ SO THE EYE'S FIVE JUDGEMENTS ABOVE ARE NOT REFUTED, THEY ARE UNADDRESSED.
+# They were made on the head; this run is decided on the whole magazine. Do not
+# read "70 lost" as "the head does not matter" -- read it as "the head's price
+# is 2.3 counts and the tail's is 25".
+RECOIL_HEAD_LEAD_MS = 0
 
 # ⚠ DERIVED, NOT CHOSEN. The derivation is the block above RECOIL_COMP_LAG_MS;
 # the one-line version is that a count emitted at t appears at t + L, so
