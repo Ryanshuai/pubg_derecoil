@@ -241,8 +241,12 @@ Threshold at whatever isolates the opaque part (200 for those buttons → a flat
 window around a fixed anchor.
 
 **text.** Near-white and achromatic where the background is neither;
-`_white_text_mask()` in `weapon_template_detector.py` is the reference
-(`gray>180`, max channel spread <30, `MORPH_OPEN 3x3`). **Look at the PNG**:
+`_white_text_mask()` in `weapon_template_detector.py` is the reference. The
+pair it thresholds on is `GRAY_MIN` / `SPREAD_MAX` beside it and the numbers
+are deliberately **not** repeated here — they had two authors until 2026-08-15
+and this line was the third. What callers do vary is `open_kernel`:
+`MORPH_OPEN 3x3` for plates, `None` for the smaller row labels (measured at
+`row_name_detector.OPEN_KERNEL`). **Look at the PNG**:
 broken strokes = threshold too high, glyphs bridged = too low or the kernel too
 small. Crop tight — padding scores against pixels the template cannot explain.
 `tools/probe_gun_name_ocr.py --extract <png>:<gun>:<key>[:<tag>] --write` does
