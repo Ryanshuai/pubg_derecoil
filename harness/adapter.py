@@ -333,7 +333,7 @@ def open_rig(sight, out_dir, home=True, countdown=6,
     return r, None
 
 
-def measure(rigging, cell, mags):
+def measure(rigging, cell, mags, aim_below_frac=0.0):
     """Measure one cell. -> a record with every RECORD_FIELDS key.
 
     MUST NOT raise for a game-state problem: a weapon that would not spawn is
@@ -395,7 +395,8 @@ def measure(rigging, cell, mags):
     # is here rather than in the night loop because it is a property of one
     # cell's measurement, and a caller that asked for one magazine should not
     # silently get an unverifiable cell.
-    return _collect(rec, rigging, weapon, posture, mags, rec['scope_asset'])
+    return _collect(rec, rigging, weapon, posture, mags, rec['scope_asset'],
+                    aim_below_frac=aim_below_frac)
 
 
 def _reach(rec, rigging, weapon, cfg):
@@ -667,7 +668,8 @@ def _blank(cell):
     return rec
 
 
-def _collect(rec, rigging, weapon, posture, mags, scope_asset=None):
+def _collect(rec, rigging, weapon, posture, mags, scope_asset=None,
+             aim_below_frac=0.0):
     """Fire into the sample store, then fit the whole accumulated pool."""
     from calibration import samples as S
     from calibration.collect_timed import collect_into_store
@@ -680,7 +682,8 @@ def _collect(rec, rigging, weapon, posture, mags, scope_asset=None):
     config = rec['config_read']
     fired, err = collect_into_store(
         rigging.rig, weapon, config, posture, mags, ARM_PLAN,
-        note_prefix=f'night {rec["cell"]} ', scope_asset=scope_asset)
+        note_prefix=f'night {rec["cell"]} ', scope_asset=scope_asset,
+        aim_below_frac=aim_below_frac)
     if err:
         rec['reached_why'] = err
         if not fired:

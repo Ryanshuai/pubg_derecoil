@@ -308,11 +308,76 @@ def _ship(rec, cell):
               f'The samples are on disk; `fit_time_curve --write` ships it.')
 
 
-def run(manifest, rigging, mags, out_dir):
+def aim_below_for(cell, frac):
+    """How far under the midline this cell must start. 0.0 for almost all.
+
+    ⚠ IT IS DECIDED FROM THE CURVE STORE, NOT FROM THE PLAN, because the thing
+    that needs it is a property of the cell's compensation and not of the
+    operator's intent. A gun with NO curve fires uncompensated, the view walks
+    into open sky, and phase correlation there returns 0 CONFIDENTLY -- a
+    magazine that reads as near-zero recoil with every gate green. Aiming low
+    buys the headroom; see ViewDriver.goto_midline.
+
+    ⚠ A SEED COUNTS AS A CURVE, EXCEPT A CROSS-GUN ONE. An ordinary seed is
+    about the right size for the gun it names -- import_kava4's patterns are
+    that gun's own, and estimate_cell's are priced from that gun's own cells --
+    so it plays, the view stays on texture, and the aim can be level.
+
+    A `cross_gun` seed is not: it carries ANOTHER gun's counts across unscaled,
+    because between two different guns there is no ratio to price with and
+    estimate_cell refuses to invent one. m416's 1489.9 under an akm is the
+    safe DIRECTION -- the view drifts up rather than being driven into the
+    ground -- but under-compensating a 7.62 by an unknown margin is exactly
+    the case where the burst still reaches open sky, and there phase
+    correlation returns 0 CONFIDENTLY. So these keep the low aim until the gun
+    has a fit of its own.
+
+    ⚠ IT IS READ FROM THE FILE, NOT INFERRED FROM THE ROSTER. `cross_gun` is
+    written by the thing that made the guess, which is the only place that
+    knows; a rule here like "guns with no samples" would be a second author
+    and would go stale the moment one of them is fired.
+
+    ⚠ AND IT NARROWS BY ITSELF. The first cell of a new gun ships a curve
+    (_ship), so the next cell of that gun reads as covered and comes back 0.0
+    -- the aim returns to level as soon as the gun can hold the view up. That
+    is why this is recomputed per cell rather than fixed for the night.
+
+    ⚠ THE PATH IS ASKED FOR, NOT SPELLED. fit_time_curve.curve_path is the one
+    author of that name -- it needs detector.weapon.sight_tag, which rule 5
+    forbids this package from importing, so a copy here could not be right even
+    in principle. And a wrong curve path does not raise: it answers "no curve",
+    which aims every cell low and says nothing.
+    """
+    if not frac:
+        return 0.0
+    import config as cfg
+    from calibration.fit_time_curve import curve_path
+    parts = cfg.parse_config_key(cell['config'])
+    if parts is None:
+        print(f"   [!] {cell['config']!r} is not a cell name — aiming level, "
+              f"which is wrong if this gun has no curve. "
+              f"config.parse_config_key holds the grammar")
+        return 0.0
+    path = curve_path(cell['weapon'], parts, cell['sight'])
+    try:
+        with open(path, encoding='utf-8') as f:
+            doc = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return float(frac)                  # no curve at all — the main case
+    return float(frac) if doc.get('cross_gun') else 0.0
+
+
+def run(manifest, rigging, mags, out_dir, aim_below=0.0):
     """The loop. -> 'done' | 'halted'"""
     for cell in list(manifest.pending()):
         cid = cell['id']
         print(f"\n── {cid}  ({len(manifest.pending())} left)")
+        below = aim_below_for(cell, aim_below)
+        if below:
+            print(f"   [.] no curve on disk for this cell — aiming {below:.0%} "
+                  f"of the travel low so the burst does not run out of "
+                  f"texture. NOT aimed level; recorded on every magazine as "
+                  f"aim_below_frac")
         rec, ver = None, None
         for attempt in range(1, ATTEMPTS + 1):
             # An exception here used to leave the process. The contract said
@@ -329,7 +394,8 @@ def run(manifest, rigging, mags, out_dir):
             # not kept is the idea that a code fault should cost the night.
             # Four in a row still halts.
             try:
-                rec = adapter.measure(rigging, cell, mags)
+                rec = adapter.measure(rigging, cell, mags,
+                                      aim_below_frac=below)
             except KeyboardInterrupt:
                 raise
             except Exception as e:
@@ -524,6 +590,17 @@ def main():
     # adapter.measure firing more than one compensation arm. --no-ema had
     # nothing left to switch off: every fit is a full refit over the stored
     # samples, so nothing is written back to a curve during a run at all.
+    ap.add_argument('--aim-below', type=float, default=0.0,
+                    help='for cells with NO CURVE ON DISK, start the magazine '
+                         'this fraction of the pitch travel below the midline. '
+                         'Cells that already have a curve (a fit OR a seed) '
+                         'are unaffected and stay level, and a gun narrows to '
+                         'level by itself once its first cell ships. Without '
+                         'it a never-fired gun cannot be measured at all: the '
+                         'view walks into open sky, where phase correlation '
+                         'returns 0 CONFIDENTLY and the magazine reads as '
+                         'near-zero recoil with every gate green. 0.15 is a '
+                         'third more headroom; see night.aim_below_for.')
     ap.add_argument('--countdown', type=int, default=6)
     ap.add_argument('--run-dir', default='',
                     help='resume this run instead of starting one')
@@ -602,7 +679,8 @@ def main():
         return 1
 
     try:
-        how = run(manifest, rigging, args.mags, out_dir)
+        how = run(manifest, rigging, args.mags, out_dir,
+                  aim_below=args.aim_below)
     except KeyboardInterrupt:
         how = 'interrupted'
     finally:

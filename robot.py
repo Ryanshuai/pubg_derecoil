@@ -35,7 +35,7 @@ except (AttributeError, OSError):
 
 import os
 
-from logbook import start_log
+from logbook import start_log, note
 from detector.game_state import GameState
 from detector.weapon_hud_detector import WeaponHudDetector
 from detector.fire_mode_detector import FireModeDetector
@@ -132,8 +132,7 @@ class Robot:
                 meta_fn=lambda: _play_meta(self.state),
                 curve_fn=self.dispatcher.armed_curve)
         else:
-            print('[play] observing OFF (config.PLAY_OBSERVE) — 实战梭不入库',
-                  flush=True)
+            note('[play] observing OFF (config.PLAY_OBSERVE) — 实战梭不入库')
 
         # Start threads
         self.capture.start()
@@ -141,7 +140,7 @@ class Robot:
         self.dispatcher.start()
         if self.play is not None:
             self.play.start()
-        print("init done", flush=True)
+        note('init done')
 
     def _on_play_magazine(self, result, meta):
         """一梭进影子库。**不进主库** —— 理由整段在 calibration/play_store.py。"""
@@ -156,9 +155,10 @@ class Robot:
             print(f'[play] {meta.get("n_frames")} frames with no weapon name '
                   f'— not stored', flush=True)
             return
-        print(f'[play] {meta.get("weapon")} hold={meta.get("hold_s")}s '
-              f'{meta.get("n_frames")} frames -> {os.path.basename(p)}',
-              flush=True)
+        # 一梭成功入库不改变操作员下一步做什么 —— 文件。**上面两条不成功的仍然
+        # 上屏**，理由在那两段自己的注释里。
+        note(f'[play] {meta.get("weapon")} hold={meta.get("hold_s")}s '
+             f'{meta.get("n_frames")} frames -> {os.path.basename(p)}')
 
     # How long the dispatcher gets to notice stop() before we disarm anyway.
     # A tick is 10 ms plus whatever one pass of detectors costs, so this is
@@ -169,10 +169,14 @@ class Robot:
         """Stop the threads, THEN disarm.
 
         This used to be stop() plus save_scales(), and stop() only clears a
-        flag -- so every exit that was not the f13 key (Ctrl-C, an exception,
-        join() returning) left the firmware compensating and the pattern
-        loaded. Dispatcher.shutdown() is where the hardware reset lives; the
-        join() in between is what stops the loop from re-arming it.
+        flag -- so every exit that was not the shutdown key (Ctrl-C, an
+        exception, join() returning) left the firmware compensating and the
+        pattern loaded. Dispatcher.shutdown() is where the hardware reset
+        lives; the join() in between is what stops the loop from re-arming it.
+
+        ⚠ AND SINCE 2026-08-10 THERE IS NO SHUTDOWN KEY, so this is not one of
+        two exits any more -- it is the only one. Ctrl-C lands in the `finally`
+        below and nothing else stops the loop from inside.
 
         It also saves the scales, so this no longer does.
 
@@ -209,8 +213,10 @@ if __name__ == '__main__':
     robot = Robot()
     try:
         # NOT dispatcher.join(). See DaemonLoop.wait -- a no-timeout join on
-        # Windows holds a pending SIGINT until it returns, and this loop only
-        # returns on f13, so Ctrl-C was never delivered at all.
+        # Windows holds a pending SIGINT until it returns, and NOTHING inside
+        # the loop makes it return, so Ctrl-C would never be delivered at all.
+        # ⚠ That was already true when a shutdown key existed (it only ever
+        # returned on that key); with the key gone it is the whole story.
         robot.dispatcher.wait()
     except KeyboardInterrupt:
         print('\n[robot] Ctrl-C', flush=True)
