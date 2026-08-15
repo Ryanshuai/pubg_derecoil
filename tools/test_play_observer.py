@@ -189,6 +189,10 @@ def main():
     print('\n没有枪名就不写盘')
     class _R:
         ts = [0.0, 0.01]; dy = [1.0]; human_dy = [0.0]; out_of_range = [False]
+        # 每帧一个，所以比 dy 多一个 —— 这个替身要撑住的正是这条不变量。
+        frame_ts = [0.0, 0.01]; reticle_y = [693.7, 694.1]; reticle_x = [1718.0, 1718.0]
+        # 黑框是 per pair，所以和 dy 一样长 —— 替身要撑住的正是这条不变量。
+        weapon_dy = [0.4]; weapon_dx = [0.0]
     check('store() 返回 None',
           play_store.store(_R(), {'t0': 0.0, 'weapon': ''}) is None)
 

@@ -223,8 +223,16 @@ def collect():
 
         # phaseCorrelate against the previous frame — the pair is arbitrary,
         # what matters is that the number is reproducible.
-        patches = [np.ascontiguousarray(img[y:y + h, x:x + w, tracker.channel])
-                   for (y, x, h, w) in tracker.regions().values()]
+        # ⚠ names(), NOT regions().values(). regions() also carries the
+        # reticle box, which is a different shape and is never correlated --
+        # feeding it here would push a crop through a Hanning window built for
+        # the patches and change every stored baseline. See RETICLE_NAME in
+        # detector/view_tracker.py.
+        _r = tracker.regions()
+        patches = [np.ascontiguousarray(
+            img[_r[n][0]:_r[n][0] + _r[n][2],
+                _r[n][1]:_r[n][1] + _r[n][3], tracker.channel])
+            for n in tracker.names()]
         if prev_patches is not None:
             def _measure():
                 m = tracker.measure_pair(prev_patches, patches)

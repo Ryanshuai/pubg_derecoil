@@ -26,5 +26,8 @@
     "p90": {
       "crouching": 1.0
     }
+  },
+  "vss": {
+    "crouching": 0.79
   }
 }

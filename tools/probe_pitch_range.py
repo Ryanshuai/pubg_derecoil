@@ -73,6 +73,7 @@ what is in front of the character, but it does care that the character stays
 put: walking during a pass changes the screen and reads as movement.
 """
 import argparse
+import contextlib
 import json
 import os
 import shutil
@@ -534,6 +535,31 @@ class _FakeRig:
         self.last = max(0, min(self.travel, self.pos + want)) - self.pos
         self.pos += self.last
 
+    @contextlib.contextmanager
+    def travel_budget(self, counts):
+        """ViewDriver._send opens one of these around every move it makes.
+
+        ⚠ ITS ABSENCE BROKE THIS ENTIRE SELFTEST AND NOTHING SAID SO. The real
+        PicoMouse has raised a budget for a while; the fake never grew one, so
+        the first `probe()` case died in `_send` with an AttributeError and the
+        remaining eleven -- including the three that pin goto_midline, the call
+        harvest makes before EVERY magazine -- never ran at all. A gate that
+        exits non-zero for a reason unrelated to what it gates reads exactly
+        like a gate that is failing, which is why it stayed broken.
+
+        It accepts and enforces nothing: the budget is a guard on the REAL
+        device against a runaway sweep, and a fake that re-implemented it would
+        be testing its own arithmetic. The clamping that matters here is in
+        move(), where the travel is known. Same for `reset_travel` below --
+        _send calls it after every move so the next raw caller starts from a
+        known origin, which is a statement about the device's accounting and
+        not about where this fake's view is.
+        """
+        yield
+
+    def reset_travel(self):
+        pass
+
     def grab(self):
         return None
 
@@ -636,6 +662,45 @@ def _selftest():
                   f"view at {rig.pos}  {'ok' if ok else 'FAIL'}")
             if not ok:
                 fails.append(('midline', travel, start, half, rig.pos))
+
+        # below_frac is the ONLY way a gun with no curve gets fired, and its
+        # failure is the same silent kind: an ignored parameter aims at the
+        # midline, the burst walks into open sky, and the correlator returns 0
+        # CONFIDENTLY -- a near-zero recoil reading with every gate green. So
+        # check where the view ACTUALLY stopped, and check it against the
+        # midline as well as against the target: `want != midline` is what
+        # separates "it aimed low" from "the argument went nowhere".
+        print('\n  below_frac aims that much of the travel low:')
+        for travel, frac in ((3000, 0.15), (3450, 0.30), (1450, 0.05)):
+            rig = _FakeRig(travel, travel // 2)
+            rig.view._travel = {('red_dot', 'standing'): travel}
+            risen = rig.view.goto_midline(below_frac=frac)
+            want = round(travel * (MIDLINE_FRAC - frac))
+            midline = round(travel * MIDLINE_FRAC)
+            ok = (risen == want and abs(rig.pos - want) <= 1
+                  and want != midline)
+            print(f"    travel {travel:5d} below {frac:.2f} -> rose {risen}, "
+                  f"view at {rig.pos} (want {want}, midline is {midline})  "
+                  f"{'ok' if ok else 'FAIL'}")
+            if not ok:
+                fails.append(('below', travel, frac, risen, rig.pos))
+
+        # ⚠ THE NEGATIVE SIDE, and it is the half that matters: at below_frac
+        # >= MIDLINE_FRAC the aim IS the bottom stop, where a magazine measures
+        # near-zero recoil and reports nothing wrong. Refusing must mean the
+        # view DID NOT MOVE -- a refusal that has already shoved the view into
+        # the clamp leaves the next magazine starting from there.
+        print('\n  and it refuses an aim at or under the stop:')
+        for frac in (0.45, 0.60, -0.10):
+            rig = _FakeRig(3000, 1500)
+            rig.view._travel = {('red_dot', 'standing'): 3000}
+            risen = rig.view.goto_midline(below_frac=frac)
+            ok = risen == 0 and rig.pos == 1500 and rig.moves == 0
+            print(f"    below {frac:+.2f} -> {risen}, view still at "
+                  f"{rig.pos}, {rig.moves} move(s)  "
+                  f"{'ok' if ok else 'FAIL'}")
+            if not ok:
+                fails.append(('below-refuse', frac, risen, rig.pos))
     finally:
         time.sleep, g['shoot'] = real_sleep, real_shoot
         g['time'] = sys.modules['time']

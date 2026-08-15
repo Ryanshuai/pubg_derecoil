@@ -52,7 +52,9 @@ from press.pointer import cursor_pos
 # posture icon, so the frame captured is not the frame that was on screen when
 # the key went down. Checked against config.KEY_ACTION_TABLE on 2026-08-09:
 #
-#     in the table   1 2 5 b c down f f9 g pause right shift tab up win x z
+#     in the table   1 2 5 b c down f f9 g right shift tab up win x z
+#     ⚠ `pause` left this list on 2026-08-10 -- it WAS the shutdown key, and
+#       Ctrl-C is the only way out of robot.py now. Free, still not the default.
 #     clashing       B  C  X  F9        <- F9 is this repo's own
 #     free           F8  V
 #
