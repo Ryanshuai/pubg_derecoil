@@ -1,0 +1,27 @@
+{
+  "measured": "2026-08-12T19:54:09",
+  "method": "calibration/hole_groups.py, 3-round groups on the Jump School concrete wall; only groups the tool called AGREE are kept",
+  "weapons": {
+    "m762": {
+      "groups": [
+        {
+          "group": 1,
+          "comp": "off",
+          "holes": 3,
+          "rounds": 3,
+          "agree": true,
+          "gap1": 33.47,
+          "gap2": 21.92,
+          "ratio": 1.53
+        }
+      ],
+      "wall_ratio_mean": 1.53,
+      "curve_ratio": 0.686,
+      "correction": 2.229,
+      "curve_gap_counts": [
+        270.69,
+        394.32
+      ]
+    }
+  }
+}
