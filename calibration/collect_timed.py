@@ -112,10 +112,15 @@ def measure(tracker, ts, patches, human_fn=None):
         p = tracker.slice_frame(f)
         if p is None:
             continue
-        rec.push_patches(t, p)
+        rec.push_patches(t, p, tracker.slice_reticle(f), tracker.slice_weapon(f))
         kept.append(t)
     res = rec.finish()
-    return kept, res.dy, res.human_dy, res.out_of_range
+    # ⚠ FOUR PER-PAIR ARRAYS AND ONE PER-FRAME ARRAY. `dy`/`human_dy`/`oor`
+    # describe the interval ENDING at kept[i+1]; `reticle_y` is an absolute
+    # position AT kept[i], so it is one longer and it is the only one that
+    # lines up with `t` directly. Storing both rather than letting a reader
+    # reconstruct one from the other is the point -- see MagazineResult.
+    return kept, res.dy, res.human_dy, res.out_of_range, res.reticle_y, res.weapon_dy
 
 
 # The slots that change the RECOIL, and therefore the only ones that belong in
@@ -372,7 +377,75 @@ def ensure_sight(ac, sc, slot, weapon, sight, require_profile=True):
 HIP_SIGHT = 'hipfire'
 
 
-def aim_and_scope(rig, posture):
+# ⚠ HOW FEW COUNTED ROUNDS MAKE A RATE UNMEASURABLE. The estimate is
+# `hold_s / (fired_n - 1)`, so ONE miscounted round is a relative error of
+# `1 / (fired_n - 1)`: at fired_n = 2 the answer is worth 100%, at 11 it is
+# worth 10%. Below this the STORED rate is the better number, and it is not a
+# fallback in any weak sense — it is the rate every magazine before this one
+# already fired at.
+RATE_MIN_ROUNDS = 11
+
+# ⚠ AND A SECOND GUARD, BECAUSE THE FIRST CANNOT SEE A COUNTER THAT LIES HIGH.
+# Both exist for one night: 2026-08-10 lost akm, g36c, k2, tommy and uzi to the
+# same chain, and every step of it printed a reasonable-looking number.
+#
+#   read_ammo() returned `rounds_left == mag_size` — a FULL magazine — after a
+#   burst whose own trajectory moved 1823 counts over 4.60 s. So the gun fired
+#   and the counter did not see it (PUBG auto-reloads when a burst empties the
+#   magazine, and that reload can beat this read).
+#
+#   `max(1, mag_size - rounds_left)` then rounded "nothing was measured" up to
+#   "one round went out", and the whole 4.24 s hold became a single interval:
+#   4242 ms/round, 14 rpm.
+#
+#   That was STORED and used to size the next hold at 42 x 4242 ms = 178 s,
+#   which overflows the uint16 `duration_ms` on the wire. The cell died in
+#   `struct.pack` — four call frames and one layer away from the mistake, with
+#   a message about a number format.
+#
+# ⚠ THE `max(1, ...)` IS THE WHOLE BUG AND IT LOOKED LIKE DEFENSIVE CODE. It
+# converts the one observation that means "this reading is unusable" into the
+# smallest usable-looking value, which is this repository's most expensive
+# shape: a criterion that is self-consistent, arithmetically correct, and
+# blind. It is gone; `fired_n` is now allowed to be 0 or negative so that the
+# refusal below can SEE it.
+#
+# The band is on the ratio to the stored rate rather than on rpm, because the
+# stored rate is per weapon and this file should not carry a second copy of the
+# roster. 2x either way is far outside any real disagreement (the mg3's two
+# cyclic modes, the widest on the roster, are 1.50x apart) and far inside the
+# failure (4242 against 99.8 is 42x).
+RATE_MAX_DRIFT = 2.0
+
+
+def rate_refusal(fired_n, mag_size, hold_s, interval_s):
+    """Why this magazine's counter must NOT set the next hold. -> str | None
+
+    None means the derived rate is worth using. Pure arithmetic: no game, no
+    hardware, no state — which is what lets `pixi run fire` hold both sides of
+    it without firing anything.
+    """
+    if fired_n <= 0:
+        return (f'the counter says {mag_size} of {mag_size} are still in the '
+                f'gun, i.e. it saw NOTHING go out, while the burst held for '
+                f'{hold_s:.2f}s — the two cannot both be true and the counter '
+                f'is the one with a known way to be wrong (an auto-reload '
+                f'beats the read)')
+    if fired_n < RATE_MIN_ROUNDS:
+        return (f'{fired_n} counted round(s) put the rate within '
+                f'{100.0 / max(1, fired_n - 1):.0f}% at best, and a rate needs '
+                f'{RATE_MIN_ROUNDS}')
+    cand = hold_s / (fired_n - 1)
+    drift = cand / interval_s if interval_s else float('inf')
+    if not 1.0 / RATE_MAX_DRIFT <= drift <= RATE_MAX_DRIFT:
+        return (f'it implies {cand * 1000:.1f} ms/round against a stored '
+                f'{interval_s * 1000:.1f}, off by {drift:.1f}x — past the '
+                f'{RATE_MAX_DRIFT:.0f}x band, so it describes the counter '
+                f'failing and not the gun')
+    return None
+
+
+def aim_and_scope(rig, posture, below_frac=0.0):
     """Hip fire -> move the view -> ADS -> take the reference. -> bool
 
     ⚠ THE ORDER IS IRON, and collect_timed had it BACKWARDS until 2026-08-08:
@@ -424,16 +497,28 @@ def aim_and_scope(rig, posture):
 
     Only these three return a verdict. `set_reference` reports nothing that
     means "the view is where I asked".
+
+    ⚠ `below_frac` IS HOW A GUN WITH NO CURVE GETS FIRED AT ALL, and the move
+    belongs HERE -- in hip fire, before the scope comes up -- for the first
+    reason in the iron order above. See ViewDriver.goto_midline for why it is a
+    fraction of the travel and not counts, and samples.Magazine.aim_below_frac
+    for why it lands on the record rather than in a flag nobody stores.
     """
     if not rig.gun.ensure_hip():
         print('  [!] could not get back to hip fire — moving the view from '
               "here would go through the scope's own sensitivity")
         return False
-    risen = rig.view.goto_midline(posture, sight=HIP_SIGHT, set_ref=False)
+    risen = rig.view.goto_midline(posture, sight=HIP_SIGHT, set_ref=False,
+                                  below_frac=below_frac)
     if not risen:
-        print(f'  [!] no stop-to-stop travel stored for {HIP_SIGHT}/{posture} '
-              f'— the view has no anchor and the magazine would start from '
-              f'wherever the last one ended. Measure it once:\n'
+        # ⚠ TWO CAUSES NOW, and goto_midline has already named whichever one
+        # it was: no stored travel, or a below_frac that aims at the stop.
+        # Naming only the first here would send the reader to probe_pitch_range
+        # for a bad flag -- the shape this file's own header calls out (prose
+        # describing a gate that does not exist is why nobody writes it).
+        print(f'  [!] the view has no anchor and the magazine would start '
+              f'from wherever the last one ended — see the line above. If it '
+              f'is the travel that is missing, measure it once:\n'
               f'      pixi run python tools/probe_pitch_range.py '
               f'--sight {HIP_SIGHT} --postures {posture}')
         return False
@@ -445,7 +530,8 @@ def aim_and_scope(rig, posture):
 
 
 def one_magazine(rig, grabber, weapon, mag_size, interval_s, curve,
-                 config, posture, note='', fire_delay_ms=None):
+                 config, posture, note='', fire_delay_ms=None,
+                 aim_below_frac=0.0):
     """Fire one, measure it, and return the record. Does not write.
 
     ⚠ ADS IS BRACKETED, NOT SAMPLED, AND THE DIFFERENCE IS STATED BECAUSE THIS
@@ -494,9 +580,9 @@ def one_magazine(rig, grabber, weapon, mag_size, interval_s, curve,
     except Exception as e:                       # noqa: BLE001
         print(f'      [!] could not read ADS after the burst: {e}')
         ads_end = None
-    t, dy_px, human_dy, oor = measure(rig.tracker, out['t'], out['patches'],
-                                      human_fn=getattr(rig.mouse,
-                                                       'human_totals', None))
+    t, dy_px, human_dy, oor, reticle_y, weapon_dy = measure(
+        rig.tracker, out['t'], out['patches'],
+        human_fn=getattr(rig.mouse, 'human_totals', None))
     span = (max(t) - min(t)) if len(t) > 1 else 0.0
     return S.Magazine(
         weapon=weapon, sight=rig.sight, K=rig.K, config=dict(config or {}),
@@ -505,6 +591,15 @@ def one_magazine(rig, grabber, weapon, mag_size, interval_s, curve,
         dy_px=[float(x) for x in dy_px],
         human_dy=[float(x) for x in human_dy],
         oor=[bool(x) for x in oor],
+        # ⚠ WHERE THE BARREL POINTED, one entry per entry of `t`. nan means
+        # the dot was not readable in that frame, which is a third answer and
+        # must not be filled in: the whole reason this field exists is that
+        # "the camera moved" and "the barrel moved" turned out to be different
+        # quantities, and a guessed dot would put them back together.
+        reticle_y=[float(x) for x in reticle_y],
+        # Same barrel, read off the sight tube's black ring — the one that
+        # survives the muzzle flash. Per PAIR, so it lines up with dy_px.
+        weapon_dy_px=[float(x) for x in weapon_dy],
         magazine_size=int(mag_size or 0),
         hold_s=float(out['hold_s']),
         # ⚠ STAMPED AT FIRING TIME, not looked up when the magazine is read
@@ -520,6 +615,11 @@ def one_magazine(rig, grabber, weapon, mag_size, interval_s, curve,
         fire_delay_ms=fire_delay_ms,
         fps=(len(t) - 1) / span if span > 0 else float('nan'),
         ads_end=ads_end,
+        # ⚠ STAMPED HERE, on the one function every magazine passes through,
+        # for the same reason sight_asset and fire_mode are set on this path:
+        # a field written by the caller gets written on one route and forgotten
+        # on the other. See samples.Magazine.aim_below_frac.
+        aim_below_frac=float(aim_below_frac or 0.0),
         ts=datetime.now().strftime('%m%d_%H%M%S'),
         note=note,
     ), out
@@ -528,7 +628,7 @@ def one_magazine(rig, grabber, weapon, mag_size, interval_s, curve,
 
 def fire_one_into_store(rig, grabber, weapon, config, posture, curve,
                         interval_s, prior=(), note='', label='',
-                        fire_mode=None, scope_asset=None):
+                        fire_mode=None, scope_asset=None, aim_below_frac=0.0):
     """Reload, re-aim, fire one magazine, store it.
 
     -> (Magazine, why|None, interval_s). The third value is the per-round time
@@ -620,11 +720,12 @@ def fire_one_into_store(rig, grabber, weapon, config, posture, curve,
               f'POOLED — read cells at a common t, not by total_counts, and '
               f'note that whether the magazine part itself moves the recoil '
               f'has never been measured.')
-    if not aim_and_scope(rig, posture):
+    if not aim_and_scope(rig, posture, below_frac=aim_below_frac):
         return None, 'could not re-aim', interval_s
     mag, out = one_magazine(rig, grabber, weapon, mag_size, interval_s,
                             curve, config, posture, note=note,
-                            fire_delay_ms=float(rig.mouse.RECOIL_FIRE_DELAY_MS))
+                            fire_delay_ms=float(rig.mouse.RECOIL_FIRE_DELAY_MS),
+                            aim_below_frac=aim_below_frac)
     # The READBACK, and it decides which file samples.append writes to.
     mag.fire_mode = got_mode if got_mode is not None else 'unreadable'
     # ⚠ THE OPTIC THE CALLER READ OFF THE GUN, travelling WITH the magazine.
@@ -643,18 +744,28 @@ def fire_one_into_store(rig, grabber, weapon, config, posture, curve,
     mag.rounds_left = rig.fire.read_ammo()
     interval_next = interval_s
     if mag.rounds_left:
-        fired_n = max(1, mag_size - int(mag.rounds_left))
-        # The k-th round leaves at (k-1)*I, so `fired_n` rounds span
-        # (fired_n - 1) intervals. FIRE_MARGIN_INTERVALS is deliberately not
-        # subtracted: it is slack that was never delivered, and counting it
-        # would make the measured interval depend on the margin.
-        interval_next = mag.hold_s / max(1, fired_n - 1)
-        print(f'      [!] {label} LEFT {mag.rounds_left} OF {mag_size} ROUNDS '
-              f'IN THE GUN. The trigger was held {mag.hold_s:.2f}s for '
-              f'{interval_s * 1000:.1f} ms/round and about {fired_n} went out, '
-              f'so this gun is firing at {interval_next * 1000:.1f} ms/round '
-              f'({60 / interval_next:.0f} rpm). Stored; the next magazine holds '
-              f'for the MEASURED rate, not the stored one.')
+        fired_n = mag_size - int(mag.rounds_left)
+        why = rate_refusal(fired_n, mag_size, mag.hold_s, interval_s)
+        if why:
+            print(f'      [!] {label} LEFT {mag.rounds_left} OF {mag_size} '
+                  f'ROUNDS IN THE GUN, and NO RATE IS TAKEN FROM IT: {why}. '
+                  f'The next magazine holds for the STORED '
+                  f'{interval_s * 1000:.1f} ms/round. The magazine itself is '
+                  f'kept — the counter is what is in doubt, not the burst.')
+        else:
+            # The k-th round leaves at (k-1)*I, so `fired_n` rounds span
+            # (fired_n - 1) intervals. FIRE_MARGIN_INTERVALS is deliberately
+            # not subtracted: it is slack that was never delivered, and
+            # counting it would make the measured interval depend on the
+            # margin.
+            interval_next = mag.hold_s / (fired_n - 1)
+            print(f'      [!] {label} LEFT {mag.rounds_left} OF {mag_size} '
+                  f'ROUNDS IN THE GUN. The trigger was held {mag.hold_s:.2f}s '
+                  f'for {interval_s * 1000:.1f} ms/round and {fired_n} went '
+                  f'out, so this gun is firing at '
+                  f'{interval_next * 1000:.1f} ms/round '
+                  f'({60 / interval_next:.0f} rpm). Stored; the next magazine '
+                  f'holds for the MEASURED rate, not the stored one.')
     # ⚠ STORED AND SAID OUT LOUD, NOT DROPPED. `ads_end` False means the burst
     # ended out of the scope, so K is wrong by ~3x — and MODEL.md's store never
     # deletes, because a magazine dropped at collection time is one the fit's
@@ -677,7 +788,8 @@ def fire_one_into_store(rig, grabber, weapon, config, posture, curve,
 
 
 def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
-                       note_prefix='', scope_asset=None, fire_mode=None):
+                       note_prefix='', scope_asset=None, fire_mode=None,
+                       aim_below_frac=0.0):
     """Fire `mags` magazines into the sample store, alternating curve arms.
 
     -> (fired, error|None). Never raises for a game problem: a burst that threw
@@ -882,7 +994,7 @@ def collect_into_store(rig, weapon, config, posture, mags, arm_plan,
             mag, why, interval_s = fire_one_into_store(
                 rig, grabber, weapon, config, posture, curve,
                 interval_s, prior=prior, fire_mode=want_mode,
-                scope_asset=scope_asset,
+                scope_asset=scope_asset, aim_below_frac=aim_below_frac,
                 note=f'{note_prefix}arm={"comp" if comp else "none"}',
                 label=f'mag {i} ({"comp" if comp else "no-comp"})')
             if mag is None:
@@ -990,6 +1102,20 @@ def main():
                          'minutes apart, so at least one of them is wrong and '
                          'nothing says which (see config.RECOIL_FIRE_DELAY_MS; '
                          'MODEL.md 2.3 forbids calling that "drift").')
+    ap.add_argument('--aim-below', type=float, default=0.0,
+                    help='start the magazine this fraction of the pitch '
+                         'travel BELOW the midline, buying that much more '
+                         'upward headroom. THE ONLY WAY TO FIRE A GUN THAT '
+                         'HAS NO CURVE: uncompensated, the view walks into '
+                         'open sky, where phase correlation has nothing to '
+                         'lock onto and returns 0 CONFIDENTLY — the magazine '
+                         'reads as near-zero recoil with every gate green. '
+                         'A fraction of the travel, not counts, so it is a '
+                         'pitch angle and no ruler is converted (see '
+                         'ViewDriver.goto_midline). RECORDED on every '
+                         'magazine as aim_below_frac; the magazine is then '
+                         'NOT aimed level, and 0.45 or more is the bottom '
+                         'stop and is refused.')
     ap.add_argument('--countdown', type=int, default=6)
     a = ap.parse_args()
 
@@ -1529,6 +1655,7 @@ def main():
                 rig, grabber, a.weapon, config, a.posture,
                 [] if a.no_comp else curve, interval_s, prior=prior,
                 fire_mode=want_mode, scope_asset=scope_asset,
+                aim_below_frac=a.aim_below,
                 note='no-comp' if a.no_comp else f'scale={mag_scale:g}',
                 label=f'mag {i}')
             if mag is None:

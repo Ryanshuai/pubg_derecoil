@@ -110,6 +110,17 @@ def to_magazine(result, meta):
         dy_px=[float(x) for x in result.dy],
         human_dy=[float(x) for x in result.human_dy],
         oor=[bool(x) for x in result.out_of_range],
+        # ⚠ 枪管指向（红点），**每帧一个**，所以它对齐的是 `t` 而不是 `dy_px`。
+        # 只有长度真的相等才存 —— `t` 来自 `meta['frame_ts']`，而这个数组来自
+        # `result.frame_ts`，是两个来源。对不上就留空，因为一个错位的绝对位置
+        # 印出来完全正常：它会说枪在别的时刻指着别处，而没有任何东西会报错。
+        # 这正是上面那条 `res.ts` vs `frame_ts` 注释记的同一个失效，只是这次
+        # 错位的是位置而不是位移。
+        reticle_y=([float(x) for x in result.reticle_y]
+                   if len(result.reticle_y) == len(t) else []),
+        # 黑框那一路是 per PAIR，所以对齐的是 dy_px（比 t 少一个），不是 t。
+        weapon_dy_px=([float(x) for x in result.weapon_dy]
+                      if len(result.weapon_dy) == len(result.dy) else []),
         magazine_size=int(meta.get('magazine_size') or 0),
         hold_s=float(meta.get('hold_s') or 0.0),
         # ⚠ 漏掉这一行，一把枪的两个自动档就落进同一个文件。mg3 的两个自动档

@@ -1002,6 +1002,31 @@ def _shape_by_session(cells, arms, min_mags):
               f'= {eff*lev.mean():.1f} counts on a {lev.mean():.0f}-count curve')
 
 
+def curve_path(weapon, config, sight, fire_mode=None):
+    """Where the runtime reads this cell's curve from. `config` is a MAPPING.
+
+    ⚠ ONE AUTHOR FOR THE NAME, and that is the whole point of it being a
+    function. _write_curve spelled this inline, so anyone who wanted to ask
+    "does this cell have a curve yet" had to spell it a SECOND time -- and a
+    second speller drifts silently, because a wrong path answers "no curve"
+    rather than raising. The sight has been in this name only since 2026-08-09
+    (before that every optic for one cell wrote to the same file and two of
+    three curves were lost); a copy made before that date would still be
+    answering, and answering wrongly.
+
+    ⚠ IT IMPORTS detector, WHICH IS WHY IT LIVES IN calibration/ AND NOT IN
+    harness/. `pixi run layering` rule 5 forbids harness from importing
+    detector -- so harness/night.py asks this, rather than deriving a name it
+    is structurally unable to derive correctly.
+    """
+    from detector.weapon import sight_tag as _sight_tag
+    from calibration.samples import config_key as _ck
+    return os.path.join(
+        cfg.CURVES_DIR,
+        f'{weapon}__{_ck(config)}{S.fire_tag(weapon, fire_mode)}'
+        f'{_sight_tag(weapon, sight)}.json')
+
+
 def _write_curve(r, weapon, config, sight, posture, n_total, fire_mode=None):
     """Put a fitted curve where the runtime reads from. Prints what it replaced.
 
@@ -1091,11 +1116,7 @@ def _write_curve(r, weapon, config, sight, posture, n_total, fire_mode=None):
     # load_final_curves builds, and leaving it out of the path meant every
     # optic for one cell wrote to the same file -- see detector.weapon.
     # sight_tag for the run that proved it by losing two of three curves.
-    from detector.weapon import sight_tag as _sight_tag
-    path = os.path.join(
-        cfg.CURVES_DIR,
-        f'{weapon}__{_ck(cfg_dict)}{S.fire_tag(weapon, fire_mode)}'
-        f'{_sight_tag(weapon, sight)}.json')
+    path = curve_path(weapon, cfg_dict, sight, fire_mode)
     was = None
     if os.path.exists(path):
         with open(path, encoding='utf-8') as f:

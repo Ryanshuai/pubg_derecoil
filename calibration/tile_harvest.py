@@ -40,7 +40,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import cv2
 import numpy as np
 
+from config import HUD_REGIONS
 from detector.attachment_catalog import ATTACHMENTS
+from detector.geometry import cut
+from detector.tab_layout import SLOT_NAMES
+
+# ⚠ THE LOOP SPEAKS ASSET NAMES, THIS FILE SPEAKS CATALOGUE KEYS. `read_slots`
+# returns `Muzzle_Suppressor_Large_C`; ATTACHMENTS is keyed `supp_sr`. The
+# first version tested `key not in ATTACHMENTS` and therefore skipped EVERY
+# reading -- silently, returning 0 with no error, which is indistinguishable
+# from "nothing worth keeping was on screen". Two different vocabularies for
+# the same thing is this repo's second law in miniature.
+KEY_OF_ASSET = {v['asset']: k for k, v in ATTACHMENTS.items() if v.get('asset')}
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, 'calibration', 'artifacts', 'attachments', 'harvest')
@@ -123,17 +134,33 @@ class TileHarvester:
         self.count = held()
         self._last = {}                 # (key, rack) -> last crop kept
 
-    def offer(self, gun, detected, crops):
-        """One rack's reading. -> how many crops were kept
+    def on_read(self, frame, got):
+        """TabWatch's sink: one whole reading. -> how many crops were kept
 
-        `detected` is {slot: name} as the detector read it, `crops` the frame
-        crops keyed `att_{gun}_{slot}` -- exactly what the dispatcher already
-        holds when it calls `set_attachments`.
+        ⚠ THIS HANGS OFF `TabWatch`, NOT off the dispatcher's DETECT_TABLE.
+        The first version hooked `result_field == 'attachments'` in
+        control/match.py, which LOOKS like the place and is dead: `config.py`
+        has no such result any more, TabWatch took the Tab reading over on
+        2026-08-09, and nothing has walked that branch since. It collected
+        zero crops across a full play session and reported no error, because
+        nothing called it. A hook on a path nothing takes is indistinguishable
+        from a hook that works and finds nothing.
         """
         kept = 0
+        for gun_id, detected in (got.get('attachments') or {}).items():
+            kept += self.offer(gun_id, detected,
+                               {f'att_{gun_id}_{s}': cut(frame, HUD_REGIONS[f'att_{gun_id}_{s}'])
+                                for s in SLOT_NAMES})
+        return kept
+
+    def offer(self, gun, detected, crops):
+        """One rack's reading. -> how many crops were kept"""
+        kept = 0
         rack = str(gun)
-        for slot, key in (detected or {}).items():
-            if not key or key not in ATTACHMENTS:
+        for slot, name in (detected or {}).items():
+            # `?` is the detector's AMBIGUOUS marker; '' is an empty slot.
+            key = KEY_OF_ASSET.get(name) if name else None
+            if key is None:
                 continue
             want = self.want.get((key, rack))
             if not want or self.count[(key, rack)] >= want:
@@ -147,7 +174,7 @@ class TileHarvester:
                     got, mse, margin = self.det.read_tile(crop, slot, None)
                 except Exception:
                     got, mse, margin = key, None, None
-                if got != key or (mse is not None and mse > KEEP_MSE_MAX)                         or (margin is not None and margin < KEEP_MARGIN_MIN):
+                if KEY_OF_ASSET.get(got) != key                         or (mse is not None and mse > KEEP_MSE_MAX)                         or (margin is not None and margin < KEEP_MARGIN_MIN):
                     continue
             prev = self._last.get((key, rack))
             if prev is not None and prev.shape == crop.shape:

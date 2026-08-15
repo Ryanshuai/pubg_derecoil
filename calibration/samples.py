@@ -201,6 +201,43 @@ class Magazine:
     # Frame-to-frame view shift in screen pixels, len(t) - 1 of them, aligned so
     # dy_px[i] is the shift between frame i and frame i+1.
     dy_px: list = field(default_factory=list)
+    # ── WHERE THE BARREL POINTED ──
+    # The red dot's screen y, ONE PER ENTRY OF `t` -- an absolute position, not
+    # an interval, so this is the one array here that is len(t) and not
+    # len(t) - 1. `nan` means no readable dot in that frame.
+    #
+    # ⚠ IT IS HERE BECAUSE dy_px IS NOT THE QUANTITY THE COMPENSATION OWES.
+    # dy_px measures the CAMERA (world content sliding past seven patches);
+    # the bullets leave along the BARREL, and on 2026-08-13 those turned out to
+    # be different by ~3.6x in the opening rounds. Measured off
+    # calibration/artifacts/holes/manual, mg3, comp OFF, in one coordinate
+    # system: round 1's hole lands on the pre-fire camera axis (0.93 px, a
+    # check that had to pass and did), and by round 2 the barrel has moved
+    # 43.81 px where the fitted curve gives 12.0.
+    #
+    # ⚠ EMPTY ON EVERY MAGAZINE STORED BEFORE THAT DATE, and it cannot be
+    # backfilled: the reticle sits at x~1718, inside RECOIL_KEEPOUT, so those
+    # pixels were never captured. Read it as "not measured", never as a still
+    # barrel -- that substitution is precisely the one that hid this for
+    # months (see `ads_frac`, which is nan for the same class of reason).
+    reticle_y: list = field(default_factory=list)
+    # The same barrel, measured by the sight tube's black ring instead of the
+    # dot: len(t) - 1 entries, aligned to dy_px, because this one is a
+    # CORRELATION between two frames and not a position in one.
+    #
+    # ⚠ IT EXISTS BECAUSE THE DOT DOES NOT SURVIVE FIRING. Two mg3 magazines
+    # (2026-08-13): the dot is rock solid at rest, sd 0.05 px over 17 pre-click
+    # frames, and during the burst it jumps 113 and 194 px between consecutive
+    # frames in runs up to 243 frames long -- continuous muzzle fire is
+    # brighter, redder and bigger than the dot. The ring is found by DARKNESS,
+    # which fire cannot counterfeit, and the two agree to 0.72 px on settled
+    # frames where the dot can still be trusted (see RECOIL_WEAPON_BOX).
+    #
+    # ⚠ NOT A REPLACEMENT -- BOTH ARE STORED. The dot is absolute and the ring
+    # is relative, so the dot is what anchors a magazine's pre-click baseline
+    # and the ring is what survives the part that matters. One would be a
+    # single source for a quantity this repository has already been wrong about.
+    weapon_dy_px: list = field(default_factory=list)
     # What the HAND contributed over the same pair, in counts, off the Pico's
     # passthrough. Screen motion is hand + compensation + recoil.
     #
@@ -332,6 +369,30 @@ class Magazine:
     # '' means "not recorded", which is every magazine before 2026-08-09 and is
     # why calibrate_scope.audit() reports the count rather than dropping them.
     sight_asset: str = ''
+    # ⚠ WHERE THIS MAGAZINE WAS AIMED, as a fraction of the pitch travel BELOW
+    # the midline. 0.0 -- every magazine before this and every magazine of a
+    # gun that has a curve -- means aimed at the midline, which is level for
+    # standing and crouching.
+    #
+    # It exists because a gun with NO curve cannot be fired from the midline at
+    # all: the view walks into open sky, the correlator returns 0 confidently,
+    # and the magazine reads as near-zero recoil with every gate green. Aiming
+    # low is the only way in, and it is what the VSS's first magazines were
+    # fired from -- unrecorded, which is why nothing can now say which of the
+    # 35 of them started where.
+    #
+    # ⚠ RECORDED, NOT REFUSED, and recorded for the reason the root CLAUDE.md
+    # gives for `sight` and `ads_frac`: a quantity that exists in ZERO places
+    # cannot be compared against anything, so the FIRST step is always to store
+    # it, never to add a detector. Once it is here, "did this cell change its
+    # aim halfway through" degrades into an ordinary two-source check.
+    #
+    # It is deliberately NOT in RECOIL_SLOTS and NOT in config_key: aiming low
+    # is a way of REACHING a cell, not a different cell. y_true(t) is a
+    # property of the gun, so a magazine fired low and one fired level estimate
+    # the same curve -- and if they do not, that is a finding about the game,
+    # which needs both kinds pooled in one file to be visible at all.
+    aim_below_frac: float = 0.0
     # ⚠ THE OTHER HALF OF RECOIL_FIRE_DELAY_MS, and the two must agree or the
     # loop diverges -- see y_true_counts for the L*omega argument.
     #
@@ -511,6 +572,12 @@ def append(mag: Magazine, root=None):
     d['dy_px'] = [round(float(v), 3) for v in mag.dy_px]
     d['human_dy'] = [round(float(v), 3) for v in mag.human_dy]
     d['oor'] = [bool(v) for v in mag.oor]
+    # ⚠ json.dumps writes a bare NaN, which is not valid JSON but IS what
+    # Python's own loader reads back — the same path `dy_px` has always taken.
+    # Do not "fix" it to null without changing both ends: a null here would
+    # arrive as None and the first float() on it would raise inside a fit.
+    d['reticle_y'] = [round(float(v), 2) for v in mag.reticle_y]
+    d['weapon_dy_px'] = [round(float(v), 3) for v in mag.weapon_dy_px]
     with open(p, 'a', encoding='utf-8') as f:
         f.write(json.dumps(d, ensure_ascii=False) + '\n')
     return p
