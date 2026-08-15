@@ -163,44 +163,22 @@ def _literal_copies(files=None):
 # Keyed 'path:function' -- the same key the report prints, so pasting a line
 # from a red run into the right table is the whole workflow.
 
-def _switch_to_is_an_override():
-    """The reason, as a predicate: a base declares it abstract with the same
-    parameter, and somebody implements it.
-
-    The claim being checked is not "timeout_s is unread" — the scanner already
-    knows that. It is "this signature is not free to change", and what makes
-    that true is an @abstractmethod above it. Delete the ABC and the parameter
-    becomes ordinary dead weight that should go.
-    """
-    src = (pathlib.Path(__file__).resolve().parent.parent
-           / 'calibration/weapon_switcher.py')
-    if not src.exists():
-        return False
-    try:
-        tree = ast.parse(src.read_text(encoding='utf-8'))
-    except (SyntaxError, UnicodeDecodeError):
-        return False
-    defs = [n for n in ast.walk(tree)
-            if isinstance(n, ast.FunctionDef) and n.name == 'switch_to']
-    abstract = [n for n in defs if any(
-        getattr(d, 'id', getattr(d, 'attr', '')) == 'abstractmethod'
-        for d in n.decorator_list)]
-    if len(abstract) != 1 or len(defs) < 2:
-        return False
-    return all('timeout_s' in [a.arg for a in n.args.args] for n in defs)
-
-
+# ⚠ EXEMPT IS EMPTY TOO, AND ITS ONE ENTRY DIED THE WAY ITS OWN PREDICATE SAID
+# IT WOULD. It exempted the unread `timeout_s` on an abstract `switch_to`, and
+# its reason was written as a predicate ending in "delete the ABC and the
+# parameter becomes ordinary dead weight that should go". The module it
+# described was deleted on 2026-08-15 -- its only edge was an import nobody
+# called -- so the entry went with it rather than sitting here matching
+# nothing.
+#
+# ⚠ AND THAT IS THE ASYMMETRY WORTH KEEPING: `audit` below reports a DEBT key
+# that no longer matches as an error, and an EXEMPT key that no longer matches
+# as NOTHING. A stale EXEMPT is a permanent silent amnesty for a path that can
+# come back under the same name -- so an EXEMPT entry has to be struck BY HAND
+# by whoever deletes the code it describes, and nothing here will remind them.
+# What did remind me was `pixi run names`, one layer over: it refused the first
+# version of this very comment for naming the file I had just deleted.
 EXEMPT = {
-    'calibration/weapon_switcher.py:switch_to': Reason(
-        'AN OVERRIDE MUST MATCH ITS BASE. WeaponSwitcher.switch_to declares '
-        '(weapon, timeout_s) and ManualSwitcher genuinely waits that long; '
-        'SpawnerSwitcher cannot, because the step it wraps is not a wait — it '
-        'opens a panel, clicks a known layout and reads the rack back, each '
-        'with its own bounded retries. Dropping the parameter would break '
-        'every caller that passes it positionally; forwarding it somewhere '
-        'would be worse, because it would suggest waiting longer helps here.',
-        CODE, _switch_to_is_an_override),
-
     # ⚠ A parameter named `_` or starting with `_` never reaches this table:
     # the scanner skips it, because that name IS the author saying "required
     # by something else, deliberately unread". control/focus.py's EnumWindows
