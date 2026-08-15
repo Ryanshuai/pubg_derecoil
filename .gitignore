@@ -109,3 +109,6 @@ docs/kava4/*.lua
 # were lost while `git status` stayed clean.
 !docs/p90_has_no_slots.png
 !docs/p90_no_slots_0802_scan.png
+
+# The agent-refactor tool's working directory (scan output, run state).
+.agent-refactor/
