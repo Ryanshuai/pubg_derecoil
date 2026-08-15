@@ -92,6 +92,9 @@ layering = "python tools/check_layering.py"
 surface = "python tools/surface.py"
 panel-state = "python tools/test_panel_state.py"
 tab-watch = "python tools/test_tab_watch.py"
+# 一个白字判据两个入口（枪名板 / 库存行），阈值只有一个作者，两者只许在
+# MORPH_OPEN 上不同——而那个不同是实测的（3x3 把行标签的墨吃光）。离线。
+text-mask = "python tools/test_text_mask.py"
 tab-open = "python tools/test_tab_open.py"
 name-plates = "python tools/test_name_plates.py"
 highlight = "python tools/eval_highlight.py"
@@ -154,7 +157,28 @@ pointers = "python tools/check_pointers.py"
 # `D`, so it read that one's `0`. 3/3 mutations bite (perturb MODEL.md, perturb
 # config, delete a paired row).
 model-consts = "python tools/check_model_constants.py"
+# How many counts the tracker BOOKS AS ZERO. Two independent routes end as a
+# zero rather than a hole -- all patches rejected (view_tracker) and `oor`
+# (samples) -- and `nancumsum` does not propagate, so an unmeasured interval
+# silently contributes no displacement. It reads 0 dead pairs in the head
+# window over 1.18M pairs today, which is a property of THE DATA and not of
+# the code: run it after touching RECOIL_MAD_*, RECOIL_GATE_MIN, patch_h or
+# the oor threshold, and watch the 0..140 ms row.
+dropped-pairs = "python tools/audit_dropped_pairs.py"
+# The wall and the correlator on the SAME two images. It is the only place
+# the camera is checked against something outside its own chain -- everything
+# else in this repository judges the camera with the camera.
+holes-vs-corr = "python tools/probe_holes_vs_correlator.py"
+# Does the BARREL leave the PICTURE, and when. Reads stored magazines; the
+# prediction is printed next to the result because it was written first.
+reticle-trace = "python tools/probe_reticle_trace.py"
 fit-time = "python calibration/fit_time_curve.py --selftest"
+# The gate is the SELFTEST, not the analysis: `--weapon aug` needs a
+# fire-delay sweep in the store and exits 1 until one exists, which is the
+# right answer for the analysis and the wrong one for a task that runs on
+# every change. `pixi run python calibration/first_gap.py --weapon aug` is
+# the analysis; the header says how to collect for it.
+first-gap = "python calibration/first_gap.py --selftest"
 # What is measured, what is guessed, what has never been fired. A REPORT, not
 # a gate — it exits 0 by construction. It earns a task because its answer is a
 # function of the sample store and moves with every magazine, so unlike the
