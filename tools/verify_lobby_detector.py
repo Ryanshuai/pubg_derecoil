@@ -15,12 +15,14 @@ import cv2
 
 from detector.geometry import cut
 
-from config import (LOBBY_BAR_ROI, LOBBY_ERROR_TEXT_ROI,
+from config import (LOBBY_POPUP_CLOSE_ROI,
+                    LOBBY_BAR_ROI, LOBBY_ERROR_TEXT_ROI,
                     LOBBY_MENU_TITLE_ROI, LOBBY_MENU_TITLE_ROI_IN_LOBBY,
                     LOBBY_RECONNECT_TEXT_ROI,
                     LOBBY_LEAVE_CONFIRM_TEXT_ROI,
                     LOBBY_LEAVE_TEXT_ROI, LOBBY_MENU_SEARCH, LOBBY_PING_ROI)
-from detector.lobby_detector import (LobbyState, _search_roi, bar_max,
+from detector.lobby_detector import (popup_open, popup_close_score,
+                                     LobbyState, _search_roi, bar_max,
                                      classify_frame, error_dialog_score,
                                      error_dialog_visible, is_lobby_system_menu,
                                      is_results_screen, is_system_menu,
@@ -114,7 +116,18 @@ def confusion():
              ('menu_title', is_system_menu, menu_title_score,
               LOBBY_MENU_TITLE_ROI, 'system_menu.png'),
              ('menu_title_lobby', is_lobby_system_menu, menu_title_score,
-              LOBBY_MENU_TITLE_ROI_IN_LOBBY, 'system_menu_lobby.png')]
+              LOBBY_MENU_TITLE_ROI_IN_LOBBY, 'system_menu_lobby.png'),
+             # ⚠ THE ONLY GATE HERE THAT FIRES ON MORE THAN ONE SCREEN, and
+             # that is a fact about the corpus rather than about the gate:
+             # BOTH stored lobby captures already have the daily-mission popup
+             # in them. Nobody noticed until the popup started eating the PLAY
+             # click on 2026-08-10 -- it had been sitting in the reference
+             # frames the whole time, which is why `expect_on` had to stop
+             # being one filename. A row that could only ever name one
+             # positive would have forced this one to be declared a false
+             # alarm on a screen where it is true.
+             ('event_popup', popup_open, popup_close_score,
+              LOBBY_POPUP_CLOSE_ROI, ('lobby.png', 'play_normal.png'))]
     bad = 0
     print(f'\n{"gate":<16}{"screen":<22}{"score":>7}  fires')
     for gate, visible, score, roi, expect_on in gates:
@@ -125,7 +138,8 @@ def confusion():
                 continue
             s = score(frame[y:y + h, x:x + w])
             fires = visible(frame)
-            want = (name == expect_on)
+            want = (name in expect_on if isinstance(expect_on, tuple)
+                    else name == expect_on)
             ok = fires == want
             bad += not ok
             print(f'{gate:<18}{name:<22}{s:>7.3f}  '

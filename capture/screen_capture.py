@@ -21,6 +21,7 @@ that precision almost linearly; lower it if the game needs the cores back.
 """
 import time
 from daemon_loop import DaemonLoop
+from logbook import note
 from collections import deque
 
 from config import FRAME_REGIONS, HUD_REGIONS
@@ -72,8 +73,10 @@ class ScreenCapture(DaemonLoop):
         grabber, paced = make_grabber(self._regions, self._prefer_dxgi,
                                       self._dxgi_fps)
         self.backend = type(grabber).__name__
-        print(f'[capture] backend={self.backend} '
-              f'buffer={self._buffer.maxlen} frames', flush=True)
+        # 文件。**下面那两条不是** —— 后端掉了、帧率塌了，都是「本该发生的事
+        # 没发生」，而这一条只是「它按预期起来了」。
+        note(f'[capture] backend={self.backend} '
+             f'buffer={self._buffer.maxlen} frames')
 
         frames = 0
         grab_total = 0.0
@@ -132,9 +135,9 @@ class ScreenCapture(DaemonLoop):
                     span = len(self._buffer) / max(self.fps, 1e-6)
                     if not reported:
                         reported = self.fps
-                        print(f'[capture] {self.fps:.0f} fps, '
-                              f'{self.grab_ms:.1f} ms/frame, buffer spans '
-                              f'{span:.2f}s', flush=True)
+                        note(f'[capture] {self.fps:.0f} fps, '
+                             f'{self.grab_ms:.1f} ms/frame, buffer spans '
+                             f'{span:.2f}s')
                     elif self.fps < reported * 0.6 and ts - last_warn > 10.0:
                         last_warn = ts
                         print(f'[capture] rate dropped to {self.fps:.0f} fps '

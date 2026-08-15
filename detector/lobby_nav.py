@@ -54,7 +54,24 @@ from detector.geometry import segments
 # Left to right, as the bars read.
 TOP_TABS = ('PLAY', 'PASS', 'CAREER', 'CUSTOMIZE', 'HIDEOUT', 'WORKSHOP',
             'STORE')
-SUB_TABS = ('NORMAL', 'RANKED', 'ARCADE', 'TRAINING', 'CUSTOM')
+# ⚠ THE PATCH OF 2026-08-11 REWROTE THIS BAR: `PLAYGROUNDS` appeared between
+# ARCADE and TRAINING, and `CUSTOM` is no longer drawn. Read off the screen the
+# same day, five runs, glyphs confirmed by eye:
+#
+#     NORMAL  RANKED  ARCADE  PLAYGROUNDS  TRAINING
+#
+# Until the template existed, `read_bar` refused the whole bar -- it requires
+# as many named runs as there are names -- so `ensure_mode` → `press_play` →
+# `ensure_in_match` all returned "mode bar unreadable (margin 0.0x)" with
+# nothing over the bar. Same failure the Chinese client produced in the
+# docstring above, from the other direction: there the bar grew a run nobody
+# expected, here it grew a NAME nobody had a picture of.
+#
+# ⚠ AND IT CAME WITHIN 0.002 OF BEING NAMED SOMETHING ELSE. The unnamed run
+# scored 0.548 against `sub_ARCADE` and the gate is 0.55. Refusing was correct
+# and it was nearly not what happened -- keep the `--verify` "highest nameless
+# run" number in view when touching LOBBY_TAB_TMPL_MIN.
+SUB_TABS = ('NORMAL', 'RANKED', 'ARCADE', 'PLAYGROUNDS', 'TRAINING')
 
 # The only sub tab anything here is allowed to start. See the module docstring.
 SAFE_MODE = 'TRAINING'

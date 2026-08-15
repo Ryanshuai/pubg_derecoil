@@ -25,7 +25,19 @@ import numpy as np
 
 from config import (SCREEN_H, RECOIL_BAND_Y, RECOIL_PATCH, RECOIL_PATCH_H,
                     RECOIL_PATCH_XS, RECOIL_GATE_MIN, RECOIL_MAD_FLOOR,
-                    RECOIL_MAD_K, RECOIL_CHANNEL)
+                    RECOIL_MAD_K, RECOIL_CHANNEL, RECOIL_RETICLE_BOX,
+                    RECOIL_RETICLE_AREA, RECOIL_RETICLE_MIN_R,
+                    RECOIL_RETICLE_MARGIN, RECOIL_WEAPON_BOX,
+                    RECOIL_WEAPON_DARK)
+
+# ⚠ THE GRABBER'S REGIONS AND THE CORRELATOR'S PATCHES ARE NO LONGER THE SAME
+# SET, and everything that slices frames has to say which one it means.
+# `regions()` is what to CAPTURE (patches + the reticle box); `names()` is what
+# to CORRELATE (patches only). Feeding regions() to measure_pair puts a
+# differently-shaped crop through a Hanning window built for the patches -- see
+# tools/regression_check.py, which did exactly that until this split.
+RETICLE_NAME = 'reticle'
+WEAPON_NAME = 'weapon'
 
 
 @dataclass
@@ -65,6 +77,23 @@ class MagazineResult:
     # without this term any nudge during a burst is booked as recoil.
     human_dy: list = field(default_factory=list)
     human_dx: list = field(default_factory=list)
+    # ⚠ THE ONLY PER-FRAME ARRAYS HERE. Everything above describes an INTERVAL
+    # and has n-1 entries aligned to ts (which holds the LATER frame of each
+    # pair). The reticle is an absolute position, so it has n entries and is
+    # aligned to `frame_ts`, not to `ts`. Zipping it against dy puts every
+    # reading one frame late -- the same class of error calibration/samples.py
+    # records for the cumsum, and the reason both time bases are stored rather
+    # than one being reconstructed by a reader.
+    frame_ts: list = field(default_factory=list)
+    reticle_y: list = field(default_factory=list)
+    reticle_x: list = field(default_factory=list)
+    # ⚠ BACK ON THE PER-PAIR TIME BASE, aligned to `ts` exactly like `dy`. The
+    # weapon is CORRELATED (a shift between two frames), where the reticle is
+    # LOCATED (a position in one frame). Same object, two time bases, and the
+    # only defence against mixing them is that both are stored with the base
+    # they were produced on.
+    weapon_dy: list = field(default_factory=list)
+    weapon_dx: list = field(default_factory=list)
 
     def cumulative_dy(self):
         return np.cumsum(np.nan_to_num(self.dy))
@@ -77,7 +106,8 @@ class ViewTracker:
     """Slices centre-band patches and turns frame pairs into a view shift."""
 
     def __init__(self, patch_xs=None, band_y=None, patch=None,
-                 gate_min=None, channel=None, patch_h=None):
+                 gate_min=None, channel=None, patch_h=None,
+                 reticle_box=None):
         self.xs = tuple(patch_xs if patch_xs is not None else RECOIL_PATCH_XS)
         self.patch = patch if patch is not None else RECOIL_PATCH        # width
         self.patch_h = patch_h if patch_h is not None else RECOIL_PATCH_H
@@ -88,6 +118,17 @@ class ViewTracker:
                        (SCREEN_H // 2 - self.patch_h // 2))
         self.gate_min = gate_min if gate_min is not None else RECOIL_GATE_MIN
         self.channel = channel if channel is not None else RECOIL_CHANNEL
+        # Kept as the Rect it came from: config's import-time check owns the
+        # one rectangle type, and re-wrapping it in a bare tuple here would be
+        # the second storage form that check exists to prevent.
+        self.reticle_box = (reticle_box if reticle_box is not None
+                            else RECOIL_RETICLE_BOX)
+        self.weapon_box = RECOIL_WEAPON_BOX
+        # Its own Hanning window: the weapon box is not the patch shape, and
+        # reusing the patches' window is precisely the mistake regions() vs
+        # names() exists to prevent.
+        self._win_weapon = cv2.createHanningWindow(
+            (self.weapon_box.w, self.weapon_box.h), cv2.CV_32F)
         # Pre-built so it is never rebuilt inside the measurement loop.
         self._win = cv2.createHanningWindow((self.patch, self.patch_h),
                                             cv2.CV_32F)
@@ -98,12 +139,111 @@ class ViewTracker:
     # ── capture-side ──
 
     def regions(self):
-        """{name: (y, x, h, w)} for make_grabber / HUD_REGIONS."""
-        return {f'recoil_{i}': (self.band_y, x, self.patch_h, self.patch)
-                for i, x in enumerate(self.xs)}
+        """{name: (y, x, h, w)} to CAPTURE — the patches plus the reticle box.
+
+        ⚠ NOT the same set as names(). The reticle is captured and never
+        correlated; see RETICLE_NAME at the top of this file for what happens
+        to a caller that confuses the two.
+        """
+        out = {f'recoil_{i}': (self.band_y, x, self.patch_h, self.patch)
+               for i, x in enumerate(self.xs)}
+        out[RETICLE_NAME] = self.reticle_box
+        out[WEAPON_NAME] = self.weapon_box
+        return out
 
     def names(self):
+        """The patches to CORRELATE. Excludes the reticle, deliberately."""
         return [f'recoil_{i}' for i in range(len(self.xs))]
+
+    def extras_free(self):
+        """Do the reticle and weapon boxes fit inside the patches' own bbox?
+
+        ⚠ THE CLAIM THAT THEY COST NOTHING IS A CLAIM ABOUT GEOMETRY, and a
+        sight profile with its own patch_xs / patch_h can break it silently --
+        DXGI has ONE bounding box, so a box outside it stretches the copy for
+        every frame of every magazine. Answered, not assumed.
+        """
+        y0, x0 = self.band_y, min(self.xs)
+        y1, x1 = y0 + self.patch_h, max(self.xs) + self.patch
+        out = {}
+        for nm, box in ((RETICLE_NAME, self.reticle_box),
+                        (WEAPON_NAME, self.weapon_box)):
+            ry, rx, rh, rw = box
+            out[nm] = (y0 <= ry and ry + rh <= y1
+                       and x0 <= rx and rx + rw <= x1)
+        return out
+
+    def slice_reticle(self, frame):
+        """The reticle crop as BGR. None when the frame lacks it.
+
+        ⚠ ALL THREE CHANNELS, unlike slice_frame. The dot is found by colour,
+        so the green-only copy the correlator uses cannot answer this.
+        """
+        crop = frame.get(RETICLE_NAME)
+        return None if crop is None else np.ascontiguousarray(crop)
+
+    def slice_weapon(self, frame):
+        """The weapon box as ONE channel, uint8. None when absent.
+
+        Single channel on purpose and it is not a compromise: `green<50` and
+        `min(BGR)<50` agree to 0.01 px on the validation groups, and this way
+        the slice costs exactly what a correlation patch costs.
+        """
+        crop = frame.get(WEAPON_NAME)
+        if crop is None:
+            return None
+        return np.ascontiguousarray(crop[:, :, self.channel])
+
+    def measure_weapon_pair(self, prev, cur):
+        """Weapon motion between two frames, in screen px. -> (dx, dy).
+
+        ⚠ THE THRESHOLD IS THE MEASUREMENT. Correlating the raw crop reads the
+        wall SEEN THROUGH the ring, which moves with the camera -- the very
+        quantity this is meant to be independent of. See RECOIL_WEAPON_DARK.
+        """
+        if prev is None or cur is None:
+            return float('nan'), float('nan')
+        a = (prev < RECOIL_WEAPON_DARK).astype(np.float32)
+        b = (cur < RECOIL_WEAPON_DARK).astype(np.float32)
+        # A frame with no weapon in the box (dead, spectating, sight down)
+        # gives an empty mask, and phaseCorrelate on two empty planes returns
+        # a confident zero. Say "not measured" instead.
+        if a.sum() < 200 or b.sum() < 200:
+            return float('nan'), float('nan')
+        (sx, sy), _resp = cv2.phaseCorrelate(a, b, self._win_weapon)
+        return float(sx), float(sy)
+
+    def find_reticle(self, crop):
+        """-> (x, y) in SCREEN coords, or (nan, nan) when there is no dot.
+
+        The red dot is the only saturated red in the sight picture, so this is
+        a colour threshold and a connected component -- not a template, not a
+        correlation. `nan` is a real answer and means the frame had no
+        readable dot (smoke, a whiteout, the sight not up), which is different
+        from the dot being at the centre.
+        """
+        if crop is None or crop.ndim != 3:
+            return float('nan'), float('nan')
+        roi = crop.astype(np.int16)
+        b, g, r = roi[:, :, 0], roi[:, :, 1], roi[:, :, 2]
+        m = ((r - g > RECOIL_RETICLE_MARGIN) &
+             (r - b > RECOIL_RETICLE_MARGIN) &
+             (r > RECOIL_RETICLE_MIN_R)).astype(np.uint8)
+        n, _lab, st, cen = cv2.connectedComponentsWithStats(m, 8)
+        lo, hi = RECOIL_RETICLE_AREA
+        best, best_a = None, 0
+        for i in range(1, n):
+            a = st[i, cv2.CC_STAT_AREA]
+            # ⚠ THE UPPER BOUND IS NOT TIDINESS. Muzzle smoke and fire read
+            # 279 and 606 px of saturated red on the stored frames, and
+            # without it the brightest blob in the burst IS the flash --
+            # which would put the "barrel" wherever the fire happened to be.
+            if lo <= a <= hi and a > best_a:
+                best, best_a = i, a
+        if best is None:
+            return float('nan'), float('nan')
+        ry, rx, _rh, _rw = self.reticle_box
+        return float(rx + cen[best][0]), float(ry + cen[best][1])
 
     def slice_frame(self, frame):
         """Pull the patches out of a grabber frame dict as uint8, one channel.
@@ -203,6 +343,8 @@ class MagazineRecorder:
         self.human_fn = human_fn
         self._ts = []
         self._patches = []
+        self._reticle = []
+        self._weapon = []
         self._human = []
         self.n_duplicates = 0
 
@@ -229,21 +371,36 @@ class MagazineRecorder:
             return False
         self._ts.append(ts)
         self._patches.append(p)
+        # ⚠ STORED, NOT MEASURED, and that is the whole reason this is one
+        # slice. The colour test plus a connected-component pass is ~100x the
+        # 0.02 ms this thread has; it runs in finish() with the other FFTs,
+        # where the budget is a magazine rather than a frame.
+        self._reticle.append(self.tracker.slice_reticle(frame))
+        self._weapon.append(self.tracker.slice_weapon(frame))
         self._human.append(self.human_fn() if self.human_fn else (0, 0))
         return True
 
-    def push_patches(self, ts, patches):
-        """Same, when the caller already sliced (e.g. replay from disk)."""
+    def push_patches(self, ts, patches, reticle=None, weapon=None):
+        """Same, when the caller already sliced (e.g. replay from disk).
+
+        `reticle` is optional: a replay of stored patches has no reticle crop,
+        and that must read as "not measured" rather than as a dot at the
+        origin.
+        """
         if len(self._patches) >= self.max_frames:
             return False
         self._ts.append(ts)
         self._patches.append(patches)
+        self._reticle.append(reticle)
+        self._weapon.append(weapon)
         self._human.append(self.human_fn() if self.human_fn else (0, 0))
         return True
 
     def clear(self):
         self._ts.clear()
         self._patches.clear()
+        self._reticle.clear()
+        self._weapon.clear()
         self._human.clear()
         self.n_duplicates = 0
 
@@ -289,6 +446,15 @@ class MagazineRecorder:
                   f'was dropped, which for a whole magazine means the grabber '
                   f'is not producing these regions')
         res = MagazineResult()
+        # The reticle first, over EVERY frame including the zeroth -- it is an
+        # absolute position, so frame 0 carries a real reading and dropping it
+        # would throw away the pre-fire reference this measurement exists for.
+        for i in range(len(self._patches)):
+            x, y = self.tracker.find_reticle(
+                self._reticle[i] if i < len(self._reticle) else None)
+            res.frame_ts.append(self._ts[i])
+            res.reticle_x.append(x)
+            res.reticle_y.append(y)
         prev_dy = 0.0
         for i in range(1, len(self._patches)):
             pred = predicted_dy[i - 1] if predicted_dy is not None else prev_dy
@@ -304,6 +470,11 @@ class MagazineRecorder:
             res.gates.append(m.low_gate)
             res.human_dx.append(self._human[i][0] - self._human[i - 1][0])
             res.human_dy.append(self._human[i][1] - self._human[i - 1][1])
+            wx, wy = self.tracker.measure_weapon_pair(
+                self._weapon[i - 1] if i - 1 < len(self._weapon) else None,
+                self._weapon[i] if i < len(self._weapon) else None)
+            res.weapon_dx.append(wx)
+            res.weapon_dy.append(wy)
             if np.isfinite(m.dy) and not m.out_of_range:
                 prev_dy = m.dy
         return res
