@@ -1278,7 +1278,7 @@ class ViewDriver:
         return self.measure_travel(posture) if measure else 0
 
     def goto_midline(self, posture='standing', measure=False, sight=None,
-                     set_ref=True):
+                     set_ref=True, below_frac=0.0):
         """L2 — THE aim. Bottom stop, then halfway up. Counts risen, or 0.
 
         ⚠ goto_level() and goto_pitch_centre() answer this same question and
@@ -1331,9 +1331,47 @@ class ViewDriver:
         it is an offset from a hard stop, so every prone cell aims at the same
         pitch -- but it is not established to be level, and this says so once
         per posture rather than letting a reader assume it.
+
+        ⚠ `below_frac` AIMS DELIBERATELY LOW, AND IT IS THE ONLY WAY TO FIRE A
+        GUN THAT HAS NO CURVE. With no compensation the view walks up until it
+        reaches open sky, where phase correlation has nothing to lock onto and
+        RETURNS 0 CONFIDENTLY -- the magazine reads as near-zero recoil with
+        every gate green. Starting `below_frac` of the travel under the midline
+        buys exactly that much more upward headroom before the burst runs out
+        of texture. It is what the VSS's first magazines were fired from, and
+        the 13 never-fired guns need it because neither seed path reaches them
+        (import_kava4 has no pattern for them, and estimate_cell borrows only
+        from the SAME gun's bare cell, which is the thing that does not exist).
+
+        ⚠ A FRACTION OF THE TRAVEL, NOT COUNTS, and that is what keeps
+        pitch_scale out. The two stops are the CHARACTER's pitch limits and are
+        the same two limits through every optic; only counts-per-degree
+        changes. So a fraction of the travel IS a pitch angle, identical
+        whatever the magazine will be fired through, and the headroom it buys
+        -- as a fraction of the firing sight's rise -- is below_frac /
+        MIDLINE_FRAC. No ruler is converted into another ruler anywhere.
+
+        ⚠ OPEN LOOP, exactly like the rise it extends, and for the same reason:
+        this move also passes over bare ground, where the correlator cannot
+        give an opinion. What anchors it is the stop, which is untouched by
+        this -- one shove down, one net rise. It is RECORDED on the magazine
+        (samples.Magazine.aim_below_frac) rather than verified, because the
+        thing a program can never check is the quantity that was not written
+        down.
         """
         t = self.travel(posture, measure=measure, sight=sight)
         if not t:
+            return 0
+        below_frac = float(below_frac or 0.0)
+        if below_frac and not 0.0 < below_frac < MIDLINE_FRAC:
+            # At below_frac >= MIDLINE_FRAC the aim IS the bottom stop, and a
+            # view pinned against a clamp measures near-zero recoil while
+            # reporting nothing wrong -- the same silent corruption recenter()
+            # exists to prevent. Negative would aim high, which has no caller
+            # and would spend the headroom this parameter is for.
+            print(f'  [!] below_frac {below_frac} is not in (0, '
+                  f'{MIDLINE_FRAC}) — that aim is at or under the bottom '
+                  f'stop, where a magazine measures nothing and says so')
             return 0
         if posture not in ('standing', 'crouching') and \
                 posture not in self._warned_midline:
@@ -1341,7 +1379,7 @@ class ViewDriver:
             print(f"  [.] {posture}: the midline is repeatable but not shown "
                   f"to be level — the game clips this posture's pitch and the "
                   f"clip is not known to be symmetric")
-        half = int(round(t * MIDLINE_FRAC))
+        half = int(round(t * (MIDLINE_FRAC - below_frac)))
         # NOT home_to_clamp(), and not pitch_scale either. That one shoves a
         # fixed CLAMP_PUSH multiplied by the magnification model; here the
         # travel is KNOWN, in the same counts this is about to command, so the
@@ -1356,6 +1394,11 @@ class ViewDriver:
         # opinion it cannot give anyway over the bare ground this passes over.
         self._send(0, -half)
         time.sleep(CLAMP_SETTLE_S)
+        if below_frac:
+            print(f'  [.] aiming {below_frac:.0%} of the travel BELOW the '
+                  f'midline ({int(round(t * below_frac))} counts) — '
+                  f'{below_frac / MIDLINE_FRAC:.0%} more upward headroom, and '
+                  f'this magazine is NOT aimed level')
         self.pitch_centre = half
         self.pitch_band = None
         self.pending_pitch = 0.0

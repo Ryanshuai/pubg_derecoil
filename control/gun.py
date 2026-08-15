@@ -38,6 +38,7 @@ import os
 import time
 
 from press.pico_mouse import (HID_KEY_TAB, HID_KEY_C, HID_KEY_Z, HID_KEY_B,
+                             HID_KEY_X,
                               HID_KEY_W, HID_KEY_S)
 
 import cv2
@@ -576,6 +577,52 @@ class GunDriver:
         crop = self.grab().get('fire_mode')
         return None if crop is None else \
             self.fire_det.classify({'fire_mode': crop})
+
+    def holster(self, settle_s=0.6):
+        """L0 — Put the weapon away, so it is not in the picture. Guard: caller.
+
+        ⚠ THIS EXISTS FOR THE BULLET-HOLE PROBE AND THE REASON IS WORTH THE
+        METHOD. That probe diffs a before frame against an after frame to find
+        impacts, and NINE successive criteria for "which dark blob is the hole"
+        were defeated by the same thing: the WEAPON is in both frames and it
+        moves between them. A red dot's ring, a scope's rim, the receiver's top
+        edge, an iron rear sight's notches -- each sways a few pixels while the
+        gun idles, each lands in the diff as a compact dark blob the size of an
+        impact, and each sits about as far from the aim as the impact does.
+
+        Subtracting the weapon out is a modelling problem. Taking it out of the
+        frame is a keypress.
+
+        ⚠ THIS ONE IS BLIND -- `ensure_stowed` below is the one to call. `X` is
+        a TOGGLE, and the first version of this probe pressed it a fixed number
+        of times and assumed parity: the compensated arm fired ZERO rounds with
+        the weapon put away, and reported a group anyway (it found HUD clutter).
+        The docstring of this very method said "a caller must not assume parity"
+        while the caller two files away was assuming it.
+        """
+        self.mouse.key(HID_KEY_X, 60)
+        time.sleep(settle_s)
+
+    def ensure_stowed(self, want, ammo_fn, tries=3, settle_s=0.6):
+        """L2 — Weapon away (want=True) or out (want=False). -> True if it took.
+
+        ⚠ THE READBACK IS THE AMMO COUNTER, AND IT EXISTS -- `holster`'s first
+        docstring claimed it did not ("the ammo counter stays"), which is what
+        made that method blind. PUBG HIDES the ammo digits with the weapon
+        stowed, so `read_ammo() is None` and "the gun is down" are the same
+        observation. That is a presence test for the drawn weapon, not an
+        absence test for something else, which is the distinction this
+        repository keeps paying for.
+
+        `ammo_fn` is passed in because this class holds `fire_det`,
+        the fire-MODE detector, and not the FireDriver that reads the
+        counter. Naming the dependency beats inventing an attribute.
+        """
+        for _ in range(tries + 1):
+            if (ammo_fn() is None) == want:
+                return True
+            self.holster(settle_s=settle_s)
+        return (ammo_fn() is None) == want
 
     def ensure_fire_mode(self, weapon, tries=6, want=None):
         """L1 — Press B and watch until the HUD reads a mode. RETURNS THE MODE

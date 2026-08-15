@@ -17,7 +17,8 @@ import time
 from daemon_loop import DaemonLoop
 from collections import deque
 
-from config import KEY_ACTION_TABLE, DETECT_TABLE, MISMATCH_TABLE
+from config import (KEY_ACTION_TABLE, DETECT_TABLE, MISMATCH_TABLE,
+                    RECOIL_COMP_LAG_MS)
 from logbook import note
 from calibration.mismatch import MismatchCollector
 from calibration.tile_harvest import TileHarvester
@@ -56,7 +57,8 @@ class Dispatcher(DaemonLoop):
         # ⚠ `on_change` IS THE WIRE FROM THE READING TO THE DEVICE, and it is
         # explicit rather than implied by the close: see _loadout_changed.
         self.tab = TabWatch(state, self._detectors,
-                            on_change=self._loadout_changed)
+                            on_change=self._loadout_changed,
+                            on_read=self.tiles.on_read)
 
     def register(self, name, detector):
         """Register a detector instance by name."""
@@ -100,11 +102,12 @@ class Dispatcher(DaemonLoop):
         # Name the cause BEFORE anything acts on it, so every [armed] line
         # printed downstream of this key carries the key. See _said_pattern.
         self._cause = f'key {ev.key!r} {ev.event}'
-        # Shutdown
-        if ev.key == 'f13' and ev.event == 'press':
-            self.shutdown()
-            self._running = False
-            return
+        # ⚠ THERE IS NO SHUTDOWN KEY, and that is the whole story of exiting
+        # this process (2026-08-10). Ctrl-C is the one way out. What stood
+        # here was a branch on `f13` -- a key `config.POLL_VK_MAP` never
+        # polled, so it was dead the whole time -- next to a live `pause`
+        # entry in KEY_ACTION_TABLE. **Two exits, one of which could not
+        # fire**, and `robot.shutdown()` had to be correct for both.
 
         # Tab: grab NOW, while the panel is still drawn, and start watching for
         # the screen to actually change. Deliberately before the tables: it
@@ -352,7 +355,14 @@ class Dispatcher(DaemonLoop):
         self._apply_hw(['upload_pattern'])
 
     def _said_pattern(self, msg):
-        """Print what is armed, once per distinct answer, WITH ITS CAUSE.
+        """Record what is armed, once per distinct answer, WITH ITS CAUSE.
+
+        ⚠ TO THE FILE, NOT THE TERMINAL (2026-08-10). The screen carries one
+        thing now -- the status table -- and this line's payload is the same
+        gun configuration that table already prints, plus a knot count the
+        table now prints too (`GameState._curve`). What is NOT in the table is
+        the CAUSE, and that is exactly the after-the-fact question this line
+        was added for: nobody reads `(after key 'f' press)` while playing.
 
         upload_pattern fires on every weapon, attachment, posture and fire-mode
         change, which is many times a second while a Tab read settles. Printing
@@ -369,7 +379,7 @@ class Dispatcher(DaemonLoop):
         """
         if msg != self._pattern_said:
             self._pattern_said = msg
-            print(f'[armed] {msg}   (after {self._cause})', flush=True)
+            note(f'[armed] {msg}   (after {self._cause})')
 
     def _apply_hw(self, hw_list):
         """Apply hardware actions."""
@@ -395,6 +405,16 @@ class Dispatcher(DaemonLoop):
                             if self.state.stop_recoil else
                             f'no curve for {w.name or "(empty hands)"}'))
                     else:
+                        # ⚠ THE LEAD IS APPLIED HERE, NOT CARRIED IN THE CURVE.
+                        # upload_pattern reads RECOIL_FIRE_DELAY_MS off the
+                        # mouse and shifts the knot TIMES by it, so the arrow
+                        # keys can only reach the firmware through this line.
+                        # GameState.lead_ms is the one runtime author (config
+                        # seeds it and stops); writing it on every upload means
+                        # an adjusted lead survives the weapon / attachment /
+                        # posture changes that re-upload constantly.
+                        m.RECOIL_FIRE_DELAY_MS = -(
+                            RECOIL_COMP_LAG_MS + self.state.lead_ms)
                         m.upload_pattern(w.dx_s, w.dy_s, w.t_s)
                         # ⚠ THE SUCCESS LINE IS THE POINT, NOT THE FAILURE
                         # ONE. set_seq already says when it cannot find a
@@ -411,9 +431,6 @@ class Dispatcher(DaemonLoop):
                             f'fire={w.fire_mode or "-"} -> {len(w.dy_s)} knots'
                             f', {sum(w.dy_s):.0f} counts over '
                             f'{(w.t_s[-1] if w.t_s else 0):.2f}s')
-                elif action == 'shutdown':
-                    self.shutdown()
-                    self._running = False
             except Exception as e:
                 print(f"[hw] {action}: {e}", flush=True)
 
@@ -525,9 +542,12 @@ class Dispatcher(DaemonLoop):
             if result_field in ('weapon_gt', 'weapon_pred'):
                 self.state.sync_weapons()
                 self._apply_hw(['upload_pattern'])
-            elif result_field == 'highlight_pred':
-                self.state.set_active_by_detect(result)
-                self._apply_hw(['upload_pattern'])
+            # ⚠ THERE IS NO `highlight_pred` BRANCH ANY MORE, and the entries
+            # that produced one are gone from DETECT_TABLE with it. It called
+            # `set_active_by_detect`, which is what let the HUD highlight move
+            # the active gun -- reasoning in detector/game_state.py. The 1/2
+            # keys are the sole author now, and they go through
+            # KEY_ACTION_TABLE, not through here.
             elif result_field == 'posture':
                 self.state.set_posture(result)
                 self._apply_hw(['upload_pattern'])
@@ -535,9 +555,16 @@ class Dispatcher(DaemonLoop):
                 self.state.set_fire_mode(result)
                 self._apply_hw(['upload_pattern'])
             elif result_field == 'attachments':
+                # ⚠ THIS BRANCH IS DEAD and is left only because deleting it
+                # is a separate change: `config.py` has no `attachments`
+                # result_field, TabWatch took the Tab reading over on
+                # 2026-08-09, and nothing has walked it since. The tile
+                # harvester was hooked HERE first and collected zero crops
+                # across a whole session while reporting no error -- a hook on
+                # a path nothing takes looks exactly like a hook that works
+                # and finds nothing. It now hangs off TabWatch's on_read.
                 for gun_id, att in result.items():
                     self.mismatch.check_attachment(gun_id, att, crops)
-                    self.tiles.offer(gun_id, att, crops)
                     self.state.set_attachments(gun_id, att)
                 self._apply_hw(['upload_pattern'])
         return None
@@ -574,4 +601,4 @@ class Dispatcher(DaemonLoop):
             print(f"[shutdown] !! FIRMWARE STILL ARMED: {e}", flush=True)
         self.tab.close()          # releases the two on-demand GDI grabbers
         Weapon.save_scales()
-        print("[shutdown] scales saved", flush=True)
+        note('[shutdown] scales saved')

@@ -87,6 +87,16 @@ class Tracker:
     def slice_frame(self, frame):
         return [np.zeros((8, 8), np.float32)]
 
+    def slice_weapon(self, frame):
+        return None
+
+    def slice_reticle(self, frame):
+        # ⚠ None, not a black crop. This double exists to keep the burst loop
+        # running, and a fabricated reticle would put a barrel reading into a
+        # test that measures the fire guard. None is what find_reticle turns
+        # into nan, i.e. "not measured" — the honest answer here.
+        return None
+
 
 class Gun:
     """Enough GunDriver to keep the burst loop happy."""
@@ -228,6 +238,113 @@ got, slept = reload_run(None, expect=30, RELOAD_MIN_S=0.05,
 check('an unreadable counter still finishes on pixels', got is not None, True)
 check('...and that path DOES pay the settle',
       slept >= fire_mod.SETTLE_AFTER_RELOAD_S, True)
+
+# ── the rate a magazine's counter is allowed to set ─────────────────────────
+#
+# ⚠ EVERY NUMBER BELOW IS FROM THE NIGHT OF 2026-08-10, where this cost five
+# guns (akm, g36c, k2, tommy, uzi) and every printed line looked reasonable.
+# The counter reported a FULL magazine after a burst that moved 1823 counts,
+# `max(1, 0)` rounded "nothing was measured" up to "one round went out", the
+# 4.24 s hold became one 4242 ms interval, and the NEXT hold -- 42 x 4242 ms --
+# blew up inside struct.pack four frames away in another layer.
+from calibration.collect_timed import rate_refusal, RATE_MIN_ROUNDS   # noqa: E402
+
+# THE FAILURE ITSELF. The magazine is full: the counter saw nothing.
+why = rate_refusal(fired_n=0, mag_size=42, hold_s=4.24, interval_s=0.0998)
+check('a counter that saw NOTHING go out sets no rate', why is not None, True)
+check('...and it says the counter is the doubtful one, not the burst',
+      'NOTHING' in (why or ''), True)
+
+# A negative count is the same fact wearing a different sign, and the old
+# `max(1, ...)` swallowed it just as quietly.
+check('more rounds than the magazine holds is refused too',
+      rate_refusal(-3, 42, 4.24, 0.0998) is not None, True)
+
+# TOO FEW TO MEASURE. One miscounted round out of 3 is a 50% error in the
+# interval, and that error would then size every following hold.
+check('a handful of rounds is not a rate',
+      rate_refusal(3, 42, 0.30, 0.0998) is not None, True)
+check('...and the boundary is RATE_MIN_ROUNDS, not a hand-picked number',
+      rate_refusal(RATE_MIN_ROUNDS - 1, 42, 1.0, 0.0998) is not None, True)
+
+# A COUNTER THAT LIES HIGH RATHER THAN LOW: enough rounds to pass the first
+# gate, an interval nowhere near the stored one.
+check('a rate 40x off the stored one describes the counter, not the gun',
+      rate_refusal(20, 42, 80.0, 0.0998) is not None, True)
+
+# ⚠ AND THE OTHER SIDE, WHICH IS THE HALF THAT MATTERS. A gate that refuses
+# everything is not a gate -- the whole point of this feedback is that a gun
+# whose STORED rpm is wrong costs one short burst instead of every burst, and
+# that only works if a real disagreement still gets through.
+why = rate_refusal(fired_n=30, mag_size=42, hold_s=3.60, interval_s=0.0998)
+check('a real, well-counted disagreement is still ACCEPTED', why, None)
+check('...and it is a genuine correction, not a rounding',
+      abs((3.60 / 29) / 0.0998 - 1) > 0.2, True)
+
+# The mg3's two automatic modes are 1.50x apart -- the widest real gap on the
+# roster -- so the band has to admit it or the gun can never be re-measured.
+check("the mg3's 1.50x mode gap is inside the band",
+      rate_refusal(40, 75, 0.0998 * 1.50 * 39, 0.0998), None)
+
+# ⚠ THE SECOND GUARD, CALLED FOR REAL. The first version of these three lines
+# asserted `(42-1+1.5) * 4.2422 > MAX_FIRE_S` -- arithmetic this file did
+# itself, about a constant, touching `fire_magazine_timed` not at all. Deleting
+# the guard from control/fire.py left the gate GREEN (verified 2026-08-10).
+# A gate that re-derives its subject instead of running it is the shape this
+# repository keeps paying for, and it appeared here inside the fix for another
+# instance of it.
+import control.fire as _fire                                          # noqa: E402
+
+
+class _RecordingMouse:
+    """Records the click instead of blocking it, so the SAME fake serves both
+    sides: the refusal is "no click was issued", not "the fake exploded"."""
+
+    def __init__(self):
+        self.clicks = []
+
+    def click(self, **kw):
+        self.clicks.append(kw)
+        return time.perf_counter()
+
+
+class _NoFrames:
+    """grab_timed() answers "no frame yet", so the loops spin on the clock and
+    never need a screen."""
+
+    n_missed = 0
+
+    def grab_timed(self):
+        return time.perf_counter(), None
+
+
+def timed_run(mag_size, interval_s):
+    """-> (error message or None, the clicks that were issued)"""
+    mouse = _RecordingMouse()
+    fd = _fire.FireDriver(_NoFrames(), mouse, None)
+    fd.PREFIRE_S = 0.0
+    fd.TAIL_S = 0.0
+    try:
+        fd.fire_magazine_timed(_NoFrames(), mag_size, interval_s)
+        return None, mouse.clicks
+    except ValueError as e:
+        return str(e), mouse.clicks
+
+
+# 42 rounds at the rate the broken counter derived: 178 s of trigger.
+err, clicks = timed_run(42, 4.2422)
+check('an impossible hold is refused', err is not None, True)
+check('...BEFORE the trigger is pressed', clicks, [])
+check('...naming the INTERVAL as the suspect, not the magazine',
+      'INTERVAL' in (err or ''), True)
+check('...and pointing at where that number came from',
+      'rate_refusal' in (err or ''), True)
+
+# ⚠ AND THE OTHER SIDE: a real magazine must still fire. Without this the guard
+# could be `if True: raise` and every line above would still pass.
+err, clicks = timed_run(10, 0.0998)
+check('a real magazine is NOT refused', err, None)
+check('...and it does press the trigger', len(clicks), 1)
 
 print()
 if FAILS:

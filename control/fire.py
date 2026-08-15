@@ -49,6 +49,15 @@ TAIL_RECORD_S = 0.25      # keep recording past the counter reaching zero, so th
                           # last round's recoil is inside the recording
 MIN_FIRE_S = 0.8
 MAX_FIRE_S = 9.0
+
+# ── one round, for the FIRST-SHOT question ──────────────────────────────────
+# 30 ms is a third of the shortest round interval on the roster (Vector, ~55 ms)
+# and well over the firmware's own report cadence, so the game sees a real
+# press-release rather than a glitch. It is NOT what guarantees one round --
+# `fire_once` counts the rounds, and the caller puts the gun in single fire.
+ONE_SHOT_CLICK_MS = 30
+ONE_SHOT_SETTLE_S = 0.45   # counter must stop moving before it is believed
+ONE_SHOT_HOLD_S = 0.12     # ...and hold the same value this long
 RELOAD_TIMEOUT_S = 9.0
 
 # Per weapon, where 9 s is not enough. ⚠ THESE ARE GIVE-UP THRESHOLDS, NOT
@@ -176,6 +185,30 @@ class FireDriver:
                 ts.append(t)
                 patches.append(f)
         hold_s = (max(0, mag_size - 1) + self.FIRE_MARGIN_INTERVALS) * interval_s
+        # ⚠ THE SAME CEILING THE OTHER FIRING PATH ALREADY USES, and the two
+        # disagreed until 2026-08-10. `fire_magazine` has capped at MAX_FIRE_S
+        # since it was written; this one took whatever `interval_s` it was
+        # handed and packed it straight into a uint16 `duration_ms`. That night
+        # a bad rate arrived here as 42 x 4242 ms = 178 s and the cell died
+        # inside `struct.pack` with "'H' format requires 0 <= number <= 65535"
+        # -- a message about a number format, four frames below the mistake and
+        # in another layer.
+        #
+        # The cause is fixed where it belongs (collect_timed.rate_refusal).
+        # This is the SECOND, INDEPENDENT guard: it does not know why the
+        # interval is wrong, only that no burst this repository fires lasts
+        # this long, and it names the number that is actually suspect.
+        #
+        # ⚠ IT RAISES RATHER THAN CLAMPING. A clamped hold fires a burst that
+        # is silently too short, stores it, and lets the counter derive another
+        # rate from it -- the failure would keep its own feedback loop and stop
+        # printing anything alarming.
+        if hold_s > MAX_FIRE_S:
+            raise ValueError(
+                f'a {mag_size}-round burst at {interval_s * 1000:.1f} ms/round '
+                f'would hold the trigger for {hold_s:.1f}s, over MAX_FIRE_S '
+                f'({MAX_FIRE_S}s). The INTERVAL is the suspect, not the '
+                f'magazine size -- see collect_timed.rate_refusal.')
         t_click = self.mouse.click(buttons=0x01,
                                    duration_ms=int(hold_s * 1000))
         stop = t_click + hold_s + self.TAIL_S
@@ -426,6 +459,56 @@ class FireDriver:
         return rounds, rounds_from
 
     # ── one magazine ──
+
+    def fire_once(self, timeout_s=1.5):
+        """L1 — Send ONE round and prove it was one. -> {'ok', 'before', 'after', 'fired'}
+
+        ⚠ THE COUNT IS READ BACK, NOT ASSUMED FROM THE CLICK LENGTH. A short
+        click in full auto usually gives one round and sometimes gives two, and
+        two rounds is not a noisy version of the first-shot measurement -- it is
+        a different measurement wearing its clothes. The caller puts the gun in
+        single fire; this says whether that worked.
+
+        ⚠ AND IT EXISTS BECAUSE THE FIRST SHOT IS THE ONE THE VIEW TRACKER IS
+        WORST AT. The correlator reads a displacement per FRAME PAIR, the whole
+        opening kick lands inside one or two frames at 144 fps, and a pair over
+        the patch's half-height WRAPS rather than failing -- so the head of a
+        burst is exactly where a self-consistent wrong number is cheapest to
+        produce. A single round put through a wall is measured by the wall.
+
+        `None` from the ammo detector is NOT zero -- it is "no digits", which
+        happens all through the shot animation -- so a poll that cannot read is
+        skipped rather than counted as the magazine emptying.
+        """
+        before = self.read_ammo()
+        if before is None:
+            return {'ok': False, 'before': None, 'after': None, 'fired': None,
+                    'error': 'no ammo counter before the shot — nothing held, '
+                             'or the digits are covered'}
+        self.mouse.click(buttons=0x01, duration_ms=ONE_SHOT_CLICK_MS)
+        t0 = time.perf_counter()
+        last, since = before, t0
+        while time.perf_counter() - t0 < timeout_s:
+            v = self.read_ammo()
+            if v is None:
+                continue
+            if v != last:
+                last, since = v, time.perf_counter()
+            elif (v != before
+                  and time.perf_counter() - since >= ONE_SHOT_HOLD_S):
+                break
+        else:
+            pass
+        time.sleep(ONE_SHOT_SETTLE_S)
+        after = self.read_ammo()
+        if after is None:
+            return {'ok': False, 'before': before, 'after': None, 'fired': None,
+                    'error': 'no ammo counter after the shot'}
+        fired = before - after
+        return {'ok': fired == 1, 'before': before, 'after': after,
+                'fired': fired,
+                'error': None if fired == 1 else
+                         f'{fired} round(s) left the gun, not 1'}
 
     def fire_magazine(self):
         """L1 — Hold the trigger for one magazine and bring back what the

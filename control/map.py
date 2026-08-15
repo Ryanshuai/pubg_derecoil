@@ -193,6 +193,56 @@ class MapControl(Driver):
 
     # ── The one thing this module is for ──
 
+    def goto_point(self, xy, timeout=MAP_TIMEOUT):
+        """L1 — Teleport by clicking a bare (x, y) on the map, not a named range.
+
+        ⚠ THE MAP HAS TWO KINDS OF TELEPORT TARGET AND CONFIG ONLY KNOWS ONE.
+        `MAP_RANGE_BOXES` holds translucent yellow RECTANGLES (the 200m lane is
+        the single entry). There are also POINT targets drawn as small icons --
+        the parachute at (1148, 476) is one, and clicking it lands you at Jump
+        School, whose north face is the only large unbroken concrete slab found
+        so far. MEASURED 2026-08-11 by clicking it; `goto_range` cannot reach it
+        because there is no box to centre on.
+
+        ⚠ AND IT CANNOT VERIFY ARRIVAL THE WAY goto_range DOES. That one reads
+        the player marker back against a known box. Here the caller supplies a
+        raw coordinate, so nothing knows where the marker SHOULD end up -- the
+        return says the click was delivered and the map was put away, and it
+        does NOT say you arrived. A caller that needs arrival proved has to
+        prove it from the world (the wall survey in calibration/hole_groups.py
+        is one way: no wall in view means no teleport happened).
+
+        Kept next to goto_range rather than left as three lines in the caller
+        because those three lines are M / click / park / M, and this layer owns
+        every one of them -- calibration/ importing press.pointer to park a
+        cursor is exactly the parallel-driver shape rule 6 exists to stop.
+
+        The map is closed on every exit path, exceptions included.
+        """
+        state = self.det.state()
+        if not state.playable:
+            return {'ok': False, 'clicked': None, 'elapsed': 0.0,
+                    'error': f'{state.value}, not a running match — the map '
+                             f'only opens in one'}
+        t0 = time.perf_counter()
+        try:
+            opened = self.ensure_map(True, timeout=timeout)
+            if not opened.get('ok'):
+                return {'ok': False, 'clicked': None,
+                        'elapsed': time.perf_counter() - t0,
+                        'error': f'the map would not open: {opened.get("error")}'}
+            self.pointer.click_at(*xy)
+            # Parking is part of the action, not tidiness: a hovered icon pops
+            # a preview card, and it lands on top of whatever is read next.
+            move_cursor(MAP_PARK_XY)
+            time.sleep(MAP_SETTLE)
+        finally:
+            closed = self.ensure_map(False, timeout=timeout)
+        return {'ok': bool(closed.get('ok')), 'clicked': tuple(xy),
+                'elapsed': time.perf_counter() - t0,
+                'error': None if closed.get('ok') else
+                         f'the map would not close: {closed.get("error")}'}
+
     def goto_range(self, name='200m', timeout=MAP_TIMEOUT):
         """L1 — Teleport to a practice range and put the map away again. One step,
         proved by reading the PLAYER MARKER back (a missed click and an
