@@ -40,7 +40,6 @@ from detector.weapon_template_detector import TabWeaponDetector
 from press.pico_mouse import get_mouse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from calibration.weapon_switcher import get_switcher
 
 cv2.setNumThreads(1)
 HERE = os.path.dirname(os.path.abspath(__file__))
