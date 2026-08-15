@@ -35,12 +35,20 @@ Recoil factors are still from PUBG Wiki (pubg.wiki.gg):
   - Other grips: not modeled (only vertical foregrip used as calibration baseline)
 
 weapon_scales.json was calibrated in training ground with default attachments
-(compensator + vertical grip where available). The calibration_factor below
-represents what was equipped during calibration.
+(compensator + vertical grip where available).
 
-At runtime:
-  effective_scale = base_scale * current_factor
-  base_scale = weapon_scales[gun] / calibration_factor
+⚠ AND THE RUNTIME THAT DIVIDED THAT BACK OUT IS GONE, so the paragraph above
+is history rather than a description of anything. It used to end:
+
+    effective_scale = base_scale * current_factor
+    base_scale = weapon_scales[gun] / calibration_factor
+
+Plan A replaced the whole shape: a curve is looked up by the gun's EXACT
+configuration and emitted with no factors at all (`scaled_by: NOTHING`,
+detector/weapon.set_seq). `calibration_factor()` was deleted on 2026-08-15
+with zero callers. The js9 / mp9 story above is kept because it is a
+measurement -- a 17.65% correction that this table's rows still carry -- and
+because nothing else in the repository records it.
 """
 
 import json
@@ -74,16 +82,18 @@ GRIP_FACTOR = {
     'LaserPointer': 1.0,
 }
 
-COMP = 0.85    # shorthand for calibration_factor
-GRIP = 0.85
-
 # muzzle_type: 'comp' = can equip compensator, 'supp_only' = suppressor only, None = nothing
 # grip: True = can equip vertical foregrip, False = cannot
-# calibration_factor: what was equipped during training ground calibration
-#   comp + grip → 0.85 * 0.85 = 0.7225
-#   comp only  → 0.85
-#   grip only  → 0.85 (tommy: suppressor + vertical)
-#   nothing    → 1.0
+#
+# ⚠ THE THIRD COLUMN IS GONE (2026-08-15). `calibration_factor()` read these
+# two fields to rebuild `0.85 * 0.85 = 0.7225` -- what the training ground had
+# fitted -- so that runtime could divide it back out. Plan A retired the
+# division: a curve is looked up by exact configuration and emitted with no
+# factors at all (`scaled_by: NOTHING`, detector/weapon.set_seq). The function
+# had zero callers, so what stayed behind was arithmetic nothing performed and
+# a `COMP = 0.85` constant whose comment read "shorthand for
+# calibration_factor". The reasoning it belonged to is above, in the module
+# docstring, and is kept: it is the record of a 17.65% correction.
 
 
 def muzzle_kind(gun):
@@ -111,29 +121,16 @@ def takes_vertical_grip(gun):
     return 'vert_grip' in compatible(gun).get('grip', ())
 
 
-# Computed, never edited. Kept in this shape because calibration_factor() and
-# validate_attachments() read it and because __main__ dumps it, but every row
+# Computed, never edited. Kept in this shape because validate_attachments()
+# and slot_factor() read it and because __main__ dumps it, but every row
 # comes from the catalogue. Verified against the 30 hand-written rows this
 # replaced: 28 identical, and the 2 that were not are the bug in the module
 # docstring.
+# ⚠ It listed calibration_factor() first until 2026-08-15; that reader is
+# gone, and a comment naming its readers is exactly the kind that goes stale
+# without anything raising.
 WEAPON_SLOTS = {gun: {'muzzle': muzzle_kind(gun), 'grip': takes_vertical_grip(gun)}
                 for gun in CATALOG_SLOTS}
-
-def calibration_factor(gun_name):
-    """Factor that was applied during training ground calibration.
-
-    Training ground equips compensator + vertical grip by default (where available).
-    """
-    slots = WEAPON_SLOTS.get(gun_name)
-    if not slots:
-        return 1.0
-    f = 1.0
-    if slots['muzzle'] == 'comp':
-        f *= COMP
-    if slots['grip']:
-        f *= GRIP
-    return f
-
 
 def validate_attachments(gun_name, attachments):
     """Filter out attachments that the weapon cannot equip.
